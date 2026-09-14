@@ -1,0 +1,476 @@
+#!/usr/bin/env bash
+# sq - auto-fitting Slurm dashboard
+#
+#   sq                      default columns
+#   sq -o i,j,T,M,P,N       custom columns (squeue field letters, %/widths ignored)
+#   sq -u "$USER" -p gpu    any other args are passed straight to squeue
+#   sq -c / -C              centre horizontally / in both axes
+#   sq -x                   expand array tasks instead of folding them
+#   sq --no-recent          hide the recently-finished block
+#   sq --no-bell            never ring the terminal bell on a new failure
+#   sq --color / --no-color force colour on or off
+#   watch -tc -n 5 sq       live dashboard
+#
+# env: SQ_FMT    default column list (same syntax as -o)
+#      SQ_CENTER 1 = horizontal, 2 = both axes
+#      SQ_FOLD   0 = never fold array tasks
+#      SQ_RECENT 0 = never show finished jobs
+#      SQ_BELL   0 = never ring; the bell covers only your own jobs unless
+#                SQ_BELL_ALL=1.  SQ_ETA 0 = no pending start estimates
+#      SQ_COLOR  0 = never colour, 1 = always
+#      SQ_TIMEOUT seconds to wait for slurm before declaring it unreachable (5)
+#      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect
+#
+# Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4.
+# Finished jobs come from squeue -t all, so the window is MinJobAge, not an
+# accounting DB.  A new failure rings the bell once; the only state kept is
+# a list of already-rung job ids in ~/.cache/sq/alerted, pruned every run.
+# TIME LEFT turns yellow under 10% of the limit and red under 2%.  Pending
+# jobs show the backfill start estimate; down nodes show their reason.
+
+set -u
+
+fields=${SQ_FMT:-i,j,u,T,M,L,C,m,R}
+center=${SQ_CENTER:-0}
+fold=${SQ_FOLD:-1}
+recent=${SQ_RECENT:-1}
+bell=${SQ_BELL:-1}
+eta=${SQ_ETA:-1}
+color=${SQ_COLOR:-auto}
+args=()
+while [ $# -gt 0 ]; do
+	case $1 in
+		-o|--format) fields=${2:-}; shift 2 ;;
+		-c|--center|--centre) center=1; shift ;;
+		-C|--center-all|--centre-all) center=2; shift ;;
+		-x|--expand) fold=0; shift ;;
+		--no-recent) recent=0; shift ;;
+		--no-bell) bell=0; shift ;;
+		--color|--colour) color=1; shift ;;
+		--no-color|--no-colour) color=0; shift ;;
+		-h|--help) sed -n '2,31p' "$0" | cut -c2- | sed 's/^ //'; exit 0 ;;
+		*) args+=("$1"); shift ;;
+	esac
+done
+
+# colour: honour NO_COLOR, else auto-detect.  A pipe with COLUMNS set is
+# watch, which wants the escapes; a bare pipe or redirect does not.
+if [ "$color" = auto ]; then
+	if   [ -n "${NO_COLOR:-}" ]; then color=0
+	elif [ -t 1 ];               then color=1
+	elif [ -n "${COLUMNS:-}" ];  then color=1
+	else color=0
+	fi
+fi
+
+# normalise "%.10i, j" -> "i j"
+fl=$(printf '%s' "$fields" | tr ',' ' ' | tr -s ' ')
+fmt=""; keys=""
+for f in $fl; do
+	k=$(printf '%s' "$f" | tr -cd 'A-Za-z' | cut -c1)
+	[ -n "$k" ] || continue
+	fmt="$fmt%$k|"; keys="$keys$k,"
+done
+fmt="$fmt%t|%l|%S"               # hidden trailing fields: state, limit, start
+keys=${keys%,}
+
+cols=${SQ_WIDTH:-${COLUMNS:-}}
+[ -n "$cols" ] || cols=$(tput cols 2>/dev/null) || cols=100
+[ "$cols" -gt 20 ] 2>/dev/null || cols=100
+
+lines=${SQ_HEIGHT:-${LINES:-}}
+[ -n "$lines" ] || lines=$(tput lines 2>/dev/null) || lines=24
+[ "$lines" -gt 4 ] 2>/dev/null || lines=24
+
+me=${SQ_BELL_USER:-$(id -un)}
+bellall=${SQ_BELL_ALL:-0}
+statedir=${XDG_CACHE_HOME:-$HOME/.cache}/sq
+[ "$bell" = 0 ] || mkdir -p "$statedir" 2>/dev/null || bell=0
+
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+
+# an unreachable controller makes sinfo/squeue block, not fail, so bound them
+tmo=${SQ_TIMEOUT:-5}
+err_of() { [ "$1" = 124 ] && echo "no response after ${tmo}s" || head -1 "$2"; }
+
+timeout "$tmo" sinfo -hN -o '%N|%C|%e|%m|%T|%E|%H' > "$tmp/nodes" 2> "$tmp/nodes.err"
+nerr=$?; [ $nerr -eq 0 ] && nerr= || nerr=$(err_of $nerr "$tmp/nodes.err")
+
+timeout "$tmo" squeue -h -S t,i -o "$fmt" "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
+jerr=$?; [ $jerr -eq 0 ] && jerr= || jerr=$(err_of $jerr "$tmp/jobs.err")
+
+: > "$tmp/recent"
+[ "$recent" = 0 ] || [ -n "$jerr" ] || timeout "$tmo" squeue -t all -h \
+	-O 'JobID:|,Name:|,StateCompact:|,State:|,exit_code:|,TimeUsed:|,EndTime:|,ArrayJobID:|,ArrayTaskID:|,UserName:|' \
+	"${args[@]+"${args[@]}"}" > "$tmp/recent" 2>/dev/null
+
+gawk -F'|' -v keys="$keys" -v cols="$cols" -v lines="$lines" -v center="$center" -v fold="$fold" \
+     -v color="$color" -v bell="$bell" -v eta="$eta" -v statef="$statedir/alerted" \
+     -v nerr="$nerr" -v jerr="$jerr" -v me="$me" -v bellall="$bellall" \
+     -v host="$(hostname -s)" -v now="$(date '+%H:%M:%S')" '
+function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
+function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
+  m = split(list, a, ",")
+  for (i=1; i<=m; i++) a[i] = a[i]+0
+  asort(a)
+  start = prev = a[1]
+  for (i=2; i<=m; i++) {
+    if (a[i] == prev+1 || a[i] == prev) { prev = a[i]; continue }
+    out = out (out?",":"") (start==prev ? start : start "-" prev)
+    start = prev = a[i]
+  }
+  return out (out?",":"") (start==prev ? start : start "-" prev)
+}
+function ago(s) {
+  if (s < 0)    return "-"
+  if (s < 60)   return s "s"
+  if (s < 3600) return int(s/60) "m"
+  return int(s/3600) "h"
+}
+function epoch(t,   d) {                                  # 2026-08-13T10:59:35 -> epoch
+  if (t !~ /^[0-9]{4}-/) return 0
+  d = t; gsub(/[-T:]/, " ", d)
+  return mktime(d)
+}
+function dur(s,   a, b, m, sec) {                         # 3-12:04:05 -> seconds
+  if (s !~ /[0-9]/) return -1
+  sec = 0
+  if (match(s, /^([0-9]+)-(.*)$/, a)) { sec += a[1]*86400; s = a[2] }
+  m = split(s, b, ":")
+  if      (m == 3) sec += b[1]*3600 + b[2]*60 + b[3]
+  else if (m == 2) sec += b[1]*60 + b[2]
+  else if (m == 1) sec += b[1]
+  return sec
+}
+function uniq(list,   a, m, i, seen, o, c) {              # distinct, at most three
+  m = split(list, a, ",")
+  for (i=1; i<=m; i++) if (!(a[i] in seen)) { seen[a[i]] = 1; if (++c <= 3) o = o (o?",":"") a[i] }
+  return (c > 3) ? o ",…" : o
+}
+function when(t,   ep) {                                  # start estimate, compactly
+  ep = epoch(t)
+  if (!ep || ep < systime()) return ""
+  if (strftime("%F", ep) == strftime("%F", systime())) return strftime("%H:%M", ep)
+  if (strftime("%Y", ep) == strftime("%Y", systime())) return strftime("%b%d %H:%M", ep)
+  return strftime("%Y-%m-%d", ep)
+}
+
+BEGIN{
+  BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4; RECENT_MAX = 6
+  n = split(keys, k, ",")
+  H["a"]="ACCOUNT"; H["b"]="GRES";   H["C"]="CPU";    H["c"]="MIN_CPU"; H["D"]="NODES"
+  H["e"]="END";     H["f"]="FEAT";   H["g"]="GROUP";  H["i"]="JOBID";   H["j"]="NAME"
+  H["K"]="ARRAY";   H["L"]="LEFT";   H["l"]="LIMIT";  H["M"]="TIME";    H["m"]="MEM"
+  H["N"]="NODELIST";H["o"]="COMMAND";H["P"]="PART";   H["p"]="PRIO";    H["Q"]="PRIO"
+  H["q"]="QOS";     H["R"]="NODE/REASON";             H["r"]="REASON";  H["S"]="START"
+  H["T"]="STATE";   H["t"]="ST";     H["u"]="USER";   H["V"]="SUBMIT";  H["v"]="RESV"
+  H["Z"]="WORKDIR"
+  split("C c D L l M m p Q y", rt, " "); for (i in rt) RIGHT[rt[i]]=1
+  split("j R r o N Z", fx, " "); for (i in fx) FLEX[fx[i]]=1
+  for (i=1; i<=n; i++) {
+    hd[i] = (k[i] in H) ? H[k[i]] : toupper(k[i])
+    if (k[i] == "i") idc = i
+    if (k[i] == "L") lc  = i
+    if (k[i] == "R") rc  = i
+  }
+  split("CD F CA TO NF OOM DL PR BF RV SE", ts, " ")      # terminal states
+  for (i in ts) DONE[ts[i]] = 1
+  split("F TO NF OOM DL BF", fs, " ")                     # worth a bell
+  for (i in fs) BAD[fs[i]] = 1
+  split("JOBID NAME STATE EXIT ELAPSED AGO", rhd, " ")
+  split("0 0 0 1 1 1", rrt, " ")                          # right-aligned?
+  if (bell) { while ((getline ln < statef) > 0) rung[ln] = 1; close(statef) }
+}
+
+ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%H
+  nn++
+  node[nn]=$1; nst[nn]=$5
+  split($2,cp,"/"); used[nn]=cp[1]+0; tot[nn]=cp[4]+0
+  if ($3 == "N/A") { memu[nn] = "-"; mempc[nn] = -1 }
+  else {
+    memu[nn]  = sprintf("%.0f", ($4-$3)/1024)
+    mempc[nn] = $4 ? int(($4-$3)*100/$4) : 0
+  }
+  memt[nn] = sprintf("%.0fG", $4/1024)
+  nreason[nn] = ($6 == "none" || $6 == "") ? "" : $6
+  if (nreason[nn] != "" && $7 ~ /^[0-9]{4}-/) nreason[nn] = nreason[nn] " · since " substr($7, 1, 10)
+  if (length($1)       > wn) wn = length($1)
+  if (length($5)       > ws) ws = length($5)
+  if (length(used[nn]) > wu) wu = length(used[nn])
+  if (length(tot[nn])  > wt) wt = length(tot[nn])
+  if (length(memu[nn]) > wf) wf = length(memu[nn])
+  if (length(memt[nn]) > wm) wm = length(memt[nn])
+  next
+}
+ARGIND==2 {                                     # ---- squeue, n fields + 3 hidden
+  q++
+  for (i=1; i<=n; i++) raw[q,i] = $i
+  qstate[q] = $(n+1); qlimit[q] = $(n+2); qstart[q] = $(n+3)
+  cnt[$(n+1)]++
+  next
+}
+{                                               # ---- squeue -t all, finished only
+  if (!($3 in DONE)) next
+  dq++
+  did[dq]=$1; dname[dq]=$2; dsc[dq]=$3; dstate[dq]=$4
+  split($5, xc, ":");  dexit[dq] = (xc[2]+0 > 0) ? xc[1] "/sig" xc[2] : xc[1]
+  delap[dq]=$6; dsec[dq]=dur($6)
+  dend[dq]=epoch($7); daj[dq]=$8; dat[dq]=$9; duser[dq]=$10
+}
+
+END{
+  # ---- pending start estimates, before folding so they stay per-task ---
+  if (eta && rc)
+    for (r=1; r<=q; r++)
+      if (qstate[r] == "PD" && (est = when(qstart[r])) != "")
+        raw[r,rc] = raw[r,rc] " → " est
+
+  # ---- fold array tasks ----------------------------------------------
+  for (r=1; r<=q; r++) {
+    id = idc ? raw[r,idc] : ""
+    base = ""; task = ""
+    if (fold && idc && match(id, /^(.+)_([0-9]+)$/, mm)) { base = mm[1]; task = mm[2] }
+    if (base == "") key = "row" SUBSEP r
+    else {
+      key = base SUBSEP qstate[r]
+      for (i=1; i<=n; i++) if (i != idc) key = key SUBSEP raw[r,i]
+    }
+    if (key in grp) { g = grp[key]; gtask[g] = gtask[g] "," task; gn[g]++ }
+    else {
+      grp[key] = g = ++rows
+      for (i=1; i<=n; i++) v[rows,i] = raw[r,i]
+      state[rows] = qstate[r]; gtask[rows] = task; gn[rows] = 1; gbase[rows] = base
+      lfrac[rows] = -1
+      if (lc) {                                 # how much of the limit is left
+        lim = dur(qlimit[r]); lft = dur(raw[r,lc])
+        if (lim > 0 && lft >= 0) lfrac[rows] = lft / lim
+      }
+    }
+  }
+  for (r=1; r<=rows; r++)
+    if (gn[r] > 1) v[r,idc] = sprintf("%s_[%s] ×%d", gbase[r], compress(gtask[r]), gn[r])
+
+  # ---- natural widths -------------------------------------------------
+  for (i=1; i<=n; i++) w[i] = length(hd[i])
+  for (r=1; r<=rows; r++)
+    for (i=1; i<=n; i++) if (length(v[r,i]) > w[i]) w[i] = length(v[r,i])
+
+  nfix = 30 + wn + wu + wt + wf + wm + ws       # node line, bars and margin aside
+  bar  = BAR_PREF
+  tabw = rows ? (n-1) : 0                       # one space per gap
+  for (i=1; i<=n; i++) tabw += w[i]
+
+  for (r=1; r<=dq; r++) {                       # group array tasks by array id + state
+    if (fold && dat[r] ~ /^[0-9]+$/) key = "a" SUBSEP daj[r] SUBSEP dsc[r]
+    else                             key = "s" SUBSEP r
+    if (key in dgrp) {
+      g = dgrp[key]
+      gtsk[g] = gtsk[g] "," dat[r]; gcnt[g]++; gex[g] = gex[g] "," dexit[r]
+      gids[g] = gids[g] "," did[r]
+      if (dsec[r] < gmin[g]) { gmin[g] = dsec[r]; gminS[g] = delap[r] }
+      if (dsec[r] > gmax[g]) { gmax[g] = dsec[r]; gmaxS[g] = delap[r] }
+      if (dend[r] > rend[g]) rend[g] = dend[r]
+    } else {
+      dgrp[key] = g = ++d
+      rv[d,1]=did[r]; rv[d,2]=dname[r]; rv[d,3]=dstate[r]
+      rst[d]=dsc[r]; rend[d]=dend[r]; gbase2[d]=daj[r]
+      gtsk[d]=dat[r]; gcnt[d]=1; gex[d]=dexit[r]; gids[d]=did[r]; guser[d]=duser[r]
+      gmin[d]=gmax[d]=dsec[r]; gminS[d]=gmaxS[d]=delap[r]
+    }
+  }
+  for (r=1; r<=d; r++) {
+    rv[r,4] = uniq(gex[r])
+    rv[r,5] = (gmin[r] == gmax[r]) ? gminS[r] : gminS[r] "-" gmaxS[r]
+    rv[r,6] = rend[r] ? ago(systime() - rend[r]) : "-"
+    if (gcnt[r] > 1) rv[r,1] = sprintf("%s_[%s] ×%d", gbase2[r], compress(gtsk[r]), gcnt[r])
+  }
+  for (r=1; r<=d; r++) {                        # newest first, then cap
+    best = 0
+    for (j=1; j<=d; j++) if (!dused[j] && (!best || rend[j] > rend[best])) best = j
+    dused[best] = 1; ord[r] = best
+  }
+  shown = (d > RECENT_MAX) ? RECENT_MAX : d
+  more  = d - shown
+
+  for (i=1; i<=6; i++) rw[i] = length(rhd[i])
+  for (r=1; r<=shown; r++)
+    for (i=1; i<=6; i++) if (length(rv[ord[r],i]) > rw[i]) rw[i] = length(rv[ord[r],i])
+  rtabw = shown ? 5 : 0
+  for (i=1; i<=6; i++) if (shown) rtabw += rw[i]
+
+  # ---- shrink whatever cannot fit -------------------------------------
+  budget = cols - 2                             # keep at least the default margin
+  while (tabw > budget) {                       # shave the widest flexible column
+    big = 0
+    for (i=1; i<=n; i++) if (FLEX[k[i]] && w[i] > 8 && w[i] > w[big]) big = i
+    if (!big) break
+    w[big]--; tabw--
+  }
+  while (tabw > budget) {                       # still over: any column, floor 5
+    big = 0
+    for (i=1; i<=n; i++) if (w[i] > 5 && w[i] > w[big]) big = i
+    if (!big) break
+    w[big]--; tabw--
+  }
+  while (rtabw > budget && rw[2] > 8) { rw[2]--; rtabw-- }   # recent: shave NAME
+
+  # ---- agree on a common right edge -----------------------------------
+  if (nfix + bar > budget) bar = budget - nfix
+  if (bar < BAR_MIN) bar = 0
+  nodew  = nfix + bar - (bar ? 0 : 1)           # the bars gap collapses when bar==0
+  target = (tabw > nodew) ? tabw : nodew
+  if (rtabw > target) target = rtabw
+  if (target > budget) target = budget
+
+  if (nodew < target) {                         # node block grows: bars first
+    bar += target - nodew
+    if (bar > BAR_MAX) { npad = bar - BAR_MAX; bar = BAR_MAX }
+  }
+  gap[1] = 0                                    # table grows: gaps first, capped, then
+  for (i=2; i<=n; i++) gap[i] = 1               # the widest text column soaks up the rest
+  if (rows && tabw < target) {
+    extra = target - tabw
+    room  = (n > 1) ? (n-1) * (GAP_MAX - 1) : 0
+    if (room > extra) room = extra
+    for (j=0; j<room; j++) gap[2 + (j % (n-1))]++
+    rest = extra - room
+    if (rest) {
+      pick = 0                                  # prefer a flexible column ...
+      for (i=1; i<=n; i++) if (FLEX[k[i]] && (!pick || w[i] > w[pick])) pick = i
+      if (!pick) for (i=n; i>=1; i--) if (!RIGHT[k[i]]) { pick = i; break }
+      if (pick) w[pick] += rest                 # ... never a right-aligned one
+      else for (j=0; j<rest; j++) gap[2 + (j % (n-1))]++
+    }
+  }
+  rgap[1] = 0
+  for (i=2; i<=6; i++) rgap[i] = 1
+  if (shown && rtabw < target) {
+    extra = target - rtabw
+    room  = 5 * (GAP_MAX - 1)
+    if (room > extra) room = extra
+    for (j=0; j<room; j++) rgap[2 + (j % 5)]++
+    rpad = extra - room                         # the rule reaches the edge, rows stay compact
+  }
+
+  # ---- left margin ----------------------------------------------------
+  left = center ? int((cols - target) / 2) : 2
+  if (left < 0) left = 0
+  lm = sprintf("%*s", left, "")
+
+  # ---- render into a buffer, so we can centre vertically --------------
+  out[++o] = sprintf("%s%s▌ SLURM%s %s%s%s  %s%s%s", lm, e("1;36"), e("0"), e("2"), host, e("0"), e("1"), now, e("0"))
+  if (nerr != "" || jerr != "") {
+    x = "⚠ slurm unreachable · " (nerr != "" ? nerr : jerr)
+    if (length(x) > target) x = substr(x, 1, target-1) "…"
+    out[++o] = ""
+    out[++o] = sprintf("%s%s%s%s", lm, e("1;31"), x, e("0"))
+  }
+  out[++o] = ""
+  barc = int(bar/2); barm = bar - barc
+  for (r=1; r<=nn; r++) {
+    down = (nst[r] ~ /down|drain|fail|inval|unk/)
+    p = tot[r] ? int(used[r]*100/tot[r]) : 0
+    sc = ""
+    b = int(p*barc/100)
+    for (i=0; i<barc; i++) sc = sc (i<b ? "█" : "░")
+    cc = down ? "31" : (p>85 ? "33" : "32")
+
+    mp = mempc[r]; sm = ""                      # real free memory, from the node itself
+    if (mp < 0) { for (i=0; i<barm; i++) sm = sm "·"; mc = "2" }
+    else {
+      b = int(mp*barm/100)
+      for (i=0; i<barm; i++) sm = sm (i<b ? "█" : "░")
+      mc = down ? "31" : (mp>95 ? "1;31" : (mp>85 ? "33" : "32"))
+    }
+    out[++o] = sprintf("%s%s%-*s%s %s%s%s%s%3d%%  %s%*d%s/%-*d cpu   %s%s%s%s%3s%%  %s%*s%s/%-*s mem  %*s%s%s%s",
+                       lm, e("1"), wn, node[r], e("0"), e(cc), sc, e("0"), (bar?" ":""), p,
+                       e("1"), wu, used[r], e("0"), wt, tot[r],
+                       e(mc), sm, e("0"), (bar?" ":""), (mp<0 ? "-" : sprintf("%d", mp)),
+                       e(mp>95 && mp>=0 ? "1;31" : "0"), wf, memu[r], e("0"), wm, memt[r],
+                       npad+0, "", e("2"), nst[r], e("0"))
+    if (nreason[r] != "") {
+      x = nreason[r]
+      if (length(x) + wn + 3 > target) x = substr(x, 1, target - wn - 4) "…"
+      out[++o] = sprintf("%s%*s%s↳ %s%s", lm, wn+1, "", e("2"), x, e("0"))
+    }
+  }
+  out[++o] = ""
+
+  if (!rows && jerr != "") out[++o] = sprintf("%s%sjob list unavailable%s", lm, e("2"), e("0"))
+  else if (!rows) out[++o] = sprintf("%s%squeue is empty%s", lm, e("2"), e("0"))
+  else {
+    line = lm e("4")
+    for (i=1; i<=n; i++) line = line sprintf("%*s%-*.*s", gap[i], "", w[i], w[i], hd[i])
+    out[++o] = line e("0")
+    for (r=1; r<=rows; r++) {
+      js = state[r]
+      jc = (js=="R") ? "32" : (js=="PD") ? "33" : (js ~ /^(F|CA|TO|NF|OOM|ST|BF|DL)/) ? "31" : "36"
+      line = lm
+      for (i=1; i<=n; i++) {
+        x = v[r,i]
+        if (length(x) > w[i]) x = substr(x, 1, w[i]-1) "…"
+        fw = RIGHT[k[i]] ? w[i] : (i==n ? -length(x) : -w[i])
+        cc = ""
+        if (i == idc)                    cc = jc
+        else if (k[i]=="t" || k[i]=="T") cc = "1;" jc
+        else if (i == lc && x == "INVALID") cc = "1;31"    # past its limit, being killed
+        else if (i == lc && lfrac[r] >= 0) {
+          if      (lfrac[r] < 0.02) cc = "1;31"
+          else if (lfrac[r] < 0.10) cc = "33"
+        }
+        if (cc != "") line = line sprintf("%*s%s%*s%s", gap[i], "", e(cc), fw, x, e("0"))
+        else          line = line sprintf("%*s%*s",     gap[i], "", fw, x)
+      }
+      out[++o] = line
+    }
+  }
+
+  if (shown) {                                  # ---- recently finished
+    out[++o] = ""
+    out[++o] = sprintf("%s%srecently finished%s", lm, e("2"), e("0"))
+    line = lm e("4")
+    for (i=1; i<=6; i++) line = line sprintf("%*s%-*.*s", rgap[i], "", rw[i], rw[i], rhd[i])
+    out[++o] = line sprintf("%*s", rpad+0, "") e("0")
+    for (r=1; r<=shown; r++) {
+      best = ord[r]
+      fc = (rst[best]=="CD") ? "32" : (rst[best]=="CA") ? "33" : "31"
+      line = lm
+      for (i=1; i<=6; i++) {
+        x = rv[best,i]
+        if (length(x) > rw[i]) x = substr(x, 1, rw[i]-1) "…"
+        fw = rrt[i]+0 ? rw[i] : -rw[i]
+        if (i==1 || i==3) line = line sprintf("%*s%s%*s%s", rgap[i], "", e(fc),  fw, x, e("0"))
+        else              line = line sprintf("%*s%s%*s%s", rgap[i], "", e("2"), fw, x, e("0"))
+      }
+      out[++o] = line
+    }
+    if (more) out[++o] = sprintf("%s%s+%d more%s", lm, e("2"), more, e("0"))
+  }
+
+  if (bell)                                     # every failure, displayed or not
+    for (r=1; r<=d; r++)
+      if (BAD[rst[r]] && (bellall || guser[r] == me)) {
+        nid = split(gids[r], gi, ",")
+        for (j=1; j<=nid; j++) { keep[gi[j]] = 1; if (!(gi[j] in rung)) ding = 1 }
+      }
+
+  out[++o] = ""
+  out[++o] = sprintf("%s%s%d%s jobs   %s%d running%s   %s%d pending%s   %s%d other%s", lm,
+                     e("1"), q, e("0"), e("32"), cnt["R"]+0, e("0"),
+                     e("33"), cnt["PD"]+0, e("0"), e("31"), q - cnt["R"] - cnt["PD"], e("0"))
+
+  if (center == 2) {                            # vertical centring, never overflowing
+    top = int((lines - o) / 2)
+    for (i=0; i<top; i++) print ""
+  }
+  for (i=1; i<=o; i++) print out[i]
+
+  if (bell) {                                   # prune to what is still in the window
+    printf "" > statef
+    for (id in keep) print id > statef
+    close(statef)
+    if (ding) { print "\a" > "/dev/tty"; close("/dev/tty") }
+  }
+}
+' "$tmp/nodes" "$tmp/jobs" "$tmp/recent" 

@@ -1,0 +1,3 @@
+# Keep LF on checkout, even with Windows git and core.autocrlf=true:
+# a CRLF shebang ("bash\r") makes the script unrunnable.
+* text=auto eol=lf
