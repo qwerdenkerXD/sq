@@ -189,8 +189,10 @@ ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%
   split($2,cp,"/"); used[nn]=cp[1]+0; tot[nn]=cp[4]+0
   if ($3 == "N/A") { memu[nn] = "-"; mempc[nn] = -1 }
   else {
-    memu[nn]  = sprintf("%.0f", ($4-$3)/1024)
-    mempc[nn] = $4 ? int(($4-$3)*100/$4) : 0
+    usedmem = $4 - $3                       # RealMemory can be configured below the
+    if (usedmem < 0) usedmem = 0            # real RAM, so FreeMem may exceed it
+    memu[nn]  = sprintf("%.0f", usedmem/1024)
+    mempc[nn] = $4 ? int(usedmem*100/$4) : 0
   }
   memt[nn] = sprintf("%.0fG", $4/1024)
   nreason[nn] = ($6 == "none" || $6 == "") ? "" : $6
