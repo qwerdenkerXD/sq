@@ -20,11 +20,17 @@
 #      SQ_BELL_HORIZON  a failure only rings while it is this fresh (600s; 0 mutes)
 #      SQ_COLOR  0 = never colour, 1 = always
 #      SQ_TIMEOUT seconds to wait for slurm before declaring it unreachable (5)
+#      SQ_SINCE  how far back the finished block looks (sacct -S; now-2hours)
 #      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect
 #
 # Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4.
-# Finished jobs come from squeue -t all, so the window is MinJobAge, not an
-# accounting DB.  A new failure rings the bell once, and only while it is
+# Finished jobs come from the accounting DB, so the window is SQ_SINCE and not
+# MinJobAge: a job that ended while nobody watched is still seen.  Step rows
+# are read along with it, because the allocation row of a signalled job
+# reports plain success and only its step carries the signal.  With no
+# accounting, or with a filter that has no sacct equivalent, the block falls
+# back to squeue -t all and its caption says so.
+# A new failure rings the bell once, and only while it is
 # younger than SQ_BELL_HORIZON, so a first run, a cleared cache and a week of
 # downtime all stay quiet.  The state kept is "<jobid><tab><end epoch>" lines
 # in ~/.cache/sq/alerted: add-only and aged out after 24h, never pruned just
@@ -58,7 +64,7 @@ while [ $# -gt 0 ]; do
 		--no-bell) bell=0; shift ;;
 		--color|--colour) color=1; shift ;;
 		--no-color|--no-colour) color=0; shift ;;
-		-h|--help) sed -n '2,35p' "$0" | cut -c2- | sed 's/^ //'; exit 0 ;;
+		-h|--help) sed -n '2,41p' "$0" | cut -c2- | sed 's/^ //'; exit 0 ;;
 		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
 		# the nonce-framed format below and collapse every record into one field
 		-O|-O?*|--Format|--Format=*|--format=*|-o?*)
@@ -95,14 +101,26 @@ nonce_ok() {
 	esac
 	[ "${#1}" -ge 17 ]
 }
-nonce=
-[ -z "${SRANDOM:-}" ] ||                                  # bash >= 5.1
-	printf -v nonce 'N%08x%08x%08x' "$SRANDOM" "$SRANDOM" "$SRANDOM" 2>/dev/null
-nonce_ok "$nonce" ||                                      # never "tr -dc </dev/urandom":
-	nonce=N$(LC_ALL=C od -An -tx1 -N12 /dev/urandom 2>/dev/null | LC_ALL=C tr -d ' \n')
-nonce_ok "$nonce" || die "no usable random field separator"
-export SQ_NONCE=$nonce      # gawk reads ENVIRON["SQ_NONCE"]: with -v the nonce would
-                            # land on gawk's own world-readable command line
+mint_nonce() {
+	local n=
+	[ -z "${SRANDOM:-}" ] ||                              # bash >= 5.1
+		printf -v n 'N%08x%08x%08x' "$SRANDOM" "$SRANDOM" "$SRANDOM" 2>/dev/null
+	nonce_ok "$n" ||                                      # never "tr -dc </dev/urandom":
+		n=N$(LC_ALL=C od -An -tx1 -N12 /dev/urandom 2>/dev/null | LC_ALL=C tr -d ' \n')
+	nonce_ok "$n" || return 1
+	printf '%s' "$n"
+}
+nonce=$(mint_nonce)   || die "no usable random field separator"
+# sacct's --delimiter has no environment equivalent, so it is always visible in
+# /proc/<pid>/cmdline (mode 0444).  That one gets its OWN nonce: a reader who
+# catches it can then forge nothing, because the queue nonce never leaves the
+# 0400 environment.
+nonce2=$(mint_nonce)  || die "no usable random field separator"
+[ "$nonce" != "$nonce2" ] || die "the two field separators collided"
+# gawk reads these as ENVIRON["SQ_NONCE"] / ENVIRON["SQ_NONCE2"]: passed with -v
+# they would land on gawk's own world-readable command line
+export SQ_NONCE=$nonce
+export SQ_NONCE2=$nonce2
 unset SQUEUE_FORMAT SQUEUE_FORMAT2   # each collector exports the one it needs, so an
                                      # inherited setting can never win over ours
 
@@ -171,18 +189,105 @@ nerr=$?; [ $nerr -eq 0 ] && nerr= || nerr=$(err_of $nerr "$tmp/nodes.err")
 SLURM_TIME_FORMAT=standard SQUEUE_FORMAT=$fmt timeout -k 2 "$tmo" squeue -h -S t,i "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
 jerr=$?; [ $jerr -eq 0 ] && jerr= || jerr=$(err_of $jerr "$tmp/jobs.err")
 
+# ---- the recently-finished block's source --------------------------------
+# sacct and squeue spell the same letters differently and several take a value
+# on one side but not the other (-p partition vs --parsable, -s steps vs
+# --state, -S sort vs --starttime), so nothing is forwarded that is not on this
+# closed list.  Dropping an unknown arg is not an option either: the queue
+# table and this block would then disagree about what they are showing.
+# -u maps to -u and then suppresses -a, because sacct takes the LAST of the two
+# and "-u x -a" quietly means "everybody".
+sargs=(); sfilt=; sskip=; suser=0; ai=0
+while [ $ai -lt ${#args[@]} ]; do
+	a=${args[$ai]}; ai=$((ai+1)); v=; have=0
+	case $a in                                       # all four spellings:
+		--*=*)       v=${a#*=}; have=1; a=${a%%=*} ;;   # --user=x
+		-[upAqjM]?*) v=${a#??}; have=1; a=${a:0:2} ;;   # -ux
+	esac
+	case $a in                                       # -u x and --user x
+		-u|--user)               sf=-u; lbl=user ;;
+		-p|--partition)          sf=-r; lbl=part ;;
+		-A|--account|--accounts) sf=-A; lbl=acct ;;
+		-q|--qos)                sf=-q; lbl=qos ;;
+		-j|--job|--jobs)         sf=-j; lbl=job ;;
+		-M|--cluster|--clusters) sf=-M; lbl=cluster ;;
+		*) sskip="$a has no sacct equivalent"; break ;;
+	esac
+	if [ $have -eq 0 ]; then
+		[ $ai -lt ${#args[@]} ] || { sskip="$a is missing its value"; break; }
+		v=${args[$ai]}; ai=$((ai+1))
+	fi
+	sargs+=("$sf" "$v"); sfilt="$sfilt · $lbl=$v"
+	[ "$sf" = -u ] && suser=1
+done
+sfilt=$(printf '%s' "$sfilt" | tr -d '[:cntrl:]')
+sskip=$(printf '%s' "$sskip" | tr -d '[:cntrl:]')
+
+# an overlap filter, so a job that started days ago and ended inside the window
+# is returned - which is the whole point.  Never --state: that redefines -S/-E
+# from "overlapped the window" to "was in that state during it".
+since=$(printf '%s' "${SQ_SINCE:-now-2hours}" | tr -d '[:cntrl:]' | cut -c1-40)
+[ -n "$since" ] || since=now-2hours
+case $since in
+	now-*) wtxt="last $(printf '%s' "${since#now-}" | sed -E 's/^([0-9]+)([A-Za-z]).*$/\1\2/')" ;;
+	*)     wtxt="since $since" ;;
+esac
+
 : > "$tmp/recent"
+rsrc=none; rwhy=$sskip; rerr=
+# sacct runs whatever $jerr says: it talks to slurmdbd, not slurmctld, so it is
+# the one block that can still be filled while the controller is out.  No -X,
+# because the allocation row of a signalled job reports SUCCESS/0 and the
+# signal lives only in its .batch step; the step rows arrive in this same call
+# and gawk folds them into their parent by id.  -p, not -P: the trailing
+# delimiter makes the last field a machine-emitted empty sentinel, which is the
+# invariant the reassembler asserts.
+if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
+	aflag=(-a); [ "$suser" = 0 ] || aflag=()
+	SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" \
+		sacct -p --delimiter="$nonce2" -n -S "$since" -E now \
+		"${aflag[@]+"${aflag[@]}"}" "${sargs[@]+"${sargs[@]}"}" \
+		-o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName \
+		> "$tmp/recent" 2> "$tmp/recent.err"
+	se=$?
+	# rc=0 with no rows is not proof of success (-M/-r typos are silent), which
+	# is what the closed whitelist above is for; rc!=0 can still leave a partial
+	# file behind, so that is thrown away rather than rendered
+	if [ $se -eq 0 ]; then rsrc=sacct
+	else rwhy=$(err_of $se "$tmp/recent.err" | tr -d '[:cntrl:]'); : > "$tmp/recent"
+	fi
+fi
+
 # every field is nonce-terminated, including the last, so gawk can tell a name
 # holding the delimiter, a tab or a newline from a real record boundary
-[ "$recent" = 0 ] || [ -n "$jerr" ] || SLURM_TIME_FORMAT=standard \
-	SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,State:$nonce,exit_code:$nonce,TimeUsed:$nonce,EndTime:$nonce,ArrayJobID:$nonce,ArrayTaskID:$nonce,UserName:$nonce,Name:$nonce" \
-	timeout -k 2 "$tmo" squeue -t all -h \
-	"${args[@]+"${args[@]}"}" > "$tmp/recent" 2>/dev/null
+if [ "$recent" != 0 ] && [ "$rsrc" = none ] && [ -z "$jerr" ]; then
+	SLURM_TIME_FORMAT=standard \
+		SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,State:$nonce,exit_code:$nonce,TimeUsed:$nonce,EndTime:$nonce,ArrayJobID:$nonce,ArrayTaskID:$nonce,UserName:$nonce,Name:$nonce" \
+		timeout -k 2 "$tmo" squeue -t all -h \
+		"${args[@]+"${args[@]}"}" > "$tmp/recent" 2> "$tmp/recent.err"
+	fe=$?
+	if [ $fe -eq 0 ]; then rsrc=squeue
+	else rerr=$(err_of $fe "$tmp/recent.err" | tr -d '[:cntrl:]'); : > "$tmp/recent"
+	fi
+fi
+
+# "CANCELLED by <uid>" is the only state carrying a number, and a uid means
+# nothing to a reader.  Resolved here, not in gawk, which has no passwd access.
+uidmap=
+if [ "$rsrc" = sacct ]; then
+	for u in $(LC_ALL=C grep -ao 'CANCELLED by [0-9][0-9]*' "$tmp/recent" 2>/dev/null \
+	           | LC_ALL=C awk '{print $3}' | sort -u); do
+		nm=$(getent passwd "$u" 2>/dev/null | cut -d: -f1 | tr -cd 'A-Za-z0-9._-')
+		[ -n "$nm" ] && uidmap="$uidmap$u=$nm,"
+	done
+fi
 
 gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v center="$center" -v fold="$fold" \
      -v color="$color" -v bell="$bell" -v eta="$eta" -v statef="$statedir/alerted" \
      -v statetmp="$statetmp" -v hastty="$hastty" -v horizon="$horizon" \
      -v nerr="$nerr" -v jerr="$jerr" -v me="$me" -v bellall="$bellall" \
+     -v recent="$recent" -v rsrc="$rsrc" -v rwhy="$rwhy" -v rerr="$rerr" \
+     -v wtxt="$wtxt" -v sfilt="$sfilt" -v uidmap="$uidmap" \
      -v host="$(hostname -s)" -v now="$(date '+%H:%M:%S')" '
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
@@ -218,10 +323,36 @@ function dur(s,   a, b, m, sec) {                         # 3-12:04:05 -> second
   else if (m == 1) sec += b[1]
   return sec
 }
-function uniq(list,   a, m, i, seen, o, c) {              # distinct, at most three
-  m = split(list, a, ",")
-  for (i=1; i<=m; i++) if (!(a[i] in seen)) { seen[a[i]] = 1; if (++c <= 3) o = o (o?",":"") a[i] }
-  return (c > 3) ? o ",…" : o
+function elap(s) {                        # 3-12:04:05 -> 3d12h.  The zero-padded
+  if (s < 0)     return "-"               # HH:MM:SS the collectors print costs a
+  if (s < 60)    return s "s"             # folded range up to 11 columns, which is
+  if (s < 3600)  return int(s/60) "m" sprintf("%02ds", s % 60)     # what used to
+  if (s < 86400) return int(s/3600) "h" sprintf("%02dm", int(s % 3600 / 60))
+  return int(s/86400) "d" sprintf("%02dh", int(s % 86400 / 3600))   # overrun the edge
+}
+function exset(list, cap,   a, m, i, seen, sk, idx, o, c, nd, p, rc, sg) {
+  m = split(list, a, ",")                 # distinct exits, WORST FIRST, then capped:
+  for (i=1; i<=m; i++) {                  # taking them in row order hid the loudest
+    if (a[i] in seen) continue            # failure behind the ellipsis, because row
+    seen[a[i]] = 1                        # order is task order
+    p  = index(a[i], "/")
+    rc = (p ? substr(a[i], 1, p-1) : a[i]) + 0
+    sg = p ? substr(a[i], p+4) + 0 : 0
+    sk[sprintf("%09d:%09d:%s", 999999999-rc, 999999999-sg, a[i])] = a[i]
+  }
+  nd = asorti(sk, idx)
+  for (i=1; i<=nd; i++) if (++c <= cap) o = o (o?",":"") sk[idx[i]]
+  return (nd > cap) ? o ",…" : o
+}
+function xcm(id, x,   a) {                # the first non-zero return code and the
+  split(x, a, ":")                        # first signal found among a job and its
+  if (JRC[id]+0 == 0 && a[1]+0 != 0) JRC[id] = a[1]+0           # steps; "sacct -X"
+  if (JSG[id]+0 == 0 && a[2]+0 != 0) JSG[id] = a[2]+0           # reports 0:0 here
+}
+function fcol(code) {                     # one table drives finished-ness, the bell
+  if (code == "") return "36"             # and the colour, so PREEMPTED and REVOKED
+  if (code == "CD") return "32"           # stop reading as failures and an unknown
+  return (code in BAD) ? "31" : "33"      # state is loud instead of silent
 }
 function when(t,   ep) {                                  # start estimate, compactly
   ep = epoch(t)
@@ -237,13 +368,21 @@ BEGIN{
     print "sq: internal field separator missing" > "/dev/stderr"   # guess at a
     fatal = 1; exit 1                                     # separator either way
   }
+  SACCT = (rsrc == "sacct")
+  NONCE2 = ENVIRON["SQ_NONCE2"]                           # the separator sacct got, so
+  if (SACCT && NONCE2 !~ /^[A-Za-z][A-Za-z0-9]{16,}$/) {  # the one it leaks on its
+    print "sq: internal field separator missing" > "/dev/stderr"   # command line can
+    fatal = 1; exit 1                                     # never forge a queue row
+  }
   BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4; RECENT_MAX = 6
   n = split(keys, k, ",")
   FQ = n + 5                    # %i, n displayed, %t %l %S, and the empty sentinel
-  FR = 11                       # 10 -O fields and the empty sentinel
+  FR = SACCT ? 9 : 11           # 8 sacct / 10 -O fields, and the empty sentinel
   # every shape squeue prints for %i / JobID: plain, het component (10646+0),
   # array task (10646_3) and pending array range (10646_[0-9,12%2])
   JOBID = "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[[-0-9,%]+\\]))?$"
+  # the same, plus the step suffix that dropping -X brings in (.batch, .extern, .0)
+  SACCTID = "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[[-0-9,%]+\\]))?([.][A-Za-z0-9_+.-]+)?$"
   H["a"]="ACCOUNT"; H["b"]="GRES";   H["C"]="CPU";    H["c"]="MIN_CPU"; H["D"]="NODES"
   H["e"]="END";     H["f"]="FEAT";   H["g"]="GROUP";  H["i"]="JOBID";   H["j"]="NAME"
   H["K"]="ARRAY";   H["L"]="LEFT";   H["l"]="LIMIT";  H["M"]="TIME";    H["m"]="MEM"
@@ -263,6 +402,17 @@ BEGIN{
   for (i in ts) DONE[ts[i]] = 1
   split("F TO NF OOM DL BF", fs, " ")                     # worth a bell
   for (i in fs) BAD[fs[i]] = 1
+  # the 15 states accounting can report on 23.11, matched as a whole first
+  # token for EQUALITY: a 2-character prefix merges REQUEUED, REVOKED and
+  # RESIZING, and that collision straddles the finished boundary
+  nsl = split("PENDING RUNNING SUSPENDED COMPLETED CANCELLED FAILED TIMEOUT " \
+              "NODE_FAIL PREEMPTED BOOT_FAIL DEADLINE OUT_OF_MEMORY RESIZING " \
+              "REQUEUED REVOKED", slong, " ")
+  split("PD R S CD CA F TO NF PR BF DL OOM RS RQ RV", scode, " ")
+  split("0 0 0 1 1 1 1 1 1 1 1 1 0 0 1", sfin, " ")       # 1 = this block shows it
+  for (i=1; i<=nsl; i++) { SC[slong[i]] = scode[i]; FIN[slong[i]] = sfin[i]+0 }
+  nu = split(uidmap, um, ",")                             # "1021=amadvi,"
+  for (i=1; i<=nu; i++) if (split(um[i], uv, "=") == 2) UMAP[uv[1]] = uv[2]
   split("JOBID NAME STATE EXIT ELAPSED AGO", rhd, " ")
   split("0 0 0 1 1 1", rrt, " ")                          # right-aligned?
   if (bell && hastty) {                                 # id<TAB>end, aged out
@@ -277,9 +427,11 @@ BEGIN{
   }
 }
 
-# one separator per input: sinfo still uses "|", both squeue collectors the
-# nonce.  BEGINFILE runs before the first record of a file, so it is in time
-BEGINFILE { FS = (ARGIND == 1) ? "|" : NONCE; anf = 0; delete ACC }
+# one separator per input: sinfo still uses "|", the queue collector the nonce,
+# the finished one whichever nonce its source was given.  BEGINFILE runs before
+# the first record of a file, so it is in time
+BEGINFILE { FS = (ARGIND == 1) ? "|" : (ARGIND == 3 && SACCT) ? NONCE2 : NONCE
+            anf = 0; delete ACC }
 ENDFILE   {                     # unreadable (our format never took effect, e.g. an
   if (anf) {                    # abbreviated --forma=) vs genuinely cut off mid-record
     if (ARGIND == 2) { if (seen[2]) qtrunc = 1; else qbad = 1 }
@@ -309,7 +461,7 @@ ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%
   if (length(memt[nn]) > wm) wm = length(memt[nn])
   next
 }
-{                               # ---- both squeue collectors, reassembled
+{                               # ---- every job collector, reassembled
   # A newline inside a field splits one record over several physical lines: the
   # last field of a line and the first of the next are two halves of one field.
   # A blank line is never skipped - it is a field that begins or ends with one.
@@ -320,8 +472,9 @@ ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%
   # Complete only with every separator seen, the machine-emitted empty sentinel
   # last and a job id first.  A name cannot contain the nonce of this run, so it can
   # neither forge a boundary nor hide one, and NF alone could not tell.
+  anchor = (ARGIND == 3 && SACCT) ? SACCTID : JOBID
   if (anf < need) next                          # a field held a newline: read on
-  if (anf > need || ACC[need] != "" || ACC[1] !~ JOBID) {
+  if (anf > need || ACC[need] != "" || ACC[1] !~ anchor) {
     skip[ARGIND]++                              # a row we cannot read (squeue
     anf = 0; delete ACC                         # -s emits step ids, say): lose that
     next                                        # record, never the rest of the stream
@@ -336,11 +489,37 @@ ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%
     cnt[F[n+2]]++
     next
   }
+  if (SACCT) {       # ---- sacct: JobID User State ExitCode Elapsed End Node Name
+    if ((dot = index(F[1], ".")) > 0) {   # a step row exists only to supply the
+      xcm(substr(F[1], 1, dot-1), F[4])   # signal its allocation row calls 0:0
+      next
+    }
+    xcm(F[1], F[4])
+    if (F[1] in arow) next                # a second allocation row for one id (a
+    arow[F[1]] = 1                        # requeue rewrite): its exit still counts
+    split(F[3], stok, " ")                # towards the fold, the row does not
+    code = (stok[1] in SC) ? SC[stok[1]] : ""
+    if (code != "" && !FIN[stok[1]]) next # running, pending, requeued, resizing
+    dq++
+    did[dq] = F[1]; duser[dq] = F[2]
+    dsc[dq] = code                        # "" = unknown: raw, cyan, never rings
+    dstate[dq] = stok[1]                  # " by <uid>" never reaches the display
+    dcxl[dq] = (stok[1] == "CANCELLED" && stok[2] == "by") ? stok[3] : ""
+    dsec[dq] = dur(F[5])                  # the raw HH:MM:SS is never displayed
+    dend[dq] = epoch(F[6]); dname[dq] = F[8]
+    # accounting has no Array* field at all, so base and task come from the
+    # JobID; a bracketed id (10401_[0-9]) names no single task and never folds
+    if (match(F[1], /^(.+)_([0-9]+)$/, smm)) { daj[dq] = smm[1]; dat[dq] = smm[2] }
+    else                                     { daj[dq] = F[1];   dat[dq] = "" }
+    dkey[dq] = dstate[dq] SUBSEP dcxl[dq]
+    next
+  }
   if (!(F[2] in DONE)) next                     # ---- squeue -t all, finished only
+  xcm(F[1], F[4])
   dq++
   did[dq]=F[1]; dname[dq]=F[10]; dsc[dq]=F[2]; dstate[dq]=F[3]
-  split(F[4], xc, ":");  dexit[dq] = (xc[2]+0 > 0) ? xc[1] "/sig" xc[2] : xc[1]
-  delap[dq]=F[5]; dsec[dq]=dur(F[5])
+  dkey[dq]=F[2]; dcxl[dq]=""
+  dsec[dq]=dur(F[5])
   dend[dq]=epoch(F[6]); daj[dq]=F[7]; dat[dq]=F[8]; duser[dq]=F[9]
 }
 
@@ -392,44 +571,6 @@ END{
   tabw = rows ? (n-1) : 0                       # one space per gap
   for (i=1; i<=n; i++) tabw += w[i]
 
-  for (r=1; r<=dq; r++) {                       # group array tasks by array id + state
-    if (fold && dat[r] ~ /^[0-9]+$/) key = "a" SUBSEP daj[r] SUBSEP dsc[r]
-    else                             key = "s" SUBSEP r
-    if (key in dgrp) {
-      g = dgrp[key]
-      gtsk[g] = gtsk[g] "," dat[r]; gcnt[g]++; gex[g] = gex[g] "," dexit[r]
-      gids[g] = gids[g] "," did[r]
-      if (dsec[r] < gmin[g]) { gmin[g] = dsec[r]; gminS[g] = delap[r] }
-      if (dsec[r] > gmax[g]) { gmax[g] = dsec[r]; gmaxS[g] = delap[r] }
-      if (dend[r] > rend[g]) rend[g] = dend[r]
-    } else {
-      dgrp[key] = g = ++d
-      rv[d,1]=did[r]; rv[d,2]=dname[r]; rv[d,3]=dstate[r]
-      rst[d]=dsc[r]; rend[d]=dend[r]; gbase2[d]=daj[r]
-      gtsk[d]=dat[r]; gcnt[d]=1; gex[d]=dexit[r]; gids[d]=did[r]; guser[d]=duser[r]
-      gmin[d]=gmax[d]=dsec[r]; gminS[d]=gmaxS[d]=delap[r]
-    }
-  }
-  for (r=1; r<=d; r++) {
-    rv[r,4] = uniq(gex[r])
-    rv[r,5] = (gmin[r] == gmax[r]) ? gminS[r] : gminS[r] "-" gmaxS[r]
-    rv[r,6] = rend[r] ? ago(systime() - rend[r]) : "-"
-    if (gcnt[r] > 1) rv[r,1] = sprintf("%s_[%s] ×%d", gbase2[r], compress(gtsk[r]), gcnt[r])
-  }
-  for (r=1; r<=d; r++) {                        # newest first, then cap
-    best = 0
-    for (j=1; j<=d; j++) if (!dused[j] && (!best || rend[j] > rend[best])) best = j
-    dused[best] = 1; ord[r] = best
-  }
-  shown = (d > RECENT_MAX) ? RECENT_MAX : d
-  more  = d - shown
-
-  for (i=1; i<=6; i++) rw[i] = length(rhd[i])
-  for (r=1; r<=shown; r++)
-    for (i=1; i<=6; i++) if (length(rv[ord[r],i]) > rw[i]) rw[i] = length(rv[ord[r],i])
-  rtabw = shown ? 5 : 0
-  for (i=1; i<=6; i++) if (shown) rtabw += rw[i]
-
   # ---- shrink whatever cannot fit -------------------------------------
   budget = cols - 2                             # keep at least the default margin
   while (tabw > budget) {                       # shave the widest flexible column
@@ -444,7 +585,97 @@ END{
     if (!big) break
     w[big]--; tabw--
   }
-  while (rtabw > budget && rw[2] > 8) { rw[2]--; rtabw-- }   # recent: shave NAME
+
+  # ---- group finished jobs by array base, state and canceller ---------
+  for (r=1; r<=dq; r++) {
+    if (fold && dat[r] ~ /^[0-9]+$/) key = "a" SUBSEP daj[r] SUBSEP dkey[r]
+    else                             key = "s" SUBSEP r
+    if (key in dgrp) g = dgrp[key]
+    else {
+      dgrp[key] = g = ++d
+      gid1[d]=did[r]; rname[d]=dname[r]; rstate[d]=dstate[r]; gcxl[d]=dcxl[r]
+      rst[d]=dsc[r]; rend[d]=rmin[d]=dend[r]; gbase2[d]=daj[r]
+      guser[d]=duser[r]; gmin[d]=gmax[d]=dsec[r]
+    }
+    rcv = JRC[did[r]]+0                         # the first non-zero return code and
+    sgv = JSG[did[r]]+0                         # the first signal this job or any of
+    ex  = (sgv > 0) ? (rcv "/sig" sgv) : (rcv "")        # its steps reported
+    grows[g]++
+    gex[g]  = (grows[g] > 1 ? gex[g]  "," : "") ex
+    gids[g] = (grows[g] > 1 ? gids[g] "," : "") did[r]
+    if (!((g SUBSEP dat[r]) in gseen)) {        # ×N counts DISTINCT task ids, so no
+      gseen[g SUBSEP dat[r]] = 1                # step row or repeated row can inflate
+      gtsk[g] = (gcnt[g] ? gtsk[g] "," : "") dat[r]
+      gcnt[g]++
+    }
+    if (dsec[r] < gmin[g]) gmin[g] = dsec[r]
+    if (dsec[r] > gmax[g]) gmax[g] = dsec[r]
+    if (dend[r] > rend[g]) rend[g] = dend[r]
+    if (dend[r] < rmin[g]) rmin[g] = dend[r]
+  }
+
+  # newest End first, but round-robin across array bases, so one array can
+  # never own the whole cap and hide all the other users jobs behind it
+  for (r=1; r<=d; r++) {
+    best = 0
+    for (j=1; j<=d; j++) if (!dused[j] && (!best || rend[j] > rend[best])) best = j
+    dused[best] = 1
+    b = gbase2[best]
+    if (!(b in bseen)) { bseen[b] = 1; border[++nb] = b }
+    bn[b]++; bq[b SUBSEP bn[b]] = best
+  }
+  r = 0
+  for (round=1; r < d && round <= d; round++)
+    for (bi=1; bi<=nb; bi++)
+      if (round <= bn[border[bi]]) ord[++r] = bq[border[bi] SUBSEP round]
+  shown = (d > RECENT_MAX) ? RECENT_MAX : d
+  more = 0                                      # jobs, not groups: "+2 more" must
+  for (r=shown+1; r<=d; r++) more += gcnt[ord[r]]     # not be able to hide 200 tasks
+
+  # ---- the finished rows, then a shrink ladder until they fit ----------
+  for (r=1; r<=shown; r++) {                    # level-independent cells, once
+    g = ord[r]
+    rv[g,2] = rname[g]
+    if (!rend[g]) rv[g,6] = "-"
+    else {                                      # a group whose tasks ended minutes
+      lo = ago(systime() - rend[g])             # apart must not claim one of their
+      hi = rmin[g] ? ago(systime() - rmin[g]) : lo        # times for the whole group
+      rv[g,6] = (lo == hi) ? lo : lo "-" hi
+    }
+    if (gcxl[g] != "") {                        # a canceller who is the owner is
+      cn = (gcxl[g] in UMAP) ? UMAP[gcxl[g]] : gcxl[g]   # noise; anybody else is
+      gcxl[g] = (cn == guser[g]) ? "" : cn               # the answer, and costs
+    }                                                    # nothing but EXIT slack
+  }
+  # NAME alone used to be shaved, and at 8 characters it gave up and let this
+  # block run past the shared right edge; each rung drops the least useful
+  # detail instead, down to the compact state code as a last resort
+  for (lvl=0; lvl<=5; lvl++) {
+    excap = (lvl >= 3) ? 1 : (lvl >= 2) ? 2 : 3
+    for (r=1; r<=shown; r++) {
+      g = ord[r]
+      rv[g,1] = (gcnt[g] > 1) \
+        ? sprintf("%s_[%s] ×%d", gbase2[g], (lvl >= 4 ? "…" : compress(gtsk[g])), gcnt[g]) \
+        : gid1[g]
+      rv[g,3] = (lvl >= 5 && rst[g] != "") ? rst[g] : rstate[g]
+      rv[g,4] = exset(gex[g], excap) (gcxl[g] == "" ? "" : " by " gcxl[g])
+      rv[g,5] = (gmin[g] == gmax[g] || lvl >= 1) ? elap(gmax[g]) \
+                                                 : elap(gmin[g]) "-" elap(gmax[g])
+    }
+    for (i=1; i<=6; i++) rw[i] = length(rhd[i])
+    for (r=1; r<=shown; r++)
+      for (i=1; i<=6; i++) if (length(rv[ord[r],i]) > rw[i]) rw[i] = length(rv[ord[r],i])
+    rtabw = shown ? 5 : 0
+    for (i=1; i<=6; i++) if (shown) rtabw += rw[i]
+    while (rtabw > budget && rw[2] > 8) { rw[2]--; rtabw-- }   # NAME first, always
+    if (rtabw <= budget) break
+  }
+  while (rtabw > budget) {                      # a terminal too narrow even for that
+    big = 0
+    for (i=1; i<=6; i++) if (rw[i] > 4 && rw[i] > rw[big]) big = i
+    if (!big) break
+    rw[big]--; rtabw--
+  }
 
   # ---- agree on a common right edge -----------------------------------
   if (nfix + bar > budget) bar = budget - nfix
@@ -560,25 +791,32 @@ END{
     }
   }
 
-  if (rbad) {                                   # ---- recently finished
+  if (recent) {                                 # ---- recently finished
     out[++o] = ""
-    out[++o] = sprintf("%s%srecently finished%s", lm, e("2"), e("0"))
-    out[++o] = sprintf("%s%s⚠ output unreadable%s", lm, e("1;31"), e("0"))
+    # the caption always renders, so "quiet window" and "broken" stop looking
+    # alike: before, zero rows took the header away with them
+    if (rbad || rtrunc) {
+      out[++o] = sprintf("%s%srecently finished%s", lm, e("2"), e("0"))
+      out[++o] = sprintf("%s%s⚠ output %s%s", lm, e("1;31"),
+                         rbad ? "unreadable" : "incomplete", e("0"))
+    } else {
+      if (rsrc == "sacct")
+        cap = "recently finished · " wtxt sfilt (shown ? "" : " · nothing in this window")
+      else if (rsrc == "squeue")
+        cap = "recently finished · recent only (no accounting)" (rwhy != "" ? " · " rwhy : "")
+      else
+        cap = "finished jobs unavailable · " (rerr != "" ? rerr : (rwhy != "" ? rwhy : jerr))
+      if (length(cap) > target) cap = substr(cap, 1, target-1) "…"
+      out[++o] = sprintf("%s%s%s%s", lm, e(rsrc == "none" ? "1;31" : "2"), cap, e("0"))
+    }
   }
-  else if (rtrunc) {
-    out[++o] = ""
-    out[++o] = sprintf("%s%srecently finished%s", lm, e("2"), e("0"))
-    out[++o] = sprintf("%s%s⚠ output incomplete%s", lm, e("1;31"), e("0"))
-  }
-  else if (shown) {
-    out[++o] = ""
-    out[++o] = sprintf("%s%srecently finished%s", lm, e("2"), e("0"))
+  if (recent && !rbad && !rtrunc && shown) {
     line = lm e("4")
     for (i=1; i<=6; i++) line = line sprintf("%*s%-*.*s", rgap[i], "", rw[i], rw[i], rhd[i])
     out[++o] = line sprintf("%*s", rpad+0, "") e("0")
     for (r=1; r<=shown; r++) {
       best = ord[r]
-      fc = (rst[best]=="CD") ? "32" : (rst[best]=="CA") ? "33" : "31"
+      fc = fcol(rst[best])
       line = lm
       for (i=1; i<=6; i++) {
         x = rv[best,i]
