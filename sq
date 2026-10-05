@@ -36,7 +36,10 @@
 
 set -u
 
+die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
+
 fields=${SQ_FMT:-i,j,u,T,M,L,C,m,R}
+fsrc=${SQ_FMT:+SQ_FMT}; fsrc=${fsrc:--o}         # which one to blame for a bad letter
 center=${SQ_CENTER:-0}
 fold=${SQ_FOLD:-1}
 recent=${SQ_RECENT:-1}
@@ -46,7 +49,7 @@ color=${SQ_COLOR:-auto}
 args=()
 while [ $# -gt 0 ]; do
 	case $1 in
-		-o|--format) fields=${2:-}; shift 2 ;;
+		-o|--format) fields=${2:-}; fsrc=-o; shift 2 ;;
 		-c|--center|--centre) center=1; shift ;;
 		-C|--center-all|--centre-all) center=2; shift ;;
 		-x|--expand) fold=0; shift ;;
@@ -55,6 +58,13 @@ while [ $# -gt 0 ]; do
 		--color|--colour) color=1; shift ;;
 		--no-color|--no-colour) color=0; shift ;;
 		-h|--help) sed -n '2,35p' "$0" | cut -c2- | sed 's/^ //'; exit 0 ;;
+		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
+		# the nonce-framed format below and collapse every record into one field
+		-O|-O?*|--Format|--Format=*|--format=*|-o?*)
+			die "$1 would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
+		-s|--steps)   # squeue ignores SQUEUE_FORMAT in step mode and has no step-format
+		              # env var, so the record framing cannot be delivered safely there
+			die "$1 lists job steps, which sq cannot frame safely; sq shows jobs" ;;
 		*) args+=("$1"); shift ;;
 	esac
 done
@@ -69,16 +79,51 @@ if [ "$color" = auto ]; then
 	fi
 fi
 
+# The field separator is a nonce minted per run, never per session: a job name
+# is fixed at submit time, so it cannot contain a separator minted afterwards.
+# That is what makes a record boundary unforgeable - a name holding "|", a tab
+# or a newline can then neither inject a row nor steal a field.
+# A nonce is usable only if it is letter-led (squeue's -O grammar is
+# type[:[.][size][suffix]], so a suffix starting with digits is read as a FIELD
+# WIDTH: "JobID:1234567890" segfaults squeue, "JobID:0" drops the separator),
+# alphanumeric (no ERE metacharacter, so gawk takes it as FS verbatim) and long
+# enough that no name can hold it by chance.
+nonce_ok() {
+	case ${1:-} in
+		''|[!A-Za-z]*|*[!A-Za-z0-9]*) return 1 ;;
+	esac
+	[ "${#1}" -ge 17 ]
+}
+nonce=
+[ -z "${SRANDOM:-}" ] ||                                  # bash >= 5.1
+	printf -v nonce 'N%08x%08x%08x' "$SRANDOM" "$SRANDOM" "$SRANDOM" 2>/dev/null
+nonce_ok "$nonce" ||                                      # never "tr -dc </dev/urandom":
+	nonce=N$(LC_ALL=C od -An -tx1 -N12 /dev/urandom 2>/dev/null | LC_ALL=C tr -d ' \n')
+nonce_ok "$nonce" || die "no usable random field separator"
+export SQ_NONCE=$nonce      # gawk reads ENVIRON["SQ_NONCE"]: with -v the nonce would
+                            # land on gawk's own world-readable command line
+unset SQUEUE_FORMAT SQUEUE_FORMAT2   # each collector exports the one it needs, so an
+                                     # inherited setting can never win over ours
+
+# %s is the only letter that is not a squeue field, and squeue reports it on
+# stderr with rc 0, so without this check it renders as a column of "%s"
+squeue_letters=abcdefghijklmnopqrtuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
+
 # normalise "%.10i, j" -> "i j"
 fl=$(printf '%s' "$fields" | tr ',' ' ' | tr -s ' ')
-fmt=""; keys=""
-for f in $fl; do
+fmt="%i$nonce"; keys=""          # hidden leading field: the job id anchors a record
+for f in $fl; do                 # start even when the user did not ask for it
 	k=$(printf '%s' "$f" | tr -cd 'A-Za-z' | cut -c1)
 	[ -n "$k" ] || continue
-	fmt="$fmt%$k|"; keys="$keys$k,"
+	case $squeue_letters in
+		*"$k"*) ;;
+		*) die "%$k is not a squeue field letter (in $fsrc '$fields')" ;;
+	esac
+	fmt="$fmt%$k$nonce"; keys="$keys$k,"
 done
-fmt="$fmt%t|%l|%S"               # hidden trailing fields: state, limit, start
-keys=${keys%,}
+fmt="$fmt%t$nonce%l$nonce%S$nonce"   # hidden trailing fields: state, limit, start;
+keys=${keys%,}                       # the last nonce leaves an empty field that only
+                                     # squeue can emit, so a record ends unambiguously
 
 cols=${SQ_WIDTH:-${COLUMNS:-}}
 [ -n "$cols" ] || cols=$(tput cols 2>/dev/null) || cols=100
@@ -122,17 +167,18 @@ err_of() { [ "$1" = 124 ] && echo "no response after ${tmo}s" || head -1 "$2"; }
 SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" sinfo -hN -o '%N|%C|%e|%m|%T|%E|%H' > "$tmp/nodes" 2> "$tmp/nodes.err"
 nerr=$?; [ $nerr -eq 0 ] && nerr= || nerr=$(err_of $nerr "$tmp/nodes.err")
 
-SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" squeue -h -S t,i -o "$fmt" "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
+SLURM_TIME_FORMAT=standard SQUEUE_FORMAT=$fmt timeout -k 2 "$tmo" squeue -h -S t,i "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
 jerr=$?; [ $jerr -eq 0 ] && jerr= || jerr=$(err_of $jerr "$tmp/jobs.err")
 
 : > "$tmp/recent"
-# NAME comes last and gawk rejoins it: a job name may contain the delimiter, a
-# tab or a newline, which would otherwise shift fields or inject a whole row
-[ "$recent" = 0 ] || [ -n "$jerr" ] || SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" squeue -t all -h \
-	-O 'JobID:|,StateCompact:|,State:|,exit_code:|,TimeUsed:|,EndTime:|,ArrayJobID:|,ArrayTaskID:|,UserName:|,Name:|' \
+# every field is nonce-terminated, including the last, so gawk can tell a name
+# holding the delimiter, a tab or a newline from a real record boundary
+[ "$recent" = 0 ] || [ -n "$jerr" ] || SLURM_TIME_FORMAT=standard \
+	SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,State:$nonce,exit_code:$nonce,TimeUsed:$nonce,EndTime:$nonce,ArrayJobID:$nonce,ArrayTaskID:$nonce,UserName:$nonce,Name:$nonce" \
+	timeout -k 2 "$tmo" squeue -t all -h \
 	"${args[@]+"${args[@]}"}" > "$tmp/recent" 2>/dev/null
 
-gawk -F'|' -v keys="$keys" -v cols="$cols" -v lines="$lines" -v center="$center" -v fold="$fold" \
+gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v center="$center" -v fold="$fold" \
      -v color="$color" -v bell="$bell" -v eta="$eta" -v statef="$statedir/alerted" \
      -v statetmp="$statetmp" -v hastty="$hastty" -v horizon="$horizon" \
      -v nerr="$nerr" -v jerr="$jerr" -v me="$me" -v bellall="$bellall" \
@@ -185,8 +231,18 @@ function when(t,   ep) {                                  # start estimate, comp
 }
 
 BEGIN{
+  NONCE = ENVIRON["SQ_NONCE"]                             # the shell minted and
+  if (NONCE !~ /^[A-Za-z][A-Za-z0-9]{16,}$/) {            # validated it; refuse to
+    print "sq: internal field separator missing" > "/dev/stderr"   # guess at a
+    fatal = 1; exit 1                                     # separator either way
+  }
   BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4; RECENT_MAX = 6
   n = split(keys, k, ",")
+  FQ = n + 5                    # %i, n displayed, %t %l %S, and the empty sentinel
+  FR = 11                       # 10 -O fields and the empty sentinel
+  # every shape squeue prints for %i / JobID: plain, het component (10646+0),
+  # array task (10646_3) and pending array range (10646_[0-9,12%2])
+  JOBID = "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[[-0-9,%]+\\]))?$"
   H["a"]="ACCOUNT"; H["b"]="GRES";   H["C"]="CPU";    H["c"]="MIN_CPU"; H["D"]="NODES"
   H["e"]="END";     H["f"]="FEAT";   H["g"]="GROUP";  H["i"]="JOBID";   H["j"]="NAME"
   H["K"]="ARRAY";   H["L"]="LEFT";   H["l"]="LIMIT";  H["M"]="TIME";    H["m"]="MEM"
@@ -220,6 +276,11 @@ BEGIN{
   }
 }
 
+# one separator per input: sinfo still uses "|", both squeue collectors the
+# nonce.  BEGINFILE runs before the first record of a file, so it is in time
+BEGINFILE { FS = (ARGIND == 1) ? "|" : NONCE; anf = 0; delete ACC }
+ENDFILE   { if (anf) { if (ARGIND == 2) qtrunc = 1; else if (ARGIND == 3) rtrunc = 1 } }
+
 ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%H
   nn++
   node[nn]=$1; nst[nn]=$5
@@ -242,28 +303,47 @@ ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%
   if (length(memt[nn]) > wm) wm = length(memt[nn])
   next
 }
-ARGIND==2 {                                     # ---- squeue, n fields + 3 hidden
-  q++
-  for (i=1; i<=n; i++) raw[q,i] = $i
-  qstate[q] = $(n+1); qlimit[q] = $(n+2); qstart[q] = $(n+3)
-  cnt[$(n+1)]++
-  next
-}
-{                                               # ---- squeue -t all, finished only
-  if ($1 !~ /^[0-9]+(_([0-9]+|\[[-0-9,%]+\]))?$/) next  # junk, or the tail of a
-  if (!($2 in DONE)) next                               # name split by a newline
-  nm = $10                                              # NAME runs to the end of
-  for (i=11; i<=NF; i++) nm = nm "|" $i                 # the record ...
-  sub(/\|$/, "", nm)                                    # ... minus its separator
-  gsub(/[[:cntrl:]]/, "?", nm)                          # before any width is read
+{                               # ---- both squeue collectors, reassembled
+  # A newline inside a field splits one record over several physical lines: the
+  # last field of a line and the first of the next are two halves of one field.
+  # A blank line is never skipped - it is a field that begins or ends with one.
+  if (anf == 0) { anf = NF ? NF : 1; for (i=1; i<=anf; i++) ACC[i] = $i }
+  else { ACC[anf] = ACC[anf] "\n" $1; for (i=2; i<=NF; i++) ACC[++anf] = $i }
+  need = (ARGIND == 2) ? FQ : FR
+  # Complete only with every separator seen, the machine-emitted empty sentinel
+  # last and a job id first.  A name cannot contain the nonce of this run, so it can
+  # neither forge a boundary nor hide one, and NF alone could not tell.
+  if (anf < need) next                          # a field held a newline: read on
+  if (anf > need || ACC[need] != "" || ACC[1] !~ JOBID) {
+    skip[ARGIND]++                              # an id shape we do not know (squeue
+    anf = 0; delete ACC                         # -s emits step ids, say): lose that
+    next                                        # record, never the rest of the stream
+  }
+  for (i=1; i<=need; i++) { F[i] = ACC[i]; gsub(/[[:cntrl:]]/, "?", F[i]) }
+  anf = 0; delete ACC           # scrubbed before any width or colour is read
+
+  if (ARGIND == 2) {                            # ---- queue: %i, n fields, 3 hidden
+    q++
+    for (i=1; i<=n; i++) raw[q,i] = F[i+1]
+    qstate[q] = F[n+2]; qlimit[q] = F[n+3]; qstart[q] = F[n+4]
+    cnt[F[n+2]]++
+    next
+  }
+  if (!(F[2] in DONE)) next                     # ---- squeue -t all, finished only
   dq++
-  did[dq]=$1; dname[dq]=nm; dsc[dq]=$2; dstate[dq]=$3
-  split($4, xc, ":");  dexit[dq] = (xc[2]+0 > 0) ? xc[1] "/sig" xc[2] : xc[1]
-  delap[dq]=$5; dsec[dq]=dur($5)
-  dend[dq]=epoch($6); daj[dq]=$7; dat[dq]=$8; duser[dq]=$9
+  did[dq]=F[1]; dname[dq]=F[10]; dsc[dq]=F[2]; dstate[dq]=F[3]
+  split(F[4], xc, ":");  dexit[dq] = (xc[2]+0 > 0) ? xc[1] "/sig" xc[2] : xc[1]
+  delap[dq]=F[5]; dsec[dq]=dur(F[5])
+  dend[dq]=epoch(F[6]); daj[dq]=F[7]; dat[dq]=F[8]; duser[dq]=F[9]
 }
 
 END{
+  if (fatal) exit 1
+  # A record left half-assembled at EOF means the stream was cut off, never a
+  # hostile name: show a caption instead of a table built from what arrived
+  if (qtrunc) q = 0
+  if (rtrunc) dq = 0
+
   # ---- pending start estimates, before folding so they stay per-task ---
   if (eta && rc)
     for (r=1; r<=q; r++)
@@ -441,7 +521,8 @@ END{
   }
   out[++o] = ""
 
-  if (!rows && jerr != "") out[++o] = sprintf("%s%sjob list unavailable%s", lm, e("2"), e("0"))
+  if (qtrunc) out[++o] = sprintf("%s%s⚠ queue output incomplete%s", lm, e("1;31"), e("0"))
+  else if (!rows && jerr != "") out[++o] = sprintf("%s%sjob list unavailable%s", lm, e("2"), e("0"))
   else if (!rows) out[++o] = sprintf("%s%squeue is empty%s", lm, e("2"), e("0"))
   else {
     line = lm e("4")
@@ -470,7 +551,12 @@ END{
     }
   }
 
-  if (shown) {                                  # ---- recently finished
+  if (rtrunc) {                                 # ---- recently finished
+    out[++o] = ""
+    out[++o] = sprintf("%s%srecently finished%s", lm, e("2"), e("0"))
+    out[++o] = sprintf("%s%s⚠ output incomplete%s", lm, e("1;31"), e("0"))
+  }
+  else if (shown) {
     out[++o] = ""
     out[++o] = sprintf("%s%srecently finished%s", lm, e("2"), e("0"))
     line = lm e("4")
@@ -502,10 +588,16 @@ END{
         }
       }
 
-  out[++o] = ""
-  out[++o] = sprintf("%s%s%d%s jobs   %s%d running%s   %s%d pending%s   %s%d other%s", lm,
-                     e("1"), q, e("0"), e("32"), cnt["R"]+0, e("0"),
-                     e("33"), cnt["PD"]+0, e("0"), e("31"), q - cnt["R"] - cnt["PD"], e("0"))
+  if (skip[2] + skip[3] > 0)
+    out[++o] = sprintf("%s%s↳ %d row%s skipped: unreadable job id%s", lm, e("2"),
+                       skip[2]+skip[3], (skip[2]+skip[3] > 1 ? "s" : ""), e("0"))
+
+  if (!qtrunc) {                                # no counts from a truncated stream
+    out[++o] = ""
+    out[++o] = sprintf("%s%s%d%s jobs   %s%d running%s   %s%d pending%s   %s%d other%s", lm,
+                       e("1"), q, e("0"), e("32"), cnt["R"]+0, e("0"),
+                       e("33"), cnt["PD"]+0, e("0"), e("31"), q - cnt["R"] - cnt["PD"], e("0"))
+  }
 
   if (center == 2) {                            # vertical centring, never overflowing
     top = int((lines - o) / 2)
