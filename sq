@@ -17,14 +17,20 @@
 #      SQ_RECENT 0 = never show finished jobs
 #      SQ_BELL   0 = never ring; the bell covers only your own jobs unless
 #                SQ_BELL_ALL=1.  SQ_ETA 0 = no pending start estimates
+#      SQ_BELL_HORIZON  a failure only rings while it is this fresh (600s; 0 mutes)
 #      SQ_COLOR  0 = never colour, 1 = always
 #      SQ_TIMEOUT seconds to wait for slurm before declaring it unreachable (5)
 #      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect
 #
 # Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4.
 # Finished jobs come from squeue -t all, so the window is MinJobAge, not an
-# accounting DB.  A new failure rings the bell once; the only state kept is
-# a list of already-rung job ids in ~/.cache/sq/alerted, pruned every run.
+# accounting DB.  A new failure rings the bell once, and only while it is
+# younger than SQ_BELL_HORIZON, so a first run, a cleared cache and a week of
+# downtime all stay quiet.  The state kept is "<jobid><tab><end epoch>" lines
+# in ~/.cache/sq/alerted: add-only and aged out after 24h, never pruned just
+# because one run queried less, and replaced by an atomic rename so two
+# instances cannot tear it.  A row with an unknown user never rings and is
+# never remembered, and with no controlling terminal the bell is skipped.
 # TIME LEFT turns yellow under 10% of the limit and red under 2%.  Pending
 # jobs show the backfill start estimate; down nodes show their reason.
 
@@ -48,7 +54,7 @@ while [ $# -gt 0 ]; do
 		--no-bell) bell=0; shift ;;
 		--color|--colour) color=1; shift ;;
 		--no-color|--no-colour) color=0; shift ;;
-		-h|--help) sed -n '2,31p' "$0" | cut -c2- | sed 's/^ //'; exit 0 ;;
+		-h|--help) sed -n '2,35p' "$0" | cut -c2- | sed 's/^ //'; exit 0 ;;
 		*) args+=("$1"); shift ;;
 	esac
 done
@@ -85,28 +91,50 @@ lines=${SQ_HEIGHT:-${LINES:-}}
 me=${SQ_BELL_USER:-$(id -un)}
 bellall=${SQ_BELL_ALL:-0}
 statedir=${XDG_CACHE_HOME:-$HOME/.cache}/sq
+statetmp=$statedir/alerted.$$                   # renamed over alerted at the end
 [ "$bell" = 0 ] || mkdir -p "$statedir" 2>/dev/null || bell=0
 
-tmp=$(mktemp -d) || exit 1
-trap 'rm -rf "$tmp"' EXIT
+# writing to /dev/tty is a gawk FATAL without a controlling terminal (ssh
+# without -t, cron, systemd), and the device node exists even then, so the only
+# honest probe is to open it
+hastty=0
+[ -c /dev/tty ] && { : >/dev/tty; } 2>/dev/null && hastty=1
 
-# an unreachable controller makes sinfo/squeue block, not fail, so bound them
+# a failure only rings while it is this fresh, which is what makes a first run,
+# a cleared cache and a week of downtime behave sanely
+horizon=${SQ_BELL_HORIZON:-600}
+case $horizon in ''|*[!0-9]*) horizon=600 ;; esac
+
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"; rm -f "$statetmp"' EXIT
+
+# an unreachable controller makes sinfo/squeue block, not fail, so bound them.
+# timeout reads 0 as "no limit" and errors out on anything non-numeric, so both
+# fall back to the default; -k kills a client that ignores SIGTERM
 tmo=${SQ_TIMEOUT:-5}
+case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeout
+[ -n "$(printf '%s' "$tmo" | tr -d '0.')" ] || tmo=5    # 0, 0.0 mean "no limit"
 err_of() { [ "$1" = 124 ] && echo "no response after ${tmo}s" || head -1 "$2"; }
 
-timeout "$tmo" sinfo -hN -o '%N|%C|%e|%m|%T|%E|%H' > "$tmp/nodes" 2> "$tmp/nodes.err"
+# SLURM_TIME_FORMAT is pinned on every collector: "relative" or a custom
+# format turns a date into something epoch() cannot read, which silently kills
+# both the AGO column and the newest-first ordering
+SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" sinfo -hN -o '%N|%C|%e|%m|%T|%E|%H' > "$tmp/nodes" 2> "$tmp/nodes.err"
 nerr=$?; [ $nerr -eq 0 ] && nerr= || nerr=$(err_of $nerr "$tmp/nodes.err")
 
-timeout "$tmo" squeue -h -S t,i -o "$fmt" "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
+SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" squeue -h -S t,i -o "$fmt" "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
 jerr=$?; [ $jerr -eq 0 ] && jerr= || jerr=$(err_of $jerr "$tmp/jobs.err")
 
 : > "$tmp/recent"
-[ "$recent" = 0 ] || [ -n "$jerr" ] || timeout "$tmo" squeue -t all -h \
-	-O 'JobID:|,Name:|,StateCompact:|,State:|,exit_code:|,TimeUsed:|,EndTime:|,ArrayJobID:|,ArrayTaskID:|,UserName:|' \
+# NAME comes last and gawk rejoins it: a job name may contain the delimiter, a
+# tab or a newline, which would otherwise shift fields or inject a whole row
+[ "$recent" = 0 ] || [ -n "$jerr" ] || SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" squeue -t all -h \
+	-O 'JobID:|,StateCompact:|,State:|,exit_code:|,TimeUsed:|,EndTime:|,ArrayJobID:|,ArrayTaskID:|,UserName:|,Name:|' \
 	"${args[@]+"${args[@]}"}" > "$tmp/recent" 2>/dev/null
 
 gawk -F'|' -v keys="$keys" -v cols="$cols" -v lines="$lines" -v center="$center" -v fold="$fold" \
      -v color="$color" -v bell="$bell" -v eta="$eta" -v statef="$statedir/alerted" \
+     -v statetmp="$statetmp" -v hastty="$hastty" -v horizon="$horizon" \
      -v nerr="$nerr" -v jerr="$jerr" -v me="$me" -v bellall="$bellall" \
      -v host="$(hostname -s)" -v now="$(date '+%H:%M:%S')" '
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
@@ -180,7 +208,16 @@ BEGIN{
   for (i in fs) BAD[fs[i]] = 1
   split("JOBID NAME STATE EXIT ELAPSED AGO", rhd, " ")
   split("0 0 0 1 1 1", rrt, " ")                          # right-aligned?
-  if (bell) { while ((getline ln < statef) > 0) rung[ln] = 1; close(statef) }
+  if (bell && hastty) {                                 # id<TAB>end, aged out
+    cut = systime() - 86400                             # at 24h; lines without
+    while ((getline ln < statef) > 0) {                 # a tab are a pre-1.1
+      sep = index(ln, "\t")                             # file, and expire with it
+      if (!sep) continue
+      id = substr(ln, 1, sep-1); ep = substr(ln, sep+1) + 0
+      if (id != "" && ep > cut && ep > rung[id]) rung[id] = ep
+    }
+    close(statef)
+  }
 }
 
 ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%H
@@ -213,12 +250,17 @@ ARGIND==2 {                                     # ---- squeue, n fields + 3 hidd
   next
 }
 {                                               # ---- squeue -t all, finished only
-  if (!($3 in DONE)) next
+  if ($1 !~ /^[0-9]+(_([0-9]+|\[[-0-9,%]+\]))?$/) next  # junk, or the tail of a
+  if (!($2 in DONE)) next                               # name split by a newline
+  nm = $10                                              # NAME runs to the end of
+  for (i=11; i<=NF; i++) nm = nm "|" $i                 # the record ...
+  sub(/\|$/, "", nm)                                    # ... minus its separator
+  gsub(/[[:cntrl:]]/, "?", nm)                          # before any width is read
   dq++
-  did[dq]=$1; dname[dq]=$2; dsc[dq]=$3; dstate[dq]=$4
-  split($5, xc, ":");  dexit[dq] = (xc[2]+0 > 0) ? xc[1] "/sig" xc[2] : xc[1]
-  delap[dq]=$6; dsec[dq]=dur($6)
-  dend[dq]=epoch($7); daj[dq]=$8; dat[dq]=$9; duser[dq]=$10
+  did[dq]=$1; dname[dq]=nm; dsc[dq]=$2; dstate[dq]=$3
+  split($4, xc, ":");  dexit[dq] = (xc[2]+0 > 0) ? xc[1] "/sig" xc[2] : xc[1]
+  delap[dq]=$5; dsec[dq]=dur($5)
+  dend[dq]=epoch($6); daj[dq]=$7; dat[dq]=$8; duser[dq]=$9
 }
 
 END{
@@ -450,11 +492,14 @@ END{
     if (more) out[++o] = sprintf("%s%s+%d more%s", lm, e("2"), more, e("0"))
   }
 
-  if (bell)                                     # every failure, displayed or not
-    for (r=1; r<=d; r++)
-      if (BAD[rst[r]] && (bellall || guser[r] == me)) {
+  if (bell && hastty)                           # every failure, displayed or not
+    for (r=1; r<=d; r++)                        # ... but never an unknown user
+      if (BAD[rst[r]] && guser[r] != "" && (bellall || guser[r] == me)) {
         nid = split(gids[r], gi, ",")
-        for (j=1; j<=nid; j++) { keep[gi[j]] = 1; if (!(gi[j] in rung)) ding = 1 }
+        for (j=1; j<=nid; j++) {
+          if (!(gi[j] in rung) && rend[r] > systime() - horizon) ding = 1
+          rung[gi[j]] = rend[r] ? rend[r] : systime()
+        }
       }
 
   out[++o] = ""
@@ -468,11 +513,18 @@ END{
   }
   for (i=1; i<=o; i++) print out[i]
 
-  if (bell) {                                   # prune to what is still in the window
-    printf "" > statef
-    for (id in keep) print id > statef
-    close(statef)
+  if (bell && hastty) {                         # everything remembered, not just
+    printf "" > statetmp                        # what this run happened to query;
+    for (id in rung) printf "%s\t%d\n", id, rung[id] > statetmp
+    close(statetmp)                             # the shell renames it into place
     if (ding) { print "\a" > "/dev/tty"; close("/dev/tty") }
   }
 }
-' "$tmp/nodes" "$tmp/jobs" "$tmp/recent" 
+' "$tmp/nodes" "$tmp/jobs" "$tmp/recent"
+rc=$?
+
+# rename(2), so a second instance can never read or leave a torn state file.
+# Only on success: a gawk that died mid-write leaves a partial temp, and
+# promoting that would wipe the bell memory and re-ring everything.
+[ "$rc" -eq 0 ] && [ -f "$statetmp" ] && mv -f "$statetmp" "$statedir/alerted"
+exit $rc
