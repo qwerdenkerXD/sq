@@ -72,6 +72,8 @@ sq                        # one-shot
 watch -tc -n 5 sq         # live; -c keeps the colours, -t drops watch's header
 sq -o i,j,T,M,P,N         # choose columns by squeue field letter
 sq -u "$USER" -p gpu      # anything sq doesn't know is passed on to squeue
+                          # (except -o/-O/--format/--Format and -s/--steps, which
+                          #  would override or defeat sq's own record framing)
 sq -C                     # centred in both axes
 ```
 
