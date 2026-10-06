@@ -213,15 +213,29 @@ while [ $# -gt 0 ]; do
 			[ $have -eq 1 ] || [ $# -ge 2 ] || { opt_hint "$kopt"
 				die "$opt needs $vnoun, e.g. sq $opt $vex"; }
 			[ $have -eq 1 ] || val=$2
+			# EMPTY, for every filter: an empty value is never what anyone meant,
+			# and neither tool says so.  "squeue -t ''" exits 0 with no rows and
+			# no message, so "sq -t ''" drew "queue is empty" with four jobs
+			# queued - the same lie the six were taught to refuse, reaching the
+			# screen through the five filters that still forwarded it.  sacct is
+			# no better: an empty -u exits 1 with zero bytes of stderr, and an
+			# empty -j quietly returns every job.  -S is excluded: an empty sort
+			# key only leaves squeue's default order, and sq -S "$SORT" with
+			# SORT unset is a fair thing for a wrapper to write.
+			case $kopt in
+				-S) ;;
+				*)  [ -n "$val" ] || { opt_hint "$kopt"
+						die "$opt needs $vnoun, e.g. sq $opt $vex"; } ;;
+			esac
 			# SHAPE, only for the six whose values are Slurm entity names or
-			# ids: no user, partition, account, QoS, job id or cluster is empty
-			# or begins with "-", and the only documented dash-leading value is
-			# -S/--sort's, which is why -S is deliberately not in this set.
+			# ids: no user, partition, account, QoS, job id or cluster begins
+			# with "-", while a job name legally may (and a state list, node
+			# list, license or reservation is forwarded as written), as may
+			# -S/--sort's key, which is why none of them is in this set.
 			case $kopt in
 				-u|-p|-A|-q|-j|-M)
 					case $val in
-						''|-*) opt_hint "$kopt"
-							[ -n "$val" ] || die "$opt needs $vnoun, e.g. sq $opt $vex"
+						-*) opt_hint "$kopt"
 							die "$opt needs $vnoun, not '$(printf '%s' "$val" \
 								| tr -d '[:cntrl:]' | cut -c1-40)'; e.g. sq $opt $vex" ;;
 					esac ;;
