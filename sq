@@ -16,8 +16,21 @@
 #   sq --no-recent          hide the recently-finished block
 #   sq --no-bell            never ring the terminal bell on a new failure
 #   sq --color / --no-color force colour on or off
+#   sq --compact / --full   fit the screen / show everything (see below)
+#   sq --reserve N          COMPACT leaves N lines of the screen unused
 #   watch -tc -n 5 sq       live dashboard; keep -t, or watch's own header
-#                           pushes the footer off screen
+#                           pushes the footer off screen (or --reserve 2)
+#
+# Two modes.  FULL shows every job.  COMPACT fits the screen: rows that do
+# not fit collapse into lines like "… 42 jobs running".  Stuck jobs (pending
+# for a reason other than plain waiting), jobs blocked on nodes and jobs held
+# by an admin keep their rows longest, within half the table while running
+# jobs are hidden; running jobs come next, the longest-running first, and
+# ordinary pending jobs last.  The finished block shrinks to one line, the
+# newest failure, and on the smallest screens the nodes to one summary line.
+# COMPACT is chosen when stdout is a terminal or COLUMNS and LINES are both
+# exported (watch does that), FULL in a pipe or a file; --compact, --full and
+# SQ_COMPACT decide instead, the flags first.
 #
 # env: SQ_FMT    default column list (same syntax as -o)
 #      SQ_CENTER 1 = horizontal, 2 = both axes
@@ -30,8 +43,11 @@
 #      SQ_TIMEOUT seconds to wait for slurm before declaring it unreachable (5)
 #      SQ_SINCE  how far back the finished block looks (sacct -S; now-2hours)
 #      SQ_RECENT_MAX  finished rows (default: the space left, clamped 3-25; a
-#                     value you set is used as given, not clamped)
-#      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect
+#                     value you set is used as given in FULL, and is an
+#                     upper limit in COMPACT, never pushing the footer off)
+#      SQ_COMPACT 1 = always COMPACT, 0 = always FULL, else auto-detect
+#      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect; they
+#                     never choose the mode
 #
 # Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4,
 # and a bracket Slurm prints reads 9008_[4-9] x6 with or without -x: the

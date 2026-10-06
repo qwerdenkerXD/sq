@@ -30,7 +30,15 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
 
 ## What it does
 
-- **Fits the terminal.** Every column is sized to its content. When the table is too wide, the text
+- **Fits the screen, or shows everything.** On a terminal and under `watch`, sq draws a
+  COMPACT screen no taller than the terminal: what does not fit collapses into lines like
+  `… 42 jobs running`. Stuck jobs (pending for a reason other than plain waiting), jobs blocked
+  on nodes and jobs held by an admin keep their rows longest, within half the table while running
+  jobs are hidden; running jobs come next, the longest-running first; ordinary pending jobs last.
+  The finished block shrinks to one line naming the newest failure, and on the smallest screens
+  the nodes become one summary line. Piped or redirected, sq draws the FULL screen, every job.
+  `--compact`, `--full` or `SQ_COMPACT` choose instead.
+- **Fits the terminal's width.** Every column is sized to its content. When the table is too wide, the text
   columns (name, reason, command, node list, work dir) shrink first, longest first, cut with `…`.
   Numbers are never cut while anything else can give.
 - **One right edge.** Node stats, the job table and the finished-jobs block are measured together
@@ -74,7 +82,8 @@ install -m 755 sq ~/.local/bin/sq            # just for you
 ```sh
 sq                        # one-shot
 watch -tc -n 5 sq         # live; keep -t, or watch's own header pushes the
-                          #  footer off screen; -c for colour
+                          #  footer off screen (or leave it room with
+                          #  --reserve 2); -c for colour
 sq -o i,j,T,M,P,N         # choose columns by squeue field letter
 sq -u "$USER" -p gpu      # squeue's filters are passed on, by full long name from
                           #  a fixed list (sq -h names it) - never an abbreviation,
@@ -96,6 +105,8 @@ sq -C                     # centred in both axes
 | `--no-recent` | Hide the recently-finished block. |
 | `--no-bell` | Never ring the bell. |
 | `--color` / `--no-color` | Force colour on or off. |
+| `--compact` / `--full` | Fit the screen / show every job, whatever the output goes to. Giving both is an error. |
+| `--reserve N` | COMPACT leaves N lines of the screen unused, e.g. for `watch`'s own header. If only the footer fits, only the footer is drawn. |
 | `-h` | Help. |
 
 | Variable | Effect |
@@ -109,12 +120,18 @@ sq -C                     # centred in both axes
 | `SQ_COLOR` | `0` never, `1` always. |
 | `SQ_TIMEOUT` | Seconds to wait for Slurm before declaring it unreachable (default 5). |
 | `SQ_SINCE` | How far back the finished block looks (`sacct -S` syntax, default `now-2hours`). |
-| `SQ_RECENT_MAX` | Finished rows shown (default: the space left on screen, 3–25; a value you set is used as given). |
+| `SQ_RECENT_MAX` | Finished rows shown (default: the space left on screen, 3–25; a value you set is used as given in FULL, and is an upper limit in COMPACT, which never pushes the footer off screen). |
+| `SQ_COMPACT` | `1` always COMPACT, `0` always FULL; anything else, or unset, decides by where the output goes. The flags beat it. |
 | `SQ_BELL_HORIZON` | A failure only rings while it is this fresh (default 600 s; `0` mutes). |
-| `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size. |
+| `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size. They never choose the mode. |
 
 ## Good to know
 
+- **How the mode is chosen:** `--compact` or `--full`, else `SQ_COMPACT`, else COMPACT when
+  stdout is a terminal, or when `COLUMNS` and `LINES` are both in the environment, which is how
+  `watch` runs sq (an interactive shell does not export them). Anything else, a pipe, a file,
+  `ssh host sq` without `-t`, a cron job, gets FULL. `sq --compact` with no size to measure
+  uses the usual fallback size, 24 lines.
 - **Finished jobs come from the accounting database** (`sacct`), so a job that ended while
   nobody was watching is still shown, for as long as `SQ_SINCE` reaches back. Step rows are read
   too, because a signalled job's own row reports success and only its step carries the signal.
@@ -129,7 +146,7 @@ sq -C                     # centred in both axes
 ## Tests
 
 ```sh
-tests/run.sh              # ~15 s, no cluster needed
+tests/run.sh              # ~75 s, no cluster needed
 ```
 
 The suite puts stand-ins for `squeue`, `sinfo` and `sacct` first on `PATH` and feeds sq the
