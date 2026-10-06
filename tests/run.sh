@@ -785,12 +785,11 @@ c_pty_xterm() {
 	pty_case xterm-256color
 	need "widest line is 123"         eval '[ "$(width)" -eq 123 ]'
 }
-c_xf_pty_kitty() {
-	T_TITLE=; xfail "TERM=xterm-kitty (unknown to terminfo here): tput fails and sq assumes 100 columns; should be 123 via stty size"
+c_pty_kitty() {
+	T_TITLE="TERM=xterm-kitty (unknown to terminfo here) on a 123-column pty: laid out at 123 columns, via stty size"
 	pty_case xterm-kitty
 	need "xterm-kitty really is unknown to terminfo here" eval '! TERM=xterm-kitty tput cols >/dev/null 2>&1'
-	want "widest line is 123"         eval '[ "$(width)" -eq 123 ]'
-	today "widest line is 100"        eval '[ "$(width)" -eq 100 ]'
+	need "widest line is 123"         eval '[ "$(width)" -eq 123 ]'
 }
 
 # ============================================================================
@@ -804,7 +803,7 @@ cases=(
 	xf_pending_strided xf_pending_long
 	malformed_step0 malformed_dots xf_malformed_reversed xf_malformed_dash xf_malformed_huge
 	xf_finished_throttled xf_fallback_throttled xf_more_sacct xf_more_fallback xf_bitstr
-	pty_xterm xf_pty_kitty
+	pty_xterm pty_kitty
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do
