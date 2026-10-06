@@ -71,6 +71,8 @@ eta=${SQ_ETA:-1}
 color=${SQ_COLOR:-auto}
 args=()
 seen=                            # the filters already set, for the repeat check
+modeflag=                        # --compact or --full, as given
+reserve=0                        # lines COMPACT leaves alone, e.g. for watch's header
 
 # One example per option, because "sq -j NAME" would read wrong: a usage error
 # is only useful when it shows the command the user meant.  vlist is the list
@@ -136,6 +138,17 @@ while [ $# -gt 0 ]; do
 		--no-bell) bell=0; shift ;;
 		--color|--colour) color=1; shift ;;
 		--no-color|--no-colour) color=0; shift ;;
+		--compact|--full)       # repeating one is harmless, giving both is not
+			[ -z "$modeflag" ] || [ "$modeflag" = "$1" ] \
+				|| die "--compact and --full contradict each other; give one of them"
+			modeflag=$1; shift ;;
+		--reserve) [ $# -ge 2 ] || die "--reserve needs a number of lines, e.g. sq --reserve 2"
+			case $2 in
+				''|*[!0-9]*) die "--reserve needs a number of lines, not '$(printf '%s' "$2" \
+					| tr -d '[:cntrl:]' | cut -c1-40)'; e.g. sq --reserve 2" ;;
+			esac
+			reserve=$2; shift 2 ;;
+		--reserve=*) die "--reserve takes its value as the next word, e.g. sq --reserve 2" ;;
 		-h|--help) awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
 		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
 		# the nonce-framed format below and collapse every record into one field
@@ -157,7 +170,7 @@ while [ $# -gt 0 ]; do
 		# sq's own long flags take no value: "--color=never" is what every other
 		# CLI accepts, and squeue answered it with a fake "slurm unreachable"
 		# banner.  --me is here too, because --me IS the value.
-		--me=*|--expand=*|--no-recent=*|--no-bell=*|--color=*|--colour=*|--no-color=*|--no-colour=*|--center=*|--centre=*|--center-all=*|--centre-all=*)
+		--me=*|--expand=*|--no-recent=*|--no-bell=*|--color=*|--colour=*|--no-color=*|--no-colour=*|--center=*|--centre=*|--center-all=*|--centre-all=*|--compact=*|--full=*)
 			die "${1%%=*} takes no value; write it on its own, e.g. sq ${1%%=*}" ;;
 		# -i reprints the queue every N seconds, so a collector would run until
 		# SQ_TIMEOUT and the screen would read "no response after 5s"
@@ -260,6 +273,19 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
+# the mode: a flag beats SQ_COMPACT, and anything else in SQ_COMPACT means
+# unset, like SQ_COLOR.  Detection asks whether a screen is there to fit: a
+# terminal on stdout, or COLUMNS and LINES both exported, which only watch
+# (or a deliberate export) does - an interactive shell keeps them unexported.
+# SQ_WIDTH/SQ_HEIGHT size the screen but never choose the mode.
+compact=${SQ_COMPACT:-}
+case $modeflag in --compact) compact=1 ;; --full) compact=0 ;; esac
+case $compact in
+	0|1) ;;
+	*) if [ -t 1 ] || { [ -n "${COLUMNS:-}" ] && [ -n "${LINES:-}" ]; }
+	   then compact=1; else compact=0; fi ;;
+esac
+
 # colour: honour NO_COLOR, else auto-detect.  A pipe with COLUMNS set is
 # watch, which wants the escapes; a bare pipe or redirect does not.
 if [ "$color" = auto ]; then
@@ -335,6 +361,9 @@ done
 fmt="$fmt%t$nonce%l$nonce%S$nonce"   # hidden trailing fields: state, limit, start;
 keys=${keys%,}                       # the last nonce leaves an empty field that only
                                      # squeue can emit, so a record ends unambiguously
+# COMPACT sorts jobs by their reason code and their elapsed time, which must not
+# depend on the columns shown, so it asks for both itself; FULL never reads them
+[ "$compact" = 0 ] || fmt="$fmt%r$nonce%M$nonce"
 
 cols=${SQ_WIDTH:-${COLUMNS:-}}
 lines=${SQ_HEIGHT:-${LINES:-}}
@@ -519,7 +548,7 @@ gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v center="$center" -v fo
      -v statetmp="$statetmp" -v hastty="$hastty" -v horizon="$horizon" \
      -v nerr="$nerr" -v jerr="$jerr" -v me="$me" -v bellall="$bellall" \
      -v recent="$recent" -v rsrc="$rsrc" -v rwhy="$rwhy" -v rerr="$rerr" \
-     -v rwhyc="$rwhyc" -v rmax="$rmax" \
+     -v rwhyc="$rwhyc" -v rmax="$rmax" -v compact="$compact" -v reserve="$reserve" \
      -v wtxt="$wtxt" -v sfilt="$sfilt" -v uidmap="$uidmap" \
      -v host="$(hostname -s)" -v now="$(date '+%H:%M:%S')" '
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
@@ -630,6 +659,148 @@ function when(t,   ep) {                                  # start estimate, comp
   return strftime("%Y-%m-%d", ep)
 }
 
+# ---- COMPACT: which section a row is in, and what fits the screen ----------
+# Sections: 1 stuck, 2 blocked on nodes, 3 held by admin, 4 pending, 5 running,
+# 6 other live states (COMPLETING, SUSPENDED, ...).  Only a CLOSED list of reasons
+# is ordinary waiting; any other pending reason is stuck, so a reason sq does not
+# know stays visible instead of vanishing into "… n jobs pending".  Whole-string
+# equality on %r, never a prefix: "Dependency" must not swallow
+# "DependencyNeverSatisfied".  A prefix is safe only on the visible side.
+function jclass(st, why) {
+  if (st == "R")  return 5
+  if (st != "PD") return 6
+  if (why in WAITING) return 4
+  if (why ~ /^ReqNodeNotAvail/ || why == "NodeDown" || why == "NodeDrain" ||
+      why ~ /^Nodes required for job are /) return 2
+  return (why == "JobHeldAdmin") ? 3 : 1
+}
+# The screen is GROWN along one fixed list of steps (fit) and stops at the first
+# step that does not fit, so a taller screen only ever adds: lines a step could
+# not use stay blank instead of flowing to a later section, which is what keeps
+# a section from showing fewer rows on a taller screen.
+# SHOW says what is drawn: the "title", the unreachable "banner", the "qcap"
+# standing in for an absent queue table, the skipped-row "notes", the "nodes"
+# (1 = one summary line, 2 = in full) and their ↳ "reasons", the finished block
+# "fin" (1 = one line, 2 = the block) and its "fslots" (rows, plus "+N more"),
+# and the blank lines b0-b4.  QUOTA[x] is how many rows section x keeps, -1
+# while not even its "… n jobs" line is drawn.
+# A section spends its own ellipsis: all its rows, or QUOTA rows and one "… n
+# jobs" line, which a single hidden row replaces at no cost.  SECN[x] is how
+# many rows section x has.
+function seclines(x) {
+  if (QUOTA[x] < 0 || !SECN[x]) return 0
+  return (QUOTA[x] >= SECN[x] - 1) ? SECN[x] : QUOTA[x] + 1
+}
+function qbody(   x, l) { for (x=1; x<=6; x++) l += seclines(x); return l }
+function finrows() {                      # SQ_RECENT_MAX caps the ROWS, "+N more"
+  return (SHOW["fslots"] >= d && d <= FINCAP) ? d : SHOW["fslots"] - 1     # is extra
+}
+function finlines(   f) {
+  if (!recent || !SHOW["fin"]) return 0
+  if (rbad || rtrunc) return 2                    # the caption and its warning
+  if (SHOW["fin"] == 1 || !d) return 1            # the one line, or the caption alone
+  f = finrows()
+  return 2 + f + (f < d)                          # caption, header, rows, "+N more"
+}
+function height(   h, l) {
+  h = FOOT * (1 + SHOW["b4"]) + SHOW["title"] + SHOW["b1"] + SHOW["b2"]
+  h += BANNER * (SHOW["banner"] + SHOW["b0"]) + QCAP * SHOW["qcap"] + NOTES * SHOW["notes"]
+  if (SHOW["nodes"] == 1) h++
+  if (SHOW["nodes"] == 2) h += nn + (nbad || ntrunc) + (skip[1] > 0) + SHOW["reasons"] * NRSN
+  if ((l = qbody())) h += l + 1                   # and the column header
+  if ((l = finlines())) h += l + SHOW["b3"]
+  return h
+}
+function grow(   k) {                     # keep the last change if the screen still
+  if (height() <= avail) {                # fits, else take it back and say stop
+    for (k in SHOW) KEPT[k] = SHOW[k]; for (k in QUOTA) KEPTQ[k] = QUOTA[k]
+    return 1
+  }
+  for (k in KEPT) SHOW[k] = KEPT[k]; for (k in KEPTQ) QUOTA[k] = KEPTQ[k]
+  return 0
+}
+function step(k, v) { SHOW[k] = v; return grow() }
+function floor(x) {         # the least of a small section is one row (both, if it
+  if (!SECN[x]) return 1    # has two), of the others their "… n jobs" line alone
+  QUOTA[x] = (x <= 3) ? 1 : 0
+  return grow()
+}
+function fill(x) {          # then a row at a time; the cap stops a small section
+  while (QUOTA[x] < SECN[x]) {    # but is no misfit, so the next one still grows
+    QUOTA[x]++
+    if (x <= 3 && CAP >= 0 && seclines(1) + seclines(2) + seclines(3) > CAP) {
+      QUOTA[x]--; return 1
+    }
+    if (!grow()) return 0
+  }
+  return 1
+}
+function fillfin() {        # the one line becomes the block, reaching down to the
+  if (!recent || rbad || rtrunc || !d) return 1   # newest failure, then grows
+  if (SHOW["fin"] == 1) { SHOW["fin"] = 2; SHOW["fslots"] = FMIN; if (!grow()) return 0 }
+  while (SHOW["fslots"] < FSLOTS) { SHOW["fslots"]++; if (!grow()) return 0 }
+  return 1
+}
+# The order is what Franz chose: what the footer cannot count (a stuck job, a
+# fresh failure) keeps a line longest, the nodes collapse to one line first,
+# the blank separators outlast the "… n jobs" lines the footer repeats, small
+# sections fill before running but within half the queue table while running
+# still hides jobs, the finished block grows only once every running job fits,
+# and ordinary pending gets rows last.
+function fit(   x) {
+  for (x in SHOWN) SHOW[SHOWN[x]] = 0
+  for (x=1; x<=6; x++) QUOTA[x] = -1
+  CAP = -1
+  if (!grow()) return                             # the footer alone
+  if (!(step("banner", 1) && step("qcap", 1) && step("notes", 1) && step("title", 1) &&
+        step("nodes", (nn >= 2 || NRSN) ? 1 : 2) &&
+        floor(1) && step("fin", 1) && floor(2) && floor(3) &&
+        step("nodes", 2) && step("reasons", 1) &&
+        step("b2", 1) && step("b1", 1) && step("b0", 1) && step("b3", 1) && step("b4", 1) &&
+        floor(4) && floor(6) && floor(5))) return
+  CAP = int((avail - height() + qbody() + (qbody() > 0) - 1) / 2)   # half the table rows
+  if (!(fill(1) && fill(2) && fill(3) && fill(5))) return
+  CAP = -1                                        # every running job fits: lifted
+  fill(1) && fill(2) && fill(3) && fill(6) && fillfin() && fill(4)
+}
+function digest(   r, s, nc, nord, ns, u, t, x, i) {   # nodes: 1 allocated, 1 down* · 128/256 cpu
+  for (r=1; r<=nn; r++) {
+    s = nst[r]; if (!(s in nc)) nord[++ns] = s
+    nc[s]++; u += used[r]; t += tot[r]
+  }
+  for (i=1; i<=ns; i++) x = x (i > 1 ? ", " : "") nc[nord[i]] " " nord[i]
+  return "nodes: " x " · " u+0 "/" t+0 " cpu"
+}
+function clip(x, wd) { return (length(x) > wd) ? substr(x, 1, wd-1) "…" : x }
+# the JOBID and EXIT cells of a finished group, for its row and for the one-line form
+function fid(g) {
+  return (gcnt[g] > 1) ? sprintf("%s_[%s] ×%d", gbase2[g], compress(gtsk[g]), gcnt[g]) \
+                       : gid1[g] (gw2[g] > 1 ? " ×" gw2[g] : "")   # gcnt, not gw2, gates the rebuild
+}
+function fexit(g, cap) { return exset(gex[g], cap) (gcxl[g] == "" ? "" : " by " gcxl[g]) }
+
+function qrow(r,   js, jc, line, i, x, fw, cc) {         # one queue row, coloured
+  js = state[r]
+  jc = (js=="R") ? "32" : (js=="PD") ? "33" : (js ~ /^(F|CA|TO|NF|OOM|ST|BF|DL)/) ? "31" : "36"
+  line = lm
+  for (i=1; i<=n; i++) {
+    x = (i == idc) ? idfit(v[r,i], w[i]) : v[r,i]
+    if (length(x) > w[i]) x = substr(x, 1, w[i]-1) "…"
+    fw = RIGHT[k[i]] ? w[i] : (i==n ? -length(x) : -w[i])
+    cc = ""
+    if (i == idc)                    cc = jc
+    else if (k[i]=="t" || k[i]=="T") cc = "1;" jc
+    else if (i == lc && x == "INVALID") cc = "1;31"    # past its limit, being killed
+    else if (i == lc && lfrac[r] >= 0) {
+      if      (lfrac[r] < 0.02) cc = "1;31"
+      else if (lfrac[r] < 0.10) cc = "33"
+    }
+    if (cc != "") line = line sprintf("%*s%s%*s%s", gap[i], "", e(cc), fw, x, e("0"))
+    else          line = line sprintf("%*s%*s",     gap[i], "", fw, x)
+  }
+  return line
+}
+
 BEGIN{
   NONCE = ENVIRON["SQ_NONCE"]                             # the shell minted and
   if (NONCE !~ /^[A-Za-z][A-Za-z0-9]{16,}$/) {            # validated it; refuse to
@@ -649,7 +820,7 @@ BEGIN{
   }
   BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4   # RECENT_MAX: see END
   n = split(keys, k, ",")
-  FQ = n + 5                    # %i, n displayed, %t %l %S, and the empty sentinel
+  FQ = n + (compact ? 7 : 5)    # %i, n displayed, %t %l %S (COMPACT: %r %M), the sentinel
   FR = SACCT ? 9 : 11           # 8 sacct / 10 -O fields, and the empty sentinel
   FN = 8                        # %C %N %e %m %T %E %H, and the empty sentinel
   # every shape squeue prints for %i / JobID: plain, het component (10646+0),
@@ -697,6 +868,11 @@ BEGIN{
   for (i=1; i<=nsl; i++) { SC[slong[i]] = scode[i]; FIN[slong[i]] = sfin[i]+0 }
   nu = split(uidmap, um, ",")                             # "1021=amadvi,"
   for (i=1; i<=nu; i++) if (split(um[i], uv, "=") == 2) UMAP[uv[1]] = uv[2]
+  split("None Priority Resources Dependency BeginTime Prolog Cleaning SchedDefer " \
+        "Reservation Licenses JobHeldUser", wr, " ")      # waiting, or held by its owner
+  for (i in wr) WAITING[wr[i]] = 1
+  split("stuck|blocked on nodes|held by admin|pending|running|other", SECNAME, "|")
+  split("title banner qcap notes nodes reasons fin fslots b0 b1 b2 b3 b4", SHOWN, " ")
   split("JOBID NAME STATE EXIT ELAPSED AGO", rhd, " ")
   split("0 0 0 1 1 1", rrt, " ")                          # right-aligned?
   if (bell && hastty) {                                 # id<TAB>end, aged out
@@ -779,6 +955,7 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     q++
     for (i=1; i<=n; i++) raw[q,i] = F[i+1]
     qstate[q] = F[n+2]; qlimit[q] = F[n+3]; qstart[q] = F[n+4]
+    if (compact) { qwhy[q] = F[n+5]; qsec[q] = dur(F[n+6]) }
     qw[q] = tw; qjobs += tw                     # a pending bracket is many jobs in one
     cnt[F[n+2]] += tw                           # row; tw is read from the hidden %i, so
                                                 # it counts whatever columns are shown
@@ -859,12 +1036,16 @@ END{
       key = base SUBSEP qstate[r]
       for (i=1; i<=n; i++) if (i != idc) key = key SUBSEP raw[r,i]
     }
-    if (key in grp) { g = grp[key]; gtask[g] = gtask[g] "," task; gn[g]++; gw[g] += qw[r] }
-    else {
+    c = jclass(qstate[r], qwhy[r])
+    if (key in grp) {
+      g = grp[key]; gtask[g] = gtask[g] "," task; gn[g]++; gw[g] += qw[r]
+      if (c < section[g]) section[g] = c        # the most visible task decides, and
+      if (qsec[r] > rsec[g]) rsec[g] = qsec[r]  # the longest-running one survives
+    } else {
       grp[key] = g = ++rows
       for (i=1; i<=n; i++) v[rows,i] = raw[r,i]
       state[rows] = qstate[r]; gtask[rows] = task; gn[rows] = 1; gbase[rows] = base
-      gw[rows] = qw[r]
+      gw[rows] = qw[r]; section[rows] = c; rsec[rows] = qsec[r]
       lfrac[rows] = -1
       if (lc) {                                 # how much of the limit is left
         lim = dur(qlimit[r]); lft = dur(raw[r,lc])
@@ -878,31 +1059,6 @@ END{
   for (r=1; r<=rows; r++)
     if (gn[r] > 1) v[r,idc] = sprintf("%s_[%s] ×%d", gbase[r], compress(gtask[r]), gn[r])
     else if (idc && gw[r] > 1) v[r,idc] = v[r,idc] " ×" gw[r]
-
-  # ---- natural widths -------------------------------------------------
-  for (i=1; i<=n; i++) w[i] = length(hd[i])
-  for (r=1; r<=rows; r++)
-    for (i=1; i<=n; i++) if (length(v[r,i]) > w[i]) w[i] = length(v[r,i])
-
-  nfix = 30 + wn + wu + wt + wf + wm + ws       # node line, bars and margin aside
-  bar  = BAR_PREF
-  tabw = rows ? (n-1) : 0                       # one space per gap
-  for (i=1; i<=n; i++) tabw += w[i]
-
-  # ---- shrink whatever cannot fit -------------------------------------
-  budget = cols - 2                             # keep at least the default margin
-  while (tabw > budget) {                       # shave the widest flexible column
-    big = 0
-    for (i=1; i<=n; i++) if (FLEX[k[i]] && w[i] > 8 && w[i] > w[big]) big = i
-    if (!big) break
-    w[big]--; tabw--
-  }
-  while (tabw > budget) {                       # still over: any column, floor 5
-    big = 0
-    for (i=1; i<=n; i++) if (w[i] > 5 && w[i] > w[big]) big = i
-    if (!big) break
-    w[big]--; tabw--
-  }
 
   # ---- group finished jobs by array base, state and canceller ---------
   for (r=1; r<=dq; r++) {
@@ -954,6 +1110,83 @@ END{
     ord[++r] = g
   }
   for (j=1; j<=nheld; j++) ord[++r] = held[j]
+  for (g=1; g<=d; g++) if (gcxl[g] != "") {    # a canceller who is the owner is
+    cn = (gcxl[g] in UMAP) ? UMAP[gcxl[g]] : gcxl[g]     # noise; anybody else is
+    gcxl[g] = (cn == guser[g]) ? "" : cn                 # the answer, and costs
+  }                                                      # nothing but EXIT slack
+
+  # ---- what the screen shows ------------------------------------------
+  # Rows keep the order squeue gave them; the sections only decide which rows
+  # survive.  Running survives by elapsed time, longest first, so a hidden row
+  # can sit between two shown ones; the other sections survive in squeue order.
+  # A "… n jobs" line follows the last row of its block, shown or not: those of
+  # the pending categories together after the last pending row, so they never
+  # split rows that interleave by id, running after its own, other states last.
+  for (r=1; r<=rows; r++) {
+    x = section[r]; SECR[x, ++SECN[x]] = r; RANK[x, SECN[x]] = SECN[x]
+    if (state[r] == "PD") lastpd = r
+  }
+  for (x=1; x<=4; x++) ELLAT[x] = lastpd
+  ELLAT[5] = SECR[5, SECN[5]]; ELLAT[6] = rows
+  FOOT   = !qtrunc && !qbad                     # no counts from a stream we could not read
+  BANNER = (nerr != "" || jerr != "")
+  QCAP   = (qbad || qtrunc || !rows)            # a caption stands in for the table
+  NOTES  = (skip[2] > 0) + (skip[3] > 0)
+  for (r=1; r<=nn; r++) if (nreason[r] != "") NRSN++
+  if (compact) {
+    for (i=1; i<=SECN[5]; i++)                  # ties keep squeue order
+      ek[sprintf("%013d %07d", 999999999999 - rsec[SECR[5,i]], i)] = i
+    asorti(ek, eo)
+    for (j=1; j<=SECN[5]; j++) RANK[5, ek[eo[j]]] = j
+    FINCAP = rmax ? rmax : 25                   # SQ_RECENT_MAX caps the rows here
+    FSLOTS = (d <= FINCAP) ? d : FINCAP + 1     # rows, plus "+N more" if any is cut
+    for (j=1; j<=d && !BAD[rst[ord[j]]]; j++) ;
+    if (j > d) j = 1                            # the one line: the newest failure, else
+    FAILG = ord[j]                              # the newest job; the block reaches
+    FMIN = (j + 1 >= d) ? d : j + 1             # down to it at least
+    if (FMIN > FSLOTS) FMIN = FSLOTS
+    avail = lines - reserve
+    fit()
+  } else {                                      # FULL: everything
+    for (x in SHOWN) SHOW[SHOWN[x]] = 1
+    SHOW["nodes"] = SHOW["fin"] = 2
+    for (x=1; x<=6; x++) QUOTA[x] = SECN[x]
+    avail = lines
+  }
+  for (x=1; x<=6; x++) {                        # the survivors, and what each
+    if (QUOTA[x] < 0) continue                  # "… n jobs" line counts
+    hid = 0
+    for (i=1; i<=SECN[x]; i++)
+      if (RANK[x,i] <= QUOTA[x]) QSHOW[SECR[x,i]] = 1
+      else { hid++; ELLJ[x] += gw[SECR[x,i]]; last = SECR[x,i] }
+    if (hid == 1) { QSHOW[last] = 1; delete ELLJ[x] }    # it costs what its line would
+  }
+  QBODY = qbody()
+
+  # ---- natural widths -------------------------------------------------
+  for (i=1; i<=n; i++) w[i] = length(hd[i])
+  for (r=1; r<=rows; r++) if (QSHOW[r])          # the rows SHOWN: a collapsed id
+    for (i=1; i<=n; i++) if (length(v[r,i]) > w[i]) w[i] = length(v[r,i])    # widens nothing
+
+  nfix = 30 + wn + wu + wt + wf + wm + ws       # node line, bars and margin aside
+  bar  = BAR_PREF
+  tabw = QBODY ? (n-1) : 0                      # one space per gap
+  for (i=1; i<=n; i++) tabw += w[i]
+
+  # ---- shrink whatever cannot fit -------------------------------------
+  budget = cols - 2                             # keep at least the default margin
+  while (tabw > budget) {                       # shave the widest flexible column
+    big = 0
+    for (i=1; i<=n; i++) if (FLEX[k[i]] && w[i] > 8 && w[i] > w[big]) big = i
+    if (!big) break
+    w[big]--; tabw--
+  }
+  while (tabw > budget) {                       # still over: any column, floor 5
+    big = 0
+    for (i=1; i<=n; i++) if (w[i] > 5 && w[i] > w[big]) big = i
+    if (!big) break
+    w[big]--; tabw--
+  }
 
   # 6 rows were chosen for the 300s window squeue could see.  Against a 2h
   # window that hid ~94% of it on a 40-line terminal while the queue table
@@ -979,6 +1212,7 @@ END{
     if (RECENT_MAX > 25) RECENT_MAX = 25        # ... and never let it run away
   }
   shown = (d > RECENT_MAX) ? RECENT_MAX : d
+  if (compact) shown = (SHOW["fin"] == 2) ? finrows() : 0
   more = 0                                      # jobs, not groups: "+2 more" must
   for (r=shown+1; r<=d; r++) more += gw2[ord[r]]      # not be able to hide 200 tasks
 
@@ -986,9 +1220,7 @@ END{
   idmin = length(rhd[1])                        # how far rung 4 may shave JOBID
   for (r=1; r<=shown; r++) {                    # level-independent cells, once
     g = ord[r]
-    rv[g,1] = (gcnt[g] > 1) \
-      ? sprintf("%s_[%s] ×%d", gbase2[g], compress(gtsk[g]), gcnt[g]) \
-      : gid1[g] (gw2[g] > 1 ? " ×" gw2[g] : "")        # gcnt, not gw2, gates the rebuild
+    rv[g,1] = fid(g)
     if (idfloor(rv[g,1]) > idmin) idmin = idfloor(rv[g,1])
     rv[g,2] = rname[g]
     if (!rend[g]) rv[g,6] = "-"
@@ -997,10 +1229,6 @@ END{
       hi = rmin[g] ? ago(systime() - rmin[g]) : lo        # times for the whole group
       rv[g,6] = (lo == hi) ? lo : lo "-" hi
     }
-    if (gcxl[g] != "") {                        # a canceller who is the owner is
-      cn = (gcxl[g] in UMAP) ? UMAP[gcxl[g]] : gcxl[g]   # noise; anybody else is
-      gcxl[g] = (cn == guser[g]) ? "" : cn               # the answer, and costs
-    }                                                    # nothing but EXIT slack
   }
   # NAME alone used to be shaved, and at 8 characters it gave up and let this
   # block run past the shared right edge; each rung drops the least useful
@@ -1010,7 +1238,7 @@ END{
     for (r=1; r<=shown; r++) {
       g = ord[r]
       rv[g,3] = (lvl >= 5 && rst[g] != "") ? rst[g] : rstate[g]
-      rv[g,4] = exset(gex[g], excap) (gcxl[g] == "" ? "" : " by " gcxl[g])
+      rv[g,4] = fexit(g, excap)
       rv[g,5] = (gmin[g] == gmax[g] || lvl >= 1) ? elap(gmax[g]) \
                                                  : elap(gmin[g]) "-" elap(gmax[g])
     }
@@ -1044,7 +1272,7 @@ END{
   }
   gap[1] = 0                                    # table grows: gaps first, capped, then
   for (i=2; i<=n; i++) gap[i] = 1               # the widest text column soaks up the rest
-  if (rows && tabw < target) {
+  if (QBODY && tabw < target) {
     extra = target - tabw
     room  = (n > 1) ? (n-1) * (GAP_MAX - 1) : 0
     if (room > extra) room = extra
@@ -1074,23 +1302,24 @@ END{
   lm = sprintf("%*s", left, "")
 
   # ---- render into a buffer, so we can centre vertically --------------
-  out[++o] = sprintf("%s%s▌ SLURM%s %s%s%s  %s%s%s", lm, e("1;36"), e("0"), e("2"), host, e("0"), e("1"), now, e("0"))
-  if (nerr != "" || jerr != "") {
-    x = "⚠ slurm unreachable · " (nerr != "" ? nerr : jerr)
-    if (length(x) > target) x = substr(x, 1, target-1) "…"
-    out[++o] = ""
+  if (SHOW["title"])
+    out[++o] = sprintf("%s%s▌ SLURM%s %s%s%s  %s%s%s", lm, e("1;36"), e("0"), e("2"), host, e("0"), e("1"), now, e("0"))
+  if (BANNER && SHOW["banner"]) {
+    x = clip("⚠ slurm unreachable · " (nerr != "" ? nerr : jerr), target)
+    if (SHOW["b0"]) out[++o] = ""
     out[++o] = sprintf("%s%s%s%s", lm, e("1;31"), x, e("0"))
   }
-  out[++o] = ""
+  if (SHOW["b1"]) out[++o] = ""
+  if (SHOW["nodes"] == 1) out[++o] = lm clip(digest(), target)
   # In place of every node line and bar.  Unlike the queue, no user argument reaches
   # sinfo and there is no SINFO_FORMAT2, so our format cannot be overridden from
   # outside: both of these mean the stream itself was wrong.
-  if (nbad || ntrunc)
+  if (SHOW["nodes"] == 2 && (nbad || ntrunc))
     out[++o] = sprintf("%s%s⚠ node output %s%s", lm, e("1;31"),
                        nbad ? "unreadable (unexpected sinfo output?)" : "incomplete",
                        e("0"))
   barc = int(bar/2); barm = bar - barc
-  for (r=1; r<=nn; r++) {
+  for (r=1; r<=nn && SHOW["nodes"] == 2; r++) {
     down = (nst[r] ~ /down|drain|fail|inval|unk/)
     p = tot[r] ? int(used[r]*100/tot[r]) : 0
     sc = ""
@@ -1111,57 +1340,50 @@ END{
                        e(mc), sm, e("0"), (bar?" ":""), (mp<0 ? "-" : sprintf("%d", mp)),
                        e(mp>95 && mp>=0 ? "1;31" : "0"), wf, memu[r], e("0"), wm, memt[r],
                        npad+0, "", e("2"), nst[r], e("0"))
-    if (nreason[r] != "") {
+    if (SHOW["reasons"] && nreason[r] != "") {
       x = nreason[r]
       if (length(x) + wn + 3 > target) x = substr(x, 1, target - wn - 4) "…"
       out[++o] = sprintf("%s%*s%s↳ %s%s", lm, wn+1, "", e("2"), x, e("0"))
     }
   }
-  if (skip[1])                                  # see which table it is talking about
+  if (SHOW["nodes"] == 2 && skip[1])           # see which table it is talking about
     out[++o] = sprintf("%s%s↳ %d unreadable node row%s skipped%s", lm, e("2"),
                        skip[1], (skip[1] > 1 ? "s" : ""), e("0"))
-  out[++o] = ""
+  if (SHOW["b2"]) out[++o] = ""
 
-  if (qbad) out[++o] = sprintf("%s%s⚠ queue output unreadable (output format overridden?)%s", lm, e("1;31"), e("0"))
+  if (QCAP && !SHOW["qcap"]) ;                 # COMPACT found no line for the caption
+  else if (qbad) out[++o] = sprintf("%s%s⚠ queue output unreadable (output format overridden?)%s", lm, e("1;31"), e("0"))
   else if (qtrunc) out[++o] = sprintf("%s%s⚠ queue output incomplete%s", lm, e("1;31"), e("0"))
   else if (!rows && skip[2]) out[++o] = sprintf("%s%sno readable rows%s", lm, e("2"), e("0"))
   else if (!rows && jerr != "") out[++o] = sprintf("%s%sjob list unavailable%s", lm, e("2"), e("0"))
   else if (!rows) out[++o] = sprintf("%s%squeue is empty%s", lm, e("2"), e("0"))
-  else {
+  else if (QBODY) {
     line = lm e("4")
     for (i=1; i<=n; i++) line = line sprintf("%*s%-*.*s", gap[i], "", w[i], w[i], hd[i])
     out[++o] = line e("0")
     for (r=1; r<=rows; r++) {
-      js = state[r]
-      jc = (js=="R") ? "32" : (js=="PD") ? "33" : (js ~ /^(F|CA|TO|NF|OOM|ST|BF|DL)/) ? "31" : "36"
-      line = lm
-      for (i=1; i<=n; i++) {
-        x = (i == idc) ? idfit(v[r,i], w[i]) : v[r,i]
-        if (length(x) > w[i]) x = substr(x, 1, w[i]-1) "…"
-        fw = RIGHT[k[i]] ? w[i] : (i==n ? -length(x) : -w[i])
-        cc = ""
-        if (i == idc)                    cc = jc
-        else if (k[i]=="t" || k[i]=="T") cc = "1;" jc
-        else if (i == lc && x == "INVALID") cc = "1;31"    # past its limit, being killed
-        else if (i == lc && lfrac[r] >= 0) {
-          if      (lfrac[r] < 0.02) cc = "1;31"
-          else if (lfrac[r] < 0.10) cc = "33"
-        }
-        if (cc != "") line = line sprintf("%*s%s%*s%s", gap[i], "", e(cc), fw, x, e("0"))
-        else          line = line sprintf("%*s%*s",     gap[i], "", fw, x)
-      }
-      out[++o] = line
+      if (QSHOW[r]) out[++o] = qrow(r)
+      for (x=1; x<=6; x++)                      # after the row it follows, shown or not
+        if (ELLAT[x] == r && (x in ELLJ))
+          out[++o] = sprintf("%s%s%s%s", lm, e("2"), clip("… " ELLJ[x] " jobs " SECNAME[x], target), e("0"))
     }
   }
 
-  if (recent) {                                 # ---- recently finished
-    out[++o] = ""
+  if (recent && SHOW["fin"]) {                  # ---- recently finished
+    if (SHOW["b3"]) out[++o] = ""
     # the caption always renders, so "quiet window" and "broken" stop looking
     # alike: before, zero rows took the header away with them
     if (rbad || rtrunc) {
       out[++o] = sprintf("%s%srecently finished%s", lm, e("2"), e("0"))
       out[++o] = sprintf("%s%s⚠ output %s%s", lm, e("1;31"),
                          rbad ? "unreadable" : "incomplete", e("0"))
+    } else if (SHOW["fin"] == 1 && d) {         # COMPACT: one line, the newest failure
+      g = FAILG                                 # (the fallback says it is one)
+      cap = "recently finished" (rsrc == "sacct" ? "" \
+            : " (" (rwhyc == "filter" ? rwhy : "no accounting") ")") ": "
+      x = clip(cap fid(g) " " rname[g] " " rstate[g] " " fexit(g, 3), target)
+      out[++o] = sprintf("%s%s%s%s%s%s%s", lm, e("2"), substr(x, 1, length(cap)), e("0"),
+                         e(fcol(rst[g])), substr(x, length(cap) + 1), e("0"))
     } else {
       if (rsrc == "sacct")
         cap = "recently finished · " wtxt sfilt (shown ? "" : " · nothing in this window")
@@ -1176,8 +1398,7 @@ END{
       else
         cap = "finished jobs unavailable · " (rwhy != "" ? rwhy \
               : (rerr != "" ? rerr : jerr))
-      if (length(cap) > target) cap = substr(cap, 1, target-1) "…"
-      out[++o] = sprintf("%s%s%s%s", lm, e(rsrc == "none" ? "1;31" : "2"), cap, e("0"))
+      out[++o] = sprintf("%s%s%s%s", lm, e(rsrc == "none" ? "1;31" : "2"), clip(cap, target), e("0"))
     }
   }
   if (recent && !rbad && !rtrunc && shown) {
@@ -1210,21 +1431,27 @@ END{
         }
       }
 
-  for (i = 2; i <= 3; i++)                      # the node note renders with the node
+  for (i = 2; i <= 3 && SHOW["notes"]; i++)    # the node note renders with the node
     if (skip[i])                                # block instead, where a reader can
       out[++o] = sprintf("%s%s↳ %d unreadable %s row%s skipped%s", lm, e("2"), skip[i],
                          (i == 2 ? "queue" : "finished"),
                          (skip[i] > 1 ? "s" : ""), e("0"))
 
-  if (!qtrunc && !qbad) {                       # no counts from a stream we could not read
-    out[++o] = ""
+  if (FOOT) {
+    if (SHOW["b4"]) out[++o] = ""
     out[++o] = sprintf("%s%s%d%s jobs   %s%d running%s   %s%d pending%s   %s%d other%s", lm,
                        e("1"), qjobs, e("0"), e("32"), cnt["R"]+0, e("0"),
                        e("33"), cnt["PD"]+0, e("0"), e("31"), qjobs - cnt["R"] - cnt["PD"], e("0"))
   }
 
+  if (compact) {                                # a blank with nothing to separate,
+    m = 0                                       # where a section collapsed away, goes
+    for (i=1; i<=o; i++) if (out[i] != "" || (m && out[m] != "")) out[++m] = out[i]
+    if (m && out[m] == "") m--
+    o = m
+  }
   if (center == 2) {                            # vertical centring, never overflowing
-    top = int((lines - o) / 2)
+    top = int((avail - o) / 2)
     for (i=0; i<top; i++) print ""
   }
   for (i=1; i<=o; i++) print out[i]
