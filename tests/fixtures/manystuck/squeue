@@ -1,49 +1,35 @@
 # COMPACT scenario "manystuck" (decision 18, the cap): busy24 with 28 more stuck
-# jobs (DependencyNeverSatisfied), 30 stuck in all, so stuck+blocked+held could
-# take every queue row from the 128 running jobs.  As the prototype rendered it:
-# the added ids 4210-4215 and 4230 REPEAT ids of ordinary pending jobs below, and
-# the list is not in id order; the cases tell those rows apart by their names.
+# jobs (DependencyNeverSatisfied, 4240-4267, after the last pending job as
+# squeue -S t,i lists them), 30 stuck in all, so stuck+blocked+held could take
+# every queue row from the 128 running jobs.
 @include ../_common/squeue-defaults
-i=4201; j=assemble; u=fsill; t=PD; T=PENDING; M=0:00; L=1-00:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4202; j=merge;    u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4203; j=trim;     u=bob;   t=PD; T=PENDING; M=0:00; L=4:00:00; R=(Priority); S=N/A
-i=4204; j=trim;     u=bob;   t=PD; T=PENDING; M=0:00; L=4:00:00; R=(Priority); S=N/A
-i=4205; j=fastp;    u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00; R=(Resources); S=N/A
-i=4206; j=fastp;    u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00; R=(Priority); S=N/A
-i=4207; j=polish;   u=fsill; t=PD; T=PENDING; M=0:00; L=8:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A
-i=4210; j=align; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4211; j=sort; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4212; j=merge; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4213; j=index; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4214; j=call; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4215; j=annot; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4216; j=vcf; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4217; j=report; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4218; j=trim; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4219; j=fastp; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4220; j=dedup; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4221; j=plot; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4222; j=qc; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4223; j=bwa; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4224; j=map; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4225; j=polish; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4226; j=assemble; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4227; j=deseq; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4228; j=count; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4229; j=filter; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4230; j=stats; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4231; j=join; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4232; j=split; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4233; j=pack; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4234; j=zip; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4235; j=tar; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4236; j=sync; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4237; j=post; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4210; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4211; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4212; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4213; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4214; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4215; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4230_[0-9]; j=sweep; u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A
+@include ../busy24/squeue-pending
+i=4240; j=align; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4241; j=sort; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4242; j=merge; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4243; j=index; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4244; j=call; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4245; j=annot; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4246; j=vcf; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4247; j=report; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4248; j=trim; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4249; j=fastp; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4250; j=dedup; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4251; j=plot; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4252; j=qc; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4253; j=bwa; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4254; j=map; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4255; j=polish; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4256; j=assemble; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4257; j=deseq; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4258; j=count; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4259; j=filter; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4260; j=stats; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4261; j=join; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4262; j=split; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4263; j=pack; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4264; j=zip; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4265; j=tar; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4266; j=sync; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4267; j=post; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
 @include ../busy24/squeue-running

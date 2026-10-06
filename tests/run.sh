@@ -1293,15 +1293,13 @@ c_compact_mix30_h45() {
 	want "the whole finished block, no '+N more'" fin_block_is "recently finished · last 2h" "5098 5097 5095 5090_[0-9] 5088 5085 5080 5075" ""
 }
 
-# manystuck: busy24 with 30 stuck jobs, under the cap of decision 18.  Its ids
-# 4210-4215 are both stuck and ordinary pending jobs (see the fixture), so the
-# stuck survivors are named by id AND name.
+# manystuck: busy24 with 30 stuck jobs, under the cap of decision 18
 manystuck_totals="stuck=30 blocked=1 held=0 pending=20 running=128 other=0"
 census_says() {      # census_says KEY VALUE H: the census of this screen at height H
 	[ "$(census "$manystuck_totals" "$3" | gawk -v k="$1" '$1 == k { sub(/^[^ ]+ ?/, ""); print }')" = "$2" ]
 }
-stuck_rows_are() {   # stuck_rows_are "ID NAME|...": the DependencyNeverSatisfied rows
-	[ "$(labelled QROW | grep -F '(DependencyNeverSatisfied)' | gawk '{ print $1 " " $2 }' | paste -sd'|')" = "$1" ]
+stuck_rows_are() {   # stuck_rows_are "ID ...": the DependencyNeverSatisfied rows
+	[ "$(labelled QROW | grep -F '(DependencyNeverSatisfied)' | first_words)" = "$1" ]
 }
 manystuck_case() {   # manystuck_case H
 	compact_case manystuck 100 "$1" "1 1 0 1" "179 128 51 0"
@@ -1320,17 +1318,16 @@ c_compact_manystuck_h24() {   # decision 18
 	T_TITLE="manystuck at 24 lines: stuck+blocked take 6 of the 13 queue lines (4 stuck + 4207 + '… 26 jobs stuck'), running keeps 5 rows"
 	xfail "$T_TITLE; sq has no --compact yet"
 	manystuck_case 24
-	compact_queue "4201|4202|4207|4210|4211|… 26 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|… 58 jobs running"
-	want "stuck survivors: the lowest ids, 4201 4202 4210 4211" stuck_rows_are "4201 assemble|4202 merge|4210 align|4211 sort"
+	compact_queue "4201|4202|4207|4240|4241|… 26 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|… 58 jobs running"
+	want "stuck survivors: the lowest ids, 4201 4202 4240 4241" stuck_rows_are "4201 4202 4240 4241"
 	want "stuck+blocked+held: 6 lines of the queue table's 13" eval 'census_says small 6 24 && census_says room 13 24'
 }
 c_compact_manystuck_h40() {   # decision 18
 	T_TITLE="manystuck at 40 lines: stuck+blocked take 14 of the 29 queue lines (12 stuck + 4207 + '… 18 jobs stuck'), running keeps 13 rows"
 	xfail "$T_TITLE; sq has no --compact yet"
 	manystuck_case 40
-	compact_queue "4201|4202|4207|4210|4211|4212|4213|4214|4215|4216|4217|4218|4219|… 18 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|3990_[70-83]|3990_[84-97]|3990_[98-111]|4109|4112|4113|4114|4115|… 11 jobs running"
-	want "stuck survivors: the lowest ids, 4201 4202 4210-4219" \
-		stuck_rows_are "4201 assemble|4202 merge|4210 align|4211 sort|4212 merge|4213 index|4214 call|4215 annot|4216 vcf|4217 report|4218 trim|4219 fastp"
+	compact_queue "4201|4202|4207|4240|4241|4242|4243|4244|4245|4246|4247|4248|4249|… 18 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|3990_[70-83]|3990_[84-97]|3990_[98-111]|4109|4112|4113|4114|4115|… 11 jobs running"
+	want "stuck survivors: the lowest ids, 4201 4202 4240-4249" stuck_rows_are "4201 4202 4240 4241 4242 4243 4244 4245 4246 4247 4248 4249"
 	want "stuck+blocked+held: 14 lines of the queue table's 29" eval 'census_says small 14 40 && census_says room 29 40'
 }
 
