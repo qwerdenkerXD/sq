@@ -1,0 +1,34 @@
+# "oldfail": the newest failure (100) is older than 30 COMPLETED jobs, so it
+# lies beyond the finished block's default cap of 25 rows in COMPACT
+@include ../_common/sacct-defaults
+JobID=100; JobName=bad; State=FAILED; ExitCode=1:0; End=2026-10-06T07:00:00
+JobID=101; JobName=ok1; End=2026-10-06T07:01:00
+JobID=102; JobName=ok2; End=2026-10-06T07:02:00
+JobID=103; JobName=ok3; End=2026-10-06T07:03:00
+JobID=104; JobName=ok4; End=2026-10-06T07:04:00
+JobID=105; JobName=ok5; End=2026-10-06T07:05:00
+JobID=106; JobName=ok6; End=2026-10-06T07:06:00
+JobID=107; JobName=ok7; End=2026-10-06T07:07:00
+JobID=108; JobName=ok8; End=2026-10-06T07:08:00
+JobID=109; JobName=ok9; End=2026-10-06T07:09:00
+JobID=110; JobName=ok10; End=2026-10-06T07:10:00
+JobID=111; JobName=ok11; End=2026-10-06T07:11:00
+JobID=112; JobName=ok12; End=2026-10-06T07:12:00
+JobID=113; JobName=ok13; End=2026-10-06T07:13:00
+JobID=114; JobName=ok14; End=2026-10-06T07:14:00
+JobID=115; JobName=ok15; End=2026-10-06T07:15:00
+JobID=116; JobName=ok16; End=2026-10-06T07:16:00
+JobID=117; JobName=ok17; End=2026-10-06T07:17:00
+JobID=118; JobName=ok18; End=2026-10-06T07:18:00
+JobID=119; JobName=ok19; End=2026-10-06T07:19:00
+JobID=120; JobName=ok20; End=2026-10-06T07:20:00
+JobID=121; JobName=ok21; End=2026-10-06T07:21:00
+JobID=122; JobName=ok22; End=2026-10-06T07:22:00
+JobID=123; JobName=ok23; End=2026-10-06T07:23:00
+JobID=124; JobName=ok24; End=2026-10-06T07:24:00
+JobID=125; JobName=ok25; End=2026-10-06T07:25:00
+JobID=126; JobName=ok26; End=2026-10-06T07:26:00
+JobID=127; JobName=ok27; End=2026-10-06T07:27:00
+JobID=128; JobName=ok28; End=2026-10-06T07:28:00
+JobID=129; JobName=ok29; End=2026-10-06T07:29:00
+JobID=130; JobName=ok30; End=2026-10-06T07:30:00

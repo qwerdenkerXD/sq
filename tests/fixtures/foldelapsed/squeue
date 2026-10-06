@@ -1,0 +1,14 @@
+# "foldelapsed": with TIME hidden (SQ_FMT=i,j,u,T) the four tasks of array 7000
+# fold into one row although their elapsed times differ: three have run a
+# minute, 7000_1 nine hours.  The row survives by its longest task, so it
+# outlasts the single jobs 7100-7103 (5h to 2h), which a row timed by its
+# first or shortest task (1 minute) would not.
+@include ../_common/squeue-defaults
+i=7000_0; j=sweep; M=0:01:00; S=2026-10-06T16:59:00
+i=7000_1; j=sweep; M=9:00:00; S=2026-10-06T08:00:00
+i=7000_2; j=sweep; M=0:01:00; S=2026-10-06T16:59:00
+i=7000_3; j=sweep; M=0:01:00; S=2026-10-06T16:59:00
+i=7100; j=solo; M=5:00:00; S=2026-10-06T12:00:00
+i=7101; j=solo; M=4:00:00; S=2026-10-06T13:00:00
+i=7102; j=solo; M=3:00:00; S=2026-10-06T14:00:00
+i=7103; j=solo; M=2:00:00; S=2026-10-06T15:00:00

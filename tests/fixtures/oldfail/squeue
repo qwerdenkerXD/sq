@@ -1,0 +1,4 @@
+# One running job, so everything the queue needs fits on any screen and the
+# finished block decides the heights
+@include ../_common/squeue-defaults
+i=200; j=train

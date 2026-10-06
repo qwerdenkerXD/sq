@@ -1682,6 +1682,42 @@ c_compact_no_size() {   # decision 21
 	need "COMPACT fitted to 24 lines, footer last" busy_compact 24
 	stubs_answer
 }
+# oldfail: the newest failure (100) is older than 30 COMPLETED jobs, so it lies
+# beyond the 25 rows COMPACT gives the finished block.  The one line names it;
+# from 38 lines on the block opens on the 25 newest and "+6 more", and the
+# failure is gone from the screen.  Two fixes are rendered for Franz
+# (screens/fincap: keepline keeps the one line, pullin makes the failure the
+# block's last row); both name it at every height, as this case asks.
+c_compact_oldfail() {
+	T_TITLE="oldfail at every height 6..60: the newest failure, older than the finished block's cap, is named on screen"
+	xfail "$T_TITLE; from 38 lines the block shows the 25 newest and '+6 more' without it, until Franz picks a fix"
+	local h ran= lost= shape=
+	sq_run oldfail SQ_WIDTH=100 SQ_HEIGHT=50 -- --full
+	need "FULL: rc 0, stubs called, footer 1/1/0/0" eval 'rc_is 0 && calls_are 1 1 0 1 && footer_is 1 1 0 0'
+	for h in $(seq 6 60); do
+		sq_run oldfail SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
+		{ rc_is 0 && err_empty && calls_are 1 1 0 1 && lines_within "$h"; } || ran="$ran $h"
+		matches '(^ *|: )100 +bad +FAILED +1( |$)' && continue
+		lost="$lost $h"
+		{ [ "$(labelled FROW | wc -l)" -eq 25 ] && [ "$(labelled FMORE)" = "+6 more" ]; } || shape="$shape $h"
+	done
+	need "rc 0, stderr empty, stubs called, at most H lines (not at H =${ran:- none})" test -z "$ran"
+	want "the failure named at every height (not at H =${lost:- none})" test -z "$lost"
+	today "where it is not named: the 25 newest rows and '+6 more' (not so at H =${shape:- none})" test -z "$shape"
+}
+# foldelapsed: with TIME hidden, array 7000 folds four tasks whose elapsed
+# times differ (1 minute, 9 hours); the row survives as long as its
+# longest-running task, ahead of the single jobs 7100-7103 (5h-2h)
+c_compact_fold_elapsed() {   # decisions 12 and 13
+	T_TITLE="foldelapsed, TIME hidden: a folded row survives by its longest-running task (7000_1, 9h), ahead of 7100 (5h)"
+	sq_run foldelapsed SQ_WIDTH=100 SQ_HEIGHT=50 SQ_FMT=i,j,u,T -- --full
+	need "FULL: rc 0, the array folded into one row" eval 'rc_is 0 && calls_are 1 1 0 1 && row_cell queue "7000_[0-3] ×4"'
+	sq_run foldelapsed SQ_WIDTH=100 SQ_HEIGHT=12 SQ_FMT=i,j,u,T -- --compact
+	need "12 lines: rc 0, footer last"   eval 'rc_is 0 && footer_last 8 8 0 0'
+	need "12 lines: the array row alone survives" queue_seq_is "7000_[0-3]|… 4 jobs running"
+	sq_run foldelapsed SQ_WIDTH=100 SQ_HEIGHT=13 SQ_FMT=i,j,u,T -- --compact
+	need "13 lines: then 7100, the longest of the single jobs" queue_seq_is "7000_[0-3]|7100|… 3 jobs running"
+}
 # The colours of finished rows: one table (fcol) decides them in both modes, so
 # CANCELLED, PREEMPTED and REVOKED read yellow, never red like a failure.  In
 # endstates they are newer than the one FAILED job, so COMPACT looks past them
@@ -1755,7 +1791,7 @@ cases=(
 	compact_manysmall_h40 compact_unlisted_h24 compact_quiet40_h10
 	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_manystuck compact_sweep_manysmall
 	compact_sweep_quiet40
-	recent_max_full compact_recent_max compact_no_folding compact_colour full_flag compact_full_both
+	recent_max_full compact_recent_max compact_no_folding compact_colour compact_oldfail compact_fold_elapsed full_flag compact_full_both
 	reserve_refused compact_reserve reservation_forwarded
 	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full
 	compact_no_size compact_error_screens
