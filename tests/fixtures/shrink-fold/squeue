@@ -1,0 +1,33 @@
+# 30 running tasks of one array, every other one (0-58): sq folds them into
+# one row whose bracket is sq's own and too wide for a narrow terminal
+@include ../_common/squeue-defaults
+i=9008_0; j=sweep
+i=9008_2; j=sweep
+i=9008_4; j=sweep
+i=9008_6; j=sweep
+i=9008_8; j=sweep
+i=9008_10; j=sweep
+i=9008_12; j=sweep
+i=9008_14; j=sweep
+i=9008_16; j=sweep
+i=9008_18; j=sweep
+i=9008_20; j=sweep
+i=9008_22; j=sweep
+i=9008_24; j=sweep
+i=9008_26; j=sweep
+i=9008_28; j=sweep
+i=9008_30; j=sweep
+i=9008_32; j=sweep
+i=9008_34; j=sweep
+i=9008_36; j=sweep
+i=9008_38; j=sweep
+i=9008_40; j=sweep
+i=9008_42; j=sweep
+i=9008_44; j=sweep
+i=9008_46; j=sweep
+i=9008_48; j=sweep
+i=9008_50; j=sweep
+i=9008_52; j=sweep
+i=9008_54; j=sweep
+i=9008_56; j=sweep
+i=9008_58; j=sweep

@@ -782,6 +782,79 @@ c_xf_bitstr() {
 	today "no squeue or sacct call has it" no_call_env SLURM_BITSTR_LEN squeue sacct
 }
 
+# ---- 11b. an id cell too wide for the terminal (array-count spec R7) ---------
+# It shrinks INSIDE its bracket, never its ×N: the base id, "_[", whole leading
+# terms of the real set, "…]" and the exact ×N.  Every case is at a width where
+# the id column must shrink, and its counts must not move with the cell.
+elided_cell() {      # elided_cell SECTION FULL-ID N: a row reads FULL-ID cut inside, then ×N
+	rows "$1" | ID=$2 N=$3 LC_ALL=$utf8 gawk '
+		BEGIN { id = ENVIRON["ID"]; p = index(id, "_["); head = substr(id, 1, p + 1)
+		        body = substr(id, p + 2, length(id) - p - 2) }
+		index($1, head) == 1 && $1 ~ /…\]$/ && $2 == "×" ENVIRON["N"] && NF >= 2 {
+			keep = substr($1, length(head) + 1, length($1) - length(head) - 2)
+			if (keep == "" || (keep ~ /,$/ && index(body, keep) == 1)) f = 1 }
+		END { exit !f }'
+}
+shrink_ids=$(seq -s, 1 3 199)        # 67 tasks, every third: a long irregular set
+c_shrink_pending() {
+	T_TITLE="at 80 columns a pending 600_[1,4,…] keeps its ×67, and still counts 67"
+	sq_run shrink-pending SLURM_BITSTR_LEN=0 SQ_WIDTH=80 --
+	need "rc 0"                       rc_is 0
+	need "stubs called"               calls_are 1 1 0 1
+	bracket_guards queue 600 67
+	need "cell 600_[1,4,…] ×67, cut inside" elided_cell queue "600_[$shrink_ids]" 67
+	need "leading terms kept"         eval 'rows queue | grep -q "^ *600_\[1,4,7,"'
+	need "footer 67/0/67/0"           footer_is 67 0 67 0
+	need "no line past 80"            eval '[ "$(width)" -le 80 ]'
+	need "no unreadable note"         no_skips
+}
+c_shrink_fold() {
+	T_TITLE="at 80 columns sq's own fold 9008_[0,2,…] keeps its ×30, and still counts 30"
+	sq_run shrink-fold SQ_WIDTH=80 --
+	need "rc 0"                       rc_is 0
+	need "stubs called"               calls_are 1 1 0 1
+	bracket_guards queue 9008 30
+	need "cell 9008_[0,2,…] ×30, cut inside" elided_cell queue "9008_[$(seq -s, 0 2 58)]" 30
+	need "leading terms kept"         eval 'rows queue | grep -q "^ *9008_\[0,2,4,"'
+	need "footer 30/30/0/0"           footer_is 30 30 0 0
+	need "no line past 80"            eval '[ "$(width)" -le 80 ]'
+}
+c_shrink_finished() {
+	T_TITLE="at 80 columns the finished 600_[…] and sq's fold 5000_[…] keep ×67 and ×30; '+97 more' when capped"
+	sq_run shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=80 SQ_RECENT_MAX=5 --
+	need "uncapped: rc 0"             rc_is 0
+	need "uncapped: stubs called"     calls_are 1 1 0 1
+	bracket_guards recent 600 67
+	bracket_guards recent 5000 30
+	need "cell 600_[1,4,…] ×67, cut inside"  elided_cell recent "600_[$shrink_ids]" 67
+	need "cell 5000_[0,2,…] ×30, cut inside" elided_cell recent "5000_[$(seq -s, 0 2 58)]" 30
+	need "leading terms kept on both" eval 'rows recent | grep -q "^ *600_\[1,4,7," && rows recent | grep -q "^ *5000_\[0,2,4,"'
+	need "no line past 80"            eval '[ "$(width)" -le 80 ]'
+	need "no unreadable note"         no_skips
+	# the brackets give way (rung 4) before STATE falls back to its code (rung 5)
+	need "STATE keeps its words"      eval 'rows recent | grep -qE "^ *600_.* CANCELLED " && rows recent | grep -qE "^ *5000_.* FAILED "'
+	sq_run shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=80 SQ_RECENT_MAX=1 --
+	need "capped: rc 0"               rc_is 0
+	need "capped: the newer job 7100 is the one row" eval '[ "$(row_first_fields recent | paste -sd,)" = 7100 ]'
+	need "capped: '+97 more'"         eval '[ "$(more_count)" = 97 ]'
+	need "footer 0/0/0/0"             footer_is 0 0 0 0
+}
+# Narrower than BASE_[…] ×N no cut keeps both, and the cell takes the plain
+# right cut: -o i,T at 25 columns leaves JOBID exactly 15, at 24 one short
+c_shrink_floor() {
+	T_TITLE="JOBID exactly BASE_[…] ×N wide reads 6000000_[…] ×67; one narrower, the plain right cut"
+	local fx; fx=$(pending_fixture floor "6000000_[$shrink_ids]")
+	sq_run "$fx" SLURM_BITSTR_LEN=0 SQ_WIDTH=25 -- -o i,T
+	need "25: rc 0"                   rc_is 0
+	need "25: stubs called"           calls_are 1 1 0 1
+	need "25: cell '6000000_[…] ×67'" row_cell queue "6000000_[…] ×67"
+	need "25: footer 67/0/67/0"       footer_is 67 0 67 0
+	sq_run "$fx" SLURM_BITSTR_LEN=0 SQ_WIDTH=24 -- -o i,T
+	need "24: rc 0"                   rc_is 0
+	need "24: cell '6000000_[1,4,…', the right cut" row_cell queue "6000000_[1,4,…"
+	need "24: footer 67/0/67/0"       footer_is 67 0 67 0
+}
+
 # ---- 12. on a terminal --------------------------------------------------------
 # The "wide" fixture's job name is wider than any terminal, so the queue table is
 # shrunk to exactly the width sq believes in and its header line spans it: the
@@ -858,6 +931,7 @@ cases=(
 	malformed_step0 malformed_dots malformed_reversed malformed_multi malformed_dash malformed_huge
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated xf_bitstr
+	shrink_pending shrink_fold shrink_finished shrink_floor
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 )
 start=$(date +%s%N)
