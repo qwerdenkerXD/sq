@@ -48,6 +48,11 @@
 # jobs show the backfill start estimate; down nodes show their reason.
 
 set -u
+# COLUMNS must only ever mean "my caller told me the size" (watch exports it):
+# bash's checkwinsize, on even in a script, would otherwise set it from the
+# terminal after the first external command whenever stderr is a tty, and
+# "sq > file" would then write colour escapes into the file.
+shopt -u checkwinsize
 
 die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
 
