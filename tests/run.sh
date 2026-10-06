@@ -71,7 +71,9 @@ sq_run() {
 	OUT=$RUN/out ERR=$RUN/err LOG=$RUN/log; : > "$LOG"
 	env[HOME]=$RUN/home; env[SQSTUB_LOG]=$LOG
 	local -a envlist=(); local k
-	[ -n "${TMPDIR:-}" ] && [ -z "${env[TMPDIR]+set}" ] && env[TMPDIR]=$TMPDIR
+	# sq's own mktemp -d lands under the run, so a sq killed before its EXIT trap
+	# (the 30s bound below) leaves nothing behind once $work is removed
+	mkdir -p "$RUN/tmp"; env[TMPDIR]=$RUN/tmp
 	for k in "${!env[@]}"; do envlist+=("$k=${env[$k]}"); done
 	if [ -n "${PTY:-}" ]; then pty_exec "${envlist[@]}" -- "$@"
 	else  # bounded, so a hanging sq fails its case instead of hanging the suite
@@ -553,11 +555,15 @@ c_colour() {
 	need "NO_COLOR: no ESC"           eval '[ "$(escapes)" -eq 0 ]'
 }
 # Width: the "wide" fixture shrinks the table to exactly the width sq believes
-# in (see section 12).  Height: with 30 finished jobs and no SQ_RECENT_MAX the
-# finished block takes what the screen has left, so the output fills the height
-# exactly, and the rows shown plus "+N more" still account for all 30 jobs.
-fills() {     # fills HEIGHT: the output is HEIGHT lines and accounts for 30 jobs
-	[ "$(plain | wc -l)" -eq "$1" ] && [ $(( $(nrows recent) + $(more_count) )) -eq 30 ]
+# in (see section 12).  Height: with 34 finished jobs (30 single, and an older
+# 4-task array that folds into one row) and no SQ_RECENT_MAX the finished block
+# takes what the screen has left, so the output fills the height exactly; the
+# array is the oldest, so it is never shown, and "+N more" must count its 4 tasks:
+# the JOBS shown (a ×K row is K) plus "+N more" account for all 34.
+jobs_shown() { rows recent | LC_ALL=$utf8 gawk '{ n += ($2 ~ /^×[0-9]+$/) ? substr($2, 2) : 1 } END { print n+0 }'; }
+fills() {     # fills HEIGHT: the output is HEIGHT lines and accounts for all 34 jobs
+	[ "$(plain | wc -l)" -eq "$1" ] && ! row_first_fields recent | grep -q "^5000_" &&
+	[ $(( $(jobs_shown) + $(more_count) )) -eq 34 ]
 }
 c_layout_size() {
 	T_TITLE="in a pipe: SQ_WIDTH, COLUMNS, SQ_HEIGHT and LINES set the layout"
@@ -568,11 +574,13 @@ c_layout_size() {
 	sq_run wide -SQ_WIDTH COLUMNS=110 --
 	need "COLUMNS=110: widest line 110"   eval 'calls_are 1 1 0 1 && [ "$(width)" -eq 110 ]'
 	sq_run many-finished SQ_HEIGHT=20 --
-	need "SQ_HEIGHT=20: 20 lines, 30 jobs accounted" eval 'calls_are 1 1 0 1 && fills 20'
+	need "SQ_HEIGHT=20: 20 lines, 34 jobs accounted, the hidden array in +N more" eval 'calls_are 1 1 0 1 && fills 20'
 	sq_run many-finished SQ_HEIGHT=30 --
-	need "SQ_HEIGHT=30: 30 lines, 30 jobs accounted" eval 'calls_are 1 1 0 1 && fills 30'
+	need "SQ_HEIGHT=30: 30 lines, 34 jobs accounted, the hidden array in +N more" eval 'calls_are 1 1 0 1 && fills 30'
 	sq_run many-finished -SQ_HEIGHT LINES=20 --
-	need "LINES=20: 20 lines, 30 jobs accounted" eval 'calls_are 1 1 0 1 && fills 20'
+	need "LINES=20: 20 lines, 34 jobs accounted, the hidden array in +N more" eval 'calls_are 1 1 0 1 && fills 20'
+	sq_run many-finished SQ_HEIGHT=20 LINES=30 --
+	need "SQ_HEIGHT beats LINES"        eval 'calls_are 1 1 0 1 && fills 20'
 }
 
 # ---- 11. known defects --------------------------------------------------------

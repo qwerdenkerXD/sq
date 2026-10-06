@@ -1,5 +1,15 @@
-# 30 finished single jobs, a minute apart: more than any screen holds
+# 30 finished single jobs, a minute apart, and before them a 4-task array that
+# folds into one row: more than any screen holds, and the array is the oldest,
+# so "+N more" has to count its 4 tasks
 @include ../_common/sacct-defaults
+JobID=5000_0; JobName=sweep; End=2026-10-06T07:00:00
+JobID=5000_0.batch; User=; JobName=batch; End=2026-10-06T07:00:00
+JobID=5000_1; JobName=sweep; End=2026-10-06T07:00:00
+JobID=5000_1.batch; User=; JobName=batch; End=2026-10-06T07:00:00
+JobID=5000_2; JobName=sweep; End=2026-10-06T07:00:00
+JobID=5000_2.batch; User=; JobName=batch; End=2026-10-06T07:00:00
+JobID=5000_3; JobName=sweep; End=2026-10-06T07:00:00
+JobID=5000_3.batch; User=; JobName=batch; End=2026-10-06T07:00:00
 JobID=8001; JobName=j01; End=2026-10-06T08:01:00
 JobID=8002; JobName=j02; End=2026-10-06T08:02:00
 JobID=8003; JobName=j03; End=2026-10-06T08:03:00
