@@ -5,11 +5,12 @@
 #
 #   tests/run.sh [-k|--keep] [NAME...]     NAME: run only the case of that name
 #
-# Needs bash, gawk, coreutils, and util-linux `script` for the pty cases.  The
-# stubs in tests/bin stand in for squeue/sinfo/sacct (tests/lib/stub.sh says how,
-# tests/FAITHFULNESS.md how they were checked against the real ones).  Every case
-# must see a stub answer, so the suite cannot pass against a real Slurm by
-# accident.
+# Needs bash, gawk, coreutils, and util-linux `script` and `setsid` for the
+# terminal cases.  The stubs in tests/bin stand in for squeue/sinfo/sacct
+# (tests/lib/stub.sh says how, tests/FAITHFULNESS.md how they were checked
+# against the real ones); tests/bin/stty only logs and runs the real stty.
+# Every case must see a stub answer, so the suite cannot pass against a real
+# Slurm by accident.
 #
 # Results: PASS, FAIL, XFAIL (a known defect, still there, in the documented
 # way) and XPASS (a known defect no longer reproduces: remove its xfail marker).
@@ -55,6 +56,7 @@ ESC=$'\033'
 # Runs sq in a clean environment: the stubs first on PATH, a fresh HOME (the
 # bell's state file lives under it), a small timeout and a fixed size; VAR=value
 # adds or overrides a variable, -VAR removes one.  --no-bell is always passed.
+# NOTTY=1 runs sq in a new session (setsid), so it has no controlling terminal.
 # Leaves OUT, ERR, LOG (the stub log) and RC for the assertions below.
 sq_run() {
 	local fixture=$1; shift
@@ -76,8 +78,9 @@ sq_run() {
 	mkdir -p "$RUN/tmp"; env[TMPDIR]=$RUN/tmp
 	for k in "${!env[@]}"; do envlist+=("$k=${env[$k]}"); done
 	if [ -n "${PTY:-}" ]; then pty_exec "${envlist[@]}" -- "$@"
-	else  # bounded, so a hanging sq fails its case instead of hanging the suite
-		env -i "${envlist[@]}" timeout -k 2 30 "$sq" --no-bell "$@" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
+	else  # bounded, so a hanging sq fails its case instead of hanging the suite;
+		# setsid outside timeout, so a hanging sq stays timeout's own child
+		env -i "${envlist[@]}" ${NOTTY:+setsid -w} timeout -k 2 30 "$sq" --no-bell "$@" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
 		[ $RC -ne 124 ] || T_FAIL+=("sq did not finish within 30s")
 	fi
 	note_run
@@ -86,6 +89,7 @@ sq_run() {
 # The pty variant: sq on a pseudo-terminal of PTY_ROWS x PTY_COLS made by
 # util-linux script, so [ -t 1 ] and tput see a terminal.  stdout of script is
 # the terminal's output, so OUT gets CRs and colour; plain() takes them out.
+# PTY_STDIN=FILE gives sq that stdin instead of the terminal.
 pty_exec() {
 	local -a envlist=()
 	while [ "$1" != -- ]; do envlist+=("$1"); shift; done; shift
@@ -94,6 +98,7 @@ pty_exec() {
 	fi
 	local inner
 	inner="stty rows $PTY_ROWS cols $PTY_COLS; exec $(printf '%q ' "$sq" --no-bell "$@")"
+	[ -n "${PTY_STDIN:-}" ] && inner="$inner < $(printf '%q' "$PTY_STDIN")"
 	# --foreground: without it timeout stops script's child with SIGTTOU in the pty
 	env -i "${envlist[@]}" SHELL=/bin/sh \
 		timeout --foreground -k 2 20 script -qec "$inner" /dev/null > "$OUT" 2> "$ERR" < /dev/null
@@ -186,6 +191,8 @@ footer_is() { # footer_is JOBS RUNNING PENDING OTHER
 no_footer()  { [ -z "$(section footer)" ]; }
 no_skips()   { lacks unreadable && lacks incomplete; }
 rc_is()      { [ "$RC" -eq "$1" ]; }
+# how often sq asked the terminal its size (tests/bin/stty logs every call)
+stty_size_calls() { gawk -F'\t' '$1 == "STTY" && $2 == "size" { n++ } END { print n+0 }' "$LOG"; }
 err_empty()  { [ ! -s "$ERR" ]; }
 out_empty()  { [ ! -s "$OUT" ]; }
 
@@ -772,8 +779,9 @@ c_xf_bitstr() {
 # The "wide" fixture's job name is wider than any terminal, so the queue table is
 # shrunk to exactly the width sq believes in and its header line spans it: the
 # widest line is the layout width.  37x123 is a size nothing defaults to.
-pty_case() {   # pty_case TERM: sq on a 37x123 pty with that TERM, no size in the env
-	PTY=1 PTY_ROWS=37 PTY_COLS=123 sq_run wide TERM="$1" -SQ_WIDTH -SQ_HEIGHT --
+pty_case() {   # pty_case ROWS COLS TERM [VAR=value...]: sq on a pty of that size
+	local rows=$1 cols=$2 term=$3; shift 3      # and TERM, no size in the env but VARs
+	PTY=1 PTY_ROWS=$rows PTY_COLS=$cols sq_run wide TERM="$term" -SQ_WIDTH -SQ_HEIGHT "$@" --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	need "the job row is there"       row_cell queue 8001
@@ -782,14 +790,48 @@ pty_case() {   # pty_case TERM: sq on a 37x123 pty with that TERM, no size in th
 }
 c_pty_xterm() {
 	T_TITLE="TERM=xterm-256color on a 123-column pty: laid out at 123 columns"
-	pty_case xterm-256color
+	pty_case 37 123 xterm-256color
 	need "widest line is 123"         eval '[ "$(width)" -eq 123 ]'
+	need "the size asked of stty once" eval '[ "$(stty_size_calls)" -eq 1 ]'
 }
 c_pty_kitty() {
 	T_TITLE="TERM=xterm-kitty (unknown to terminfo here) on a 123-column pty: laid out at 123 columns, via stty size"
-	pty_case xterm-kitty
+	pty_case 37 123 xterm-kitty
 	need "xterm-kitty really is unknown to terminfo here" eval '! TERM=xterm-kitty tput cols >/dev/null 2>&1'
 	need "widest line is 123"         eval '[ "$(width)" -eq 123 ]'
+	need "the size asked of stty once" eval '[ "$(stty_size_calls)" -eq 1 ]'
+}
+c_pty_stdin_null() {
+	T_TITLE="stdin </dev/null on a 123-column xterm-kitty pty: still 123, the size comes from /dev/tty"
+	PTY_STDIN=/dev/null pty_case 37 123 xterm-kitty
+	need "widest line is 123"         eval '[ "$(width)" -eq 123 ]'
+}
+c_pty_columns_wins() {
+	T_TITLE="COLUMNS=90 on a 123-column xterm-kitty pty: laid out at 90, the env wins over stty"
+	pty_case 37 123 xterm-kitty COLUMNS=90
+	need "widest line is 90"          eval '[ "$(width)" -eq 90 ]'
+	need "stty asked once, for the lines" eval '[ "$(stty_size_calls)" -eq 1 ]'
+}
+c_pty_env_both() {
+	T_TITLE="COLUMNS=90 LINES=30 on a 123-column pty: laid out at 90, stty never asked"
+	pty_case 37 123 xterm-kitty COLUMNS=90 LINES=30
+	need "widest line is 90"          eval '[ "$(width)" -eq 90 ]'
+	need "stty not asked"             eval '[ "$(stty_size_calls)" -eq 0 ]'
+}
+c_pty_unsized() {
+	T_TITLE="a pty not yet sized (stty says 0 0), TERM=xterm-256color: tput's terminfo default 80, never 0"
+	pty_case 0 0 xterm-256color
+	need "stty asked once"           eval '[ "$(stty_size_calls)" -eq 1 ]'
+	need "widest line is 80"          eval '[ "$(width)" -eq 80 ]'
+}
+c_no_tty() {
+	T_TITLE="no controlling terminal, no TERM, no size in the env: 100 columns, silently"
+	NOTTY=1 sq_run wide -SQ_WIDTH -SQ_HEIGHT --
+	need "rc 0"                       rc_is 0
+	need "stubs called"               calls_are 1 1 0 1
+	need "stderr empty"               err_empty
+	need "no terminal: stty never got to run" eval '[ "$(stty_size_calls)" -eq 0 ]'
+	need "widest line is 100"         eval '[ "$(width)" -eq 100 ]'
 }
 
 # ============================================================================
@@ -803,7 +845,7 @@ cases=(
 	xf_pending_strided xf_pending_long
 	malformed_step0 malformed_dots xf_malformed_reversed xf_malformed_dash xf_malformed_huge
 	xf_finished_throttled xf_fallback_throttled xf_more_sacct xf_more_fallback xf_bitstr
-	pty_xterm pty_kitty
+	pty_xterm pty_kitty pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

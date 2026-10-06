@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# not a stub: logs the call (STTY <argv> in SQSTUB_LOG, when set) and execs the
+# real stty, so the pty cases still get a real terminal's answer, and a case can
+# count how often sq asked for the size
+[ -n "${SQSTUB_LOG:-}" ] && printf 'STTY\t%s\n' "$*" >> "$SQSTUB_LOG"
+IFS=:
+for dir in $PATH; do
+	[ -x "$dir/stty" ] && ! [ "$dir/stty" -ef "${BASH_SOURCE[0]}" ] && exec -a stty "$dir/stty" "$@"
+done
+echo "tests/bin/stty: no real stty on PATH" >&2; exit 127

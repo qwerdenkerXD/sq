@@ -333,23 +333,24 @@ keys=${keys%,}                       # the last nonce leaves an empty field that
 
 cols=${SQ_WIDTH:-${COLUMNS:-}}
 lines=${SQ_HEIGHT:-${LINES:-}}
+mincols=21 minlines=5            # anything smaller is no usable size, from any source
 
 # the terminal's own size needs no terminfo entry for $TERM, which tput does
 # (xterm-kitty, xterm-ghostty); asked once, and only for an axis the env left
 # open.  No controlling terminal fails silently, and a pty not yet sized says
-# 0 0, so a value the checks below would refuse is left to tput instead
+# 0 0, so a value under the minimum is left to tput instead
 if [ -z "$cols" ] || [ -z "$lines" ]; then
 	tty_size=$({ stty size </dev/tty; } 2>/dev/null) || tty_size=
 	tty_lines=${tty_size% *} tty_cols=${tty_size#* }
-	[ -n "$cols" ] || { [ "$tty_cols" -gt 20 ] 2>/dev/null && cols=$tty_cols; }
-	[ -n "$lines" ] || { [ "$tty_lines" -gt 4 ] 2>/dev/null && lines=$tty_lines; }
+	[ -n "$cols" ] || { [ "$tty_cols" -ge $mincols ] 2>/dev/null && cols=$tty_cols; }
+	[ -n "$lines" ] || { [ "$tty_lines" -ge $minlines ] 2>/dev/null && lines=$tty_lines; }
 fi
 
 [ -n "$cols" ] || cols=$(tput cols 2>/dev/null) || cols=100
-[ "$cols" -gt 20 ] 2>/dev/null || cols=100
+[ "$cols" -ge $mincols ] 2>/dev/null || cols=100
 
 [ -n "$lines" ] || lines=$(tput lines 2>/dev/null) || lines=24
-[ "$lines" -gt 4 ] 2>/dev/null || lines=24
+[ "$lines" -ge $minlines ] 2>/dev/null || lines=24
 
 login=                                          # what "--me" means to squeue,
 me=${SQ_BELL_USER:-$(id -un)}                   # resolved only if --me asks
