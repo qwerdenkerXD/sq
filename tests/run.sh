@@ -475,32 +475,37 @@ c_xf_pending_range() {
 	today "cell '7000_[1-20]' alone"  row_cell queue "7000_[1-20]"
 }
 c_xf_pending_strided() {
-	T_TITLE=; xfail "a pending strided _[0-12:2] row is dropped as unreadable (and once shown, still counted 1)"
+	T_TITLE=; xfail "a pending strided _[0-12:2] row is dropped as unreadable; should be shown as 7 jobs"
 	sq_run pending-strided --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	want "cell '7001_[0-12:2] ×7'"    row_cell queue "7001_[0-12:2] ×7"
 	want "footer 7/0/7/0"             footer_is 7 0 7 0
 	want "no unreadable note"         no_skips
-	# the defect has two known stages: dropped (today), then shown but counted 1
-	# (once the id anchor accepts it), so either one is still this XFAIL
-	today "dropped as unreadable, or shown but counted 1" eval '
-		{ has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0; } ||
-		{ row_cell queue "7001_[0-12:2]" && footer_is 1 0 1 0; }'
+	# the only accepted shape of the defect is today's: dropped, with the note.  A
+	# bracketed row shown but counted 1 is forbidden at every commit (array-count
+	# spec, acceptance 4b), so it is a FAIL, never this XFAIL
+	need "forbidden intermediate: shown but counted 1" eval '
+		! { row_cell queue "7001_[0-12:2]" && section footer | grep -qE "^ *1 jobs "; }'
+	today "dropped, with the skip note" eval '
+		has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0'
 }
 c_xf_pending_long() {
-	T_TITLE=; xfail "a pending id over 31 characters is cut by squeue (no SLURM_BITSTR_LEN=0) and dropped (and once shown, counted 1)"
+	T_TITLE=; xfail "a pending id over 31 characters is cut by squeue (no SLURM_BITSTR_LEN=0) and dropped; should be shown as 10 jobs"
 	sq_run pending-long --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	want "cell '11137_[1,3,5,7,9,11,13,15,17,20] ×10'" row_cell queue "11137_[1,3,5,7,9,11,13,15,17,20] ×10"
 	want "footer 10/0/10/0"           footer_is 10 0 10 0
 	want "no unreadable note"         no_skips
-	# two known stages: dropped (today), then shown whole but counted 1 (once
-	# SLURM_BITSTR_LEN=0 is set), so either one is still this XFAIL
-	today "dropped as unreadable, or shown but counted 1" eval '
-		{ has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0; } ||
-		{ row_cell queue "11137_[1,3,5,7,9,11,13,15,17,20]" && footer_is 1 0 1 0; }'
+	# today's shape is the only accepted one: dropped, with the note, which is also
+	# what a correct count without SLURM_BITSTR_LEN=0 still gives (squeue cuts the
+	# id, so it fails the gate) - so this flips only once the whole id arrives.
+	# Shown but counted 1 is forbidden at every commit (acceptance 4b): a FAIL
+	need "forbidden intermediate: shown but counted 1" eval '
+		! { rows queue | grep -q "^ *11137_" && section footer | grep -qE "^ *1 jobs "; }'
+	today "dropped, with the skip note" eval '
+		has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0'
 }
 c_xf_finished_throttled() {
 	T_TITLE=; xfail "a finished _[0-9%3] row from sacct counts 1, shows no ×10"
