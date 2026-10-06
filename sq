@@ -21,13 +21,16 @@
 #   watch -tc -n 5 sq       live dashboard; keep -t, or watch's own header
 #                           pushes the footer off screen (or --reserve 2)
 #
-# Two modes.  FULL shows every job.  COMPACT fits the screen: rows that do
-# not fit collapse into lines like "… 42 jobs running".  Stuck jobs (pending
-# for a reason other than plain waiting), jobs blocked on nodes and jobs held
-# by an admin keep their rows longest, within half the table while running
-# jobs are hidden; running jobs come next, the longest-running first, and
-# ordinary pending jobs last.  The finished block shrinks to one line, the
-# newest failure, and on the smallest screens the nodes to one summary line.
+# Two modes.  FULL shows every job.  COMPACT fits the screen's height: rows
+# that do not fit collapse into lines like "… 42 jobs running".  Stuck jobs
+# (pending for a reason other than plain waiting), jobs blocked by a node or
+# partition fault and jobs held by an admin keep their rows longest, within
+# half the table while running jobs are hidden; running jobs come next, the
+# longest-running first, and ordinary pending jobs last.  The finished block
+# shrinks to one line, the newest failure, else the newest job, and on the
+# smallest screens the nodes to one summary line.  Below about 60 columns
+# some lines are wider than the screen and wrap, so COMPACT can still run
+# over its height there.
 # COMPACT is chosen when stdout is a terminal or COLUMNS and LINES are both
 # exported (watch does that), FULL in a pipe or a file; --compact, --full and
 # SQ_COMPACT decide instead, the flags first.

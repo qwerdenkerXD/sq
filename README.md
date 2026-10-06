@@ -31,13 +31,16 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
 ## What it does
 
 - **Fits the screen, or shows everything.** On a terminal and under `watch`, sq draws a
-  COMPACT screen no taller than the terminal: what does not fit collapses into lines like
+  COMPACT screen fitted to the terminal's height: what does not fit collapses into lines like
   `… 42 jobs running`. Stuck jobs (pending for a reason other than plain waiting), jobs blocked
-  on nodes and jobs held by an admin keep their rows longest, within half the table while running
-  jobs are hidden; running jobs come next, the longest-running first; ordinary pending jobs last.
-  The finished block shrinks to one line naming the newest failure, and on the smallest screens
-  the nodes become one summary line. Piped or redirected, sq draws the FULL screen, every job.
-  `--compact`, `--full` or `SQ_COMPACT` choose instead.
+  by a node or partition fault and jobs held by an admin keep their rows longest, within half the
+  table while running jobs are hidden; running jobs come next, the longest-running first; ordinary
+  pending jobs last. The finished block shrinks to one line naming the newest failure, else the
+  newest job, and on the smallest screens the nodes become one summary line. Piped or redirected,
+  sq draws the FULL screen, every job. `--compact`, `--full` or `SQ_COMPACT` choose instead.
+  The width has a floor: the node lines and the job table cannot shrink below about 60 columns
+  (it depends on the node names and the columns shown), and on a narrower terminal those lines
+  wrap, so COMPACT can then run over the screen's height.
 - **Fits the terminal's width.** Every column is sized to its content. When the table is too wide, the text
   columns (name, reason, command, node list, work dir) shrink first, longest first, cut with `…`.
   Numbers are never cut while anything else can give.
@@ -146,7 +149,7 @@ sq -C                     # centred in both axes
 ## Tests
 
 ```sh
-tests/run.sh              # ~75 s, no cluster needed
+tests/run.sh              # ~90 s, no cluster needed
 ```
 
 The suite puts stand-ins for `squeue`, `sinfo` and `sacct` first on `PATH` and feeds sq the
