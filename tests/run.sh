@@ -162,7 +162,7 @@ xmarks() {    # xmarks queue|recent BASE
 	rows "$1" | B=$2 LC_ALL=$utf8 gawk '($1 == ENVIRON["B"] || index($1, ENVIRON["B"] "_") == 1) && $2 ~ /^×[0-9]+$/ { print substr($2, 2) }'
 }
 # 4b(ii) of the array-count spec: a row that shows ×K must show the right K, and
-# the totals must count it as K.  Silent while no ×K is shown (today's state).
+# the totals must count it as K.  Silent while no ×K is shown (a single job has none).
 only_xmark()  { ! xmarks "$1" "$2" | grep -qvx "$3"; }     # only_xmark SECTION BASE N
 footer_jobs()  { section footer | gawk 'NR == 1 { print $1 }'; }
 more_count()   { plain | gawk '/^ *\+[0-9]+ more$/ { sub(/^ *\+/, ""); print $1 }'; }
