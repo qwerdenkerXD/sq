@@ -1,0 +1,27 @@
+# "faults": pending reasons that name a fault of the cluster (blocked on
+# nodes: NodeDown, PartitionDown, PartitionInactive, FrontEndDown,
+# PowerNotAvail, PowerReserved), a launch failure Slurm requeued held (held
+# by admin), NodeDrain, which Slurm 23.11 has no such reason as (so it is
+# unknown: stuck), and ordinary waiting; then 8 running jobs
+@include ../_common/squeue-defaults
+i=601; j=job601; t=PD; T=PENDING; M=0:00; R=(PartitionDown); S=N/A; r=PartitionDown
+i=602; j=job602; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=603; j=job603; t=PD; T=PENDING; M=0:00; R=(PowerNotAvail); S=N/A; r=PowerNotAvail
+i=604; j=job604; t=PD; T=PENDING; M=0:00; R=(launch failed requeued held); S=N/A; r=launch failed requeued held
+i=605; j=job605; t=PD; T=PENDING; M=0:00; R=(FrontEndDown); S=N/A; r=FrontEndDown
+i=606; j=job606; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=607; j=job607; t=PD; T=PENDING; M=0:00; R=(PartitionInactive); S=N/A; r=PartitionInactive
+i=608; j=job608; t=PD; T=PENDING; M=0:00; R=(NodeDrain); S=N/A; r=NodeDrain
+i=609; j=job609; t=PD; T=PENDING; M=0:00; R=(PowerReserved); S=N/A; r=PowerReserved
+i=610; j=job610; t=PD; T=PENDING; M=0:00; R=(launch failed requeued held); S=N/A; r=launch failed requeued held
+i=611; j=job611; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=612; j=job612; t=PD; T=PENDING; M=0:00; R=(NodeDown); S=N/A; r=NodeDown
+i=613; j=job613; t=PD; T=PENDING; M=0:00; R=(Resources); S=N/A; r=Resources
+i=620; j=run0; M=1:00:00; S=2026-10-06T08:00:00
+i=621; j=run1; M=2:00:00; S=2026-10-06T07:00:00
+i=622; j=run2; M=3:00:00; S=2026-10-06T06:00:00
+i=623; j=run3; M=4:00:00; S=2026-10-06T05:00:00
+i=624; j=run4; M=5:00:00; S=2026-10-06T04:00:00
+i=625; j=run5; M=6:00:00; S=2026-10-06T03:00:00
+i=626; j=run6; M=7:00:00; S=2026-10-06T02:00:00
+i=627; j=run7; M=8:00:00; S=2026-10-06T01:00:00

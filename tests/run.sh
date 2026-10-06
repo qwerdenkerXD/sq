@@ -1384,17 +1384,20 @@ census() {   # census TOTALS H
 		        RANK["stuck"] = 1; RANK["blocked on nodes"] = 2; RANK["held by admin"] = 3; RANK["pending"] = 4 }
 		# the settled classifier (stuck-classifier notes, 2026-10-06): a CLOSED
 		# allow-list of collapsible reasons (plus JobHeldUser, which Franz
-		# collapses) is ordinary pending; node reasons are blocked; JobHeldAdmin
-		# is held; EVERY OTHER reason is stuck, visible by default, so a misread
-		# or unknown reason fails loud.  The reason is what the NODE/REASON cell
+		# collapses) is ordinary pending; node reasons and the other cluster
+		# faults are blocked; JobHeldAdmin and a launch failure Slurm requeued
+		# held are held; EVERY OTHER reason is stuck, visible by default, so a
+		# misread or unknown reason fails loud (NodeDrain, which 23.11 does not
+		# have, among them).  The reason is what the NODE/REASON cell
 		# shows inside its parentheses (to the cell'"'"'s end, if the cell was cut).
 		function sec(t,   m, r) {
 			if (t ~ / RUNNING /) return "running"
 			if (t !~ / PENDING /) return "other"
 			r = match(t, /\(([^)]*)/, m) ? m[1] : ""
 			if (r ~ /^(None|Priority|Resources|Dependency|BeginTime|Prolog|Cleaning|SchedDefer|Reservation|Licenses|JobHeldUser)$/) return "pending"
-			if (r ~ /^ReqNodeNotAvail/ || r ~ /^(NodeDown|NodeDrain)$/ || r ~ /^Nodes required for job are /) return "blocked"
-			if (r == "JobHeldAdmin") return "held"
+			if (r ~ /^ReqNodeNotAvail/ || r ~ /^Nodes required for job are / ||
+			    r ~ /^(NodeDown|PartitionDown|PartitionInactive|FrontEndDown|PowerNotAvail|PowerReserved)$/) return "blocked"
+			if (r == "JobHeldAdmin" || r ~ /requeued held$/) return "held"
 			return "stuck"
 		}
 		{ nl++ }
@@ -1523,6 +1526,19 @@ c_compact_sweep_quiet40() {   # CALL (made inside the target screens, listed to 
 	T_TITLE="quiet40 at every height 6..30: fits, footer last, no two blank lines together where the queue block vanishes, never fewer rows on a taller screen"
 	sweep_case quiet40 100 30 "1 1 0 1" "7 5 2 0" \
 		"stuck=0 blocked=0 held=0 pending=2 running=5 other=0" "recently finished: 4098 qc FAILED 1"
+}
+
+# faults: the categories of the VISIBLE reasons (a CALL, listed to Franz,
+# overrulable; the collapse rule is unchanged): a fault of the cluster is
+# blocked on nodes, a launch failure requeued held is held by admin, and
+# NodeDrain, no reason 23.11 has, is unknown and so stuck
+c_compact_sweep_faults() {
+	T_TITLE="faults at every height 6..50: partition, front-end and power faults count as blocked on nodes, 'launch failed requeued held' as held, NodeDrain as stuck; every sweep invariant"
+	sweep_case faults 100 50 "1 1 0 1" "21 8 13 0" \
+		"stuck=1 blocked=6 held=2 pending=4 running=8 other=0" "recently finished: 600 qc FAILED 1"
+	sq_run faults SQ_WIDTH=100 SQ_HEIGHT=17 -- --compact
+	need "17 lines: PartitionDown blocked, both requeued-held jobs held, NodeDrain stuck" \
+		queue_seq_is "601|604|608|610|… 5 jobs blocked on nodes|… 4 jobs pending|… 8 jobs running"
 }
 
 # ---- 14. COMPACT: the behaviour rules no screen shows --------------------------
@@ -1742,6 +1758,24 @@ c_compact_colour() {
 	done
 	need "the same bytes as FULL, the clock and AGO aside" eval 'cmp -s <(without_clock_ago_sgr "$fullout") <(without_clock_ago_sgr "$OUT")'
 }
+# Below 5 lines a height is still a height in COMPACT, down to the footer
+# alone (a CALL, listed to Franz, overrulable); FULL keeps reading such a
+# height as no usable size, as today
+c_compact_low_heights() {
+	T_TITLE="COMPACT at 1-4 lines fits them, the footer alone at 1; FULL still reads them as 24"
+	local h
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --full
+	need "FULL at 24: rc 0" rc_is 0
+	local full24=$OUT
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=3 -- --full
+	need "FULL at 3: the screen of 24, clock and AGO aside" eval 'rc_is 0 && cmp -s <(without_clock_ago "$full24") <(without_clock_ago "$OUT")'
+	for h in 1 2 3 4; do
+		sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
+		need "$h: rc 0, stubs called, at most $h lines, footer last" eval 'rc_is 0 && calls_are 1 1 0 1 && lines_within '"$h"' && footer_last 151 128 23 0'
+	done
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=1 -- --compact
+	need "1: the footer alone" lines_are 1
+}
 # error screens: sinfo failing (the unreachable banner), squeue failing, a cut
 # queue stream (qtrunc) and an unreadable one (qbad, no footer): at every
 # height the screen fits and a footer, if any, is the last line
@@ -1790,8 +1824,8 @@ cases=(
 	compact_manystuck_h16 compact_manystuck_h24 compact_manystuck_h40
 	compact_manysmall_h40 compact_unlisted_h24 compact_quiet40_h10
 	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_manystuck compact_sweep_manysmall
-	compact_sweep_quiet40
-	recent_max_full compact_recent_max compact_no_folding compact_colour compact_oldfail compact_fold_elapsed full_flag compact_full_both
+	compact_sweep_quiet40 compact_sweep_faults
+	recent_max_full compact_recent_max compact_no_folding compact_colour compact_oldfail compact_fold_elapsed compact_low_heights full_flag compact_full_both
 	reserve_refused compact_reserve reservation_forwarded
 	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full
 	compact_no_size compact_error_screens

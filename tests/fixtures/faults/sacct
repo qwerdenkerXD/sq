@@ -1,0 +1,2 @@
+@include ../_common/sacct-defaults
+JobID=600; JobName=qc; State=FAILED; ExitCode=1:0

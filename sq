@@ -383,7 +383,9 @@ keys=${keys%,}                       # the last nonce leaves an empty field that
 
 cols=${SQ_WIDTH:-${COLUMNS:-}}
 lines=${SQ_HEIGHT:-${LINES:-}}
-mincols=21 minlines=5            # anything smaller is no usable size, from any source
+mincols=21 minlines=5            # anything smaller is no usable size, from any source,
+[ "$compact" = 0 ] || minlines=1 # but COMPACT fits whatever height it is given, down
+                                 # to the footer alone; 0 still means "not sized yet"
 
 # the terminal's own size needs no terminfo entry for $TERM, which tput does
 # (xterm-kitty, xterm-ghostty); asked once, and only for an axis the env left
@@ -681,14 +683,15 @@ function when(t,   ep) {                                  # start estimate, comp
 # is ordinary waiting; any other pending reason is stuck, so a reason sq does not
 # know stays visible instead of vanishing into "… n jobs pending".  Whole-string
 # equality on %r, never a prefix: "Dependency" must not swallow
-# "DependencyNeverSatisfied".  A prefix is safe only on the visible side.
+# "DependencyNeverSatisfied".  A prefix is safe only on the visible side, which
+# only names the category: a cluster fault is "blocked on nodes", a hold that
+# needs an admin (or a launch failure Slurm requeued held) "held by admin".
 function jclass(st, why) {
   if (st == "R")  return 5
   if (st != "PD") return 6
   if (why in WAITING) return 4
-  if (why ~ /^ReqNodeNotAvail/ || why == "NodeDown" || why == "NodeDrain" ||
-      why ~ /^Nodes required for job are /) return 2
-  return (why == "JobHeldAdmin") ? 3 : 1
+  if (why in FAULT || why ~ /^ReqNodeNotAvail/ || why ~ /^Nodes required for job are /) return 2
+  return (why == "JobHeldAdmin" || why ~ /requeued held$/) ? 3 : 1
 }
 # The screen is GROWN along one fixed list of steps (fit) and stops at the first
 # step that does not fit, so a taller screen only ever adds: lines a step could
@@ -887,6 +890,9 @@ BEGIN{
   split("None Priority Resources Dependency BeginTime Prolog Cleaning SchedDefer " \
         "Reservation Licenses JobHeldUser", wr, " ")      # waiting, or held by its owner
   for (i in wr) WAITING[wr[i]] = 1
+  split("NodeDown PartitionDown PartitionInactive FrontEndDown PowerNotAvail " \
+        "PowerReserved", wr, " ")                         # a fault of the cluster
+  for (i in wr) FAULT[wr[i]] = 1
   split("stuck|blocked on nodes|held by admin|pending|running|other", SECNAME, "|")
   split("title banner qcap notes nodes reasons fin fslots b0 b1 b2 b3 b4", SHOWN, " ")
   split("JOBID NAME STATE EXIT ELAPSED AGO", rhd, " ")
