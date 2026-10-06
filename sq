@@ -3,7 +3,7 @@
 #
 #   sq                      default columns
 #   sq -o i,j,T,M,P,N       custom columns (squeue field letters, %/widths ignored)
-#   sq -u "$USER" -p gpu    other args go to squeue (not -o/-O/--format/-s)
+#   sq -u "$USER" -p gpu    other args go to squeue (not -o/-O/--format/-s/-i)
 #   sq -c / -C              centre horizontally / in both axes
 #   sq -x                   expand array tasks instead of folding them
 #   sq --no-recent          hide the recently-finished block
@@ -55,6 +55,61 @@ bell=${SQ_BELL:-1}
 eta=${SQ_ETA:-1}
 color=${SQ_COLOR:-auto}
 args=()
+seen=                            # the filters already set, for the repeat check
+
+# One example per option, because "sq -j NAME" would read wrong: a usage error
+# is only useful when it shows the command the user meant.  vlist is the list
+# form a repeated filter has to be written as instead.
+opt_hint() {
+	vlist=
+	case $1 in
+		-u) vnoun='a user name';        vex=$(id -un); vlist="$vex,alice" ;;
+		-p) vnoun='a partition name';   vex=batch;     vlist=batch,gpu ;;
+		-A) vnoun='an account name';    vex=myaccount; vlist=acct1,acct2 ;;
+		-q) vnoun='a QoS name';         vex=normal;    vlist=normal,long ;;
+		-j) vnoun='a job id';           vex=12345;     vlist=12345,12346 ;;
+		-M) vnoun='a cluster name';     vex=mycluster; vlist=cluster1,cluster2 ;;
+		-n) vnoun='a job name';         vex=myjob ;;
+		-t) vnoun='a state list';       vex=R,PD ;;
+		-w) vnoun='a node list';        vex=node01 ;;
+		-L) vnoun='a license name';     vex=matlab ;;
+		-R) vnoun='a reservation name'; vex=maint ;;
+		-S) vnoun='a sort key list';    vex=-i ;;
+	esac
+}
+
+# the one spelling a filter is tracked and reported under: squeue accepts up to
+# three for most of them, and --me is -u with the login already filled in
+canon_opt() {
+	case $1 in
+		-u|--user|--users)       kopt=-u ;;
+		-p|--partition|--partitions) kopt=-p ;;
+		-A|--account|--accounts) kopt=-A ;;
+		-q|--qos)                kopt=-q ;;
+		-j|--job|--jobs)         kopt=-j ;;
+		-M|--cluster|--clusters) kopt=-M ;;
+		-n|--name)               kopt=-n ;;
+		-t|--states|--state)     kopt=-t ;;
+		-w|--nodelist|--node|--nodes) kopt=-w ;;
+		-L|--licenses|--license) kopt=-L ;;
+		-R|--reservation)        kopt=-R ;;
+		-S|--sort)               kopt=-S ;;
+		*)                       kopt= ;;
+	esac
+}
+
+# squeue keeps only the LAST of a repeated filter while sacct takes the UNION,
+# so "sq -u fsill -u root" showed an empty queue beside a finished block full of
+# root's jobs: the two halves of the screen disagreeing about what they show.
+# Both tools accept the list form, so the error has somewhere to point.
+mark_filter() {                  # $1 the filter's own spelling, $2 as written
+	case " $seen " in
+		*" $1 "*) opt_hint "$1"
+			die "$2 sets the same filter twice; squeue would keep only the last one, so write one list instead, e.g. sq $1 $vlist" ;;
+	esac
+	seen="$seen $1"
+}
+
 while [ $# -gt 0 ]; do
 	case $1 in
 		-o|--format) [ $# -ge 2 ] || die "$1 needs a column list, e.g. -o i,j,u"
@@ -71,17 +126,60 @@ while [ $# -gt 0 ]; do
 		# the nonce-framed format below and collapse every record into one field
 		-O|-O?*|--Format|--Format=*|--format=*|-o?*)
 			die "$1 would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
-		-s|--steps)   # squeue ignores SQUEUE_FORMAT in step mode and has no step-format
-		              # env var, so the record framing cannot be delivered safely there
-			die "$1 lists job steps, which sq cannot frame safely; sq shows jobs" ;;
-		# a filter with nothing after it is a usage error.  Left to squeue it
-		# became "slurm unreachable", and the finished block's own translation
-		# reported it as "finished jobs unavailable" - an availability caption
-		# for a typo.  The value itself is still passed through untouched.
-		-u|--user|-p|--partition|-A|--account|--accounts|-q|--qos|-j|--job|--jobs|-M|--cluster|--clusters)
-			[ $# -ge 2 ] || die "$1 needs a value, e.g. sq $1 NAME"
-			args+=("$1"); shift ;;
-		*) args+=("$1"); shift ;;
+		-s|-s?*|--step|--step=*|--steps|--steps=*)   # squeue ignores SQUEUE_FORMAT in step mode and has
+		              # no step-format env var, so the framing cannot be delivered there.
+		              # The "=" spelling has to be here too: without it --steps=x walked
+		              # past this guard into exactly the mode it exists to refuse
+			die "${1%%=*} lists job steps, which sq cannot frame safely; sq shows jobs" ;;
+		--help=*) die "--help takes no value; write it on its own, e.g. sq --help" ;;
+		# sq's own long flags take no value: "--color=never" is what every other
+		# CLI accepts, and squeue answered it with a fake "slurm unreachable"
+		# banner.  --me is here too, because --me IS the value.
+		--me=*|--expand=*|--no-recent=*|--no-bell=*|--color=*|--colour=*|--no-color=*|--no-colour=*|--center=*|--centre=*|--center-all=*|--centre-all=*)
+			die "${1%%=*} takes no value; write it on its own, e.g. sq ${1%%=*}" ;;
+		# -i reprints the queue every N seconds, so a collector would run until
+		# SQ_TIMEOUT and the screen would read "no response after 5s"
+		-i|-i?*|--iterate|--iterate=*)
+			die "$1 repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" ;;
+		--me)   # a user filter carrying its own value, so it collides with -u
+			mark_filter -u "$1"; args+=("$1"); shift ;;
+		*)
+			# ROLE, for every value-taking option sq forwards: the NEXT TOKEN IS
+			# ITS VALUE, whatever it looks like, so sq can never match a value
+			# against one of its own flags.  "sq -u -x" used to switch on
+			# --expand and leave -u bare, and the screen then blamed slurm for a
+			# typo.  A value with nothing after it is still a usage error, and a
+			# value is still forwarded exactly as written.
+			opt=$1; val=; have=0
+			case $opt in                        # a value may be attached already
+				--*=*)             val=${opt#*=}; have=1; opt=${opt%%=*} ;;
+				-[upAqjMntwLRS]?*) val=${opt#??}; have=1; opt=${opt:0:2} ;;
+			esac
+			canon_opt "$opt"
+			if [ -z "$kopt" ]; then args+=("$1"); shift; continue; fi
+			[ $have -eq 1 ] || [ $# -ge 2 ] || { opt_hint "$kopt"
+				die "$opt needs $vnoun, e.g. sq $opt $vex"; }
+			[ $have -eq 1 ] || val=$2
+			# SHAPE, only for the six whose values are Slurm entity names or
+			# ids: no user, partition, account, QoS, job id or cluster is empty
+			# or begins with "-", and the only documented dash-leading value is
+			# -S/--sort's, which is why -S is deliberately not in this set.
+			case $kopt in
+				-u|-p|-A|-q|-j|-M)
+					case $val in
+						''|-*) opt_hint "$kopt"
+							[ -n "$val" ] || die "$opt needs $vnoun, e.g. sq $opt $vex"
+							die "$opt needs $vnoun, not '$(printf '%s' "$val" \
+								| tr -d '[:cntrl:]' | cut -c1-40)'; e.g. sq $opt $vex" ;;
+					esac ;;
+			esac
+			# REPEAT, for every filter and not only the six: squeue keeps the LAST
+			# of a repeated filter while sacct unions them, so "-t R -t PD" showed
+			# "0 running" with four jobs running.  -S is excluded: a second sort
+			# key refines the order, it does not contradict a filter.
+			case $kopt in -S) ;; *) mark_filter "$kopt" "$opt" ;; esac
+			if [ $have -eq 1 ]; then args+=("$1"); shift
+			else args+=("$1" "$2"); shift 2; fi ;;
 	esac
 done
 
@@ -239,7 +337,7 @@ while [ $ai -lt ${#args[@]} ]; do
 	esac
 	case $a in                                       # -u x and --user x
 		-u|--user)               sf=-u; lbl=user ;;
-		--me)                    sf=-u; lbl=user       # "--me=x" lands here via --*=*
+		--me)                    sf=-u; lbl=user       # "--me=x" dies in the arg loop
 			[ $have -eq 2 ] || { sskip="$a takes no value"; break; }
 			[ -n "$v" ] || { sskip="$a has no login name to translate"; break; } ;;
 		-p|--partition)          sf=-r; lbl=part ;;
