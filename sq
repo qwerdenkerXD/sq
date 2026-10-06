@@ -10,7 +10,9 @@
 #                           -V --json --yaml, each of which would replace or
 #                           defeat the output sq parses
 #   sq -c / -C              centre horizontally / in both axes
-#   sq -x                   expand array tasks instead of folding them
+#   sq -x                   expand array tasks instead of folding them; a pending
+#                           bracket squeue prints (9008_[4-9] x6) stays one row,
+#                           which only --array splits
 #   sq --no-recent          hide the recently-finished block
 #   sq --no-bell            never ring the terminal bell on a new failure
 #   sq --color / --no-color force colour on or off
@@ -30,7 +32,9 @@
 #                     value you set is used as given, not clamped)
 #      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect
 #
-# Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4.
+# Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4,
+# and a bracket Slurm prints reads 9008_[4-9] x6 with or without -x: the
+# footer and "+N more" count every task in it, not the row.
 # Finished jobs come from the accounting DB, so the window is SQ_SINCE and not
 # MinJobAge: a job that ended while nobody watched is still seen.  Step rows
 # are read along with it, because the allocation row of a signalled job
@@ -526,6 +530,24 @@ function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
   }
   return out (out?",":"") (start==prev ? start : start "-" prev)
 }
+# How many jobs an id stands for: a Slurm bracket its tasks, any other id one.
+# 0 means it is no id, and the record gate skips it: the anchor cannot say
+# a<=b or step>0, and a bracket counted 0 or 1 would be a wrong number nobody
+# can see is wrong.  Each term is ONE anchored match, because a split on "-"
+# then ":" lets gawk read "12:2" as 12 and count 0-12:2 as 13.
+function ntasks(id, anchor,   br, t, nt, i, m, sum) {
+  if (id !~ anchor) return 0
+  if (!match(id, /_\[([^]]*)\]/, br)) return 1
+  sub(/%[0-9]+$/, "", br[1])              # a throttle limits concurrency, not membership
+  nt = split(br[1], t, ",")
+  for (i=1; i<=nt; i++) {
+    if (!match(t[i], /^([0-9]+)(-([0-9]+)(:([0-9]+))?)?$/, m)) return 0
+    if (m[2] == "") { sum++; continue }
+    if (m[3]+0 < m[1]+0 || (m[4] != "" && m[5]+0 < 1)) return 0
+    sum += int((m[3] - m[1]) / (m[4] != "" ? m[5] : 1)) + 1
+  }
+  return sum
+}
 function ago(s) {
   if (s < 0)    return "-"
   if (s < 60)   return s "s"
@@ -609,10 +631,16 @@ BEGIN{
   FR = SACCT ? 9 : 11           # 8 sacct / 10 -O fields, and the empty sentinel
   FN = 8                        # %C %N %e %m %T %E %H, and the empty sentinel
   # every shape squeue prints for %i / JobID: plain, het component (10646+0),
-  # array task (10646_3) and pending array range (10646_[0-9,12%2])
-  JOBID = "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[[-0-9,%]+\\]))?$"
+  # array task (10646_3) and pending array (10646_[0-9,12%2], 10646_[0-12:2]).
+  # The bracket is the grammar Slurm prints and nothing looser, because the
+  # anchor is what a forged record has to get past: term ("," term)* ("%" N)?,
+  # term = N | N-N | N-N:N.  N is at most 7 digits (MaxArraySize cannot exceed
+  # 4000001), so no row can count 1e20 or NaN, which passes every "< 1" test
+  AN = "[0-9]{1,7}"; AT = AN "(-" AN "(:" AN ")?)?"
+  ID = "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[" AT "(," AT ")*(%" AN ")?\\]))?"
+  JOBID = ID "$"
   # the same, plus the step suffix that dropping -X brings in (.batch, .extern, .0)
-  SACCTID = "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[[-0-9,%]+\\]))?([.][A-Za-z0-9_+.-]+)?$"
+  SACCTID = ID "([.][A-Za-z0-9_+.-]+)?$"
   # a node record leads with %C, alloc/idle/other/total: four machine-emitted
   # numbers, so no reason text can be taken for the start of a record
   NODEID = "^[0-9]+/[0-9]+/[0-9]+/[0-9]+$"
@@ -688,7 +716,13 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
   # one, and NF alone could not tell.
   anchor = (ARGIND == 1) ? NODEID : (ARGIND == 3 && SACCT) ? SACCTID : JOBID
   if (anf < need) next                          # a field held a newline: read on
-  if (anf > need || ACC[need] != "" || ACC[1] !~ anchor) {
+  # ... and an id that names at least one job.  In the fallback -O JobID is the
+  # plain job id and its expression arrives bare in ArrayTaskID (0-9%3), so it
+  # is put back together the way %i and sacct print it, and gated as that
+  tid = ACC[1]
+  if (ARGIND == 3 && !SACCT && ACC[8] != "N/A" && ACC[8] !~ /^[0-9]+$/)
+    tid = ACC[7] "_[" ACC[8] "]"
+  if (anf > need || ACC[need] != "" || ACC[1] !~ anchor || (tw = ntasks(tid, anchor)) < 1) {
     skip[ARGIND]++                              # a row we cannot read (squeue
     anf = 0; delete ACC                         # -s emits step ids, say): lose that
     next                                        # record, never the rest of the stream
@@ -722,7 +756,9 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     q++
     for (i=1; i<=n; i++) raw[q,i] = F[i+1]
     qstate[q] = F[n+2]; qlimit[q] = F[n+3]; qstart[q] = F[n+4]
-    cnt[F[n+2]]++
+    qw[q] = tw; qjobs += tw                     # a pending bracket is many jobs in one
+    cnt[F[n+2]] += tw                           # row; tw is read from the hidden %i, so
+                                                # it counts whatever columns are shown
     next
   }
   if (SACCT) {       # ---- sacct: JobID User State ExitCode Elapsed End Node Name
@@ -749,7 +785,7 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     split(F[3], stok, " ")
     code = (stok[1] in SC) ? SC[stok[1]] : ""
     ddrop[s] = (code != "" && !FIN[stok[1]])   # running, pending, requeued, resizing
-    did[s] = F[1]; duser[s] = F[2]
+    did[s] = dlbl[s] = F[1]; duser[s] = F[2]; dw[s] = tw
     dsc[s] = code                         # "" = unknown: raw, cyan, never rings
     dstate[s] = stok[1]                   # " by <uid>" never reaches the display
     dcxl[s] = (stok[1] == "CANCELLED" && stok[2] == "by") ? stok[3] : ""
@@ -766,6 +802,7 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
   xcm(F[1], F[4])
   dq++
   did[dq]=F[1]; dname[dq]=F[10]; dsc[dq]=F[2]; dstate[dq]=F[3]
+  dlbl[dq]=tid; dw[dq]=tw         # shown as sacct shows it; the bell keeps the JobID
   dkey[dq]=F[2]; dcxl[dq]=""
   dsec[dq]=dur(F[5])
   dend[dq]=epoch(F[6]); daj[dq]=F[7]; dat[dq]=F[8]; duser[dq]=F[9]
@@ -799,11 +836,12 @@ END{
       key = base SUBSEP qstate[r]
       for (i=1; i<=n; i++) if (i != idc) key = key SUBSEP raw[r,i]
     }
-    if (key in grp) { g = grp[key]; gtask[g] = gtask[g] "," task; gn[g]++ }
+    if (key in grp) { g = grp[key]; gtask[g] = gtask[g] "," task; gn[g]++; gw[g] += qw[r] }
     else {
       grp[key] = g = ++rows
       for (i=1; i<=n; i++) v[rows,i] = raw[r,i]
       state[rows] = qstate[r]; gtask[rows] = task; gn[rows] = 1; gbase[rows] = base
+      gw[rows] = qw[r]
       lfrac[rows] = -1
       if (lc) {                                 # how much of the limit is left
         lim = dur(qlimit[r]); lft = dur(raw[r,lc])
@@ -811,8 +849,12 @@ END{
       }
     }
   }
+  # gn counts distinct ids and alone decides the rebuild, or a bracket would come
+  # out as 7000_[1-20]_[] ×20; a bracket never folds (it has no _N), so its ×N
+  # is the weight of its own row, and shows under -x too
   for (r=1; r<=rows; r++)
     if (gn[r] > 1) v[r,idc] = sprintf("%s_[%s] ×%d", gbase[r], compress(gtask[r]), gn[r])
+    else if (idc && gw[r] > 1) v[r,idc] = v[r,idc] " ×" gw[r]
 
   # ---- natural widths -------------------------------------------------
   for (i=1; i<=n; i++) w[i] = length(hd[i])
@@ -847,7 +889,7 @@ END{
     if (key in dgrp) g = dgrp[key]
     else {
       dgrp[key] = g = ++d
-      gid1[d]=did[r]; rname[d]=dname[r]; rstate[d]=dstate[r]; gcxl[d]=dcxl[r]
+      gid1[d]=dlbl[r]; rname[d]=dname[r]; rstate[d]=dstate[r]; gcxl[d]=dcxl[r]
       rst[d]=dsc[r]; rend[d]=rmin[d]=dend[r]; gbase2[d]=daj[r]
       guser[d]=duser[r]; gmin[d]=gmax[d]=dsec[r]
     }
@@ -861,6 +903,7 @@ END{
       gseen[g SUBSEP dat[r]] = 1                # step row or repeated row can inflate
       gtsk[g] = (gcnt[g] ? gtsk[g] "," : "") dat[r]
       gcnt[g]++
+      gw2[g] += dw[r]                           # and jobs: a bracket is many in one row
     }
     if (dsec[r] < gmin[g]) gmin[g] = dsec[r]
     if (dsec[r] > gmax[g]) gmax[g] = dsec[r]
@@ -914,7 +957,7 @@ END{
   }
   shown = (d > RECENT_MAX) ? RECENT_MAX : d
   more = 0                                      # jobs, not groups: "+2 more" must
-  for (r=shown+1; r<=d; r++) more += gcnt[ord[r]]     # not be able to hide 200 tasks
+  for (r=shown+1; r<=d; r++) more += gw2[ord[r]]      # not be able to hide 200 tasks
 
   # ---- the finished rows, then a shrink ladder until they fit ----------
   for (r=1; r<=shown; r++) {                    # level-independent cells, once
@@ -940,7 +983,7 @@ END{
       g = ord[r]
       rv[g,1] = (gcnt[g] > 1) \
         ? sprintf("%s_[%s] ×%d", gbase2[g], (lvl >= 4 ? "…" : compress(gtsk[g])), gcnt[g]) \
-        : gid1[g]
+        : gid1[g] (gw2[g] > 1 ? " ×" gw2[g] : "")      # gcnt, not gw2, gates the rebuild
       rv[g,3] = (lvl >= 5 && rst[g] != "") ? rst[g] : rstate[g]
       rv[g,4] = exset(gex[g], excap) (gcxl[g] == "" ? "" : " by " gcxl[g])
       rv[g,5] = (gmin[g] == gmax[g] || lvl >= 1) ? elap(gmax[g]) \
@@ -1150,8 +1193,8 @@ END{
   if (!qtrunc && !qbad) {                       # no counts from a stream we could not read
     out[++o] = ""
     out[++o] = sprintf("%s%s%d%s jobs   %s%d running%s   %s%d pending%s   %s%d other%s", lm,
-                       e("1"), q, e("0"), e("32"), cnt["R"]+0, e("0"),
-                       e("33"), cnt["PD"]+0, e("0"), e("31"), q - cnt["R"] - cnt["PD"], e("0"))
+                       e("1"), qjobs, e("0"), e("32"), cnt["R"]+0, e("0"),
+                       e("33"), cnt["PD"]+0, e("0"), e("31"), qjobs - cnt["R"] - cnt["PD"], e("0"))
   }
 
   if (center == 2) {                            # vertical centring, never overflowing

@@ -590,7 +590,7 @@ c_layout_size() {
 	need "SQ_HEIGHT beats LINES"        eval 'calls_are 1 1 0 1 && fills 20'
 }
 
-# ---- 11. known defects --------------------------------------------------------
+# ---- 11. array ids and their counts, and known defects -------------------------
 # Array-count spec, acceptance 4b: the FORBIDDEN states are a FAIL at any commit,
 # never an XFAIL: (i) a row dropped today shown but counted 1; (ii) a row
 # showing ×N while the footer or "+N more" counts it as anything but N, or a
@@ -610,57 +610,50 @@ pending_fixture() {  # pending_fixture NAME ID: prints the fixture's directory
 	  printf 'i=%s; j=sweep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A\n' "$2"; } > "$d/squeue"
 	printf '%s' "$d"
 }
-c_xf_pending_range() {
-	T_TITLE=; xfail "a pending _[1-20] row counts 1 job, not 20, and has no ×20"
+c_pending_range() {
+	T_TITLE="a pending _[1-20] row reads 7000_[1-20] ×20 and counts 20 jobs"
 	sq_run pending-range --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	bracket_guards queue 7000 20
-	want "cell '7000_[1-20] ×20'"     row_cell queue "7000_[1-20] ×20"
-	want "footer 20/0/20/0"           footer_is 20 0 20 0
-	today "bare cell '7000_[1-20]' then 'sweep'" cell_then queue "7000_[1-20]" sweep
-	today "footer 1/0/1/0"            footer_is 1 0 1 0
+	need "cell '7000_[1-20] ×20'"     row_cell queue "7000_[1-20] ×20"
+	need "footer 20/0/20/0"           footer_is 20 0 20 0
 }
-pending_bracket() {  # pending_bracket ID BASE N: a bracket today shown bare and counted 1
+pending_bracket() {  # pending_bracket ID BASE N: a pending bracket shown as ID ×N and counted N
 	sq_run "$(pending_fixture "$2" "$1")" --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	bracket_guards queue "$2" "$3"
-	want "cell '$1 ×$3'"              row_cell queue "$1 ×$3"
-	want "footer $3/0/$3/0"           footer_is "$3" 0 "$3" 0
-	today "bare cell '$1' then 'sweep'" cell_then queue "$1" sweep
-	today "footer 1/0/1/0"            footer_is 1 0 1 0
+	need "cell '$1 ×$3'"              row_cell queue "$1 ×$3"
+	need "footer $3/0/$3/0"           footer_is "$3" 0 "$3" 0
 }
-c_xf_pending_commas() {
-	T_TITLE=; xfail "a pending _[1-5,8,10-12] row counts 1 job, not 9"
+c_pending_commas() {
+	T_TITLE="a pending _[1-5,8,10-12] row reads ×9 and counts 9 jobs"
 	pending_bracket "7003_[1-5,8,10-12]" 7003 9
 }
-c_xf_pending_throttle() {
-	T_TITLE=; xfail "a pending _[1-20%4] row counts 1 job, not 20 (the throttle limits concurrency, not membership)"
+c_pending_throttle() {
+	T_TITLE="a pending _[1-20%4] row counts 20 jobs (the throttle limits concurrency, not membership)"
 	pending_bracket "7004_[1-20%4]" 7004 20
 }
-c_xf_pending_no_id_column() {
-	T_TITLE=; xfail "sq -o j,T with a pending _[1-20]: the footer counts 1 pending, not 20"
+c_pending_no_id_column() {
+	T_TITLE="sq -o j,T with a pending _[1-20]: the footer counts 20 pending"
 	sq_run pending-range -- -o j,T
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	need "one row: 'sweep PENDING'"   eval '[ "$(nrows queue)" -eq 1 ] && rows queue | grep -qE "^ +sweep +PENDING$"'
-	want "footer 20/0/20/0"           footer_is 20 0 20 0
-	today "footer 1/0/1/0"            footer_is 1 0 1 0
+	need "footer 20/0/20/0"           footer_is 20 0 20 0
 }
-c_xf_pending_strided() {
-	T_TITLE=; xfail "a pending strided _[0-12:2] row is dropped as unreadable; should be shown as 7 jobs"
+c_pending_strided() {
+	T_TITLE="a pending strided _[0-12:2] row is shown as ×7 and counted 7, with no skip note"
 	sq_run pending-strided --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	bracket_guards queue 7001 7
-	want "cell '7001_[0-12:2] ×7'"    row_cell queue "7001_[0-12:2] ×7"
-	want "footer 7/0/7/0"             footer_is 7 0 7 0
-	want "no unreadable note"         no_skips
+	need "cell '7001_[0-12:2] ×7'"    row_cell queue "7001_[0-12:2] ×7"
+	need "footer 7/0/7/0"             footer_is 7 0 7 0
+	need "no unreadable note"         no_skips
 	need "4b(i): shown but counted 1" eval '
 		! { rows queue | grep -q "^ *7001_" && section footer | grep -qE "^ *1 jobs "; }'
-	today "dropped, with the skip note" eval '
-		has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0 && [ "$(nrows queue)" -eq 0 ]'
 }
 c_xf_pending_long() {
 	T_TITLE=; xfail "a pending id over 31 characters is cut by squeue (no SLURM_BITSTR_LEN=0) and dropped; should be shown as 10 jobs"
@@ -690,8 +683,8 @@ malformed() {        # malformed NAME ID BASE
 	need "never counted other than 0 (skipped) or 1 (today)" eval '
 		case $(footer_jobs) in 0|1) true ;; *) false ;; esac'
 	need "no ×K on it"                eval '[ -z "$(xmarks queue "'"$3"'")" ]'
-	want "skipped with the note"      has "↳ 1 unreadable queue row skipped"
-	want "not shown, footer 0/0/0/0"  eval '[ "$(nrows queue)" -eq 0 ] && footer_is 0 0 0 0'
+	need "skipped with the note"      has "↳ 1 unreadable queue row skipped"
+	need "not shown, footer 0/0/0/0"  eval '[ "$(nrows queue)" -eq 0 ] && footer_is 0 0 0 0'
 }
 c_malformed_step0() {
 	T_TITLE="malformed _[0-4:0] (step 0) is skipped with the note"
@@ -701,70 +694,62 @@ c_malformed_dots() {
 	T_TITLE="malformed _[...] is skipped with the note"
 	malformed dots "7008_[...]" 7008
 }
-c_xf_malformed_reversed() {
-	T_TITLE=; xfail "malformed _[5-2] passes today's id check and is shown, counted 1"
+c_malformed_reversed() {
+	T_TITLE="malformed _[5-2] (empty range) is skipped with the note"
 	malformed reversed "7005_[5-2]" 7005
-	today "bare cell '7005_[5-2]' then 'sweep', footer 1/0/1/0" eval 'cell_then queue "7005_[5-2]" sweep && footer_is 1 0 1 0'
 }
-c_xf_malformed_dash() {
-	T_TITLE=; xfail "malformed _[1--2] passes today's id check and is shown, counted 1"
+c_malformed_dash() {
+	T_TITLE="malformed _[1--2] is skipped with the note"
 	malformed dash "7007_[1--2]" 7007
-	today "bare cell '7007_[1--2]' then 'sweep', footer 1/0/1/0" eval 'cell_then queue "7007_[1--2]" sweep && footer_is 1 0 1 0'
 }
-c_xf_malformed_huge() {
-	T_TITLE=; xfail "a 400-digit index passes today's id check and is shown (cut to the column), counted 1"
+c_malformed_huge() {
+	T_TITLE="a 400-digit index is skipped with the note"
 	local digits; digits=$(printf '%0400d' 7)
 	malformed huge "7009_[$digits]" 7009
-	today "one row, its cell cut: '7009_[000…' then 'sweep', footer 1/0/1/0" eval '
-		[ "$(nrows queue)" -eq 1 ] && rows queue | grep -qE "^ +7009_\[0+… +sweep " && footer_is 1 0 1 0'
 }
-c_xf_finished_throttled() {
-	T_TITLE=; xfail "a finished _[0-9%3] row from sacct counts 1, shows no ×10"
+c_finished_throttled() {
+	T_TITLE="a finished _[0-9%3] row from sacct reads 7002_[0-9%3] ×10"
 	sq_run finished-throttled --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	bracket_guards recent 7002 10
 	need "state CANCELLED, the canceller in EXIT" eval '
 		rows recent | grep -qE "^ +7002_\[0-9%3\]( ×[0-9]+)? +sweep +CANCELLED +0 by [^ ]+ "'
-	want "cell '7002_[0-9%3] ×10'"    row_cell recent "7002_[0-9%3] ×10"
-	today "bare cell '7002_[0-9%3]' then 'sweep'" cell_then recent "7002_[0-9%3]" sweep
+	need "cell '7002_[0-9%3] ×10'"    row_cell recent "7002_[0-9%3] ×10"
 }
-c_xf_fallback_throttled() {
-	T_TITLE=; xfail "a finished throttled array via the squeue fallback counts 1, shows the bare id"
+c_fallback_throttled() {
+	T_TITLE="a finished throttled array via the squeue fallback reads 7002_[0-9%3] ×10, as from sacct"
 	sq_run fallback-throttled --
 	need "rc 0"                       rc_is 0
 	need "stubs: sacct failed, fallback used" calls_are 1 1 1 1
 	bracket_guards recent 7002 10
-	want "cell '7002_[0-9%3] ×10'"    row_cell recent "7002_[0-9%3] ×10"
-	today "bare cell '7002' then 'sweep'" cell_then recent 7002 sweep
+	need "cell '7002_[0-9%3] ×10'"    row_cell recent "7002_[0-9%3] ×10"
 }
 # Acceptance 3/4: capped to one finished row, the newer single job is shown and
 # the throttled array is behind "+N more", which counts JOBS.  The uncapped twin
 # shows whether the array row already carries ×10, which "+N more" must match.
-more_case() {        # more_case FIXTURE CALLS TODAY-CELL
+more_case() {        # more_case FIXTURE CALLS
 	local -a calls; read -ra calls <<< "$2"
 	sq_run "$1" SQ_RECENT_MAX=5 --
 	need "uncapped: rc 0"             rc_is 0
 	need "uncapped: stubs called"     calls_are "${calls[@]}"
 	bracket_guards recent 7002 10
 	local marks; marks=$(xmarks recent 7002)
-	want "uncapped: cell '7002_[0-9%3] ×10'" row_cell recent "7002_[0-9%3] ×10"
-	today "uncapped: bare cell '$3' then 'sweep'" cell_then recent "$3" sweep
+	need "uncapped: cell '7002_[0-9%3] ×10'" row_cell recent "7002_[0-9%3] ×10"
 	sq_run "$1" SQ_RECENT_MAX=1 --
 	need "capped: rc 0"               rc_is 0
 	need "capped: stubs called"       calls_are "${calls[@]}"
 	need "capped: the newer job 7100 is the one row" eval '[ "$(row_first_fields recent | paste -sd,)" = 7100 ]'
 	need "4b(ii): ×10 shown means '+10 more'" eval '[ -z "$marks" ] || [ "$(more_count)" = 10 ]'
-	want "capped: '+10 more'"         eval '[ "$(more_count)" = 10 ]'
-	today "capped: exactly '+1 more'" matches '^ +\+1 more$'
+	need "capped: '+10 more'"         eval '[ "$(more_count)" = 10 ]'
 }
-c_xf_more_sacct() {
-	T_TITLE=; xfail "capped finished block (sacct): '+N more' counts the throttled array as 1, not 10"
-	more_case more-sacct "1 1 0 1" "7002_[0-9%3]"
+c_more_sacct() {
+	T_TITLE="capped finished block (sacct): '+10 more' counts every task of the throttled array"
+	more_case more-sacct "1 1 0 1"
 }
-c_xf_more_fallback() {
-	T_TITLE=; xfail "capped finished block (fallback): '+N more' counts the throttled array as 1, not 10"
-	more_case more-fallback "1 1 1 1" 7002
+c_more_fallback() {
+	T_TITLE="capped finished block (fallback): '+10 more' counts every task of the throttled array"
+	more_case more-fallback "1 1 1 1"
 }
 c_xf_bitstr() {
 	T_TITLE=; xfail "squeue and sacct are called without SLURM_BITSTR_LEN=0"
@@ -846,10 +831,10 @@ cases=(
 	finished user_filter sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
-	xf_pending_range xf_pending_commas xf_pending_throttle xf_pending_no_id_column
-	xf_pending_strided xf_pending_long
-	malformed_step0 malformed_dots xf_malformed_reversed xf_malformed_dash xf_malformed_huge
-	xf_finished_throttled xf_fallback_throttled xf_more_sacct xf_more_fallback xf_bitstr
+	pending_range pending_commas pending_throttle pending_no_id_column
+	pending_strided xf_pending_long
+	malformed_step0 malformed_dots malformed_reversed malformed_dash malformed_huge
+	finished_throttled fallback_throttled more_sacct more_fallback xf_bitstr
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 )
 start=$(date +%s%N)
