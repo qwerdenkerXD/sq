@@ -1,0 +1,4 @@
+# a job NAME that looks like a bracketed id: a name is no id, so when NAME
+# shrinks it takes the plain right cut, never the cut inside the brackets
+@include ../_common/squeue-defaults
+i=1101; j=sweep_[1,4,7,10,13,16,19,22,25,28,31,34,37,40,43,46] ×16

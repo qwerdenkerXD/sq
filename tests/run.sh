@@ -839,6 +839,62 @@ c_shrink_finished() {
 	need "capped: '+97 more'"         eval '[ "$(more_count)" = 97 ]'
 	need "footer 0/0/0/0"             footer_is 0 0 0 0
 }
+# sq does not pin the locale: under LC_ALL=C length() counts bytes and "…" is
+# 3, so the elision must measure it rather than assume 1.  Only ×N and valid
+# UTF-8 are asserted here: the rest of the layout is byte-based under C anyway.
+# Validity is checked byte by byte in gawk, needing no tool beyond the suite's.
+utf8_valid() {
+	LC_ALL=C gawk '{ s = $0
+		gsub(/[\x01-\x7F]|[\xC2-\xDF][\x80-\xBF]|\xE0[\xA0-\xBF][\x80-\xBF]|[\xE1-\xEC\xEE\xEF][\x80-\xBF][\x80-\xBF]|\xED[\x80-\x9F][\x80-\xBF]|\xF0[\x90-\xBF][\x80-\xBF][\x80-\xBF]|[\xF1-\xF3][\x80-\xBF][\x80-\xBF][\x80-\xBF]|\xF4[\x80-\x8F][\x80-\xBF][\x80-\xBF]/, "", s)
+		if (s != "") bad++ } END { exit bad > 0 }' "$OUT"
+}
+c_shrink_locale() {
+	T_TITLE="under LC_ALL=C the elided 600_[…] still keeps its exact ×67, in valid UTF-8"
+	local wd
+	for wd in 80 79; do                 # 79: where a byte-counted cut split a character
+		sq_run shrink-pending SLURM_BITSTR_LEN=0 LC_ALL=C SQ_WIDTH=$wd --
+		need "$wd: rc 0"              rc_is 0
+		need "$wd: stubs called"      calls_are 1 1 0 1
+		need "$wd: the 600 row shows ×67" eval '[ "$(xmarks queue 600)" = 67 ]'
+		need "$wd: valid UTF-8"       utf8_valid
+	done
+}
+# A NAME is no id, even one that looks like a bracket: it keeps the plain cut
+name_cut() {         # name_cut SECTION ID: the NAME of row ID is a right cut of the full name
+	rows "$1" | ID=$2 LC_ALL=$utf8 gawk '
+		BEGIN { full = "sweep_[1,4,7,10,13,16,19,22,25,28,31,34,37,40,43,46] ×16" }
+		$1 == ENVIRON["ID"] && $2 ~ /…$/ && index(full, substr($2, 1, length($2) - 1)) == 1 { f = 1 }
+		END { exit !f }'
+}
+c_shrink_name() {
+	T_TITLE="a NAME that looks like a bracket keeps the plain right cut, in both tables"
+	sq_run shrink-name SQ_WIDTH=80 --
+	need "rc 0"                       rc_is 0
+	need "stubs called"               calls_are 1 1 0 1
+	need "queue NAME right-cut"       name_cut queue 1101
+	need "finished NAME right-cut"    name_cut recent 1001
+	need "no cut inside a name's brackets" eval 'lacks "…]" && lacks "×16"'
+}
+# How far each rung goes: rung 4 shaves JOBID down to the widest BASE_[…] ×N
+# and no further, and only as far as needed; idfit keeps every term that fits
+c_shrink_extent() {
+	T_TITLE="rung 4 stops at BASE_[…] ×N and only when needed; idfit keeps every whole term that fits"
+	sq_run shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=50 SQ_RECENT_MAX=5 --
+	need "50: rc 0"                   rc_is 0
+	need "50: cell '600_[1,…] ×67'"   row_cell recent "600_[1,…] ×67"
+	need "50: cell '5000_[…] ×30'"    row_cell recent "5000_[…] ×30"
+	local wd
+	for wd in 53 55; do
+		sq_run shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=$wd SQ_RECENT_MAX=5 --
+		need "$wd: rc 0"              rc_is 0
+		need "$wd: ×67 and ×30 kept"  eval '[ "$(xmarks recent 600)" = 67 ] && [ "$(xmarks recent 5000)" = 30 ]'
+		need "$wd: STATE keeps its words" eval 'rows recent | grep -qE "^ *600_.* CANCELLED " && rows recent | grep -qE "^ *5000_.* FAILED "'
+	done
+	sq_run shrink-pending SLURM_BITSTR_LEN=0 SQ_WIDTH=65 --
+	need "65: rc 0"                   rc_is 0
+	need "65: cell '600_[1,…] ×67'"   row_cell queue "600_[1,…] ×67"
+}
+
 # Narrower than BASE_[…] ×N no cut keeps both, and the cell takes the plain
 # right cut: -o i,T at 25 columns leaves JOBID exactly 15, at 24 one short
 c_shrink_floor() {
@@ -932,6 +988,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated xf_bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
+	shrink_locale shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 )
 start=$(date +%s%N)

@@ -538,12 +538,12 @@ function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
 # Below BASE_[…] ×N the cell is returned whole, for the plain right cut:
 # the base id is in this cell alone, the footer and "+N more" still count.
 function idfloor(x,   b) {                  # the narrowest idfit() can go
-  return match(x, BRACKET, b) ? length(b[1] b[3]) + 1 : length(x)
+  return match(x, BRACKET, b) ? length(b[1] b[3] "…") : length(x)
 }
 function idfit(x, wd,   b, keep) {
   if (length(x) <= wd || wd < idfloor(x)) return x
   match(x, BRACKET, b)
-  keep = substr(b[2], 1, wd - length(b[1] b[3]) - 1)
+  keep = substr(b[2], 1, wd - length(b[1] b[3] "…"))   # "…" is 3 under LC_ALL=C
   sub(/[^,]*$/, "", keep)
   return b[1] keep "…" b[3]
 }
