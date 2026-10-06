@@ -21,6 +21,8 @@
 #      SQ_COLOR  0 = never colour, 1 = always
 #      SQ_TIMEOUT seconds to wait for slurm before declaring it unreachable (5)
 #      SQ_SINCE  how far back the finished block looks (sacct -S; now-2hours)
+#      SQ_RECENT_MAX  finished rows (default: the space left, clamped 3-25; a
+#                     value you set is used as given, not clamped)
 #      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect
 #
 # Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4.
@@ -64,7 +66,7 @@ while [ $# -gt 0 ]; do
 		--no-bell) bell=0; shift ;;
 		--color|--colour) color=1; shift ;;
 		--no-color|--no-colour) color=0; shift ;;
-		-h|--help) sed -n '2,41p' "$0" | cut -c2- | sed 's/^ //'; exit 0 ;;
+		-h|--help) sed -n '2,43p' "$0" | cut -c2- | sed 's/^ //'; exit 0 ;;
 		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
 		# the nonce-framed format below and collapse every record into one field
 		-O|-O?*|--Format|--Format=*|--format=*|-o?*)
@@ -72,6 +74,13 @@ while [ $# -gt 0 ]; do
 		-s|--steps)   # squeue ignores SQUEUE_FORMAT in step mode and has no step-format
 		              # env var, so the record framing cannot be delivered safely there
 			die "$1 lists job steps, which sq cannot frame safely; sq shows jobs" ;;
+		# a filter with nothing after it is a usage error.  Left to squeue it
+		# became "slurm unreachable", and the finished block's own translation
+		# reported it as "finished jobs unavailable" - an availability caption
+		# for a typo.  The value itself is still passed through untouched.
+		-u|--user|-p|--partition|-A|--account|--accounts|-q|--qos|-j|--job|--jobs|-M|--cluster|--clusters)
+			[ $# -ge 2 ] || die "$1 needs a value, e.g. sq $1 NAME"
+			args+=("$1"); shift ;;
 		*) args+=("$1"); shift ;;
 	esac
 done
@@ -152,8 +161,15 @@ lines=${SQ_HEIGHT:-${LINES:-}}
 [ -n "$lines" ] || lines=$(tput lines 2>/dev/null) || lines=24
 [ "$lines" -gt 4 ] 2>/dev/null || lines=24
 
-me=${SQ_BELL_USER:-$(id -un)}
+login=                                          # what "--me" means to squeue,
+me=${SQ_BELL_USER:-$(id -un)}                   # resolved only if --me asks
 bellall=${SQ_BELL_ALL:-0}
+
+# how many finished rows to show.  0 = work it out from what the screen has
+# left; anything that is not a plain positive integer is not a row count
+rmax=${SQ_RECENT_MAX:-0}
+case $rmax in ''|*[!0-9]*|?????????*) rmax=0 ;; esac
+[ "$rmax" -gt 0 ] 2>/dev/null || rmax=0
 statedir=${XDG_CACHE_HOME:-$HOME/.cache}/sq
 statetmp=$statedir/alerted.$$                   # renamed over alerted at the end
 [ "$bell" = 0 ] || mkdir -p "$statedir" 2>/dev/null || bell=0
@@ -201,11 +217,15 @@ sargs=(); sfilt=; sskip=; suser=0; ai=0
 while [ $ai -lt ${#args[@]} ]; do
 	a=${args[$ai]}; ai=$((ai+1)); v=; have=0
 	case $a in                                       # all four spellings:
-		--*=*)       v=${a#*=}; have=1; a=${a%%=*} ;;   # --user=x
-		-[upAqjM]?*) v=${a#??}; have=1; a=${a:0:2} ;;   # -ux
+		--me)        v=${login:=$(id -un)}; have=2 ;;   # carries no value of its own,
+		--*=*)       v=${a#*=}; have=1; a=${a%%=*} ;;   # it supplies one: sacct has
+		-[upAqjM]?*) v=${a#??}; have=1; a=${a:0:2} ;;   # no --me, only -u <login>
 	esac
 	case $a in                                       # -u x and --user x
 		-u|--user)               sf=-u; lbl=user ;;
+		--me)                    sf=-u; lbl=user       # "--me=x" lands here via --*=*
+			[ $have -eq 2 ] || { sskip="$a takes no value"; break; }
+			[ -n "$v" ] || { sskip="$a has no login name to translate"; break; } ;;
 		-p|--partition)          sf=-r; lbl=part ;;
 		-A|--account|--accounts) sf=-A; lbl=acct ;;
 		-q|--qos)                sf=-q; lbl=qos ;;
@@ -234,7 +254,11 @@ case $since in
 esac
 
 : > "$tmp/recent"
-rsrc=none; rwhy=$sskip; rerr=
+# rwhyc names the CAUSE, not the text: "accounting is down" and "this filter
+# has no accounting equivalent" both end on the squeue fallback, and the
+# caption used to blame the first for both
+rsrc=none; rwhy=$sskip; rerr=; rwhyc=
+[ -z "$sskip" ] || rwhyc=filter
 # sacct runs whatever $jerr says: it talks to slurmdbd, not slurmctld, so it is
 # the one block that can still be filled while the controller is out.  No -X,
 # because the allocation row of a signalled job reports SUCCESS/0 and the
@@ -254,7 +278,7 @@ if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	# is what the closed whitelist above is for; rc!=0 can still leave a partial
 	# file behind, so that is thrown away rather than rendered
 	if [ $se -eq 0 ]; then rsrc=sacct
-	else rwhy=$(err_of $se "$tmp/recent.err" | tr -d '[:cntrl:]'); : > "$tmp/recent"
+	else rwhy=$(err_of $se "$tmp/recent.err" | tr -d '[:cntrl:]'); rwhyc=acct; : > "$tmp/recent"
 	fi
 fi
 
@@ -287,6 +311,7 @@ gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v center="$center" -v fo
      -v statetmp="$statetmp" -v hastty="$hastty" -v horizon="$horizon" \
      -v nerr="$nerr" -v jerr="$jerr" -v me="$me" -v bellall="$bellall" \
      -v recent="$recent" -v rsrc="$rsrc" -v rwhy="$rwhy" -v rerr="$rerr" \
+     -v rwhyc="$rwhyc" -v rmax="$rmax" \
      -v wtxt="$wtxt" -v sfilt="$sfilt" -v uidmap="$uidmap" \
      -v host="$(hostname -s)" -v now="$(date '+%H:%M:%S')" '
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
@@ -374,7 +399,7 @@ BEGIN{
     print "sq: internal field separator missing" > "/dev/stderr"   # command line can
     fatal = 1; exit 1                                     # never forge a queue row
   }
-  BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4; RECENT_MAX = 6
+  BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4   # RECENT_MAX: see END
   n = split(keys, k, ",")
   FQ = n + 5                    # %i, n displayed, %t %l %S, and the empty sentinel
   FR = SACCT ? 9 : 11           # 8 sacct / 10 -O fields, and the empty sentinel
@@ -495,23 +520,35 @@ ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%
       next
     }
     xcm(F[1], F[4])
-    if (F[1] in arow) next                # a second allocation row for one id (a
-    arow[F[1]] = 1                        # requeue rewrite): its exit still counts
-    split(F[3], stok, " ")                # towards the fold, the row does not
+    ep = epoch(F[6])
+    # a second allocation row for one id (a requeue rewrite).  Its exit still
+    # counts towards the fold, its STATE only if it is the later attempt: 23.11
+    # rewrites the row in place, but letting row order decide would mean a job
+    # that ended COMPLETED could render FAILED - and ring - on a release that
+    # keeps both rows.  A later row could in principle hide an earlier terminal
+    # one, but a running or pending row has End=Unknown, which epoch() reads as
+    # 0, so it always loses the comparison
+    if (F[1] in arow) {
+      if (ep <= aend[F[1]]) next
+      s = arow[F[1]]
+    } else {
+      s = ++dq; arow[F[1]] = s
+    }
+    aend[F[1]] = ep
+    split(F[3], stok, " ")
     code = (stok[1] in SC) ? SC[stok[1]] : ""
-    if (code != "" && !FIN[stok[1]]) next # running, pending, requeued, resizing
-    dq++
-    did[dq] = F[1]; duser[dq] = F[2]
-    dsc[dq] = code                        # "" = unknown: raw, cyan, never rings
-    dstate[dq] = stok[1]                  # " by <uid>" never reaches the display
-    dcxl[dq] = (stok[1] == "CANCELLED" && stok[2] == "by") ? stok[3] : ""
-    dsec[dq] = dur(F[5])                  # the raw HH:MM:SS is never displayed
-    dend[dq] = epoch(F[6]); dname[dq] = F[8]
+    ddrop[s] = (code != "" && !FIN[stok[1]])   # running, pending, requeued, resizing
+    did[s] = F[1]; duser[s] = F[2]
+    dsc[s] = code                         # "" = unknown: raw, cyan, never rings
+    dstate[s] = stok[1]                   # " by <uid>" never reaches the display
+    dcxl[s] = (stok[1] == "CANCELLED" && stok[2] == "by") ? stok[3] : ""
+    dsec[s] = dur(F[5])                   # the raw HH:MM:SS is never displayed
+    dend[s] = ep; dname[s] = F[8]
     # accounting has no Array* field at all, so base and task come from the
     # JobID; a bracketed id (10401_[0-9]) names no single task and never folds
-    if (match(F[1], /^(.+)_([0-9]+)$/, smm)) { daj[dq] = smm[1]; dat[dq] = smm[2] }
-    else                                     { daj[dq] = F[1];   dat[dq] = "" }
-    dkey[dq] = dstate[dq] SUBSEP dcxl[dq]
+    if (match(F[1], /^(.+)_([0-9]+)$/, smm)) { daj[s] = smm[1]; dat[s] = smm[2] }
+    else                                     { daj[s] = F[1];   dat[s] = "" }
+    dkey[s] = dstate[s] SUBSEP dcxl[s]
     next
   }
   if (!(F[2] in DONE)) next                     # ---- squeue -t all, finished only
@@ -588,6 +625,7 @@ END{
 
   # ---- group finished jobs by array base, state and canceller ---------
   for (r=1; r<=dq; r++) {
+    if (ddrop[r]) continue                      # the winning row says not finished
     if (fold && dat[r] ~ /^[0-9]+$/) key = "a" SUBSEP daj[r] SUBSEP dkey[r]
     else                             key = "s" SUBSEP r
     if (key in dgrp) g = dgrp[key]
@@ -614,20 +652,48 @@ END{
     if (dend[r] < rmin[g]) rmin[g] = dend[r]
   }
 
-  # newest End first, but round-robin across array bases, so one array can
-  # never own the whole cap and hide all the other users jobs behind it
+  # Newest End first, globally, with at most two groups per array base in the
+  # first pass.  Round-robin gave every base a slot before any base got a
+  # second, which demoted a FRESH array failure below four staler single jobs
+  # - seen live, with a fresh FAILED group hidden behind "+118 more".
+  # A non-array group is its own base, so single jobs are never capped against
+  # each other.  The second pass refills from what the cap held back, still
+  # newest-first, so a window with few bases wastes no slot.
   for (r=1; r<=d; r++) {
     best = 0
     for (j=1; j<=d; j++) if (!dused[j] && (!best || rend[j] > rend[best])) best = j
     dused[best] = 1
-    b = gbase2[best]
-    if (!(b in bseen)) { bseen[b] = 1; border[++nb] = b }
-    bn[b]++; bq[b SUBSEP bn[b]] = best
+    sord[r] = best
   }
   r = 0
-  for (round=1; r < d && round <= d; round++)
-    for (bi=1; bi<=nb; bi++)
-      if (round <= bn[border[bi]]) ord[++r] = bq[border[bi] SUBSEP round]
+  for (j=1; j<=d; j++) {
+    g = sord[j]
+    if (bn[gbase2[g]]++ >= 2) { held[++nheld] = g; continue }
+    ord[++r] = g
+  }
+  for (j=1; j<=nheld; j++) ord[++r] = held[j]
+
+  # 6 rows were chosen for the 300s window squeue could see.  Against a 2h
+  # window that hid ~94% of it on a 40-line terminal while the queue table
+  # above was uncapped, so count what the screen actually has left: every
+  # other line in the buffer is already decided by here.  A tall queue
+  # squeezes this block instead of pushing the footer off the screen.
+  if (rmax) RECENT_MAX = rmax
+  else {
+    chrome = 2                                  # title, blank
+    if (nerr != "" || jerr != "") chrome += 2   # blank, unreachable banner
+    chrome += nn + 1                            # node lines, blank
+    for (r=1; r<=nn; r++) if (nreason[r] != "") chrome++
+    chrome += rows ? rows + 1 : 1               # header and rows, or one caption
+    chrome += 3                                 # blank, caption, column header
+    if (skip[2]) chrome++
+    if (skip[3]) chrome++
+    if (!qtrunc && !qbad) chrome += 2           # blank, counts footer
+    RECENT_MAX = lines - chrome
+    if (d > RECENT_MAX) RECENT_MAX--            # "+N more" costs a line, if it comes
+    if (RECENT_MAX < 3)  RECENT_MAX = 3         # never let the block vanish ...
+    if (RECENT_MAX > 25) RECENT_MAX = 25        # ... and never let it run away
+  }
   shown = (d > RECENT_MAX) ? RECENT_MAX : d
   more = 0                                      # jobs, not groups: "+2 more" must
   for (r=shown+1; r<=d; r++) more += gcnt[ord[r]]     # not be able to hide 200 tasks
@@ -802,10 +868,17 @@ END{
     } else {
       if (rsrc == "sacct")
         cap = "recently finished · " wtxt sfilt (shown ? "" : " · nothing in this window")
+      # accounting down, or a filter accounting cannot express: the
+      # parenthetical has to say which, because the fix differs
       else if (rsrc == "squeue")
-        cap = "recently finished · recent only (no accounting)" (rwhy != "" ? " · " rwhy : "")
+        cap = "recently finished · recent only " ((rwhyc == "filter") \
+              ? "(" rwhy ")" \
+              : "(no accounting)" (rwhy != "" ? " · " rwhy : ""))
+      # both paths gone: the filter is the actionable half and the fallback
+      # stderr only a symptom, so rwhy outranks rerr
       else
-        cap = "finished jobs unavailable · " (rerr != "" ? rerr : (rwhy != "" ? rwhy : jerr))
+        cap = "finished jobs unavailable · " (rwhy != "" ? rwhy \
+              : (rerr != "" ? rerr : jerr))
       if (length(cap) > target) cap = substr(cap, 1, target-1) "…"
       out[++o] = sprintf("%s%s%s%s", lm, e(rsrc == "none" ? "1;31" : "2"), cap, e("0"))
     }
