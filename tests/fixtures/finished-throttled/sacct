@@ -1,3 +1,4 @@
-# a 10-task array throttled to 3 that failed as a whole: one bracketed row
+# a 10-task array throttled to 3, cancelled while pending: one bracketed row,
+# in the live shape (all 10 bracketed rows in bioserver's history look like this)
 @include ../_common/sacct-defaults
-JobID=7002_[0-9%3]; JobName=sweep; State=FAILED; ExitCode=1:0; Elapsed=00:00:00; NodeList=None assigned
+JobID=7002_[0-9%3]; JobName=sweep; State=CANCELLED by 1025; ExitCode=0:0; Elapsed=00:00:00; NodeList=None assigned

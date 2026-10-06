@@ -1,0 +1,7 @@
+# four running tasks of one array, task 2 on another node: only the three
+# that agree on every displayed column may fold
+@include ../_common/squeue-defaults
+i=1300_0; j=sweep
+i=1300_1; j=sweep
+i=1300_2; j=sweep; R=node02
+i=1300_3; j=sweep

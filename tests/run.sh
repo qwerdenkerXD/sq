@@ -3,7 +3,7 @@
 # of its output (counts, rows, captions, escapes, widths, exit codes), never a
 # snapshot of it.
 #
-#   tests/run.sh [-k|--keep] [NAME...]     NAME: run only cases containing it
+#   tests/run.sh [-k|--keep] [NAME...]     NAME: run only the case of that name
 #
 # Needs bash, gawk, coreutils, and util-linux `script` for the pty cases.  The
 # stubs in tests/bin stand in for squeue/sinfo/sacct (tests/lib/stub.sh says how,
@@ -14,9 +14,12 @@
 # Results: PASS, FAIL, XFAIL (a known defect, still there, in the documented
 # way) and XPASS (a known defect no longer reproduces: remove its xfail marker).
 # The run fails on any FAIL or XPASS.
+#
+# Known gaps, left out on purpose because they are cosmetic: right alignment
+# of numeric columns, the truncation of a long drain reason, the bar glyphs.
 
 set -u
-here=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 sq=${SQ_UNDER_TEST:-${here%/*}/sq}    # SQ_UNDER_TEST: another build of sq, e.g. an installed one
 fixtures=$here/fixtures
 keep=0; only=()
@@ -37,8 +40,11 @@ for l in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
 done
 [ -n "$utf8" ] || { echo "run.sh: no UTF-8 locale available (tried C.UTF-8, en_US.UTF-8)" >&2; exit 2; }
 
-work=$(mktemp -d) || exit 2
+# TMPDIR is honoured; with -k the evidence stays there, under a recognisable name
+work=$(mktemp -d "${TMPDIR:-/tmp}/sq-tests.XXXXXX") || exit 2
 if [ $keep = 1 ]; then echo "evidence kept in $work"; else trap 'rm -rf "$work"' EXIT; fi
+# a killed run still runs the EXIT trap, so its work dir goes too
+trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
 
 ESC=$'\033'
 
@@ -53,7 +59,7 @@ ESC=$'\033'
 sq_run() {
 	local fixture=$1; shift
 	local -A env=([PATH]="$here/bin:$PATH" [LC_ALL]=$utf8
-	              [SQSTUB_FIXTURE]=$fixtures/$fixture
+	              [SQSTUB_FIXTURE]=$([[ $fixture == /* ]] && echo "$fixture" || echo "$fixtures/$fixture")
 	              [SQ_TIMEOUT]=3 [SQ_WIDTH]=120 [SQ_HEIGHT]=50)
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do
 		case $1 in -*) unset "env[${1#-}]" ;; *=*) env[${1%%=*}]=${1#*=} ;; esac
@@ -65,9 +71,12 @@ sq_run() {
 	OUT=$RUN/out ERR=$RUN/err LOG=$RUN/log; : > "$LOG"
 	env[HOME]=$RUN/home; env[SQSTUB_LOG]=$LOG
 	local -a envlist=(); local k
+	[ -n "${TMPDIR:-}" ] && [ -z "${env[TMPDIR]+set}" ] && env[TMPDIR]=$TMPDIR
 	for k in "${!env[@]}"; do envlist+=("$k=${env[$k]}"); done
 	if [ -n "${PTY:-}" ]; then pty_exec "${envlist[@]}" -- "$@"
-	else env -i "${envlist[@]}" "$sq" --no-bell "$@" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
+	else  # bounded, so a hanging sq fails its case instead of hanging the suite
+		env -i "${envlist[@]}" timeout -k 2 30 "$sq" --no-bell "$@" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
+		[ $RC -ne 124 ] || T_FAIL+=("sq did not finish within 30s")
 	fi
 	note_run
 }
@@ -118,14 +127,15 @@ width() { plain | LC_ALL=$utf8 gawk '{ if (length($0) > m) m = length($0) } END 
 # the blocks of sq's screen, found by what they start with
 section() {   # section queue|recent|footer: that block's lines
 	plain | LC_ALL=$utf8 gawk -v want="$1" '
-		BEGIN { RS = "" }
+		BEGIN { RS = ""; HDR = "^ *[A-Z][A-Z/_()]*( +[A-Z][A-Z/_()]*)* *$" }   # a table header
 		{ split($0, L, "\n"); first = L[1] }
-		want == "queue"  && first ~ /^ *(JOBID |queue is empty|job list unavailable|no readable rows|⚠ queue output)/ { print; exit }
+		want == "queue"  && first ~ /^ *(queue is empty|job list unavailable|no readable rows|⚠ queue output)/ { print; exit }
+		want == "queue"  && first ~ HDR { print; exit }
 		want == "recent" && first ~ /^ *(recently finished|finished jobs unavailable)/ { print; exit }
 		want == "footer" && first ~ /^ *[0-9]+ jobs / { print; exit }'
 }
 rows() {      # rows queue|recent: the data rows of a table, header and notes left out
-	section "$1" | LC_ALL=$utf8 gawk 'NR == 1 && /^ *JOBID /       { next }
+	section "$1" | LC_ALL=$utf8 gawk 'NR == 1 && /^ *[A-Z][A-Z\/_()]*( +[A-Z][A-Z\/_()]*)* *$/ { next }   # the queue header
 		/^ *(recently finished|finished jobs unavailable)/          { next }
 		/^ *JOBID +NAME +STATE +EXIT /                               { next }
 		/^ *(↳|\+[0-9]+ more|queue is empty|job list unavailable|no readable rows|⚠)/ { next }
@@ -140,6 +150,27 @@ row_cell() {  # row_cell queue|recent CELL
 		END { exit !f }'
 }
 row_first_fields() { rows "$1" | gawk '{ print $1 }'; }
+# a today-signature: the BARE cell followed directly by the next column's text,
+# never a prefix, so "7000_[1-20] ×20" can never pass for "7000_[1-20]"
+cell_then() { # cell_then queue|recent CELL NEXT
+	rows "$1" | CELL=$2 NEXT=$3 LC_ALL=$utf8 gawk 'BEGIN { c = ENVIRON["CELL"]; x = ENVIRON["NEXT"] }
+		{ sub(/^ +/, "") } index($0, c) == 1 {
+			rest = substr($0, length(c) + 1)
+			if (match(rest, /^ +/) && index(substr(rest, RLENGTH + 1) " ", x " ") == 1) f = 1 }
+		END { exit !f }'
+}
+# the N of every "×N" on a row of array BASE (its id is BASE or starts BASE_)
+xmarks() {    # xmarks queue|recent BASE
+	rows "$1" | B=$2 LC_ALL=$utf8 gawk '($1 == ENVIRON["B"] || index($1, ENVIRON["B"] "_") == 1) && $2 ~ /^×[0-9]+$/ { print substr($2, 2) }'
+}
+# 4b(ii) of the array-count spec: a row that shows ×K must show the right K, and
+# the totals must count it as K.  Silent while no ×K is shown (today's state).
+only_xmark()  { ! xmarks "$1" "$2" | grep -qvx "$3"; }     # only_xmark SECTION BASE N
+footer_jobs()  { section footer | gawk 'NR == 1 { print $1 }'; }
+more_count()   { plain | gawk '/^ *\+[0-9]+ more$/ { sub(/^ *\+/, ""); print $1 }'; }
+xmark_counted_in_footer() {   # xmark_counted_in_footer BASE N: ×N shown -> footer counts N
+	[ -z "$(xmarks queue "$1")" ] || [ "$(footer_jobs)" = "$2" ]
+}
 # a left-aligned column lines up: in every queue row a cell starts exactly where
 # the header names it (after a space), so no name can shift the columns after it
 column_aligned() {   # column_aligned HEADER, e.g. USER
@@ -171,6 +202,10 @@ calls_are() { # calls_are SINFO QUEUE FALLBACK SACCT
 argv_has() {  # argv_has TOOL WORD...: some call got these words in a row
 	local want; want=" $(printf '%q ' "${@:2}")"
 	W=$want gawk -F'\t' -v t="$1" '$1 == "CALL" && $2 == t && index(" " $3, ENVIRON["W"]) { f = 1 } END { exit !f }' "$LOG"
+}
+argv_lacks() { # argv_lacks TOOL WORD: no call of TOOL got WORD as an argument
+	local want; want=" $(printf '%q ' "$2")"
+	W=$want gawk -F'\t' -v t="$1" '$1 == "CALL" && $2 == t { n++; if (index(" " $3, ENVIRON["W"])) f = 1 } END { exit !(n > 0 && !f) }' "$LOG"
 }
 # env_of TOOL N VAR: VAR as call N of TOOL saw it, or "(unset)"
 env_of() {
@@ -264,12 +299,13 @@ c_mixed() {
 	need "6 queue rows"               eval '[ "$(nrows queue)" -eq 6 ]'
 	need "rows are 1101..1106"        eval '[ "$(row_first_fields queue | sort | paste -sd,)" = 1101,1102,1103,1104,1105,1106 ]'
 	need "USER and NODE/REASON columns line up" eval 'column_aligned USER && column_aligned NODE/REASON'
-	need "pending reason shown"       eval 'rows queue | grep -E "^ +1103 .*PENDING .*\(Resources\)$" -q'
+	need "pending reason with its backfill estimate" eval 'rows queue | grep -qE "^ +1103 .*PENDING .*\(Resources\) → 2099-01-01$"'
+	need "no estimate where squeue has none" eval 'rows queue | grep -qE "^ +1102 .*PENDING .*\(Priority\)$"'
 	need "finished row 1001 COMPLETED" eval 'rows recent | grep -qE "^ +1001 +done +COMPLETED "'
 	need "finished block has 1 row (steps folded)" eval '[ "$(nrows recent)" -eq 1 ]'
 	need "no unreadable/incomplete note" no_skips
 	need "queue call: squeue -h -S t,i" argv_has squeue -h -S t,i
-	need "queue call has SLURM_TIME_FORMAT=standard" eval '[ "$(env_of squeue 1 SLURM_TIME_FORMAT)" = standard ]'
+	need "every call has SLURM_TIME_FORMAT=standard" all_calls_env SLURM_TIME_FORMAT standard sinfo squeue sacct
 	need "queue format framed by SQ_NONCE, ends in hidden %t %l %S" eval '
 		f=$(env_of squeue 1 SQUEUE_FORMAT); n=$(env_of squeue 1 SQ_NONCE)
 		[ "$f" = "%i$n%i$n%j$n%u$n%T$n%M$n%L$n%C$n%m$n%R$n%t$n%l$n%S$n" ]'
@@ -278,6 +314,9 @@ c_mixed() {
 	need "sacct's delimiter is not the queue nonce" eval '[ "$(env_of sacct 1 SQ_NONCE2)" != "$(env_of sacct 1 SQ_NONCE)" ]'
 	need "sinfo: -hN -o framed by SQ_NONCE3" eval '
 		n=$(env_of sinfo 1 SQ_NONCE3); argv_has sinfo -hN -o "%C$n%N$n%e$n%m$n%T$n%E$n%H$n"'
+	sq_run mixed SQ_ETA=0 --
+	need "SQ_ETA=0: rc 0"             rc_is 0
+	need "SQ_ETA=0: no estimate"      eval 'rows queue | grep -qE "^ +1103 .*PENDING .*\(Resources\)$"'
 }
 
 # ---- 3. running array tasks fold into one row --------------------------------
@@ -297,6 +336,17 @@ c_array_fold() {
 	need "-x: no fold marker"         lacks "×"
 	need "-x: footer unchanged"       footer_is 5 5 0 0
 }
+c_fold_split() {
+	T_TITLE="tasks that differ in a displayed column do not fold together"
+	sq_run array-split --
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs called"               calls_are 1 1 0 1
+	need "'1300_[0-1,3] ×3' on node01" eval 'row_cell queue "1300_[0-1,3] ×3" && rows queue | grep -qE "^ +1300_\[0-1,3\] ×3 .* node01$"'
+	need "'1300_2' alone, on node02"  eval 'row_cell queue 1300_2 && rows queue | grep -qE "^ +1300_2 .* node02$"'
+	need "two rows"                   eval '[ "$(nrows queue)" -eq 2 ]'
+	need "footer 4/4/0/0"             footer_is 4 4 0 0
+}
 
 # ---- 4. a drain reason with "|" and a newline --------------------------------
 c_drain_reason() {
@@ -314,7 +364,7 @@ c_drain_reason() {
 	need "footer 0 jobs"              footer_is 0 0 0 0
 }
 
-# ---- 5. hostile job names ----------------------------------------------------
+# ---- 5. hostile job names, and a record that does not end where it should ----
 c_hostile_names() {
 	T_TITLE="names with | tab newline ESC and a fake record: 5 real rows, no forgery, no raw ESC"
 	sq_run hostile-names --
@@ -335,10 +385,23 @@ c_hostile_names() {
 	need "colour on: every ESC is sq's own SGR" escapes_all_sgr
 	need "colour on: footer 5 jobs"   eval 'section footer | grep -qE "^ *5 jobs "'
 }
+c_trailing_junk() {
+	T_TITLE="a record with text after its last separator is skipped with the note"
+	sq_run trailing-junk --
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs called"               calls_are 1 1 0 1
+	need "only 1201 shown"            eval '[ "$(row_first_fields queue | paste -sd,)" = 1201 ]'
+	need "'↳ 1 unreadable queue row skipped'" has "↳ 1 unreadable queue row skipped"
+	need "footer 1/1/0/0"             footer_is 1 1 0 0
+}
 
 # ---- 6. squeue failing, hanging, or answering garbage -------------------------
+# With the job list unavailable sq still prints a "0 jobs" footer: a number it
+# does not know.  What it should print instead is not decided here, only that
+# it must not claim zero.
 c_squeue_fails() {
-	T_TITLE="squeue rc 1: unreachable banner with its stderr, 'job list unavailable', rc 0"
+	T_TITLE=; xfail "squeue rc 1: the job list is unavailable, yet the footer claims 0 jobs"
 	sq_run squeue-fails --
 	need "rc 0"                       rc_is 0
 	need "stderr empty"               err_empty
@@ -346,10 +409,11 @@ c_squeue_fails() {
 	need "banner carries squeue's first stderr line" matches "^  ⚠ slurm unreachable · squeue: error: Unable to contact"
 	need "'job list unavailable'"     has "job list unavailable"
 	need "finished block still from sacct" eval 'rows recent | grep -qE "^ +1001 +done +COMPLETED "'
-	need "footer as today: 0/0/0/0"   footer_is 0 0 0 0
+	want "no '0 jobs' footer while the job list is unavailable" eval '! section footer | grep -qE "^ *0 jobs "'
+	today "footer 0/0/0/0"            footer_is 0 0 0 0
 }
 c_squeue_hangs() {
-	T_TITLE="squeue hangs: cut at SQ_TIMEOUT=1, banner 'no response after 1s', rc 0"
+	T_TITLE=; xfail "squeue hangs (cut at SQ_TIMEOUT=1): the job list is unavailable, yet the footer claims 0 jobs"
 	local t0=$SECONDS
 	sq_run squeue-hangs SQ_TIMEOUT=1 --
 	need "rc 0"                       rc_is 0
@@ -358,7 +422,8 @@ c_squeue_hangs() {
 	need "finished within 10s"        eval '[ $((SECONDS - t0)) -lt 10 ]'
 	need "banner 'no response after 1s'" matches "^  ⚠ slurm unreachable · no response after 1s$"
 	need "'job list unavailable'"     has "job list unavailable"
-	need "footer as today: 0/0/0/0"   footer_is 0 0 0 0
+	want "no '0 jobs' footer while the job list is unavailable" eval '! section footer | grep -qE "^ *0 jobs "'
+	today "footer 0/0/0/0"            footer_is 0 0 0 0
 }
 c_squeue_garbage() {
 	T_TITLE="squeue answers unframed text: 'queue output unreadable', no footer"
@@ -371,10 +436,19 @@ c_squeue_garbage() {
 	need "no footer from an unreadable stream" no_footer
 	need "no unreachable banner"      lacks "slurm unreachable"
 }
+c_both_fail() {
+	T_TITLE="squeue and sacct both fail: no fallback call, caption carries sacct's error"
+	sq_run both-fail --
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs: no squeue -t all after squeue itself failed" calls_are 1 1 0 1
+	need "banner carries squeue's error" matches "^  ⚠ slurm unreachable · squeue: error: Unable to contact"
+	need "caption: finished jobs unavailable, with sacct's error" matches "^  finished jobs unavailable · sacct: error: Problem"
+}
 
 # ---- 7. the finished block from sacct ----------------------------------------
 c_finished() {
-	T_TITLE="sacct: COMPLETED and FAILED tasks of one array fold apart; a timeout shows its signal"
+	T_TITLE="sacct: COMPLETED and FAILED tasks of one array fold apart; a timeout shows its signal; newest first"
 	sq_run finished --
 	need "rc 0"                       rc_is 0
 	need "stderr empty"               err_empty
@@ -382,9 +456,21 @@ c_finished() {
 	need "'5000_[0-3] ×4' COMPLETED"  eval 'row_cell recent "5000_[0-3] ×4" && rows recent | grep -qE "^ +5000_\[0-3\] ×4 +sweep +COMPLETED "'
 	need "'5000_[4-5] ×2' FAILED exit 1" eval 'row_cell recent "5000_[4-5] ×2" && rows recent | grep -qE "^ +5000_\[4-5\] ×2 +sweep +FAILED +1 "'
 	need "5100 TIMEOUT shows 0/sig15 from its step" eval 'rows recent | grep -qE "^ +5100 +longrun +TIMEOUT +0/sig15 "'
+	need "newest first: 5100 (ended last) is the first row" eval '[ "$(row_first_fields recent | head -1)" = 5100 ]'
 	need "3 finished rows, no step row" eval '[ "$(nrows recent)" -eq 3 ] && ! rows recent | grep -q "batch"'
 	need "caption from sacct"         eval 'section recent | head -1 | grep -qE "^ +recently finished · last 2h$"'
 	need "no unreadable note"         no_skips
+}
+c_user_filter() {
+	T_TITLE="-u alice reaches squeue and sacct as -u alice, and sacct gets no -a"
+	sq_run empty -- -u alice
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs: queue and sacct"     calls_are 1 1 0 1
+	need "queue call: -u alice"       argv_has squeue -h -S t,i -u alice
+	need "sacct: -u alice"            argv_has sacct -u alice
+	need "sacct: no -a (sacct takes the last of -u/-a, so -a would mean everybody)" argv_lacks sacct -a
+	need "caption names the filter"   has "recently finished · last 2h · user=alice"
 }
 
 # ---- 8. sacct fails: the squeue -t all fallback -----------------------------
@@ -394,6 +480,7 @@ c_sacct_fallback() {
 	need "rc 0"                       rc_is 0
 	need "stderr empty"               err_empty
 	need "stubs: sacct, then the fallback" calls_are 1 1 1 1
+	need "every call has SLURM_TIME_FORMAT=standard" all_calls_env SLURM_TIME_FORMAT standard sinfo squeue sacct
 	need "fallback argv: squeue -t all -h" argv_has squeue -t all -h
 	need "fallback uses SQUEUE_FORMAT2 and not SQUEUE_FORMAT" eval '
 		[ "$(env_of squeue 2 SQUEUE_FORMAT)" = "(unset)" ] && [ "$(env_of squeue 2 SQUEUE_FORMAT2)" != "(unset)" ]'
@@ -447,81 +534,222 @@ c_refuse_s()    { T_TITLE="-s refused; -u alice accepted";      refusal empty "-
 c_refuse_json() { T_TITLE="--json refused; --all accepted";     refusal empty "--json" "--all"; }
 c_refuse_O()    { T_TITLE="-O x refused; -o i,j accepted";      refusal empty "-O x" "-o i,j"; }
 
-# ---- 10. colour -------------------------------------------------------------
+# ---- 10. colour and size ------------------------------------------------------
 c_colour() {
 	T_TITLE="colour: plain pipe 0 escapes, COLUMNS+LINES >0, NO_COLOR=1 0"
 	sq_run mixed --
 	need "plain pipe: rc 0"           rc_is 0
+	need "plain pipe: stubs called"   calls_are 1 1 0 1
 	need "plain pipe: no ESC"         eval '[ "$(escapes)" -eq 0 ]'
 	sq_run mixed COLUMNS=120 LINES=50 --
 	need "COLUMNS+LINES: rc 0"        rc_is 0
+	need "COLUMNS+LINES: stubs called" calls_are 1 1 0 1
 	need "COLUMNS+LINES: escapes"     eval '[ "$(escapes)" -gt 0 ]'
 	need "COLUMNS+LINES: all SGR"     escapes_all_sgr
 	need "COLUMNS+LINES: same footer once uncoloured" footer_is 6 3 2 1
 	sq_run mixed COLUMNS=120 LINES=50 NO_COLOR=1 --
 	need "NO_COLOR: rc 0"             rc_is 0
+	need "NO_COLOR: stubs called"     calls_are 1 1 0 1
 	need "NO_COLOR: no ESC"           eval '[ "$(escapes)" -eq 0 ]'
+}
+# Width: the "wide" fixture shrinks the table to exactly the width sq believes
+# in (see section 12).  Height: with 30 finished jobs and no SQ_RECENT_MAX the
+# finished block takes what the screen has left, so the output fills the height
+# exactly, and the rows shown plus "+N more" still account for all 30 jobs.
+fills() {     # fills HEIGHT: the output is HEIGHT lines and accounts for 30 jobs
+	[ "$(plain | wc -l)" -eq "$1" ] && [ $(( $(nrows recent) + $(more_count) )) -eq 30 ]
+}
+c_layout_size() {
+	T_TITLE="in a pipe: SQ_WIDTH, COLUMNS, SQ_HEIGHT and LINES set the layout"
+	sq_run wide SQ_WIDTH=123 --
+	need "SQ_WIDTH=123: widest line 123"  eval 'calls_are 1 1 0 1 && [ "$(width)" -eq 123 ]'
+	sq_run wide SQ_WIDTH=123 COLUMNS=90 --
+	need "SQ_WIDTH beats COLUMNS"         eval 'calls_are 1 1 0 1 && [ "$(width)" -eq 123 ]'
+	sq_run wide -SQ_WIDTH COLUMNS=110 --
+	need "COLUMNS=110: widest line 110"   eval 'calls_are 1 1 0 1 && [ "$(width)" -eq 110 ]'
+	sq_run many-finished SQ_HEIGHT=20 --
+	need "SQ_HEIGHT=20: 20 lines, 30 jobs accounted" eval 'calls_are 1 1 0 1 && fills 20'
+	sq_run many-finished SQ_HEIGHT=30 --
+	need "SQ_HEIGHT=30: 30 lines, 30 jobs accounted" eval 'calls_are 1 1 0 1 && fills 30'
+	sq_run many-finished -SQ_HEIGHT LINES=20 --
+	need "LINES=20: 20 lines, 30 jobs accounted" eval 'calls_are 1 1 0 1 && fills 20'
 }
 
 # ---- 11. known defects --------------------------------------------------------
+# Array-count spec, acceptance 4b: the FORBIDDEN states are a FAIL at any commit,
+# never an XFAIL: (i) a row dropped today shown but counted 1; (ii) a row
+# showing ×N while the footer or "+N more" counts it as anything but N, or a
+# ×K other than the right N.  A today-signature names the BARE cell followed
+# directly by the next column (cell_then), never a prefix.
+bracket_guards() {   # bracket_guards SECTION BASE N: 4b(ii) for one array
+	need "4b(ii): no ×K other than ×$3 on $2" only_xmark "$1" "$2" "$3"
+	[ "$1" = queue ] && need "4b(ii): ×$3 shown means the footer counts $3" xmark_counted_in_footer "$2" "$3"
+	return 0
+}
+# one pending array row beside the two idle nodes, written into the case's dir
+pending_fixture() {  # pending_fixture NAME ID: prints the fixture's directory
+	local d=$T_DIR/fx-$1; mkdir -p "$d"
+	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
+	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
+	{ printf '@include %s\n' "$fixtures/_common/squeue-defaults"
+	  printf 'i=%s; j=sweep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A\n' "$2"; } > "$d/squeue"
+	printf '%s' "$d"
+}
 c_xf_pending_range() {
 	T_TITLE=; xfail "a pending _[1-20] row counts 1 job, not 20, and has no ×20"
 	sq_run pending-range --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
+	bracket_guards queue 7000 20
 	want "cell '7000_[1-20] ×20'"     row_cell queue "7000_[1-20] ×20"
 	want "footer 20/0/20/0"           footer_is 20 0 20 0
+	today "bare cell '7000_[1-20]' then 'sweep'" cell_then queue "7000_[1-20]" sweep
 	today "footer 1/0/1/0"            footer_is 1 0 1 0
-	today "cell '7000_[1-20]' alone"  row_cell queue "7000_[1-20]"
+}
+pending_bracket() {  # pending_bracket ID BASE N: a bracket today shown bare and counted 1
+	sq_run "$(pending_fixture "$2" "$1")" --
+	need "rc 0"                       rc_is 0
+	need "stubs called"               calls_are 1 1 0 1
+	bracket_guards queue "$2" "$3"
+	want "cell '$1 ×$3'"              row_cell queue "$1 ×$3"
+	want "footer $3/0/$3/0"           footer_is "$3" 0 "$3" 0
+	today "bare cell '$1' then 'sweep'" cell_then queue "$1" sweep
+	today "footer 1/0/1/0"            footer_is 1 0 1 0
+}
+c_xf_pending_commas() {
+	T_TITLE=; xfail "a pending _[1-5,8,10-12] row counts 1 job, not 9"
+	pending_bracket "7003_[1-5,8,10-12]" 7003 9
+}
+c_xf_pending_throttle() {
+	T_TITLE=; xfail "a pending _[1-20%4] row counts 1 job, not 20 (the throttle limits concurrency, not membership)"
+	pending_bracket "7004_[1-20%4]" 7004 20
+}
+c_xf_pending_no_id_column() {
+	T_TITLE=; xfail "sq -o j,T with a pending _[1-20]: the footer counts 1 pending, not 20"
+	sq_run pending-range -- -o j,T
+	need "rc 0"                       rc_is 0
+	need "stubs called"               calls_are 1 1 0 1
+	need "one row: 'sweep PENDING'"   eval '[ "$(nrows queue)" -eq 1 ] && rows queue | grep -qE "^ +sweep +PENDING$"'
+	want "footer 20/0/20/0"           footer_is 20 0 20 0
+	today "footer 1/0/1/0"            footer_is 1 0 1 0
 }
 c_xf_pending_strided() {
 	T_TITLE=; xfail "a pending strided _[0-12:2] row is dropped as unreadable; should be shown as 7 jobs"
 	sq_run pending-strided --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
+	bracket_guards queue 7001 7
 	want "cell '7001_[0-12:2] ×7'"    row_cell queue "7001_[0-12:2] ×7"
 	want "footer 7/0/7/0"             footer_is 7 0 7 0
 	want "no unreadable note"         no_skips
-	# the only accepted shape of the defect is today's: dropped, with the note.  A
-	# bracketed row shown but counted 1 is forbidden at every commit (array-count
-	# spec, acceptance 4b), so it is a FAIL, never this XFAIL
-	need "forbidden intermediate: shown but counted 1" eval '
-		! { row_cell queue "7001_[0-12:2]" && section footer | grep -qE "^ *1 jobs "; }'
+	need "4b(i): shown but counted 1" eval '
+		! { rows queue | grep -q "^ *7001_" && section footer | grep -qE "^ *1 jobs "; }'
 	today "dropped, with the skip note" eval '
-		has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0'
+		has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0 && [ "$(nrows queue)" -eq 0 ]'
 }
 c_xf_pending_long() {
 	T_TITLE=; xfail "a pending id over 31 characters is cut by squeue (no SLURM_BITSTR_LEN=0) and dropped; should be shown as 10 jobs"
 	sq_run pending-long --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
+	bracket_guards queue 11137 10
 	want "cell '11137_[1,3,5,7,9,11,13,15,17,20] ×10'" row_cell queue "11137_[1,3,5,7,9,11,13,15,17,20] ×10"
 	want "footer 10/0/10/0"           footer_is 10 0 10 0
 	want "no unreadable note"         no_skips
 	# today's shape is the only accepted one: dropped, with the note, which is also
 	# what a correct count without SLURM_BITSTR_LEN=0 still gives (squeue cuts the
-	# id, so it fails the gate) - so this flips only once the whole id arrives.
-	# Shown but counted 1 is forbidden at every commit (acceptance 4b): a FAIL
-	need "forbidden intermediate: shown but counted 1" eval '
+	# id, so it fails the gate) - so this flips only once the whole id arrives
+	need "4b(i): shown but counted 1" eval '
 		! { rows queue | grep -q "^ *11137_" && section footer | grep -qE "^ *1 jobs "; }'
 	today "dropped, with the skip note" eval '
-		has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0'
+		has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0 && [ "$(nrows queue)" -eq 0 ]'
+}
+# Acceptance 6: a malformed bracket is skipped with the existing note, never
+# counted 0, negative, NaN or 1.  The run inherits SLURM_BITSTR_LEN=0 (a user
+# may have it set), so the stub hands sq the whole id and the case tests sq's
+# own gate, not squeue's 31-character cut.
+malformed() {        # malformed NAME ID BASE
+	sq_run "$(pending_fixture "$1" "$2")" SLURM_BITSTR_LEN=0 --
+	need "rc 0"                       rc_is 0
+	need "stubs called"               calls_are 1 1 0 1
+	need "never counted other than 0 (skipped) or 1 (today)" eval '
+		case $(footer_jobs) in 0|1) true ;; *) false ;; esac'
+	need "no ×K on it"                eval '[ -z "$(xmarks queue "'"$3"'")" ]'
+	want "skipped with the note"      has "↳ 1 unreadable queue row skipped"
+	want "not shown, footer 0/0/0/0"  eval '[ "$(nrows queue)" -eq 0 ] && footer_is 0 0 0 0'
+}
+c_malformed_step0() {
+	T_TITLE="malformed _[0-4:0] (step 0) is skipped with the note"
+	malformed step0 "7006_[0-4:0]" 7006
+}
+c_malformed_dots() {
+	T_TITLE="malformed _[...] is skipped with the note"
+	malformed dots "7008_[...]" 7008
+}
+c_xf_malformed_reversed() {
+	T_TITLE=; xfail "malformed _[5-2] passes today's id check and is shown, counted 1"
+	malformed reversed "7005_[5-2]" 7005
+	today "bare cell '7005_[5-2]' then 'sweep', footer 1/0/1/0" eval 'cell_then queue "7005_[5-2]" sweep && footer_is 1 0 1 0'
+}
+c_xf_malformed_dash() {
+	T_TITLE=; xfail "malformed _[1--2] passes today's id check and is shown, counted 1"
+	malformed dash "7007_[1--2]" 7007
+	today "bare cell '7007_[1--2]' then 'sweep', footer 1/0/1/0" eval 'cell_then queue "7007_[1--2]" sweep && footer_is 1 0 1 0'
+}
+c_xf_malformed_huge() {
+	T_TITLE=; xfail "a 400-digit index passes today's id check and is shown (cut to the column), counted 1"
+	local digits; digits=$(printf '%0400d' 7)
+	malformed huge "7009_[$digits]" 7009
+	today "one row, its cell cut: '7009_[000…' then 'sweep', footer 1/0/1/0" eval '
+		[ "$(nrows queue)" -eq 1 ] && rows queue | grep -qE "^ +7009_\[0+… +sweep " && footer_is 1 0 1 0'
 }
 c_xf_finished_throttled() {
 	T_TITLE=; xfail "a finished _[0-9%3] row from sacct counts 1, shows no ×10"
 	sq_run finished-throttled --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
+	bracket_guards recent 7002 10
+	need "state CANCELLED, the canceller in EXIT" eval '
+		rows recent | grep -qE "^ +7002_\[0-9%3\]( ×[0-9]+)? +sweep +CANCELLED +0 by [^ ]+ "'
 	want "cell '7002_[0-9%3] ×10'"    row_cell recent "7002_[0-9%3] ×10"
-	today "cell '7002_[0-9%3]' alone" row_cell recent "7002_[0-9%3]"
+	today "bare cell '7002_[0-9%3]' then 'sweep'" cell_then recent "7002_[0-9%3]" sweep
 }
 c_xf_fallback_throttled() {
 	T_TITLE=; xfail "a finished throttled array via the squeue fallback counts 1, shows the bare id"
 	sq_run fallback-throttled --
 	need "rc 0"                       rc_is 0
 	need "stubs: sacct failed, fallback used" calls_are 1 1 1 1
+	bracket_guards recent 7002 10
 	want "cell '7002_[0-9%3] ×10'"    row_cell recent "7002_[0-9%3] ×10"
-	today "cell '7002' alone"         row_cell recent "7002"
+	today "bare cell '7002' then 'sweep'" cell_then recent 7002 sweep
+}
+# Acceptance 3/4: capped to one finished row, the newer single job is shown and
+# the throttled array is behind "+N more", which counts JOBS.  The uncapped twin
+# shows whether the array row already carries ×10, which "+N more" must match.
+more_case() {        # more_case FIXTURE CALLS TODAY-CELL
+	local -a calls; read -ra calls <<< "$2"
+	sq_run "$1" SQ_RECENT_MAX=5 --
+	need "uncapped: rc 0"             rc_is 0
+	need "uncapped: stubs called"     calls_are "${calls[@]}"
+	bracket_guards recent 7002 10
+	local marks; marks=$(xmarks recent 7002)
+	want "uncapped: cell '7002_[0-9%3] ×10'" row_cell recent "7002_[0-9%3] ×10"
+	today "uncapped: bare cell '$3' then 'sweep'" cell_then recent "$3" sweep
+	sq_run "$1" SQ_RECENT_MAX=1 --
+	need "capped: rc 0"               rc_is 0
+	need "capped: stubs called"       calls_are "${calls[@]}"
+	need "capped: the newer job 7100 is the one row" eval '[ "$(row_first_fields recent | paste -sd,)" = 7100 ]'
+	need "4b(ii): ×10 shown means '+10 more'" eval '[ -z "$marks" ] || [ "$(more_count)" = 10 ]'
+	want "capped: '+10 more'"         eval '[ "$(more_count)" = 10 ]'
+	today "capped: exactly '+1 more'" matches '^ +\+1 more$'
+}
+c_xf_more_sacct() {
+	T_TITLE=; xfail "capped finished block (sacct): '+N more' counts the throttled array as 1, not 10"
+	more_case more-sacct "1 1 0 1" "7002_[0-9%3]"
+}
+c_xf_more_fallback() {
+	T_TITLE=; xfail "capped finished block (fallback): '+N more' counts the throttled array as 1, not 10"
+	more_case more-fallback "1 1 1 1" 7002
 }
 c_xf_bitstr() {
 	T_TITLE=; xfail "squeue and sacct are called without SLURM_BITSTR_LEN=0"
@@ -559,18 +787,21 @@ c_xf_pty_kitty() {
 
 # ============================================================================
 cases=(
-	empty mixed array_fold drain_reason hostile_names
-	squeue_fails squeue_hangs squeue_garbage finished sacct_fallback
+	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
+	squeue_fails squeue_hangs squeue_garbage both_fail
+	finished user_filter sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
-	colour
-	xf_pending_range xf_pending_strided xf_pending_long
-	xf_finished_throttled xf_fallback_throttled xf_bitstr
+	colour layout_size
+	xf_pending_range xf_pending_commas xf_pending_throttle xf_pending_no_id_column
+	xf_pending_strided xf_pending_long
+	malformed_step0 malformed_dots xf_malformed_reversed xf_malformed_dash xf_malformed_huge
+	xf_finished_throttled xf_fallback_throttled xf_more_sacct xf_more_fallback xf_bitstr
 	pty_xterm xf_pty_kitty
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do
 	if [ ${#only[@]} -gt 0 ]; then
-		hit=0; for o in "${only[@]}"; do [[ $c == *"$o"* ]] && hit=1; done
+		hit=0; for o in "${only[@]}"; do [ "$c" = "$o" ] && hit=1; done
 		[ $hit = 1 ] || continue
 	fi
 	T_NAME=$c T_TITLE= T_XFAIL= T_CALLS=0 T_FAIL=() T_WANT=() T_TODAY=() run_n=0

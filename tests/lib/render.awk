@@ -158,7 +158,7 @@ function render(   rec, i, out, k) {
                 " (the format asks for it; set it in the record or in @defaults)")
     out = out lit[i]
   }
-  printf "%s\n", out
+  printf "%s%s\n", out, trail_next; trail_next = ""
 }
 
 function run_file(path,   line, rc, saved_file, saved_line, dir, d, arg, tmp, k) {
@@ -173,8 +173,10 @@ function run_file(path,   line, rc, saved_file, saved_line, dir, d, arg, tmp, k)
     if (d == "@defaults")     { delete tmp; parse_fields(arg, tmp); for (k in tmp) DEF[k] = tmp[k] }
     else if (d == "@include") {
       dir = path; if (!sub(/\/[^\/]*$/, "", dir)) dir = "."
-      run_file(dir "/" trim(arg))
+      arg = trim(arg)
+      run_file(arg ~ /^\// ? arg : dir "/" arg)
     }
+    else if (d == "@trail")   trail_next = decode(arg)
     else if (d == "@raw")     printf "%s\n", decode(arg)
     else if (d == "@stderr")  printf "%s\n", decode(arg) > "/dev/stderr"
     else if (d == "@exit")    {

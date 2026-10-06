@@ -1,0 +1,6 @@
+# the second record has text after its last separator: the right number of
+# fields, but it does not end where the format says, so it is not a record
+@include ../_common/squeue-defaults
+i=1201; j=good
+@trail JUNK
+i=1202; j=bad

@@ -15,7 +15,7 @@
 # with output formats, and their output comes back over the ssh pipe.
 
 set -u
-here=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 target=; keep=0
 for a in "$@"; do
 	case $a in

@@ -1,0 +1,5 @@
+# a single job that ended last, and the throttled array before it: with one
+# finished row allowed, the array is what "+N more" has to count
+@include ../_common/sacct-defaults
+JobID=7100; JobName=single; End=2026-10-06T09:00:00
+JobID=7002_[0-9%3]; JobName=sweep; State=CANCELLED by 1025; ExitCode=0:0; Elapsed=00:00:00; NodeList=None assigned; End=2026-10-06T08:00:00

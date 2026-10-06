@@ -29,7 +29,9 @@
 #                    \xHH any byte  \; semicolon  \\ backslash
 # Lines starting with "#" and blank lines are ignored.  Directives, run in order:
 #   @defaults k=v; ...  fields every later record has unless it sets them
-#   @include FILE       read FILE (relative to this file) here
+#   @include FILE       read FILE (relative to this file, or absolute) here
+#   @trail TEXT         append TEXT after the NEXT record's last separator: a
+#                       record that does not end where its format says
 #   @raw TEXT           print TEXT (escapes decoded) as one output line
 #   @stderr TEXT        print TEXT (escapes decoded) on stderr
 #   @exit N             stop here with exit code N
@@ -38,7 +40,7 @@
 
 set -u
 tool=$1; shift
-stubdir=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
+stubdir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 refuse() {
 	printf 'stub %s: %s\n' "$tool" "$*" >&2
@@ -96,14 +98,17 @@ while [ $# -gt 0 ]; do
 		squeue:-n|squeue:--name|squeue:-w|squeue:--nodelist|squeue:--node|squeue:--nodes|\
 		squeue:-L|squeue:--licenses|squeue:--license|squeue:-R|squeue:--reservation)
 			take "$@" ;;              # a filter: logged above, never applied
-		squeue:--me|squeue:--all|squeue:--hide|squeue:--array|squeue:--noconvert|\
+		squeue:--me|squeue:--all|squeue:--hide|\
 		squeue:--priority|squeue:--federation|squeue:--local|squeue:--sibling)
 			[ "$has" = 0 ] || refuse "$a takes no value"; shift_n=1 ;;
 
 		sacct:-p|sacct:--parsable)   parsable=1; trail=1; shift_n=1 ;;
 		sacct:-P|sacct:--parsable2)  parsable=1; trail=0; shift_n=1 ;;
 		sacct:-n|sacct:--noheader)   noheader=1; shift_n=1 ;;
-		sacct:-a|sacct:--allusers|sacct:-X|sacct:--allocations) shift_n=1 ;;
+		sacct:-a|sacct:--allusers) shift_n=1 ;;
+		# refused like any option the stub does not render: --array and --noconvert
+		# change what squeue prints (one row per task; unconverted sizes), and sacct
+		# -X drops the step rows, the only ones carrying a signal (seen live)
 		sacct:--delimiter)           take "$@"; delim=$val ;;
 		sacct:-o|sacct:--format)     take "$@"; cmd_o=$val ;;
 		sacct:-S|sacct:--starttime|sacct:-E|sacct:--endtime|sacct:-u|sacct:--user|\
