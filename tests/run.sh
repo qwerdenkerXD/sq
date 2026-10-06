@@ -1099,8 +1099,10 @@ compact_queue() {
 	# CALL (made inside the target screens, listed to Franz, overrulable): one "… n jobs <category>" line per section, the category named
 	# (stuck, blocked on nodes, held by admin, pending, running, other)
 	want "ellipsis lines exactly: ${ells:-none}"           ellipses_are "$ells"
-	# CALL (made inside the target screens, listed to Franz, overrulable): a section's ellipsis sits right after its last shown row
-	want "each ellipsis line right after its section's last shown row" queue_seq_is "$1"
+	# decision 24: the pending categories' lines sit together at the END of the
+	# pending block (stuck, blocked on nodes, held by admin, pending); running's
+	# and other's after their own rows
+	want "each '… n jobs' line where decision 24 puts it" queue_seq_is "$1"
 }
 compact_lines() {   # compact_lines N BLANKS: the screen is N lines, BLANKS of them blank
 	want "$1 lines"                       lines_are "$1"
@@ -1209,12 +1211,12 @@ c_compact_busy24_h44() {   # decision 6
 	want "the finished block: caption, header, 4195 4193 4188, '+17 more'" fin_block_is "recently finished · last 2h" "4195 4193 4188" "+17 more"
 }
 c_compact_busy24_h52() {
-	T_TITLE="busy24 at 52 lines: the whole finished block, then pending gets rows: 4203 4204 and '… 18 jobs pending' above 4207"
+	T_TITLE="busy24 at 52 lines: the whole finished block, then pending gets rows: 4203 4204, and '… 18 jobs pending' after 4207, the pending block's end"
 	xfail "$T_TITLE; sq has no --compact yet"
 	compact_case busy24 100 52 "1 1 0 1" "151 128 23 0"
 	compact_lines 52 4
 	busy_nodes_full
-	compact_queue "4201|4202|4203|4204|… 18 jobs pending|4207|$busy_running_all"
+	compact_queue "4201|4202|4203|4204|4207|… 18 jobs pending|$busy_running_all"
 	want "the whole finished block, no '+N more'" fin_block_is "recently finished · last 2h" "$busy_finished_all" ""
 }
 c_compact_busy24_h60() {
@@ -1295,11 +1297,11 @@ c_compact_mix30_h30() {
 	mix_finished_line
 }
 c_compact_mix30_h45() {
-	T_TITLE="mix30 at 45 lines: all running and other rows, the whole finished block, then 3 pending rows and '… 23 jobs pending' above 5118"
+	T_TITLE="mix30 at 45 lines: all running and other rows, the whole finished block, then 3 pending rows, and '… 23 jobs pending' after 5118, the pending block's end"
 	xfail "$T_TITLE; sq has no --compact yet"
 	mix_case 45
 	compact_lines 45 4
-	compact_queue "5101|5110|5111|5112|5113|5114|5115|… 23 jobs pending|5118|5050_[0-7]|5050_[8-15]|5050_[16-23]|5050_[24-31]|5060|5061|5062|5063|5064|5065|5066|5067|5068|5069|5070|5045"
+	compact_queue "5101|5110|5111|5112|5113|5114|5115|5118|… 23 jobs pending|5050_[0-7]|5050_[8-15]|5050_[16-23]|5050_[24-31]|5060|5061|5062|5063|5064|5065|5066|5067|5068|5069|5070|5045"
 	want "the whole finished block, no '+N more'" fin_block_is "recently finished · last 2h" "5098 5097 5095 5090_[0-9] 5088 5085 5080 5075" ""
 }
 
@@ -1318,7 +1320,7 @@ c_compact_manystuck_h16() {   # decision 19: running may show only its count lin
 	T_TITLE="manystuck at 16 lines: the stuck and blocked floors, running only '… 128 jobs running', the 4 blanks kept"
 	xfail "$T_TITLE; sq has no --compact yet"
 	manystuck_case 16
-	compact_queue "4201|… 29 jobs stuck|4207|… 20 jobs pending|… 128 jobs running"
+	compact_queue "4201|4207|… 29 jobs stuck|… 20 jobs pending|… 128 jobs running"
 	want "no running row, only its count line, and still 4 blanks (decision 19)" eval '[ -z "$(labelled QROW | grep " RUNNING ")" ] && blanks_are 4'
 }
 c_compact_manystuck_h24() {   # decision 18
@@ -1347,7 +1349,7 @@ c_compact_manysmall_h40() {   # decision 18; the wording "… n jobs blocked on 
 	compact_lines 40 4
 	busy_nodes_full
 	busy_finished_line
-	compact_queue "4201|4202|4207|… 10 jobs blocked on nodes|4240|4242|… 9 jobs held by admin|4243|4246|4249|4252|4255|4258|… 3 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|3990_[70-83]|3990_[84-97]|3990_[98-111]|4109|4112|4113|4114|4115|… 11 jobs running"
+	compact_queue "4201|4202|4207|4240|4242|4243|4246|4249|4252|4255|4258|… 3 jobs stuck|… 10 jobs blocked on nodes|… 9 jobs held by admin|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|3990_[70-83]|3990_[84-97]|3990_[98-111]|4109|4112|4113|4114|4115|… 11 jobs running"
 	want "stuck+blocked+held: 14 lines of the queue table's 29" eval 'census_says "$manysmall_totals" 40 small 14 && census_says "$manysmall_totals" 40 room 29'
 }
 # Source: the settled classifier (stuck-classifier notes, 2026-10-06): only a
@@ -1400,6 +1402,9 @@ c_compact_sweep_manysmall() {   # decision 18: the order inside the cap
 #                  then blocked, then held) hides jobs
 #   lift N         1 if every running job is shown, a small section hides jobs,
 #                  and the screen still has a spare line (the cap did not lift)
+#   ellpos N       1 if decision 24 is broken: the stuck / blocked on nodes /
+#                  held by admin / pending lines are not together, in that order,
+#                  after the last pending row and before running's rows and lines
 # A section's floor is 1 row and its "… n jobs" line, or all of it if 2 rows or
 # fewer (CALL (made inside the target screens, listed to Franz, overrulable): a small section with
 # 2 or more rows has a 2-line floor, never a bare ellipsis); "past its floor":
@@ -1411,7 +1416,8 @@ census() {   # census TOTALS H
 		        nsec = split("stuck blocked held pending running other", S, " ")
 		        # CALL (made inside the target screens, listed to Franz, overrulable): the ellipsis wording names the category
 		        L["stuck"] = "stuck"; L["blocked on nodes"] = "blocked"; L["held by admin"] = "held"
-		        L["pending"] = "pending"; L["running"] = "running"; L["other"] = "other" }
+		        L["pending"] = "pending"; L["running"] = "running"; L["other"] = "other"
+		        RANK["stuck"] = 1; RANK["blocked on nodes"] = 2; RANK["held by admin"] = 3; RANK["pending"] = 4 }
 		# the settled classifier (stuck-classifier notes, 2026-10-06): a CLOSED
 		# allow-list of collapsible reasons (plus JobHeldUser, which Franz
 		# collapses) is ordinary pending; node reasons are blocked; JobHeldAdmin
@@ -1431,6 +1437,13 @@ census() {   # census TOTALS H
 		$1 == "QROW" || $1 == "QELL" || $1 == "QNOTE" { qbody++ }
 		$1 == "BLANK" { if (blank) pair = 1; blank = 1; next }
 		{ blank = 0 }
+		$1 == "QROW" || $1 == "QELL" { qi++ }
+		$1 == "QROW" && $2 ~ / PENDING / { lastpd = qi }
+		$1 == "QROW" && $2 ~ / RUNNING / && !firstrun { firstrun = qi }
+		$1 == "QELL" && match($2, /^… [0-9]+ jobs (.+)$/, em) && (em[1] in RANK) {
+			if (pqi && (qi != pqi + 1 || RANK[em[1]] <= prank)) ellbad = 1
+			if (!fpqi) fpqi = qi; pqi = qi; prank = RANK[em[1]] }
+		$1 == "QELL" && $2 ~ / jobs (running|other)$/ && !firstrun { firstrun = qi }
 		$1 == "QROW" { s = sec($2); rows[s]++; jobs[s] += match($2, /^[^ ]+ ×([0-9]+)( |$)/, m) ? m[1] : 1 }
 		$1 == "QELL" { if (match($2, /^… ([0-9]+) jobs (.+)$/, m) && (m[2] in L)) { s = L[m[2]]; nell[s]++; ell[s] = m[1] }
 		               else bad = bad " ellipsis?" }
@@ -1461,6 +1474,7 @@ census() {   # census TOTALS H
 			print "cap " ((jobs["running"] < tot["running"] && anypast && small > int(room / 2)) ? small ">" int(room / 2) : "")
 			print "order" order
 			print "lift " (jobs["running"] == tot["running"] && hiding && nl < ENVIRON["H"])
+			print "ellpos " ((ellbad || (fpqi && fpqi < lastpd) || (pqi && firstrun && pqi > firstrun)) ? 1 : 0)
 		}'
 }
 # sweep_case FIXTURE W HMAX "CALLS" "J R P O" "TOTALS" "FINLINE": COMPACT at
@@ -1482,7 +1496,7 @@ sweep_case() {
 	need "FULL: stubs called"             calls_are "${calls[@]}"
 	need "FULL: footer ${foot[*]}"        footer_is "${foot[@]}"
 	local -A prev=()
-	local refused= ran= fits= footer= narrow= pairs= acct= fin= mixed= overstuck= capped= order= lift= shrinks=
+	local refused= ran= fits= footer= narrow= pairs= acct= fin= mixed= overstuck= capped= order= lift= ellpos= shrinks=
 	for h in $(seq 6 "$hmax"); do
 		sq_run "$fx" SQ_WIDTH="$w" SQ_HEIGHT="$h" -- --compact
 		{ rc_is 2 && out_empty && grep -qxF "$compact_todays_refusal" "$ERR" &&
@@ -1507,6 +1521,7 @@ sweep_case() {
 				cap)   [ -z "$v" ] || capped="$capped $h:$v" ;;
 				order) [ -z "$v" ] || order="$order $h:${v// /,}" ;;
 				lift)  [ "$v" = 0 ] || lift="$lift $h" ;;
+				ellpos) [ "$v" = 0 ] || ellpos="$ellpos $h" ;;
 			esac
 		done < <(census "$totals" "$h")
 	done
@@ -1524,6 +1539,7 @@ sweep_case() {
 	want "while running hides jobs, stuck+blocked+held past their floors take at most half the queue table's lines (over at H:lines>half${capped:- none})" test -z "$capped"
 	want "stuck fills before blocked, blocked before held (not at H:section${order:- none})" test -z "$order"
 	want "once every running job is shown the cap lifts: stuck/blocked/held take every spare line (spare at H =${lift:- none})" test -z "$lift"
+	want "the pending categories' '… n jobs' lines together at the pending block's end, stuck, blocked, held, pending (decision 24; not at H =${ellpos:- none})" test -z "$ellpos"
 	want "a taller screen never shows fewer rows of a section (fewer at H:section${shrinks:- none})" test -z "$shrinks"
 }
 c_compact_sweep_busy24() {
@@ -1667,7 +1683,8 @@ c_reservation_forwarded() {   # decision 23's caveat: no prefix clash with --res
 	need "x: forwarded"                   argv_has squeue -h -S t,i --reservation x
 }
 # SQ_COMPACT: a CALL (made with decisions 20-23, listed to Franz, overrulable):
-# 0 = always FULL, 1 = always COMPACT, unset = detect; the flags beat it
+# 0 = always FULL, 1 = always COMPACT, unset = detect; the flags beat it.
+# Decision 25: any other value, empty included, means unset, silently
 c_sq_compact_env() {
 	T_TITLE="SQ_COMPACT=1 is COMPACT into a file; SQ_COMPACT=0 --compact is COMPACT; SQ_COMPACT=1 --full is FULL"
 	xfail "$T_TITLE; sq has no SQ_COMPACT yet"
@@ -1681,17 +1698,19 @@ c_sq_compact_env() {
 	today "=1 --full: refused today"      unknown_option --full
 	want "=1 --full: the flag wins, FULL" busy_full
 }
-c_sq_compact_bad() {
-	T_TITLE="SQ_COMPACT=yes or 2 is refused (rc 2) before any Slurm call"
-	xfail "$T_TITLE; sq has no SQ_COMPACT yet"
+c_sq_compact_bad() {   # decision 25
+	T_TITLE="SQ_COMPACT=yes, 2 or empty falls back silently to detection: COMPACT on a terminal, FULL into a file"
+	xfail "$T_TITLE; sq has no COMPACT yet"
 	local v
-	for v in yes 2; do
-		sq_run busy24 SQ_COMPACT=$v --
-		today "$v: ignored today, a FULL screen" eval 'rc_is 0 && busy_full'
-		want_refused "SQ_COMPACT=$v"
-		want "SQ_COMPACT=$v: the message names SQ_COMPACT" grep -q SQ_COMPACT "$ERR"
+	for v in yes 2 ""; do
+		PTY=1 PTY_ROWS=24 PTY_COLS=100 sq_run busy24 TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT SQ_COMPACT="$v" --
+		today "'$v' on a terminal: FULL today" eval 'rc_is 0 && busy_full'
+		want "'$v' on a terminal: rc 0, stubs called, no message" eval 'rc_is 0 && calls_are 1 1 0 1 && ! plain | grep -q "^sq: "'
+		want "'$v' on a terminal: COMPACT fitted to 24 rows" busy_compact 24
+		sq_run busy24 -SQ_WIDTH -SQ_HEIGHT SQ_COMPACT="$v" --
+		need "'$v' into a file: rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
+		need "'$v' into a file: FULL" busy_full
 	done
-	stubs_answer
 }
 c_sq_compact_zero_pty() {   # true today already: sq has only FULL
 	T_TITLE="SQ_COMPACT=0 on a 24-row terminal is FULL"
