@@ -651,22 +651,17 @@ c_pending_strided() {
 	need "4b(i): shown but counted 1" eval '
 		! { rows queue | grep -q "^ *7001_" && section footer | grep -qE "^ *1 jobs "; }'
 }
-c_xf_pending_long() {
-	T_TITLE=; xfail "a pending id over 31 characters is cut by squeue (no SLURM_BITSTR_LEN=0) and dropped; should be shown as 10 jobs"
+c_pending_long() {
+	T_TITLE="a pending id over 31 characters arrives whole (SLURM_BITSTR_LEN=0) and is shown as 10 jobs"
 	sq_run pending-long --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	bracket_guards queue 11137 10
-	want "cell '11137_[1,3,5,7,9,11,13,15,17,20] ×10'" row_cell queue "11137_[1,3,5,7,9,11,13,15,17,20] ×10"
-	want "footer 10/0/10/0"           footer_is 10 0 10 0
-	want "no unreadable note"         no_skips
-	# today's shape is the only accepted one: dropped, with the note, which is also
-	# what a correct count without SLURM_BITSTR_LEN=0 still gives (squeue cuts the
-	# id, so it fails the gate) - so this flips only once the whole id arrives
+	need "cell '11137_[1,3,5,7,9,11,13,15,17,20] ×10'" row_cell queue "11137_[1,3,5,7,9,11,13,15,17,20] ×10"
+	need "footer 10/0/10/0"           footer_is 10 0 10 0
+	need "no unreadable note"         no_skips
 	need "4b(i): shown but counted 1" eval '
 		! { rows queue | grep -q "^ *11137_" && section footer | grep -qE "^ *1 jobs "; }'
-	today "dropped, with the skip note" eval '
-		has "↳ 1 unreadable queue row skipped" && footer_is 0 0 0 0 && [ "$(nrows queue)" -eq 0 ]'
 }
 # Acceptance 6: a malformed bracket is skipped with the existing note, never
 # counted 0, negative, NaN or 1.  The run inherits SLURM_BITSTR_LEN=0 (a user
@@ -773,13 +768,12 @@ c_more_repeated() {
 	T_TITLE="capped finished block (fallback): a task listed twice counts once, '8400_[1-2] ×2' and '+2 more'"
 	more_case more-repeated "1 1 1 1" 8400 "8400_[1-2] ×2" 2
 }
-c_xf_bitstr() {
-	T_TITLE=; xfail "squeue and sacct are called without SLURM_BITSTR_LEN=0"
+c_bitstr() {
+	T_TITLE="every squeue and sacct call carries SLURM_BITSTR_LEN=0"
 	sq_run sacct-fails --
 	need "rc 0"                       rc_is 0
 	need "stubs: queue, sacct and fallback all called" calls_are 1 1 1 1
-	want "every squeue and sacct call has SLURM_BITSTR_LEN=0" all_calls_env SLURM_BITSTR_LEN 0 squeue sacct
-	today "no squeue or sacct call has it" no_call_env SLURM_BITSTR_LEN squeue sacct
+	need "every squeue and sacct call has SLURM_BITSTR_LEN=0" all_calls_env SLURM_BITSTR_LEN 0 squeue sacct
 }
 
 # ---- 11b. an id cell too wide for the terminal (array-count spec R7) ---------
@@ -983,10 +977,10 @@ cases=(
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
-	pending_strided xf_pending_long
+	pending_strided pending_long
 	malformed_step0 malformed_dots malformed_reversed malformed_multi malformed_dash malformed_huge
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
-	more_sacct more_fallback more_repeated xf_bitstr
+	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
 	shrink_locale shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty

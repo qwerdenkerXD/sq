@@ -394,6 +394,10 @@ err_of() { [ "$1" = 124 ] && echo "no response after ${tmo}s" || head -1 "$2"; }
 # SLURM_TIME_FORMAT is pinned on every collector: "relative" or a custom
 # format turns a date into something epoch() cannot read, which silently kills
 # both the AGO column and the newest-first ordering
+# SLURM_BITSTR_LEN=0 is pinned on every squeue and sacct call: unset, squeue
+# cuts an array id at 31 characters mid-number and sacct ends a long one in
+# a literal "...", and a small inherited value cuts every bracket - each such
+# id fails the record anchor and the whole row is dropped
 # The node collector is framed like the job ones, because a node's drain/down
 # REASON (%E) is free text: a "|" in it used to shift the whole node block and a
 # newline split the record.  %C ("alloc/idle/other/total") leads, so a record is
@@ -405,7 +409,7 @@ nfmt="%C$nonce3%N$nonce3%e$nonce3%m$nonce3%T$nonce3%E$nonce3%H$nonce3"
 SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" sinfo -hN -o "$nfmt" > "$tmp/nodes" 2> "$tmp/nodes.err"
 nerr=$?; [ $nerr -eq 0 ] && nerr= || nerr=$(err_of $nerr "$tmp/nodes.err")
 
-SLURM_TIME_FORMAT=standard SQUEUE_FORMAT=$fmt timeout -k 2 "$tmo" squeue -h -S t,i "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
+SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT=$fmt timeout -k 2 "$tmo" squeue -h -S t,i "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
 jerr=$?; [ $jerr -eq 0 ] && jerr= || jerr=$(err_of $jerr "$tmp/jobs.err")
 
 # ---- the recently-finished block's source --------------------------------
@@ -471,7 +475,7 @@ rsrc=none; rwhy=$sskip; rerr=; rwhyc=
 # invariant the reassembler asserts.
 if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	aflag=(-a); [ "$suser" = 0 ] || aflag=()
-	SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" \
+	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 timeout -k 2 "$tmo" \
 		sacct -p --delimiter="$nonce2" -n -S "$since" -E now \
 		"${aflag[@]+"${aflag[@]}"}" "${sargs[@]+"${sargs[@]}"}" \
 		-o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName \
@@ -488,7 +492,7 @@ fi
 # every field is nonce-terminated, including the last, so gawk can tell a name
 # holding the delimiter, a tab or a newline from a real record boundary
 if [ "$recent" != 0 ] && [ "$rsrc" = none ] && [ -z "$jerr" ]; then
-	SLURM_TIME_FORMAT=standard \
+	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 \
 		SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,State:$nonce,exit_code:$nonce,TimeUsed:$nonce,EndTime:$nonce,ArrayJobID:$nonce,ArrayTaskID:$nonce,UserName:$nonce,Name:$nonce" \
 		timeout -k 2 "$tmo" squeue -t all -h \
 		"${args[@]+"${args[@]}"}" > "$tmp/recent" 2> "$tmp/recent.err"
