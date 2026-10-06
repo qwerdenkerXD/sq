@@ -1,0 +1,3 @@
+# a 10-task array throttled to 3 that failed as a whole: one bracketed row
+@include ../_common/sacct-defaults
+JobID=7002_[0-9%3]; JobName=sweep; State=FAILED; ExitCode=1:0; Elapsed=00:00:00; NodeList=None assigned

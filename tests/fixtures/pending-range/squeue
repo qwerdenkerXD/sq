@@ -1,0 +1,3 @@
+# one pending array of 20 tasks: squeue prints it as ONE row
+@include ../_common/squeue-defaults
+i=7000_[1-20]; j=sweep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A

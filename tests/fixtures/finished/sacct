@@ -1,0 +1,18 @@
+# array 5000: tasks 0-3 COMPLETED, 4-5 FAILED, each with its .batch step;
+# job 5100 hit its time limit: the allocation row says TIMEOUT 0:0 and only the
+# .batch step carries the signal (shaped like bioserver's job 10297)
+@include ../_common/sacct-defaults
+JobID=5000_0; JobName=sweep
+JobID=5000_0.batch; User=; JobName=batch
+JobID=5000_1; JobName=sweep
+JobID=5000_1.batch; User=; JobName=batch
+JobID=5000_2; JobName=sweep
+JobID=5000_2.batch; User=; JobName=batch
+JobID=5000_3; JobName=sweep
+JobID=5000_3.batch; User=; JobName=batch
+JobID=5000_4; JobName=sweep; State=FAILED; ExitCode=1:0
+JobID=5000_4.batch; User=; JobName=batch; State=FAILED; ExitCode=1:0
+JobID=5000_5; JobName=sweep; State=FAILED; ExitCode=1:0
+JobID=5000_5.batch; User=; JobName=batch; State=FAILED; ExitCode=1:0
+JobID=5100; JobName=longrun; State=TIMEOUT; Elapsed=01:00:02; End=2026-10-06T08:30:00
+JobID=5100.batch; User=; JobName=batch; State=CANCELLED; ExitCode=0:15; Elapsed=01:00:03; End=2026-10-06T08:30:01

@@ -1,0 +1,4 @@
+# a job name far wider than any terminal, so the table is shrunk to the
+# terminal's width and the layout width shows in the output
+@include ../_common/squeue-defaults
+i=8001; j=a-job-name-that-is-much-wider-than-any-terminal-so-sq-has-to-shrink-the-name-column-to-make-the-table-fit-the-width-it-believes-the-terminal-has

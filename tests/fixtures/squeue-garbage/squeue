@@ -1,0 +1,3 @@
+# rc 0, but not the format sq asked for (what an overridden format looks like)
+@raw JOBID PARTITION NAME USER ST TIME NODES NODELIST(REASON)
+@raw  1101 batch train alice R 10:00 1 node01

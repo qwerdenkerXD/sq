@@ -1,0 +1,8 @@
+# four running tasks of one array that agree on every displayed column, and a
+# single job beside them
+@include ../_common/squeue-defaults
+i=1234_0; j=sweep
+i=1234_1; j=sweep
+i=1234_2; j=sweep
+i=1234_3; j=sweep
+i=2000;   j=single

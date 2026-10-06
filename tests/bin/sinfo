@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# test stub, see tests/lib/stub.sh
+exec "${BASH_SOURCE[0]%/*}/../lib/stub.sh" sinfo "$@"

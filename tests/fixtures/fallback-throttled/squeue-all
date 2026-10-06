@@ -1,0 +1,4 @@
+# the same array through squeue -t all: -O JobID is the plain base id and the
+# expression arrives bare in ArrayTaskID
+@include ../_common/squeue-all-defaults
+JobID=7002; StateCompact=F; State=FAILED; exit_code=1; TimeUsed=0:00; ArrayJobID=7002; ArrayTaskID=0-9%3; Name=sweep

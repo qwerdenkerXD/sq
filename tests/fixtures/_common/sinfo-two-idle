@@ -1,0 +1,4 @@
+# Two idle nodes, shaped like bioserver's `sinfo -hN` (23.11): no reason is
+# "none" and its timestamp "Unknown".
+C=0/32/0/32; N=node01; e=120000; m=128000; T=idle; E=none; H=Unknown
+C=0/32/0/32; N=node02; e=121000; m=128000; T=idle; E=none; H=Unknown

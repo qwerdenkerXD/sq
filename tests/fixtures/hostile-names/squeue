@@ -1,0 +1,9 @@
+# names that try to break the framing: a pipe, a tab, a newline, terminal
+# escapes (clear screen, set title + BEL), and a whole fake record after a
+# newline, once in the old "|" framing and once with a nonce-shaped separator
+@include ../_common/squeue-defaults
+i=3001; j=pipe|name
+i=3002; j=tab\tname
+i=3003; j=nl\nname
+i=3004; j=esc\e[2Jclear\e]0\;pwn\a
+i=3005; j=x\n424242|fake|mallory|RUNNING|0:01|9:59|64|999G|node01|R|UNLIMITED|N/A|\n424243Nabcdef0123456789abcdef01HACKEDNabcdef0123456789abcdef01

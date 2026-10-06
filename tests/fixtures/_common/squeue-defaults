@@ -1,0 +1,3 @@
+# What a running job looks like in sq's default columns (i,j,u,T,M,L,C,m,R) and
+# its hidden ones (t,l,S), so a record only has to say what makes it different.
+@defaults u=alice; j=job; T=RUNNING; t=R; M=10:00; L=50:00; l=1:00:00; C=1; m=4G; R=node01; S=2026-10-06T08:00:00

@@ -1,0 +1,2 @@
+# the controller never answers: sq's timeout has to cut this off
+@hang 30

@@ -1,0 +1,3 @@
+# node02 drained, its reason holding a "|" and a newline
+C=0/32/0/32; N=node01; e=120000; m=128000; T=idle; E=none; H=Unknown
+C=0/0/32/32; N=node02; e=121000; m=128000; T=drained; E=bad|disk\nreplace; H=2026-10-01T12:00:00
