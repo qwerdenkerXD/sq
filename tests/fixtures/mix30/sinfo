@@ -1,0 +1,2 @@
+C=60/4/0/64; N=node01; e=150000; m=257000; T=mixed; E=none; H=Unknown
+C=0/0/64/64; N=node02; e=250000; m=257000; T=drained; E=bad DIMM B2, replace; H=2026-10-04T09:30:00

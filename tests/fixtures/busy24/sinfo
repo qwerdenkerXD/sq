@@ -1,0 +1,2 @@
+C=128/0/0/128; N=node01; e=61000; m=515000; T=allocated; E=none; H=Unknown
+C=0/0/128/128; N=node02; e=N/A; m=515000; T=down*; E=Not responding; H=2026-10-05T22:14:00

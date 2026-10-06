@@ -1,0 +1,2 @@
+# busy24 with sacct down: the finished block comes from the squeue -t all fallback
+@include ../busy24/squeue

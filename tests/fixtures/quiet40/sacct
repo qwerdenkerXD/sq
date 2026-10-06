@@ -1,0 +1,17 @@
+@include ../_common/sacct-defaults
+JobID=4099; User=bob; JobName=trim; State=COMPLETED; ExitCode=0:0; Elapsed=00:41:10; End=2026-10-06T19:41:48; NodeList=node01
+JobID=4099.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=00:41:10; End=2026-10-06T19:41:48; NodeList=node01
+JobID=4098; User=fsill; JobName=qc; State=FAILED; ExitCode=1:0; Elapsed=00:00:42; End=2026-10-06T19:36:48; NodeList=node01
+JobID=4098.batch; User=; JobName=batch; State=FAILED; ExitCode=1:0; Elapsed=00:00:42; End=2026-10-06T19:36:48; NodeList=node01
+JobID=4090_0; User=alice; JobName=sweep; State=COMPLETED; ExitCode=0:0; Elapsed=00:20:00; End=2026-10-06T19:28:48; NodeList=node01
+JobID=4090_0.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=00:20:00; End=2026-10-06T19:28:48; NodeList=node01
+JobID=4090_1; User=alice; JobName=sweep; State=COMPLETED; ExitCode=0:0; Elapsed=00:20:00; End=2026-10-06T19:28:48; NodeList=node01
+JobID=4090_1.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=00:20:00; End=2026-10-06T19:28:48; NodeList=node01
+JobID=4090_2; User=alice; JobName=sweep; State=COMPLETED; ExitCode=0:0; Elapsed=00:20:00; End=2026-10-06T19:28:48; NodeList=node01
+JobID=4090_2.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=00:20:00; End=2026-10-06T19:28:48; NodeList=node01
+JobID=4085; User=mkoch; JobName=bwa; State=TIMEOUT; ExitCode=0:0; Elapsed=06:00:00; End=2026-10-06T19:10:48; NodeList=node01
+JobID=4085.batch; User=; JobName=batch; State=TIMEOUT; ExitCode=0:0; Elapsed=06:00:00; End=2026-10-06T19:10:48; NodeList=node01
+JobID=4080; User=bob; JobName=deseq; State=COMPLETED; ExitCode=0:0; Elapsed=01:10:00; End=2026-10-06T18:53:48; NodeList=node01
+JobID=4080.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=01:10:00; End=2026-10-06T18:53:48; NodeList=node01
+JobID=4075; User=alice; JobName=plot; State=COMPLETED; ExitCode=0:0; Elapsed=00:03:00; End=2026-10-06T18:08:48; NodeList=node01
+JobID=4075.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=00:03:00; End=2026-10-06T18:08:48; NodeList=node01

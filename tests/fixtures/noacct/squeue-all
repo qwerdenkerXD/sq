@@ -1,0 +1,148 @@
+# what squeue -t all lists for busy24: the live jobs too (sq drops them), then
+# what MinJobAge still holds: 3 finished jobs, 4188 FAILED among them
+@include ../_common/squeue-all-defaults
+JobID=4201; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=assemble
+JobID=4202; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=merge
+JobID=4203; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=trim
+JobID=4204; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=trim
+JobID=4205; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=fastp
+JobID=4206; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=fastp
+JobID=4207; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=polish
+JobID=4210; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=bwa
+JobID=4211; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=bwa
+JobID=4212; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=bwa
+JobID=4213; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=bwa
+JobID=4214; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=bwa
+JobID=4215; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=bwa
+JobID=4230; ArrayJobID=4230; ArrayTaskID=0-9; StateCompact=PD; State=PENDING; EndTime=Unknown; Name=sweep
+JobID=9000016; ArrayJobID=3990; ArrayTaskID=0; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000017; ArrayJobID=3990; ArrayTaskID=1; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000018; ArrayJobID=3990; ArrayTaskID=2; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000019; ArrayJobID=3990; ArrayTaskID=3; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000020; ArrayJobID=3990; ArrayTaskID=4; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000021; ArrayJobID=3990; ArrayTaskID=5; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000022; ArrayJobID=3990; ArrayTaskID=6; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000023; ArrayJobID=3990; ArrayTaskID=7; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000024; ArrayJobID=3990; ArrayTaskID=8; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000025; ArrayJobID=3990; ArrayTaskID=9; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000026; ArrayJobID=3990; ArrayTaskID=10; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000027; ArrayJobID=3990; ArrayTaskID=11; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000028; ArrayJobID=3990; ArrayTaskID=12; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000029; ArrayJobID=3990; ArrayTaskID=13; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000030; ArrayJobID=3990; ArrayTaskID=14; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000031; ArrayJobID=3990; ArrayTaskID=15; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000032; ArrayJobID=3990; ArrayTaskID=16; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000033; ArrayJobID=3990; ArrayTaskID=17; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000034; ArrayJobID=3990; ArrayTaskID=18; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000035; ArrayJobID=3990; ArrayTaskID=19; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000036; ArrayJobID=3990; ArrayTaskID=20; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000037; ArrayJobID=3990; ArrayTaskID=21; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000038; ArrayJobID=3990; ArrayTaskID=22; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000039; ArrayJobID=3990; ArrayTaskID=23; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000040; ArrayJobID=3990; ArrayTaskID=24; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000041; ArrayJobID=3990; ArrayTaskID=25; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000042; ArrayJobID=3990; ArrayTaskID=26; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000043; ArrayJobID=3990; ArrayTaskID=27; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000044; ArrayJobID=3990; ArrayTaskID=28; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000045; ArrayJobID=3990; ArrayTaskID=29; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000046; ArrayJobID=3990; ArrayTaskID=30; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000047; ArrayJobID=3990; ArrayTaskID=31; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000048; ArrayJobID=3990; ArrayTaskID=32; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000049; ArrayJobID=3990; ArrayTaskID=33; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000050; ArrayJobID=3990; ArrayTaskID=34; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000051; ArrayJobID=3990; ArrayTaskID=35; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000052; ArrayJobID=3990; ArrayTaskID=36; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000053; ArrayJobID=3990; ArrayTaskID=37; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000054; ArrayJobID=3990; ArrayTaskID=38; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000055; ArrayJobID=3990; ArrayTaskID=39; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000056; ArrayJobID=3990; ArrayTaskID=40; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000057; ArrayJobID=3990; ArrayTaskID=41; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000058; ArrayJobID=3990; ArrayTaskID=42; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000059; ArrayJobID=3990; ArrayTaskID=43; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000060; ArrayJobID=3990; ArrayTaskID=44; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000061; ArrayJobID=3990; ArrayTaskID=45; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000062; ArrayJobID=3990; ArrayTaskID=46; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000063; ArrayJobID=3990; ArrayTaskID=47; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000064; ArrayJobID=3990; ArrayTaskID=48; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000065; ArrayJobID=3990; ArrayTaskID=49; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000066; ArrayJobID=3990; ArrayTaskID=50; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000067; ArrayJobID=3990; ArrayTaskID=51; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000068; ArrayJobID=3990; ArrayTaskID=52; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000069; ArrayJobID=3990; ArrayTaskID=53; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000070; ArrayJobID=3990; ArrayTaskID=54; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000071; ArrayJobID=3990; ArrayTaskID=55; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000072; ArrayJobID=3990; ArrayTaskID=56; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000073; ArrayJobID=3990; ArrayTaskID=57; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000074; ArrayJobID=3990; ArrayTaskID=58; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000075; ArrayJobID=3990; ArrayTaskID=59; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000076; ArrayJobID=3990; ArrayTaskID=60; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000077; ArrayJobID=3990; ArrayTaskID=61; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000078; ArrayJobID=3990; ArrayTaskID=62; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000079; ArrayJobID=3990; ArrayTaskID=63; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000080; ArrayJobID=3990; ArrayTaskID=64; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000081; ArrayJobID=3990; ArrayTaskID=65; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000082; ArrayJobID=3990; ArrayTaskID=66; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000083; ArrayJobID=3990; ArrayTaskID=67; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000084; ArrayJobID=3990; ArrayTaskID=68; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000085; ArrayJobID=3990; ArrayTaskID=69; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000086; ArrayJobID=3990; ArrayTaskID=70; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000087; ArrayJobID=3990; ArrayTaskID=71; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000088; ArrayJobID=3990; ArrayTaskID=72; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000089; ArrayJobID=3990; ArrayTaskID=73; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000090; ArrayJobID=3990; ArrayTaskID=74; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000091; ArrayJobID=3990; ArrayTaskID=75; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000092; ArrayJobID=3990; ArrayTaskID=76; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000093; ArrayJobID=3990; ArrayTaskID=77; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000094; ArrayJobID=3990; ArrayTaskID=78; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000095; ArrayJobID=3990; ArrayTaskID=79; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000096; ArrayJobID=3990; ArrayTaskID=80; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000097; ArrayJobID=3990; ArrayTaskID=81; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000098; ArrayJobID=3990; ArrayTaskID=82; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000099; ArrayJobID=3990; ArrayTaskID=83; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000100; ArrayJobID=3990; ArrayTaskID=84; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000101; ArrayJobID=3990; ArrayTaskID=85; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000102; ArrayJobID=3990; ArrayTaskID=86; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000103; ArrayJobID=3990; ArrayTaskID=87; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000104; ArrayJobID=3990; ArrayTaskID=88; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000105; ArrayJobID=3990; ArrayTaskID=89; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000106; ArrayJobID=3990; ArrayTaskID=90; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000107; ArrayJobID=3990; ArrayTaskID=91; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000108; ArrayJobID=3990; ArrayTaskID=92; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000109; ArrayJobID=3990; ArrayTaskID=93; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000110; ArrayJobID=3990; ArrayTaskID=94; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000111; ArrayJobID=3990; ArrayTaskID=95; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000112; ArrayJobID=3990; ArrayTaskID=96; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000113; ArrayJobID=3990; ArrayTaskID=97; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000114; ArrayJobID=3990; ArrayTaskID=98; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000115; ArrayJobID=3990; ArrayTaskID=99; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000116; ArrayJobID=3990; ArrayTaskID=100; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000117; ArrayJobID=3990; ArrayTaskID=101; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000118; ArrayJobID=3990; ArrayTaskID=102; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000119; ArrayJobID=3990; ArrayTaskID=103; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000120; ArrayJobID=3990; ArrayTaskID=104; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000121; ArrayJobID=3990; ArrayTaskID=105; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000122; ArrayJobID=3990; ArrayTaskID=106; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000123; ArrayJobID=3990; ArrayTaskID=107; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000124; ArrayJobID=3990; ArrayTaskID=108; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000125; ArrayJobID=3990; ArrayTaskID=109; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000126; ArrayJobID=3990; ArrayTaskID=110; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=9000127; ArrayJobID=3990; ArrayTaskID=111; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=align
+JobID=4100; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=deseq
+JobID=4101; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=plot
+JobID=4102; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=index
+JobID=4103; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=qc
+JobID=4104; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=trim
+JobID=4105; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=fastp
+JobID=4106; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=bwa
+JobID=4107; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=merge
+JobID=4108; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=polish
+JobID=4109; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=assemble
+JobID=4110; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=sort
+JobID=4111; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=dedup
+JobID=4112; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=call
+JobID=4113; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=annot
+JobID=4114; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=vcf
+JobID=4115; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=report
+JobID=4195; StateCompact=CD; State=COMPLETED; TimeUsed=41:10; EndTime=2026-10-06T19:42:48; UserName=bob; Name=trim
+JobID=4193; StateCompact=CD; State=COMPLETED; TimeUsed=12:03; EndTime=2026-10-06T19:40:48; UserName=alice; Name=fastp
+JobID=4188; StateCompact=F; State=FAILED; exit_code=1; TimeUsed=0:42; EndTime=2026-10-06T19:39:48; UserName=fsill; Name=qc
