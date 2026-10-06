@@ -1,0 +1,3 @@
+# one running job beside the finished block of endstates
+@include ../_common/squeue-defaults
+i=310; j=train

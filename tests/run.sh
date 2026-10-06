@@ -1682,6 +1682,30 @@ c_compact_no_size() {   # decision 21
 	need "COMPACT fitted to 24 lines, footer last" busy_compact 24
 	stubs_answer
 }
+# The colours of finished rows: one table (fcol) decides them in both modes, so
+# CANCELLED, PREEMPTED and REVOKED read yellow, never red like a failure.  In
+# endstates they are newer than the one FAILED job, so COMPACT looks past them
+# for the newest failure.  Everything fits, so COMPACT is FULL byte for byte.
+sgr_of() { plain_rows_with "$1" | LC_ALL=C grep -o "$ESC\[[0-9;]*m" | paste -sd' '; }   # sgr_of TEXT: the escapes of the row holding TEXT
+plain_rows_with() { LC_ALL=C grep -aF -- "$1" "$OUT"; }
+# the clock and AGO, with the escapes around them, are what two runs may differ in
+without_clock_ago_sgr() { sed -E "/SLURM/s/[0-9]{2}:[0-9]{2}:[0-9]{2}//; s/ +([0-9]+[smh]|-)($ESC\[[0-9;]*m)?\$//" "$1"; }
+c_compact_colour() {
+	T_TITLE="--color: CANCELLED, PREEMPTED and REVOKED rows are coloured alike in COMPACT and FULL, and COMPACT is FULL when everything fits"
+	local st full=() fullout names=(stopped bumped fed)     # their job names
+	sq_run endstates -- --color --full
+	need "FULL: rc 0, stubs called"       eval 'rc_is 0 && calls_are 1 1 0 1'
+	for st in "${names[@]}"; do full+=("$(sgr_of "$st")"); done
+	fullout=$OUT
+	sq_run endstates -- --color --compact
+	need "COMPACT: rc 0, stubs called"    eval 'rc_is 0 && calls_are 1 1 0 1'
+	local i=0
+	for st in CANCELLED PREEMPTED REVOKED; do
+		need "$st: the same colours as in FULL, yellow (33)" eval '[ "$(sgr_of "${names['"$i"']}")" = "${full['"$i"']}" ] && grep -q "\[33m" <<< "${full['"$i"']}"'
+		i=$((i+1))
+	done
+	need "the same bytes as FULL, the clock and AGO aside" eval 'cmp -s <(without_clock_ago_sgr "$fullout") <(without_clock_ago_sgr "$OUT")'
+}
 # error screens: sinfo failing (the unreachable banner), squeue failing, a cut
 # queue stream (qtrunc) and an unreadable one (qbad, no footer): at every
 # height the screen fits and a footer, if any, is the last line
@@ -1731,7 +1755,7 @@ cases=(
 	compact_manysmall_h40 compact_unlisted_h24 compact_quiet40_h10
 	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_manystuck compact_sweep_manysmall
 	compact_sweep_quiet40
-	recent_max_full compact_recent_max compact_no_folding full_flag compact_full_both
+	recent_max_full compact_recent_max compact_no_folding compact_colour full_flag compact_full_both
 	reserve_refused compact_reserve reservation_forwarded
 	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full
 	compact_no_size compact_error_screens

@@ -1156,7 +1156,8 @@ END{
     for (j=1; j<=SECN[5]; j++) RANK[5, ek[eo[j]]] = j
     FINCAP = rmax ? rmax : 25                   # SQ_RECENT_MAX caps the rows here
     FSLOTS = (d <= FINCAP) ? d : FINCAP + 1     # rows, plus "+N more" if any is cut
-    for (j=1; j<=d && !BAD[rst[ord[j]]]; j++) ;
+    for (j=1; j<=d && !(rst[ord[j]] in BAD); j++) ;   # "in": a lookup would add the
+                                                       # key, and fcol() reads BAD by "in"
     if (j > d) j = 1                            # the one line: the newest failure, else
     FAILG = ord[j]                              # the newest job; the block reaches
     FMIN = (j + 1 >= d) ? d : j + 1             # down to it at least

@@ -1,0 +1,9 @@
+# "endstates": end states that are neither success nor a failure worth a bell
+# (CANCELLED, PREEMPTED, REVOKED: yellow), all newer than the one FAILED job,
+# so COMPACT looks past them for the newest failure
+@include ../_common/sacct-defaults
+JobID=300; JobName=bad; State=FAILED; ExitCode=1:0; End=2026-10-06T07:00:00
+JobID=301; JobName=bumped; State=PREEMPTED; End=2026-10-06T07:10:00
+JobID=302; JobName=stopped; State=CANCELLED; End=2026-10-06T07:20:00
+JobID=303; JobName=fed; State=REVOKED; End=2026-10-06T07:30:00
+JobID=304; JobName=done; End=2026-10-06T07:40:00
