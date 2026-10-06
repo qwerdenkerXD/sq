@@ -779,6 +779,10 @@ c_xf_bitstr() {
 # The "wide" fixture's job name is wider than any terminal, so the queue table is
 # shrunk to exactly the width sq believes in and its header line spans it: the
 # widest line is the layout width.  37x123 is a size nothing defaults to.
+# A TERM no terminfo has stands in for xterm-kitty and xterm-ghostty, which are
+# unknown to some hosts and known to others: tput fails for it everywhere.
+unknown_term=sq-test-unknown-term
+tput_fails() { ! TERM=$unknown_term tput cols >/dev/null 2>&1; }
 pty_case() {   # pty_case ROWS COLS TERM [VAR=value...]: sq on a pty of that size
 	local rows=$1 cols=$2 term=$3; shift 3      # and TERM, no size in the env but VARs
 	PTY=1 PTY_ROWS=$rows PTY_COLS=$cols sq_run wide TERM="$term" -SQ_WIDTH -SQ_HEIGHT "$@" --
@@ -794,27 +798,28 @@ c_pty_xterm() {
 	need "widest line is 123"         eval '[ "$(width)" -eq 123 ]'
 	need "the size asked of stty once" eval '[ "$(stty_size_calls)" -eq 1 ]'
 }
-c_pty_kitty() {
-	T_TITLE="TERM=xterm-kitty (unknown to terminfo here) on a 123-column pty: laid out at 123 columns, via stty size"
-	pty_case 37 123 xterm-kitty
-	need "xterm-kitty really is unknown to terminfo here" eval '! TERM=xterm-kitty tput cols >/dev/null 2>&1'
+c_pty_unknown_term() {
+	T_TITLE="a TERM unknown to terminfo (as kitty, ghostty can be) on a 123-column pty: laid out at 123 columns, via stty size"
+	pty_case 37 123 "$unknown_term"
+	need "tput really fails for $unknown_term" tput_fails
 	need "widest line is 123"         eval '[ "$(width)" -eq 123 ]'
 	need "the size asked of stty once" eval '[ "$(stty_size_calls)" -eq 1 ]'
 }
 c_pty_stdin_null() {
-	T_TITLE="stdin </dev/null on a 123-column xterm-kitty pty: still 123, the size comes from /dev/tty"
-	PTY_STDIN=/dev/null pty_case 37 123 xterm-kitty
+	T_TITLE="stdin </dev/null on a 123-column pty, TERM unknown to terminfo: still 123, the size comes from /dev/tty"
+	PTY_STDIN=/dev/null pty_case 37 123 "$unknown_term"
+	need "tput really fails for $unknown_term" tput_fails
 	need "widest line is 123"         eval '[ "$(width)" -eq 123 ]'
 }
 c_pty_columns_wins() {
-	T_TITLE="COLUMNS=90 on a 123-column xterm-kitty pty: laid out at 90, the env wins over stty"
-	pty_case 37 123 xterm-kitty COLUMNS=90
+	T_TITLE="COLUMNS=90 on a 123-column pty, TERM unknown to terminfo: laid out at 90, the env wins over stty"
+	pty_case 37 123 "$unknown_term" COLUMNS=90
 	need "widest line is 90"          eval '[ "$(width)" -eq 90 ]'
 	need "stty asked once, for the lines" eval '[ "$(stty_size_calls)" -eq 1 ]'
 }
 c_pty_env_both() {
 	T_TITLE="COLUMNS=90 LINES=30 on a 123-column pty: laid out at 90, stty never asked"
-	pty_case 37 123 xterm-kitty COLUMNS=90 LINES=30
+	pty_case 37 123 "$unknown_term" COLUMNS=90 LINES=30
 	need "widest line is 90"          eval '[ "$(width)" -eq 90 ]'
 	need "stty not asked"             eval '[ "$(stty_size_calls)" -eq 0 ]'
 }
@@ -845,7 +850,7 @@ cases=(
 	xf_pending_strided xf_pending_long
 	malformed_step0 malformed_dots xf_malformed_reversed xf_malformed_dash xf_malformed_huge
 	xf_finished_throttled xf_fallback_throttled xf_more_sacct xf_more_fallback xf_bitstr
-	pty_xterm pty_kitty pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
+	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do
