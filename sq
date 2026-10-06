@@ -96,9 +96,10 @@ if [ "$color" = auto ]; then
 fi
 
 # The field separator is a nonce minted per run, never per session: a job name
-# is fixed at submit time, so it cannot contain a separator minted afterwards.
-# That is what makes a record boundary unforgeable - a name holding "|", a tab
-# or a newline can then neither inject a row nor steal a field.
+# is fixed at submit time and a node's drain reason when the admin sets it, so
+# neither can contain a separator minted afterwards.  That is what makes a record
+# boundary unforgeable - a field holding "|", a tab or a newline can then neither
+# inject a row nor steal a field.
 # A nonce is usable only if it is letter-led (squeue's -O grammar is
 # type[:[.][size][suffix]], so a suffix starting with digits is read as a FIELD
 # WIDTH: "JobID:1234567890" segfaults squeue, "JobID:0" drops the separator),
@@ -120,18 +121,25 @@ mint_nonce() {
 	printf '%s' "$n"
 }
 nonce=$(mint_nonce)   || die "no usable random field separator"
-# sacct's --delimiter has no environment equivalent, so it is always visible in
-# /proc/<pid>/cmdline (mode 0444).  That one gets its OWN nonce: a reader who
-# catches it can then forge nothing, because the queue nonce never leaves the
-# 0400 environment.
+# Two of the three separators cannot travel in the environment, so they are
+# visible in /proc/<pid>/cmdline (mode 0444) and each gets its OWN nonce:
+# sacct's --delimiter has no environment equivalent at all, and sinfo's
+# SINFO_FORMAT is silently IGNORED in -N mode (23.11.4: honoured without -N,
+# replaced by the default node format with it, rc 0).  A reader who catches one
+# can then forge nothing in the other two blocks, and the queue nonce - the only
+# one covering user-supplied text - never leaves the 0400 environment.
 nonce2=$(mint_nonce)  || die "no usable random field separator"
-[ "$nonce" != "$nonce2" ] || die "the two field separators collided"
-# gawk reads these as ENVIRON["SQ_NONCE"] / ENVIRON["SQ_NONCE2"]: passed with -v
-# they would land on gawk's own world-readable command line
+nonce3=$(mint_nonce)  || die "no usable random field separator"
+[ "$nonce" != "$nonce2" ] && [ "$nonce" != "$nonce3" ] && [ "$nonce2" != "$nonce3" ] \
+	|| die "two field separators collided"
+# gawk reads these as ENVIRON["SQ_NONCE"] / ["SQ_NONCE2"] / ["SQ_NONCE3"]: passed
+# with -v they would land on gawk's own world-readable command line
 export SQ_NONCE=$nonce
 export SQ_NONCE2=$nonce2
-unset SQUEUE_FORMAT SQUEUE_FORMAT2   # each collector exports the one it needs, so an
-                                     # inherited setting can never win over ours
+export SQ_NONCE3=$nonce3
+unset SQUEUE_FORMAT SQUEUE_FORMAT2 SINFO_FORMAT   # each collector exports or passes the
+                                     # one it needs, so an inherited setting can never
+                                     # win over ours
 
 # %s is the only letter that is not a squeue field, and squeue reports it on
 # stderr with rc 0, so without this check it renders as a column of "%s"
@@ -199,7 +207,15 @@ err_of() { [ "$1" = 124 ] && echo "no response after ${tmo}s" || head -1 "$2"; }
 # SLURM_TIME_FORMAT is pinned on every collector: "relative" or a custom
 # format turns a date into something epoch() cannot read, which silently kills
 # both the AGO column and the newest-first ordering
-SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" sinfo -hN -o '%N|%C|%e|%m|%T|%E|%H' > "$tmp/nodes" 2> "$tmp/nodes.err"
+# The node collector is framed like the job ones, because a node's drain/down
+# REASON (%E) is free text: a "|" in it used to shift the whole node block and a
+# newline split the record.  %C ("alloc/idle/other/total") leads, so a record is
+# anchored by a machine-emitted field the way a job record is anchored by %i, and
+# the trailing nonce leaves the empty field that ends one unambiguously.  sinfo's
+# -o puts the letter BEFORE the literal text, so a nonce suffix is never read as
+# a field width the way squeue's -O would read it.
+nfmt="%C$nonce3%N$nonce3%e$nonce3%m$nonce3%T$nonce3%E$nonce3%H$nonce3"
+SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" sinfo -hN -o "$nfmt" > "$tmp/nodes" 2> "$tmp/nodes.err"
 nerr=$?; [ $nerr -eq 0 ] && nerr= || nerr=$(err_of $nerr "$tmp/nodes.err")
 
 SLURM_TIME_FORMAT=standard SQUEUE_FORMAT=$fmt timeout -k 2 "$tmo" squeue -h -S t,i "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
@@ -399,15 +415,24 @@ BEGIN{
     print "sq: internal field separator missing" > "/dev/stderr"   # command line can
     fatal = 1; exit 1                                     # never forge a queue row
   }
+  NONCE3 = ENVIRON["SQ_NONCE3"]                           # and the one sinfo got, which
+  if (NONCE3 !~ /^[A-Za-z][A-Za-z0-9]{16,}$/) {           # leaks for the same reason and
+    print "sq: internal field separator missing" > "/dev/stderr"   # is kept apart for it
+    fatal = 1; exit 1
+  }
   BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4   # RECENT_MAX: see END
   n = split(keys, k, ",")
   FQ = n + 5                    # %i, n displayed, %t %l %S, and the empty sentinel
   FR = SACCT ? 9 : 11           # 8 sacct / 10 -O fields, and the empty sentinel
+  FN = 8                        # %C %N %e %m %T %E %H, and the empty sentinel
   # every shape squeue prints for %i / JobID: plain, het component (10646+0),
   # array task (10646_3) and pending array range (10646_[0-9,12%2])
   JOBID = "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[[-0-9,%]+\\]))?$"
   # the same, plus the step suffix that dropping -X brings in (.batch, .extern, .0)
   SACCTID = "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[[-0-9,%]+\\]))?([.][A-Za-z0-9_+.-]+)?$"
+  # a node record leads with %C, alloc/idle/other/total: four machine-emitted
+  # numbers, so no reason text can be taken for the start of a record
+  NODEID = "^[0-9]+/[0-9]+/[0-9]+/[0-9]+$"
   H["a"]="ACCOUNT"; H["b"]="GRES";   H["C"]="CPU";    H["c"]="MIN_CPU"; H["D"]="NODES"
   H["e"]="END";     H["f"]="FEAT";   H["g"]="GROUP";  H["i"]="JOBID";   H["j"]="NAME"
   H["K"]="ARRAY";   H["L"]="LEFT";   H["l"]="LIMIT";  H["M"]="TIME";    H["m"]="MEM"
@@ -452,52 +477,33 @@ BEGIN{
   }
 }
 
-# one separator per input: sinfo still uses "|", the queue collector the nonce,
-# the finished one whichever nonce its source was given.  BEGINFILE runs before
-# the first record of a file, so it is in time
-BEGINFILE { FS = (ARGIND == 1) ? "|" : (ARGIND == 3 && SACCT) ? NONCE2 : NONCE
+# one nonce per input, so a separator leaked by one collector cannot frame a
+# record for another: nodes got NONCE3, the queue NONCE, the finished block
+# whichever its source was given.  BEGINFILE runs before the first record of a
+# file, so it is in time
+BEGINFILE { FS = (ARGIND == 1) ? NONCE3 : (ARGIND == 3 && SACCT) ? NONCE2 : NONCE
             anf = 0; delete ACC }
 ENDFILE   {                     # unreadable (our format never took effect, e.g. an
   if (anf) {                    # abbreviated --forma=) vs genuinely cut off mid-record
+    if (ARGIND == 1) { if (seen[1]) ntrunc = 1; else nbad = 1 }
     if (ARGIND == 2) { if (seen[2]) qtrunc = 1; else qbad = 1 }
     if (ARGIND == 3) { if (seen[3]) rtrunc = 1; else rbad = 1 }
   }
 }
 
-ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%H
-  nn++
-  node[nn]=$1; nst[nn]=$5
-  split($2,cp,"/"); used[nn]=cp[1]+0; tot[nn]=cp[4]+0
-  if ($3 == "N/A") { memu[nn] = "-"; mempc[nn] = -1 }
-  else {
-    usedmem = $4 - $3                       # RealMemory can be configured below the
-    if (usedmem < 0) usedmem = 0            # real RAM, so FreeMem may exceed it
-    memu[nn]  = sprintf("%.0f", usedmem/1024)
-    mempc[nn] = $4 ? int(usedmem*100/$4) : 0
-  }
-  memt[nn] = sprintf("%.0fG", $4/1024)
-  nreason[nn] = ($6 == "none" || $6 == "") ? "" : $6
-  if (nreason[nn] != "" && $7 ~ /^[0-9]{4}-/) nreason[nn] = nreason[nn] " · since " substr($7, 1, 10)
-  if (length($1)       > wn) wn = length($1)
-  if (length($5)       > ws) ws = length($5)
-  if (length(used[nn]) > wu) wu = length(used[nn])
-  if (length(tot[nn])  > wt) wt = length(tot[nn])
-  if (length(memu[nn]) > wf) wf = length(memu[nn])
-  if (length(memt[nn]) > wm) wm = length(memt[nn])
-  next
-}
-{                               # ---- every job collector, reassembled
+{                               # ---- every collector, reassembled
   # A newline inside a field splits one record over several physical lines: the
   # last field of a line and the first of the next are two halves of one field.
   # A blank line is never skipped - it is a field that begins or ends with one.
   if (NF > 1) seen[ARGIND] = 1   # the separator did arrive, so the format took effect
   if (anf == 0) { anf = NF ? NF : 1; for (i=1; i<=anf; i++) ACC[i] = $i }
   else { ACC[anf] = ACC[anf] "\n" $1; for (i=2; i<=NF; i++) ACC[++anf] = $i }
-  need = (ARGIND == 2) ? FQ : FR
+  need = (ARGIND == 1) ? FN : (ARGIND == 2) ? FQ : FR
   # Complete only with every separator seen, the machine-emitted empty sentinel
-  # last and a job id first.  A name cannot contain the nonce of this run, so it can
-  # neither forge a boundary nor hide one, and NF alone could not tell.
-  anchor = (ARGIND == 3 && SACCT) ? SACCTID : JOBID
+  # last and a machine-emitted anchor first.  Neither a job name nor a node reason
+  # can contain the nonce of this run, so neither can forge a boundary or hide
+  # one, and NF alone could not tell.
+  anchor = (ARGIND == 1) ? NODEID : (ARGIND == 3 && SACCT) ? SACCTID : JOBID
   if (anf < need) next                          # a field held a newline: read on
   if (anf > need || ACC[need] != "" || ACC[1] !~ anchor) {
     skip[ARGIND]++                              # a row we cannot read (squeue
@@ -507,6 +513,28 @@ ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%
   for (i=1; i<=need; i++) { F[i] = ACC[i]; gsub(/[[:cntrl:]]/, "?", F[i]) }
   anf = 0; delete ACC           # scrubbed before any width or colour is read
 
+  if (ARGIND == 1) {                            # ---- sinfo: %C %N %e %m %T %E %H
+    nn++
+    node[nn] = F[2]; nst[nn] = F[5]
+    split(F[1], cp, "/"); used[nn] = cp[1]+0; tot[nn] = cp[4]+0
+    if (F[3] == "N/A") { memu[nn] = "-"; mempc[nn] = -1 }
+    else {
+      usedmem = F[4] - F[3]                     # RealMemory can be configured below the
+      if (usedmem < 0) usedmem = 0              # real RAM, so FreeMem may exceed it
+      memu[nn]  = sprintf("%.0f", usedmem/1024)
+      mempc[nn] = F[4] ? int(usedmem*100/F[4]) : 0
+    }
+    memt[nn] = sprintf("%.0fG", F[4]/1024)
+    nreason[nn] = (F[6] == "none" || F[6] == "") ? "" : F[6]
+    if (nreason[nn] != "" && F[7] ~ /^[0-9]{4}-/) nreason[nn] = nreason[nn] " · since " substr(F[7], 1, 10)
+    if (length(F[2])     > wn) wn = length(F[2])
+    if (length(F[5])     > ws) ws = length(F[5])
+    if (length(used[nn]) > wu) wu = length(used[nn])
+    if (length(tot[nn])  > wt) wt = length(tot[nn])
+    if (length(memu[nn]) > wf) wf = length(memu[nn])
+    if (length(memt[nn]) > wm) wm = length(memt[nn])
+    next
+  }
   if (ARGIND == 2) {                            # ---- queue: %i, n fields, 3 hidden
     q++
     for (i=1; i<=n; i++) raw[q,i] = F[i+1]
@@ -563,7 +591,12 @@ ARGIND==1 {                                     # ---- sinfo %N|%C|%e|%m|%T|%E|%
 END{
   if (fatal) exit 1
   # A record left half-assembled at EOF means the stream was cut off, never a
-  # hostile name: show a caption instead of a table built from what arrived
+  # hostile name or reason: show a caption instead of a table, a bar or a count
+  # built from what arrived
+  # the nfix constant and BAR_PREF still claim their minimum for the shared right edge,
+  # exactly as they do when sinfo returns nothing at all, so the caption sits on a
+  # narrower dashboard than a healthy node block would give
+  if (ntrunc || nbad) { nn = 0; wn = wu = wt = wf = wm = ws = 0 }
   if (qtrunc || qbad) q = 0
   if (rtrunc || rbad) dq = 0
 
@@ -684,8 +717,10 @@ END{
     if (nerr != "" || jerr != "") chrome += 2   # blank, unreachable banner
     chrome += nn + 1                            # node lines, blank
     for (r=1; r<=nn; r++) if (nreason[r] != "") chrome++
+    if (nbad || ntrunc) chrome++                # the caption that replaces them
     chrome += rows ? rows + 1 : 1               # header and rows, or one caption
     chrome += 3                                 # blank, caption, column header
+    if (skip[1]) chrome++
     if (skip[2]) chrome++
     if (skip[3]) chrome++
     if (!qtrunc && !qbad) chrome += 2           # blank, counts footer
@@ -795,6 +830,13 @@ END{
     out[++o] = sprintf("%s%s%s%s", lm, e("1;31"), x, e("0"))
   }
   out[++o] = ""
+  # In place of every node line and bar.  Unlike the queue, no user argument reaches
+  # sinfo and there is no SINFO_FORMAT2, so our format cannot be overridden from
+  # outside: both of these mean the stream itself was wrong.
+  if (nbad || ntrunc)
+    out[++o] = sprintf("%s%s⚠ node output %s%s", lm, e("1;31"),
+                       nbad ? "unreadable (unexpected sinfo output?)" : "incomplete",
+                       e("0"))
   barc = int(bar/2); barm = bar - barc
   for (r=1; r<=nn; r++) {
     down = (nst[r] ~ /down|drain|fail|inval|unk/)
@@ -823,6 +865,9 @@ END{
       out[++o] = sprintf("%s%*s%s↳ %s%s", lm, wn+1, "", e("2"), x, e("0"))
     }
   }
+  if (skip[1])                                  # see which table it is talking about
+    out[++o] = sprintf("%s%s↳ %d unreadable node row%s skipped%s", lm, e("2"),
+                       skip[1], (skip[1] > 1 ? "s" : ""), e("0"))
   out[++o] = ""
 
   if (qbad) out[++o] = sprintf("%s%s⚠ queue output unreadable (output format overridden?)%s", lm, e("1;31"), e("0"))
@@ -913,10 +958,11 @@ END{
         }
       }
 
-  for (i = 2; i <= 3; i++)
-    if (skip[i])
+  for (i = 2; i <= 3; i++)                      # the node note renders with the node
+    if (skip[i])                                # block instead, where a reader can
       out[++o] = sprintf("%s%s↳ %d unreadable %s row%s skipped%s", lm, e("2"), skip[i],
-                         (i == 2 ? "queue" : "finished"), (skip[i] > 1 ? "s" : ""), e("0"))
+                         (i == 2 ? "queue" : "finished"),
+                         (skip[i] > 1 ? "s" : ""), e("0"))
 
   if (!qtrunc && !qbad) {                       # no counts from a stream we could not read
     out[++o] = ""
