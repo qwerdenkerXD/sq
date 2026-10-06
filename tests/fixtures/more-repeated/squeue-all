@@ -1,0 +1,7 @@
+# a single job that ended last, and an array whose task 8401 is listed twice:
+# a task counts once however often its row repeats, in "×N" and "+N more" alike
+@include ../_common/squeue-all-defaults
+JobID=7100; Name=single; EndTime=2026-10-06T09:00:00
+JobID=8401; Name=sweep; EndTime=2026-10-06T08:00:00; ArrayJobID=8400; ArrayTaskID=1
+JobID=8401; Name=sweep; EndTime=2026-10-06T08:00:00; ArrayJobID=8400; ArrayTaskID=1
+JobID=8402; Name=sweep; EndTime=2026-10-06T08:00:00; ArrayJobID=8400; ArrayTaskID=2

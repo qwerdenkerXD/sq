@@ -74,6 +74,13 @@ Premises never seen on the cluster are taken from the Slurm 23.11.4 source (tag
 - **`-O JobID` of an array** prints the plain `job_id` (`_print_job_job_id2`,
   `print.c:664-672`), never a bracket; the expression arrives in `ArrayTaskID`.
   The stub refuses a `[` in a fallback `JobID`, so a fixture cannot get this wrong.
+- **`-O ArrayTaskID` of a job that is no array** is the literal `N/A`:
+  `_print_job_array_task_id` (`src/squeue/print.c`) prints `job->array_task_str`
+  if set, else the numeric `array_task_id` if it is not `NO_VAL`, else `"N/A"`.
+  The fallback fixtures' default `ArrayTaskID=N/A`
+  (`fixtures/_common/squeue-all-defaults`) rests on this, and it is load-bearing:
+  sq skips a fallback row whose `ArrayTaskID` is not `N/A`, plain digits or a
+  valid array expression.
 - **The `%n` throttle** is appended after any shortening
   (`src/common/slurm_protocol_defs.c:6888`, in `xlate_array_task_str`), which the
   live sacct comparison confirmed (`10609_[...%3]` at length 4).

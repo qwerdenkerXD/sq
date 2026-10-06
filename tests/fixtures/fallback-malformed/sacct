@@ -1,0 +1,3 @@
+# slurmdbd is down: sacct's real wording, rc 1
+@stderr sacct: error: Problem talking to the database: Connection refused
+@exit 1

@@ -157,15 +157,6 @@ row_cell() {  # row_cell queue|recent CELL
 		END { exit !f }'
 }
 row_first_fields() { rows "$1" | gawk '{ print $1 }'; }
-# a today-signature: the BARE cell followed directly by the next column's text,
-# never a prefix, so "7000_[1-20] ×20" can never pass for "7000_[1-20]"
-cell_then() { # cell_then queue|recent CELL NEXT
-	rows "$1" | CELL=$2 NEXT=$3 LC_ALL=$utf8 gawk 'BEGIN { c = ENVIRON["CELL"]; x = ENVIRON["NEXT"] }
-		{ sub(/^ +/, "") } index($0, c) == 1 {
-			rest = substr($0, length(c) + 1)
-			if (match(rest, /^ +/) && index(substr(rest, RLENGTH + 1) " ", x " ") == 1) f = 1 }
-		END { exit !f }'
-}
 # the N of every "×N" on a row of array BASE (its id is BASE or starts BASE_)
 xmarks() {    # xmarks queue|recent BASE
 	rows "$1" | B=$2 LC_ALL=$utf8 gawk '($1 == ENVIRON["B"] || index($1, ENVIRON["B"] "_") == 1) && $2 ~ /^×[0-9]+$/ { print substr($2, 2) }'
@@ -594,8 +585,7 @@ c_layout_size() {
 # Array-count spec, acceptance 4b: the FORBIDDEN states are a FAIL at any commit,
 # never an XFAIL: (i) a row dropped today shown but counted 1; (ii) a row
 # showing ×N while the footer or "+N more" counts it as anything but N, or a
-# ×K other than the right N.  A today-signature names the BARE cell followed
-# directly by the next column (cell_then), never a prefix.
+# ×K other than the right N.
 bracket_guards() {   # bracket_guards SECTION BASE N: 4b(ii) for one array
 	need "4b(ii): no ×K other than ×$3 on $2" only_xmark "$1" "$2" "$3"
 	[ "$1" = queue ] && need "4b(ii): ×$3 shown means the footer counts $3" xmark_counted_in_footer "$2" "$3"
@@ -611,13 +601,19 @@ pending_fixture() {  # pending_fixture NAME ID: prints the fixture's directory
 	printf '%s' "$d"
 }
 c_pending_range() {
-	T_TITLE="a pending _[1-20] row reads 7000_[1-20] ×20 and counts 20 jobs"
+	T_TITLE="a pending _[1-20] row reads 7000_[1-20] ×20 and counts 20 jobs, -x or not"
 	sq_run pending-range --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
 	bracket_guards queue 7000 20
 	need "cell '7000_[1-20] ×20'"     row_cell queue "7000_[1-20] ×20"
 	need "footer 20/0/20/0"           footer_is 20 0 20 0
+	# -x expands sq's own fold, not a Slurm bracket, and sq -h promises the ×20
+	sq_run pending-range -- -x
+	need "-x: rc 0"                   rc_is 0
+	bracket_guards queue 7000 20
+	need "-x: cell '7000_[1-20] ×20'" row_cell queue "7000_[1-20] ×20"
+	need "-x: footer 20/0/20/0"       footer_is 20 0 20 0
 }
 pending_bracket() {  # pending_bracket ID BASE N: a pending bracket shown as ID ×N and counted N
 	sq_run "$(pending_fixture "$2" "$1")" --
@@ -680,8 +676,6 @@ malformed() {        # malformed NAME ID BASE
 	sq_run "$(pending_fixture "$1" "$2")" SLURM_BITSTR_LEN=0 --
 	need "rc 0"                       rc_is 0
 	need "stubs called"               calls_are 1 1 0 1
-	need "never counted other than 0 (skipped) or 1 (today)" eval '
-		case $(footer_jobs) in 0|1) true ;; *) false ;; esac'
 	need "no ×K on it"                eval '[ -z "$(xmarks queue "'"$3"'")" ]'
 	need "skipped with the note"      has "↳ 1 unreadable queue row skipped"
 	need "not shown, footer 0/0/0/0"  eval '[ "$(nrows queue)" -eq 0 ] && footer_is 0 0 0 0'
@@ -697,6 +691,10 @@ c_malformed_dots() {
 c_malformed_reversed() {
 	T_TITLE="malformed _[5-2] (empty range) is skipped with the note"
 	malformed reversed "7005_[5-2]" 7005
+}
+c_malformed_multi() {
+	T_TITLE="malformed _[1-10,5-2] (one empty term among good ones) is skipped with the note"
+	malformed multi "7001_[1-10,5-2]" 7001
 }
 c_malformed_dash() {
 	T_TITLE="malformed _[1--2] is skipped with the note"
@@ -725,31 +723,55 @@ c_fallback_throttled() {
 	bracket_guards recent 7002 10
 	need "cell '7002_[0-9%3] ×10'"    row_cell recent "7002_[0-9%3] ×10"
 }
+# Acceptance 6 for the finished block: the record gate is the same for every
+# source, so a bracket naming no task is skipped there too, never shown
+finished_malformed() {   # finished_malformed FIXTURE CALLS SKIPPED ID-ERE
+	local -a calls; read -ra calls <<< "$2"
+	sq_run "$1" --
+	need "rc 0"                       rc_is 0
+	need "stubs called"               calls_are "${calls[@]}"
+	need "the good row 7100 is shown" row_cell recent 7100
+	need "no row for $4"              eval '! row_first_fields recent | grep -qE "^('"$4"')"'
+	need "'↳ $3 skipped'"             has "↳ $3 skipped"
+	need "footer 0/0/0/0"             footer_is 0 0 0 0
+}
+c_finished_malformed() {
+	T_TITLE="sacct: _[5-2] and _[0-4:0] are skipped with the note, never shown"
+	finished_malformed finished-malformed "1 1 0 1" "2 unreadable finished rows" "8000|8001"
+}
+c_fallback_malformed() {
+	T_TITLE="fallback: ArrayTaskID=5-2 is skipped with the note, never shown"
+	finished_malformed fallback-malformed "1 1 1 1" "1 unreadable finished row" "8100"
+}
 # Acceptance 3/4: capped to one finished row, the newer single job is shown and
 # the throttled array is behind "+N more", which counts JOBS.  The uncapped twin
 # shows whether the array row already carries ×10, which "+N more" must match.
-more_case() {        # more_case FIXTURE CALLS
+more_case() {        # more_case FIXTURE CALLS BASE CELL N
 	local -a calls; read -ra calls <<< "$2"
 	sq_run "$1" SQ_RECENT_MAX=5 --
 	need "uncapped: rc 0"             rc_is 0
 	need "uncapped: stubs called"     calls_are "${calls[@]}"
-	bracket_guards recent 7002 10
-	local marks; marks=$(xmarks recent 7002)
-	need "uncapped: cell '7002_[0-9%3] ×10'" row_cell recent "7002_[0-9%3] ×10"
+	bracket_guards recent "$3" "$5"
+	local marks; marks=$(xmarks recent "$3")
+	need "uncapped: cell '$4'"        row_cell recent "$4"
 	sq_run "$1" SQ_RECENT_MAX=1 --
 	need "capped: rc 0"               rc_is 0
 	need "capped: stubs called"       calls_are "${calls[@]}"
 	need "capped: the newer job 7100 is the one row" eval '[ "$(row_first_fields recent | paste -sd,)" = 7100 ]'
-	need "4b(ii): ×10 shown means '+10 more'" eval '[ -z "$marks" ] || [ "$(more_count)" = 10 ]'
-	need "capped: '+10 more'"         eval '[ "$(more_count)" = 10 ]'
+	need "4b(ii): ×$5 shown means '+$5 more'" eval '[ -z "$marks" ] || [ "$(more_count)" = '"$5"' ]'
+	need "capped: '+$5 more'"         eval '[ "$(more_count)" = '"$5"' ]'
 }
 c_more_sacct() {
 	T_TITLE="capped finished block (sacct): '+10 more' counts every task of the throttled array"
-	more_case more-sacct "1 1 0 1"
+	more_case more-sacct "1 1 0 1" 7002 "7002_[0-9%3] ×10" 10
 }
 c_more_fallback() {
 	T_TITLE="capped finished block (fallback): '+10 more' counts every task of the throttled array"
-	more_case more-fallback "1 1 1 1"
+	more_case more-fallback "1 1 1 1" 7002 "7002_[0-9%3] ×10" 10
+}
+c_more_repeated() {
+	T_TITLE="capped finished block (fallback): a task listed twice counts once, '8400_[1-2] ×2' and '+2 more'"
+	more_case more-repeated "1 1 1 1" 8400 "8400_[1-2] ×2" 2
 }
 c_xf_bitstr() {
 	T_TITLE=; xfail "squeue and sacct are called without SLURM_BITSTR_LEN=0"
@@ -833,8 +855,9 @@ cases=(
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
 	pending_strided xf_pending_long
-	malformed_step0 malformed_dots malformed_reversed malformed_dash malformed_huge
-	finished_throttled fallback_throttled more_sacct more_fallback xf_bitstr
+	malformed_step0 malformed_dots malformed_reversed malformed_multi malformed_dash malformed_huge
+	finished_throttled finished_malformed fallback_throttled fallback_malformed
+	more_sacct more_fallback more_repeated xf_bitstr
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 )
 start=$(date +%s%N)
