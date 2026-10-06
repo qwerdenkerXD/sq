@@ -1,0 +1,3 @@
+# busy24's queue cut off: the stream ends inside a record (queue output incomplete)
+@include ../busy24/squeue
+@raw 4999

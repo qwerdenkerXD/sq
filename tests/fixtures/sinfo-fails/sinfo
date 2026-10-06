@@ -1,0 +1,3 @@
+# sinfo fails (slurmctld unreachable for it alone); the queue is busy24's
+@stderr sinfo: error: Unable to contact slurm controller (connect failure)
+@exit 1

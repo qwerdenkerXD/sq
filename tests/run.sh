@@ -1059,19 +1059,22 @@ jobid_fits_shown() {
 # which can tick over an hour between them (the fixtures' end times are fixed)
 without_clock_ago() { sed -E '1s/[0-9]{2}:[0-9]{2}:[0-9]{2}$//; s/ +([0-9]+[smh]|-)$//' "$1"; }
 
-# compact_case FIXTURE W H "SINFO QUEUE FALLBACK SACCT" "JOBS RUNNING PENDING OTHER"
+# compact_case FIXTURE W H "SINFO QUEUE FALLBACK SACCT" "JOBS RUNNING PENDING OTHER" [VAR=value...]
 # The FULL twin, then COMPACT at W x H with what every accepted screen has: it
 # fits, the footer is last with the fixture's counts, the title first.  Leaves
 # the COMPACT run for the case's own wants, and FULL_OUT for the twin's output.
+# VARs go to both runs.  The twin is FULL because stdout is a file and COLUMNS
+# and LINES are not both set; once --full exists it should pass --full as well
+# (today sq refuses it), and so should sweep_case's twin.
 compact_case() {
-	local fx=$1 w=$2 h=$3; local -a calls foot
+	local fx=$1 w=$2 h=$3; local -a calls foot extra=("${@:6}")
 	read -ra calls <<< "$4"; read -ra foot <<< "$5"
-	sq_run "$fx" SQ_WIDTH="$w" SQ_HEIGHT="$h" --
+	sq_run "$fx" SQ_WIDTH="$w" SQ_HEIGHT="$h" "${extra[@]}" --
 	need "FULL: rc 0"                     rc_is 0
 	need "FULL: stubs called"             calls_are "${calls[@]}"
 	need "FULL: footer ${foot[*]}"        footer_is "${foot[@]}"
 	FULL_OUT=$OUT
-	sq_run "$fx" SQ_WIDTH="$w" SQ_HEIGHT="$h" -- --compact
+	sq_run "$fx" SQ_WIDTH="$w" SQ_HEIGHT="$h" "${extra[@]}" -- --compact
 	today "refused: rc 2"                 rc_is 2
 	today "refused: zero bytes on stdout" out_empty
 	today "refused: stderr says --compact is not forwarded" grep -qxF "$compact_todays_refusal" "$ERR"
@@ -1549,6 +1552,210 @@ c_compact_sweep_quiet40() {   # CALL (made inside the target screens, listed to 
 		"stuck=0 blocked=0 held=0 pending=2 running=5 other=0" "recently finished: 4098 qc FAILED 1"
 }
 
+# ---- 14. COMPACT: the behaviour rules no screen shows --------------------------
+# Decision 4 (SQ_RECENT_MAX), 20 (no folding), 21 (no measurable size), 22
+# (--compact --full), 23 (--reserve), the calls listed with them (SQ_COMPACT),
+# and the mode detection settled by measurement: COMPACT on a terminal, or with
+# COLUMNS and LINES both in the environment (what watch sets), FULL otherwise.
+# Only what the decisions say is asserted; e.g. the wording of a refusal is not
+# decided, only that it names what it refuses.
+# busy24 tells the modes apart: FULL is all 38 queue rows and no "… n jobs"
+# line; COMPACT fits the height, collapses, and keeps the footer last.
+busy_full()    { [ -z "$(labelled QELL)" ] && [ "$(labelled QROW | wc -l)" -eq 38 ] && footer_last 151 128 23 0; }
+busy_compact() { lines_within "$1" && [ -n "$(labelled QELL)" ] && footer_last 151 128 23 0; }   # busy_compact H
+unknown_option() { grep -qxF "sq: $1 is not one of the long options sq forwards; sq -h lists them" "$ERR"; }
+no_slurm_call()  { [ "$(grep -c "^CALL" "$LOG")" -eq 0 ]; }
+want_refused() {     # want_refused WHAT: this run is a usage error, refused before any Slurm call
+	want "$1: rc 2"                   rc_is 2
+	want "$1: zero bytes on stdout"   out_empty
+	want "$1: no Slurm call"          no_slurm_call
+}
+stubs_answer() {     # a plain FULL run, so a case made of refusals still proves the stubs answer
+	sq_run busy24 --
+	need "plain run: rc 0, stubs called" eval 'rc_is 0 && calls_are 1 1 0 1'
+}
+
+c_recent_max_full() {   # decision 4, FULL half: true today already
+	T_TITLE="FULL uses SQ_RECENT_MAX as given: 6 is 6 rows and '+N more', 100 is every row (not clamped to 25)"
+	sq_run many-finished SQ_HEIGHT=20 SQ_RECENT_MAX=6 --
+	need "6: rc 0, stubs called"          eval 'rc_is 0 && calls_are 1 1 0 1'
+	need "6: exactly 6 finished rows"     eval '[ "$(nrows recent)" -eq 6 ]'
+	need "6: '+N more' counts the rest of the 34 jobs" eval '[ $(( $(jobs_shown) + $(more_count) )) -eq 34 ]'
+	sq_run many-finished SQ_HEIGHT=20 SQ_RECENT_MAX=100 --
+	need "100: rc 0, stubs called"        eval 'rc_is 0 && calls_are 1 1 0 1'
+	need "100: all 31 rows, 34 jobs, no '+N more'" eval '[ "$(nrows recent)" -eq 31 ] && [ "$(jobs_shown)" -eq 34 ] && [ -z "$(more_count)" ]'
+}
+c_compact_recent_max() {   # decision 4, COMPACT half
+	T_TITLE="COMPACT takes SQ_RECENT_MAX as a cap: 3 at 60 lines is 4195 4193 4188 and '+17 more'; 100 at 24 lines changes nothing"
+	xfail "$T_TITLE; sq has no --compact yet"
+	compact_case busy24 100 60 "1 1 0 1" "151 128 23 0" SQ_RECENT_MAX=3
+	want "3: the block is 4195 4193 4188 and '+17 more'" fin_block_is "recently finished · last 2h" "4195 4193 4188" "+17 more"
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact
+	local plain24=$OUT
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 SQ_RECENT_MAX=100 -- --compact
+	want "100 at 24 lines: rc 0, footer last" eval 'rc_is 0 && footer_last 151 128 23 0'
+	want "100 at 24 lines: the same screen as without it, clock and AGO aside" eval 'cmp -s <(without_clock_ago "$plain24") <(without_clock_ago "$OUT")'
+}
+c_compact_no_folding() {   # decision 20
+	T_TITLE="samecause at 40 lines: 4 stuck jobs with ONE cause (afterok:3999) keep a row each, as do 4201 4202"
+	xfail "$T_TITLE; sq has no --compact yet"
+	compact_case samecause 100 40 "1 1 0 1" "155 128 27 0"
+	want "6 stuck rows, one per job, no ×N among them" eval '[ "$(labelled QROW | gawk '"'"'$1 ~ /^42(01|02|4[0-3])$/ && $2 !~ /^×/ { print $1 }'"'"' | paste -sd" ")" = "4201 4202 4240 4241 4242 4243" ]'
+	want "no '… n jobs stuck' line"       eval '! labelled QELL | grep -q "jobs stuck$"'
+}
+c_full_flag() {
+	T_TITLE="--full with COLUMNS and LINES set (which would mean COMPACT) prints everything"
+	xfail "$T_TITLE; sq has no --full yet"
+	sq_run busy24 -SQ_WIDTH -SQ_HEIGHT COLUMNS=100 LINES=24 -- --full
+	today "refused: --full is not forwarded" unknown_option --full
+	today "refused: no Slurm call"        no_slurm_call
+	want "rc 0, stubs called"             eval 'rc_is 0 && calls_are 1 1 0 1'
+	want "FULL: all 38 queue rows, no '… n jobs' line, footer last" busy_full
+	stubs_answer
+}
+c_compact_full_both() {   # decision 22
+	T_TITLE="--compact --full, in either order, is refused (rc 2) with a message naming both"
+	xfail "$T_TITLE; sq has neither flag yet"
+	local pair; local -a order
+	for pair in "--compact --full" "--full --compact"; do
+		read -ra order <<< "$pair"
+		sq_run busy24 -- "${order[@]}"
+		today "${order[*]}: refused as an unknown option" unknown_option "${order[0]}"
+		want_refused "${order[*]}"
+		want "${order[*]}: the message names both" eval 'grep -q -- --compact "$ERR" && grep -q -- --full "$ERR" && ! unknown_option "${order[0]}"'
+	done
+	stubs_answer
+}
+c_reserve_refused() {   # decision 23: sq only parses --reserve
+	T_TITLE="--reserve -1 / x / '' / 1.5 / no value: refused (rc 2) for the value, before any Slurm call"
+	xfail "$T_TITLE; sq has no --reserve yet"
+	local v
+	for v in -1 x "" 1.5; do
+		sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reserve "$v"
+		today "'$v': refused, --compact first" unknown_option --compact
+		want_refused "--reserve '$v'"
+		want "--reserve '$v': refused for its value, naming --reserve" eval 'grep -q -- --reserve "$ERR" && ! unknown_option --compact && ! unknown_option --reserve'
+	done
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reserve
+	today "no value: refused, --compact first" unknown_option --compact
+	want_refused "--reserve with no value"
+	want "--reserve with no value: names --reserve" eval 'grep -q -- --reserve "$ERR" && ! unknown_option --compact'
+	stubs_answer
+}
+c_compact_reserve() {   # decision 23
+	T_TITLE="--reserve: 0 is no reserve, 2 at 26 lines is the screen of 24, and a reserve leaving one line draws the footer alone"
+	xfail "$T_TITLE; sq has neither --compact nor --reserve yet"
+	compact_case busy24 100 24 "1 1 0 1" "151 128 23 0"
+	local seq24 lines24 out24=$OUT
+	seq24=$(queue_seq); lines24=$(plain | wc -l)
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reserve 0
+	want "0: the same screen as no --reserve, clock and AGO aside" eval 'rc_is 0 && cmp -s <(without_clock_ago "$out24") <(without_clock_ago "$OUT")'
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=26 -- --compact --reserve 2
+	want "2 at 26 lines: rc 0, footer last" eval 'rc_is 0 && footer_last 151 128 23 0'
+	want "2 at 26 lines: the queue and line count of 24 lines" eval '[ "$(queue_seq)" = "$seq24" ] && [ "$(plain | wc -l)" -eq "$lines24" ]'
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reserve 23
+	want "23 at 24 lines: rc 0, stubs called" eval 'rc_is 0 && calls_are 1 1 0 1'
+	want "23 at 24 lines: the footer line alone" eval '[ "$(plain | wc -l)" -eq 1 ] && footer_last 151 128 23 0'
+}
+c_reservation_forwarded() {   # decision 23's caveat: no prefix clash with --reserve
+	T_TITLE="--reservation=x and --reservation x still reach squeue"
+	sq_run empty -- --reservation=x
+	need "=x: rc 0, sacct skipped for the fallback" eval 'rc_is 0 && calls_are 1 1 1 0'
+	need "=x: forwarded"                  argv_has squeue -h -S t,i --reservation=x
+	sq_run empty -- --reservation x
+	need "x: rc 0, sacct skipped for the fallback" eval 'rc_is 0 && calls_are 1 1 1 0'
+	need "x: forwarded"                   argv_has squeue -h -S t,i --reservation x
+}
+# SQ_COMPACT: a CALL (made with decisions 20-23, listed to Franz, overrulable):
+# 0 = always FULL, 1 = always COMPACT, unset = detect; the flags beat it
+c_sq_compact_env() {
+	T_TITLE="SQ_COMPACT=1 is COMPACT into a file; SQ_COMPACT=0 --compact is COMPACT; SQ_COMPACT=1 --full is FULL"
+	xfail "$T_TITLE; sq has no SQ_COMPACT yet"
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 SQ_COMPACT=1 --
+	today "=1: FULL today"                busy_full
+	want "=1: COMPACT fitted to 24 lines" busy_compact 24
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 SQ_COMPACT=0 -- --compact
+	today "=0 --compact: refused today"   unknown_option --compact
+	want "=0 --compact: the flag wins, COMPACT" busy_compact 24
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 SQ_COMPACT=1 -- --full
+	today "=1 --full: refused today"      unknown_option --full
+	want "=1 --full: the flag wins, FULL" busy_full
+}
+c_sq_compact_bad() {
+	T_TITLE="SQ_COMPACT=yes or 2 is refused (rc 2) before any Slurm call"
+	xfail "$T_TITLE; sq has no SQ_COMPACT yet"
+	local v
+	for v in yes 2; do
+		sq_run busy24 SQ_COMPACT=$v --
+		today "$v: ignored today, a FULL screen" eval 'rc_is 0 && busy_full'
+		want_refused "SQ_COMPACT=$v"
+		want "SQ_COMPACT=$v: the message names SQ_COMPACT" grep -q SQ_COMPACT "$ERR"
+	done
+	stubs_answer
+}
+c_sq_compact_zero_pty() {   # true today already: sq has only FULL
+	T_TITLE="SQ_COMPACT=0 on a 24-row terminal is FULL"
+	PTY=1 PTY_ROWS=24 PTY_COLS=100 sq_run busy24 TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT SQ_COMPACT=0 --
+	need "rc 0, stubs called"             eval 'rc_is 0 && calls_are 1 1 0 1'
+	need "FULL: all 38 queue rows, no '… n jobs' line" busy_full
+}
+c_auto_compact() {   # detection settled by measurement
+	T_TITLE="no flag: a 24-row terminal, or COLUMNS and LINES both set, means COMPACT fitted to 24 lines"
+	xfail "$T_TITLE; sq has no COMPACT yet"
+	PTY=1 PTY_ROWS=24 PTY_COLS=100 sq_run busy24 TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT --
+	today "pty: FULL today"               busy_full
+	want "pty: COMPACT fitted to its 24 rows, footer last" busy_compact 24
+	sq_run busy24 -SQ_WIDTH -SQ_HEIGHT COLUMNS=100 LINES=24 --
+	today "COLUMNS+LINES: FULL today"     busy_full
+	want "COLUMNS+LINES into a file: COMPACT within LINES" busy_compact 24
+}
+c_auto_full() {   # detection settled by measurement; true today already
+	T_TITLE="no flag, no terminal: COLUMNS alone, LINES alone, neither, or SQ_HEIGHT alone all mean FULL"
+	local e; local -a env
+	for e in "COLUMNS=100" "LINES=24" "" "SQ_HEIGHT=24"; do
+		read -ra env <<< "$e"
+		sq_run busy24 -SQ_WIDTH -SQ_HEIGHT "${env[@]}" --
+		need "${env[*]:-nothing}: rc 0, stubs called" eval 'rc_is 0 && calls_are 1 1 0 1'
+		need "${env[*]:-nothing}: FULL" busy_full
+	done
+}
+c_compact_no_size() {   # decision 21
+	T_TITLE="--compact with no measurable size (no terminal, no COLUMNS/LINES/SQ_*) compacts to 24 lines"
+	xfail "$T_TITLE; sq has no --compact yet"
+	NOTTY=1 sq_run busy24 -SQ_WIDTH -SQ_HEIGHT -- --compact
+	today "refused today"                 unknown_option --compact
+	want "rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
+	want "COMPACT fitted to 24 lines, footer last" busy_compact 24
+	stubs_answer
+}
+# error screens: sinfo failing (the unreachable banner), squeue failing, a cut
+# queue stream (qtrunc) and an unreadable one (qbad, no footer): at every
+# height the screen fits and a footer, if any, is the last line
+error_sweep() {   # error_sweep FIXTURE "CALLS"
+	local fx=$1 h fits= foot= wide= refused=
+	sq_run "$fx" --
+	need "$fx FULL: rc 0, stubs called" eval 'rc_is 0 && calls_are '"$2"
+	for h in $(seq 6 30); do
+		sq_run "$fx" SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
+		{ rc_is 2 && out_empty && unknown_option --compact && no_slurm_call; } || refused="$refused $h"
+		{ rc_is 0 && lines_within "$h"; } || fits="$fits $h"
+		[ -z "$(labelled FOOTER)" ] || { [ "$(labelled FOOTER | wc -l)" -eq 1 ] && screen | tail -n 1 | grep -q '^FOOTER'; } || foot="$foot $h"
+		[ "$(width)" -le 100 ] || wide="$wide $h"
+	done
+	today "$fx: refused at every height (not at:${refused:- none})" test -z "$refused"
+	want "$fx: rc 0 and at most H lines (not at H =${fits:- none})" test -z "$fits"
+	want "$fx: a footer is the last line (not at H =${foot:- none})" test -z "$foot"
+	want "$fx: no line wider than 100 (wider at H =${wide:- none})" test -z "$wide"
+}
+c_compact_error_screens() {
+	T_TITLE="COMPACT error screens at every height 6..30: sinfo failing, squeue failing, a cut and an unreadable queue stream fit, footer last when there is one"
+	xfail "$T_TITLE; sq has no --compact yet"
+	error_sweep sinfo-fails "1 1 0 1"
+	error_sweep squeue-fails "1 1 0 1"
+	error_sweep queue-cut "1 1 0 1"
+	error_sweep squeue-garbage "1 1 0 1"
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -1573,6 +1780,10 @@ cases=(
 	compact_manysmall_h40 compact_unlisted_h24 compact_quiet40_h10
 	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_manystuck compact_sweep_manysmall
 	compact_sweep_quiet40
+	recent_max_full compact_recent_max compact_no_folding full_flag compact_full_both
+	reserve_refused compact_reserve reservation_forwarded
+	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full
+	compact_no_size compact_error_screens
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

@@ -1,0 +1,9 @@
+# decision 20 (no folding): busy24 with 4 more stuck jobs that share ONE cause,
+# the failed parent 3999 (the classic loop of dependents); each keeps its own row
+@include ../_common/squeue-defaults
+@include ../busy24/squeue-pending
+i=4240; j=part0; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3999(failed)
+i=4241; j=part1; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3999(failed)
+i=4242; j=part2; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3999(failed)
+i=4243; j=part3; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3999(failed)
+@include ../busy24/squeue-running
