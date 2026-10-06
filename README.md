@@ -23,7 +23,7 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
 4120_[0-3] ×4    qc_report    COMPLETED       0    0:01-0:03    10s
 4120_[4-5] ×2    qc_report    FAILED          7         0:00    13s
 
-5 jobs   4 running   1 pending   0 other
+6 jobs   5 running   1 pending   0 other
 ```
 
 *(Sample output with made-up names; the real thing is coloured.)*
@@ -39,7 +39,10 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
   meaningful even when Slurm is not configured to schedule memory (`CR_CORE`), which is exactly
   when you most need to watch it. Yellow past 85%, red past 95%.
 - **Array jobs fold.** Tasks that agree on every displayed column collapse to one row,
-  `4108_[0-3] ×4`. Finished tasks fold by array and by outcome, so failures never hide inside a
+  `4108_[0-3] ×4`. A pending array Slurm prints as one bracket reads `4109_[1,4,7-20%2] ×16`,
+  and the counts include every task in it, not the row. When the id column is too narrow it
+  shrinks inside the brackets, `4109_[1,4,…] ×16`, so the count is never the part that gets cut.
+  Finished tasks fold by array and by outcome, so failures never hide inside a
   count of successes; values that differ are shown as ranges.
 - **Recently finished jobs**, with state, exit code (and signal), elapsed time and age.
 - **A bell for your own failures.** A newly failed, timed-out or out-of-memory job of yours rings
@@ -53,9 +56,10 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
 
 ## Requirements
 
-- Slurm client tools: `sinfo`, `squeue`
+- Slurm client tools: `sinfo`, `squeue`, and `sacct` when accounting (slurmdbd) is set up;
+  without it the finished block falls back to `squeue -t all` and says so
 - **gawk** (GNU awk; plain awk and mawk won't do)
-- coreutils `timeout`, and `tput`
+- coreutils (`timeout`, `stty`) and `tput`
 - A UTF-8 terminal
 
 ## Install
@@ -69,7 +73,8 @@ install -m 755 sq ~/.local/bin/sq            # just for you
 
 ```sh
 sq                        # one-shot
-watch -tc -n 5 sq         # live; -c keeps the colours, -t drops watch's header
+watch -tc -n 5 sq         # live; keep -t, or watch's own header pushes the
+                          #  footer off screen; -c for colour
 sq -o i,j,T,M,P,N         # choose columns by squeue field letter
 sq -u "$USER" -p gpu      # squeue's filters are passed on, by full long name from
                           #  a fixed list (sq -h names it) - never an abbreviation,
@@ -103,18 +108,36 @@ sq -C                     # centred in both axes
 | `SQ_ETA` | `0` hides pending start estimates. |
 | `SQ_COLOR` | `0` never, `1` always. |
 | `SQ_TIMEOUT` | Seconds to wait for Slurm before declaring it unreachable (default 5). |
+| `SQ_SINCE` | How far back the finished block looks (`sacct -S` syntax, default `now-2hours`). |
+| `SQ_RECENT_MAX` | Finished rows shown (default: the space left on screen, 3–25; a value you set is used as given). |
+| `SQ_BELL_HORIZON` | A failure only rings while it is this fresh (default 600 s; `0` mutes). |
 | `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size. |
 
 ## Good to know
 
-- **Finished jobs only stay visible for `MinJobAge`** (`scontrol show config | grep MinJobAge`,
-  often 300 s), because they are read from the controller's memory with `squeue -t all`, not from
-  an accounting database. That's enough to catch a failure while you're watching, not to review
-  yesterday.
-- **The bell keeps a little state:** the ids of failures it has already rung for, in
-  `~/.cache/sq/alerted`, rewritten on every run to hold only what is still in the window.
+- **Finished jobs come from the accounting database** (`sacct`), so a job that ended while
+  nobody was watching is still shown, for as long as `SQ_SINCE` reaches back. Step rows are read
+  too, because a signalled job's own row reports success and only its step carries the signal.
+  Without accounting, or with a filter `sacct` has no equivalent for, the block falls back to
+  `squeue -t all`, which only remembers jobs for `MinJobAge` (often 300 s), and the caption says so.
+- **The bell keeps a little state:** `<jobid><tab><end time>` lines in `~/.cache/sq/alerted`,
+  added to and aged out after 24 h, never pruned just because one run looked at fewer jobs, and
+  replaced atomically so two running copies cannot tear it.
 - An unreachable controller makes `sinfo` and `squeue` hang rather than fail, so every call is
   bounded by `SQ_TIMEOUT`. A full outage therefore delays a refresh by about twice that.
+
+## Tests
+
+```sh
+tests/run.sh              # ~15 s, no cluster needed
+```
+
+The suite puts stand-ins for `squeue`, `sinfo` and `sacct` first on `PATH` and feeds sq the
+shapes that are hard to get from a live cluster: large arrays, hostile job names, array ids
+Slurm truncates, a controller that hangs. Each case asserts properties of the screen
+(counts, which rows appear, that nothing is forged), not a snapshot. Known defects are listed
+as expected failures, so a fix shows up as one. `tests/faithfulness.sh <host>` compares the
+stand-ins' output with the real tools, read-only.
 
 ## License
 

@@ -16,7 +16,8 @@
 #   sq --no-recent          hide the recently-finished block
 #   sq --no-bell            never ring the terminal bell on a new failure
 #   sq --color / --no-color force colour on or off
-#   watch -tc -n 5 sq       live dashboard
+#   watch -tc -n 5 sq       live dashboard; keep -t, or watch's own header
+#                           pushes the footer off screen
 #
 # env: SQ_FMT    default column list (same syntax as -o)
 #      SQ_CENTER 1 = horizontal, 2 = both axes
