@@ -3,7 +3,12 @@
 #
 #   sq                      default columns
 #   sq -o i,j,T,M,P,N       custom columns (squeue field letters, %/widths ignored)
-#   sq -u "$USER" -p gpu    other args go to squeue (not -o/-O/--format/-s/-i)
+#   sq -u "$USER" -p gpu    filters go to squeue, by the names squeue documents
+#                           also forwarded: --all --hide --array --noconvert
+#                           --noheader --priority --federation --local --sibling
+#                           refused: -O --Format -s --steps -i --iterate -l -v
+#                           -V --json --yaml, each of which would replace or
+#                           defeat the output sq parses
 #   sq -c / -C              centre horizontally / in both axes
 #   sq -x                   expand array tasks instead of folding them
 #   sq --no-recent          hide the recently-finished block
@@ -121,11 +126,18 @@ while [ $# -gt 0 ]; do
 		--no-bell) bell=0; shift ;;
 		--color|--colour) color=1; shift ;;
 		--no-color|--no-colour) color=0; shift ;;
-		-h|--help) sed -n '2,43p' "$0" | cut -c2- | sed 's/^ //'; exit 0 ;;
+		-h|--help) awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
 		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
 		# the nonce-framed format below and collapse every record into one field
 		-O|-O?*|--Format|--Format=*|--format=*|-o?*)
 			die "$1 would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
+		-l)         # squeue's own long format replaces the framed one
+			die "-l replaces the output format sq parses; sq -o i,j,u picks columns" ;;
+		-v)         # the parameter dump contains SQUEUE_FORMAT itself, nonce and
+			    # all, so one dump line parses as a record: a real job
+			    # vanishes from the table and the counts lie
+			die "-v prints squeue's own parameters into the output sq parses" ;;
+		-V)         die "-V asks squeue for its version; run 'squeue -V' for that" ;;
 		-s|-s?*|--step|--step=*|--steps|--steps=*)   # squeue ignores SQUEUE_FORMAT in step mode and has
 		              # no step-format env var, so the framing cannot be delivered there.
 		              # The "=" spelling has to be here too: without it --steps=x walked
@@ -141,6 +153,21 @@ while [ $# -gt 0 ]; do
 		# SQ_TIMEOUT and the screen would read "no response after 5s"
 		-i|-i?*|--iterate|--iterate=*)
 			die "$1 repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" ;;
+		# squeue ignores SQUEUE_FORMAT in these modes and answers with one whole
+		# document instead of rows, so the framing never arrives and the screen
+		# could only say "queue output unreadable".  Both take an OPTIONAL value,
+		# so the "=" spelling has to be here too, exactly as for --steps=
+		--json|--json=*|--yaml|--yaml=*)
+			die "${1%%=*} asks squeue for a machine-readable document, which sq cannot render; run 'squeue ${1%%=*}' for that" ;;
+		# squeue has no positional arguments at all: it answers "Unrecognized
+		# option: -o" to anything after a "--", so "--" can neither carry a value
+		# nor smuggle an option past the guards above.  The filters whose value may
+		# legitimately begin with "-" (-n -t -w -L -R -S) already accept one.
+		--)	# a wrapper writing `sq -- "$@"` with nothing to pass produces a bare
+			# "--", so swallow that; squeue takes no positional argument, so
+			# anything after it could never have been delivered
+			[ $# -eq 1 ] || die "-- cannot pass anything on; squeue takes no positional argument"
+			shift ;;
 		--me)   # a user filter carrying its own value, so it collides with -u
 			mark_filter -u "$1"; args+=("$1"); shift ;;
 		*)
@@ -156,7 +183,33 @@ while [ $# -gt 0 ]; do
 				-[upAqjMntwLRS]?*) val=${opt#??}; have=1; opt=${opt:0:2} ;;
 			esac
 			canon_opt "$opt"
-			if [ -z "$kopt" ]; then args+=("$1"); shift; continue; fi
+			# THE CLOSED LIST.  squeue parses its long options with getopt_long,
+			# which honours any unambiguous ABBREVIATION, so every guard above was
+			# walkable: "--iter=5" reached -i and stalled for the whole timeout,
+			# "--part=" reached an empty -p and drew an empty queue, "--forma=%i"
+			# reached -o.  sq cannot see that without carrying squeue's own option
+			# table AND getopt's ambiguity rules, which drift between releases, so
+			# it carries the opposite: the full names it knows, and nothing else.
+			# canon_opt above holds the value-taking ones; these are the flags that
+			# take none.  Enumerated from squeue 23.11's --help, its man page and
+			# every prefix of every name probed against the binary.  Left off
+			# deliberately: --long and --start replace SQUEUE_FORMAT, --verbose
+			# prints its parameters into the stream, --version/--usage/--autocomplete
+			# answer instead of querying, --json/--yaml are refused by name above,
+			# and --format/--help/--me/--iterate/--steps are read by sq itself.
+			if [ -z "$kopt" ]; then
+				case $opt in
+					--all|--hide|--array|--noconvert|--noheader|\
+					--priority|--federation|--local|--sibling)
+						# the name is on the list, but none of them takes a
+						# value, and "--all=x" forwarded raw came back as a
+						# fake outage
+						[ "$1" = "$opt" ] || die "$opt takes no value; write it on its own, e.g. sq $opt" ;;
+					--*) die "$(printf '%s' "$opt" | tr -d '[:cntrl:]' \
+						| cut -c1-40) is not one of the long options sq forwards; sq -h lists them" ;;
+				esac
+				args+=("$1"); shift; continue
+			fi
 			[ $have -eq 1 ] || [ $# -ge 2 ] || { opt_hint "$kopt"
 				die "$opt needs $vnoun, e.g. sq $opt $vex"; }
 			[ $have -eq 1 ] || val=$2

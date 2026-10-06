@@ -71,9 +71,15 @@ install -m 755 sq ~/.local/bin/sq            # just for you
 sq                        # one-shot
 watch -tc -n 5 sq         # live; -c keeps the colours, -t drops watch's header
 sq -o i,j,T,M,P,N         # choose columns by squeue field letter
-sq -u "$USER" -p gpu      # anything sq doesn't know is passed on to squeue
-                          # (except -o/-O/--format/--Format and -s/--steps, which
-                          #  would override or defeat sq's own record framing)
+sq -u "$USER" -p gpu      # squeue's filters are passed on, by full long name from
+                          #  a fixed list (sq -h names it) - never an abbreviation,
+                          #  because squeue's own getopt would read "--iter=5" as
+                          #  -i and "--forma=%i" as -o.  Some full names are refused
+                          #  too, where they would replace the output sq parses
+sq --json                 # refused, like -O/--Format, -s/--steps, -i/--iterate,
+                          #  -l, -v and -V: each would replace or defeat the
+                          #  output sq parses.  (-o and --format are sq's own
+                          #  column list, above.)
 sq -C                     # centred in both axes
 ```
 
