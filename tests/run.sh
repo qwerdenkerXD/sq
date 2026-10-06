@@ -1293,6 +1293,47 @@ c_compact_mix30_h45() {
 	want "the whole finished block, no '+N more'" fin_block_is "recently finished · last 2h" "5098 5097 5095 5090_[0-9] 5088 5085 5080 5075" ""
 }
 
+# manystuck: busy24 with 30 stuck jobs, under the cap of decision 18.  Its ids
+# 4210-4215 are both stuck and ordinary pending jobs (see the fixture), so the
+# stuck survivors are named by id AND name.
+manystuck_totals="stuck=30 blocked=1 held=0 pending=20 running=128 other=0"
+census_says() {      # census_says KEY VALUE H: the census of this screen at height H
+	[ "$(census "$manystuck_totals" "$3" | gawk -v k="$1" '$1 == k { sub(/^[^ ]+ ?/, ""); print }')" = "$2" ]
+}
+stuck_rows_are() {   # stuck_rows_are "ID NAME|...": the DependencyNeverSatisfied rows
+	[ "$(labelled QROW | grep -F '(DependencyNeverSatisfied)' | gawk '{ print $1 " " $2 }' | paste -sd'|')" = "$1" ]
+}
+manystuck_case() {   # manystuck_case H
+	compact_case manystuck 100 "$1" "1 1 0 1" "179 128 51 0"
+	compact_lines "$1" 4
+	busy_nodes_full
+	busy_finished_line
+}
+c_compact_manystuck_h16() {   # decision 19: running may show only its count line
+	T_TITLE="manystuck at 16 lines: the stuck and blocked floors, running only '… 128 jobs running', the 4 blanks kept"
+	xfail "$T_TITLE; sq has no --compact yet"
+	manystuck_case 16
+	compact_queue "4201|… 29 jobs stuck|4207|… 20 jobs pending|… 128 jobs running"
+	want "no running row, only its count line, and still 4 blanks (decision 19)" eval '[ -z "$(labelled QROW | grep " RUNNING ")" ] && blanks_are 4'
+}
+c_compact_manystuck_h24() {   # decision 18
+	T_TITLE="manystuck at 24 lines: stuck+blocked take 6 of the 13 queue lines (4 stuck + 4207 + '… 26 jobs stuck'), running keeps 5 rows"
+	xfail "$T_TITLE; sq has no --compact yet"
+	manystuck_case 24
+	compact_queue "4201|4202|4207|4210|4211|… 26 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|… 58 jobs running"
+	want "stuck survivors: the lowest ids, 4201 4202 4210 4211" stuck_rows_are "4201 assemble|4202 merge|4210 align|4211 sort"
+	want "stuck+blocked+held: 6 lines of the queue table's 13" eval 'census_says small 6 24 && census_says room 13 24'
+}
+c_compact_manystuck_h40() {   # decision 18
+	T_TITLE="manystuck at 40 lines: stuck+blocked take 14 of the 29 queue lines (12 stuck + 4207 + '… 18 jobs stuck'), running keeps 13 rows"
+	xfail "$T_TITLE; sq has no --compact yet"
+	manystuck_case 40
+	compact_queue "4201|4202|4207|4210|4211|4212|4213|4214|4215|4216|4217|4218|4219|… 18 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|3990_[70-83]|3990_[84-97]|3990_[98-111]|4109|4112|4113|4114|4115|… 11 jobs running"
+	want "stuck survivors: the lowest ids, 4201 4202 4210-4219" \
+		stuck_rows_are "4201 assemble|4202 merge|4210 align|4211 sort|4212 merge|4213 index|4214 call|4215 annot|4216 vcf|4217 report|4218 trim|4219 fastp"
+	want "stuck+blocked+held: 14 lines of the queue table's 29" eval 'census_says small 14 40 && census_says room 29 40'
+}
+
 # What the screen at one height shows, for the sweep: one "KEY VALUE" line each.
 #   rows S=N ...   rows shown per section (stuck blocked held pending running
 #                  other: from STATE and the reason; finished: the one line counts
@@ -1302,9 +1343,21 @@ c_compact_mix30_h45() {
 #   pair N         1 if two blank lines meet
 #   finline TEXT   the one-line finished form, if shown
 #   mixedfin N     1 if the one line and the block are both there
-#   finoverstuck N 1 if a finished line is shown while a stuck job is not
-census() {
-	screen | TOTALS=$1 LC_ALL=$utf8 gawk -F'\t' '
+#   finoverstuck N 1 if a finished line is shown while the stuck section is not
+#   small N        the lines of stuck + blocked + held: their rows and their own
+#                  "… n jobs stuck/blocked on nodes/held by admin" lines
+#   room N         the queue table's lines: H minus every line outside the table
+#                  body (title, blanks, nodes, the table header, finished, footer)
+#   cap TEXT       decision 18 broken: running hides jobs, a small section is
+#                  past its floor, and small > room/2 rounded down
+#   order S        a small section past its floor while one before it (stuck,
+#                  then blocked, then held) hides jobs
+#   lift N         1 if every running job is shown, a small section hides jobs,
+#                  and the screen still has a spare line (the cap did not lift)
+# A section's floor is 1 row and its "… n jobs" line, or all of it if 2 rows or
+# fewer; "past its floor": more than 2 rows, or 2 rows with jobs still hidden.
+census() {   # census TOTALS H
+	screen | TOTALS=$1 H=$2 LC_ALL=$utf8 gawk -F'\t' '
 		BEGIN { n = split(ENVIRON["TOTALS"], kv, " ")
 		        for (i = 1; i <= n; i++) { split(kv[i], p, "="); tot[p[1]] = p[2] }
 		        nsec = split("stuck blocked held pending running other", S, " ")
@@ -1319,6 +1372,8 @@ census() {
 			if (m[1] == "JobHeldAdmin") return "held"
 			return "pending"
 		}
+		{ nl++ }
+		$1 == "QROW" || $1 == "QELL" || $1 == "QNOTE" { qbody++ }
 		$1 == "BLANK" { if (blank) pair = 1; blank = 1; next }
 		{ blank = 0 }
 		$1 == "QROW" { s = sec($2); rows[s]++; jobs[s] += match($2, /^[^ ]+ ×([0-9]+)( |$)/, m) ? m[1] : 1 }
@@ -1339,17 +1394,31 @@ census() {
 			print "pair " pair + 0
 			print "finline " finline
 			print "mixedfin " (finline != "" && block)
-			print "finoverstuck " (fin && jobs["stuck"] < tot["stuck"])
+			print "finoverstuck " (fin && tot["stuck"] && !rows["stuck"])
+			split("stuck blocked held", SM, " ")
+			for (i = 1; i <= 3; i++) { s = SM[i]; small += rows[s] + nell[s]
+				past[s] = rows[s] > 2 || (rows[s] == 2 && jobs[s] < tot[s]); anypast += past[s]
+				if (past[s] && hiding) order = order " " s
+				if (jobs[s] < tot[s]) hiding = 1 }
+			room = ENVIRON["H"] - nl + qbody
+			print "small " small + 0
+			print "room " room
+			print "cap " ((jobs["running"] < tot["running"] && anypast && small > int(room / 2)) ? small ">" int(room / 2) : "")
+			print "order" order
+			print "lift " (jobs["running"] == tot["running"] && hiding && nl < ENVIRON["H"])
 		}'
 }
 # sweep_case FIXTURE W HMAX "CALLS" "J R P O" "TOTALS" "FINLINE": COMPACT at
 # every height from 6 to HMAX, and at each what must hold at ANY height: at most H
 # lines, the footer last with the fixture's counts, no line wider than W, no two
-# blanks together (a blank with nothing to separate is dropped); every section shows all its jobs, none (the footer carries
-# them), or some and one "… n jobs" line hiding the rest, at least 2 (decision
-# 3); the one-line finished form, wherever it is, names the newest failure; a
-# finished line never outlasts a stuck job (decision 10); and no section shows fewer rows on a taller screen than on a shorter one (decision
-# 8).  Each failure lists the heights, so one want stands for every height.
+# blanks together (a blank with nothing to separate is dropped); every section
+# shows all its jobs, none (the footer carries them), or some and one "… n jobs"
+# line hiding the rest, at least 2 (decision 3); the one-line finished form,
+# wherever it is, names the newest failure; a finished line never outlasts a
+# stuck job (decision 10); the cap of decision 18 (see census: small, room, cap,
+# order, lift); and no section shows fewer rows on a taller screen than on a
+# shorter one (decision 8).  Each failure lists the heights, so one want stands
+# for every height.
 sweep_case() {
 	local fx=$1 w=$2 hmax=$3 totals=$6 finline=$7 h k v; local -a calls foot
 	read -ra calls <<< "$4"; read -ra foot <<< "$5"
@@ -1358,7 +1427,7 @@ sweep_case() {
 	need "FULL: stubs called"             calls_are "${calls[@]}"
 	need "FULL: footer ${foot[*]}"        footer_is "${foot[@]}"
 	local -A prev=()
-	local refused= ran= fits= footer= narrow= pairs= acct= fin= mixed= overstuck= shrinks=
+	local refused= ran= fits= footer= narrow= pairs= acct= fin= mixed= overstuck= capped= order= lift= shrinks=
 	for h in $(seq 6 "$hmax"); do
 		sq_run "$fx" SQ_WIDTH="$w" SQ_HEIGHT="$h" -- --compact
 		{ rc_is 2 && out_empty && grep -qxF "$compact_todays_refusal" "$ERR" &&
@@ -1380,8 +1449,11 @@ sweep_case() {
 				finline) [ -z "$v" ] || [ "$v" = "$finline" ] || fin="$fin $h" ;;
 				mixedfin) [ "$v" = 0 ] || mixed="$mixed $h" ;;
 				finoverstuck) [ "$v" = 0 ] || overstuck="$overstuck $h" ;;
+				cap)   [ -z "$v" ] || capped="$capped $h:$v" ;;
+				order) [ -z "$v" ] || order="$order $h:${v// /,}" ;;
+				lift)  [ "$v" = 0 ] || lift="$lift $h" ;;
 			esac
-		done < <(census "$totals")
+		done < <(census "$totals" "$h")
 	done
 	today "refused at every height (not at:${refused:- none})" test -z "$refused"
 	want "rc 0, stderr empty, stubs called at every height (not at:${ran:- none})" test -z "$ran"
@@ -1392,7 +1464,10 @@ sweep_case() {
 	want "every section: all, none, or rows + one '… n jobs' (n >= 2) adding up to its total (not at H:section${acct:- none})" test -z "$acct"
 	want "the one-line finished form is '$finline' (not at H =${fin:- none})" test -z "$fin"
 	want "never the one line and the block together (at H =${mixed:- none})" test -z "$mixed"
-	want "the stuck jobs outlast the finished block: no finished line while a stuck job is hidden (at H =${overstuck:- none})" test -z "$overstuck"
+	want "the stuck jobs outlast the finished block: no finished line while no stuck row is shown (at H =${overstuck:- none})" test -z "$overstuck"
+	want "while running hides jobs, stuck+blocked+held past their floors take at most half the queue table's lines (over at H:lines>half${capped:- none})" test -z "$capped"
+	want "stuck fills before blocked, blocked before held (not at H:section${order:- none})" test -z "$order"
+	want "once every running job is shown the cap lifts: stuck/blocked/held take every spare line (spare at H =${lift:- none})" test -z "$lift"
 	want "a taller screen never shows fewer rows of a section (fewer at H:section${shrinks:- none})" test -z "$shrinks"
 }
 c_compact_sweep_busy24() {
@@ -1406,6 +1481,12 @@ c_compact_sweep_mix30() {
 	xfail "$T_TITLE; sq has no --compact yet"
 	sweep_case mix30 110 70 "1 1 0 1" "75 43 30 2" \
 		"stuck=1 blocked=2 held=1 pending=26 running=43 other=2" "recently finished: 5097 fastp FAILED 2"
+}
+c_compact_sweep_manystuck() {   # decision 18: the cap
+	T_TITLE="manystuck at every height 6..70: the cap holds while running hides jobs and lifts once it does not, and every sweep invariant"
+	xfail "$T_TITLE; sq has no --compact yet"
+	sweep_case manystuck 100 70 "1 1 0 1" "179 128 51 0" \
+		"stuck=30 blocked=1 held=0 pending=20 running=128 other=0" "recently finished: 4188 qc FAILED 1"
 }
 
 c_compact_sweep_quiet40() {   # a call inside the target screens: a blank with nothing to separate is dropped
@@ -1435,7 +1516,8 @@ cases=(
 	compact_busy24_h43 compact_busy24_h44 compact_busy24_h52 compact_busy24_h60
 	compact_elapsed24_h24 compact_emptyfin_h24 compact_noacct_h24 compact_quiet40_h40
 	compact_mix30_h16 compact_mix30_h18 compact_mix30_h30 compact_mix30_h45
-	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_quiet40
+	compact_manystuck_h16 compact_manystuck_h24 compact_manystuck_h40
+	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_manystuck compact_sweep_quiet40
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do
