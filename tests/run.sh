@@ -597,7 +597,7 @@ pending_fixture() {  # pending_fixture NAME ID: prints the fixture's directory
 	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
 	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
 	{ printf '@include %s\n' "$fixtures/_common/squeue-defaults"
-	  printf 'i=%s; j=sweep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A\n' "$2"; } > "$d/squeue"
+	  printf 'i=%s; j=sweep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A; r=Resources\n' "$2"; } > "$d/squeue"
 	printf '%s' "$d"
 }
 c_pending_range() {
@@ -1028,7 +1028,9 @@ footer_last()  { # footer_last JOBS RUNNING PENDING OTHER: the one footer, on th
 	[ "$(labelled FOOTER | wc -l)" -eq 1 ] &&
 	plain | tail -n 1 | grep -qE "^ *$1 jobs +$2 running +$3 pending +$4 other\$"
 }
-title_first()  { screen | head -n 1 | grep -q '^TITLE' && ! labelled TITLE | grep -qi compact; }
+# the title is "▌ SLURM <host>  HH:MM:SS", nothing more, whatever the host is called
+# (CALL (made inside the target screens, listed to Franz, overrulable): no "· compact" mode marker)
+title_first()  { screen | head -n 1 | grep -qE '^TITLE'$'\t''▌ SLURM [^ ]+  [0-9]{2}:[0-9]{2}:[0-9]{2}$'; }
 nothing_unlabelled() { [ -z "$(labelled OTHER)$(labelled QNOTE)" ]; }
 qrows_are()    { [ "$(labelled QROW | first_words)" = "$1" ]; }
 ellipses_are() { [ "$(labelled QELL | paste -sd'|')" = "$1" ]; }
@@ -1045,15 +1047,17 @@ fin_block_is() { # fin_block_is CAPTION "ID..." "+N more"|"": the block form, ex
 	[ "$(labelled FHDR | wc -l)" -eq "$([ -n "$2" ] && echo 1 || echo 0)" ]
 }
 # the JOBID column is as wide as the ids SHOWN, not those collapsed away: NAME
-# starts at most GAP_MAX (4) after the widest shown id cell (an id and its ×N)
+# starts at most GAP_MAX (4) after the widest shown id cell (an id and its ×N).
+# CALL (made inside the target screens, listed to Franz, overrulable): column widths come from the shown rows only
 jobid_fits_shown() {
 	{ labelled QHDR; labelled QROW; } | LC_ALL=$utf8 gawk '
 		NR == 1 { off = index($0, "NAME") - index($0, "JOBID"); next }
 		{ c = $1; if ($2 ~ /^×[0-9]+$/) c = c " " $2; if (length(c) > m) m = length(c) }
 		END { if (m < 5) m = 5; exit !(off > 0 && off - m <= 4) }'
 }
-# the title's clock is the one thing two runs of the same screen may differ in
-without_clock() { sed '1s/[0-9][0-9]:[0-9][0-9]:[0-9][0-9]$//' "$1"; }
+# what two runs of the same screen may differ in: the title's clock, and AGO,
+# which can tick over an hour between them (the fixtures' end times are fixed)
+without_clock_ago() { sed -E '1s/[0-9]{2}:[0-9]{2}:[0-9]{2}$//; s/ +([0-9]+[smh]|-)$//' "$1"; }
 
 # compact_case FIXTURE W H "SINFO QUEUE FALLBACK SACCT" "JOBS RUNNING PENDING OTHER"
 # The FULL twin, then COMPACT at W x H with what every accepted screen has: it
@@ -1089,7 +1093,10 @@ compact_queue() {
 	ells=$(tr '|' '\n' <<< "$1" | grep '^… ' | paste -sd'|')
 	nrows=$(wc -w <<< "$rows")
 	want "the accepted $nrows queue rows, in squeue order" qrows_are "$rows"
+	# CALL (made inside the target screens, listed to Franz, overrulable): one "… n jobs <category>" line per section, the category named
+	# (stuck, blocked on nodes, held by admin, pending, running, other)
 	want "ellipsis lines exactly: ${ells:-none}"           ellipses_are "$ells"
+	# CALL (made inside the target screens, listed to Franz, overrulable): a section's ellipsis sits right after its last shown row
 	want "each ellipsis line right after its section's last shown row" queue_seq_is "$1"
 }
 compact_lines() {   # compact_lines N BLANKS: the screen is N lines, BLANKS of them blank
@@ -1252,7 +1259,7 @@ c_compact_quiet40_h40() {
 	xfail "$T_TITLE; sq has no --compact yet"
 	compact_case quiet40 100 40 "1 1 0 1" "7 5 2 0"
 	compact_lines 24 4
-	want "the same bytes as FULL, the clock aside" eval 'cmp -s <(without_clock "$FULL_OUT") <(without_clock "$OUT")'
+	want "the same bytes as FULL, the clock and AGO aside" eval 'cmp -s <(without_clock_ago "$FULL_OUT") <(without_clock_ago "$OUT")'
 }
 mix_case() {   # mix_case H: mix30 at 110 x H
 	compact_case mix30 110 "$1" "1 1 0 1" "75 43 30 2"
@@ -1294,13 +1301,10 @@ c_compact_mix30_h45() {
 }
 
 # manystuck: busy24 with 30 stuck jobs, under the cap of decision 18
+census_says() {      # census_says TOTALS H KEY VALUE: the census of this screen at height H
+	[ "$(census "$1" "$2" | gawk -v k="$3" '$1 == k { sub(/^[^ ]+ ?/, ""); print }')" = "$4" ]
+}
 manystuck_totals="stuck=30 blocked=1 held=0 pending=20 running=128 other=0"
-census_says() {      # census_says KEY VALUE H: the census of this screen at height H
-	[ "$(census "$manystuck_totals" "$3" | gawk -v k="$1" '$1 == k { sub(/^[^ ]+ ?/, ""); print }')" = "$2" ]
-}
-stuck_rows_are() {   # stuck_rows_are "ID ...": the DependencyNeverSatisfied rows
-	[ "$(labelled QROW | grep -F '(DependencyNeverSatisfied)' | first_words)" = "$1" ]
-}
 manystuck_case() {   # manystuck_case H
 	compact_case manystuck 100 "$1" "1 1 0 1" "179 128 51 0"
 	compact_lines "$1" 4
@@ -1319,16 +1323,58 @@ c_compact_manystuck_h24() {   # decision 18
 	xfail "$T_TITLE; sq has no --compact yet"
 	manystuck_case 24
 	compact_queue "4201|4202|4207|4240|4241|… 26 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|… 58 jobs running"
-	want "stuck survivors: the lowest ids, 4201 4202 4240 4241" stuck_rows_are "4201 4202 4240 4241"
-	want "stuck+blocked+held: 6 lines of the queue table's 13" eval 'census_says small 6 24 && census_says room 13 24'
+	want "stuck+blocked+held: 6 lines of the queue table's 13" eval 'census_says "$manystuck_totals" 24 small 6 && census_says "$manystuck_totals" 24 room 13'
 }
 c_compact_manystuck_h40() {   # decision 18
 	T_TITLE="manystuck at 40 lines: stuck+blocked take 14 of the 29 queue lines (12 stuck + 4207 + '… 18 jobs stuck'), running keeps 13 rows"
 	xfail "$T_TITLE; sq has no --compact yet"
 	manystuck_case 40
 	compact_queue "4201|4202|4207|4240|4241|4242|4243|4244|4245|4246|4247|4248|4249|… 18 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|3990_[70-83]|3990_[84-97]|3990_[98-111]|4109|4112|4113|4114|4115|… 11 jobs running"
-	want "stuck survivors: the lowest ids, 4201 4202 4240-4249" stuck_rows_are "4201 4202 4240 4241 4242 4243 4244 4245 4246 4247 4248 4249"
-	want "stuck+blocked+held: 14 lines of the queue table's 29" eval 'census_says small 14 40 && census_says room 29 40'
+	want "stuck+blocked+held: 14 lines of the queue table's 29" eval 'census_says "$manystuck_totals" 40 small 14 && census_says "$manystuck_totals" 40 room 29'
+}
+
+# manysmall: 12 stuck, 11 blocked, 10 held, interleaved in squeue order, under
+# the cap: inside it stuck fills before node-blocked before held (decision 18).
+# Reference render: screens/cap/manysmall-h40__half.txt (the prototype, half).
+manysmall_totals="stuck=12 blocked=11 held=10 pending=20 running=128 other=0"
+c_compact_manysmall_h40() {   # decision 18; the wording "… n jobs blocked on nodes / held by admin" is a CALL (made inside the target screens, listed to Franz, overrulable), on no screen he has seen
+	T_TITLE="manysmall at 40 lines: inside the cap stuck fills first (9 rows), blocked and held keep their floors; 14 of the 29 queue lines"
+	xfail "$T_TITLE; sq has no --compact yet"
+	compact_case manysmall 100 40 "1 1 0 1" "181 128 53 0"
+	compact_lines 40 4
+	busy_nodes_full
+	busy_finished_line
+	compact_queue "4201|4202|4207|… 10 jobs blocked on nodes|4240|4242|… 9 jobs held by admin|4243|4246|4249|4252|4255|4258|… 3 jobs stuck|… 20 jobs pending|3990_[0-13]|3990_[14-27]|3990_[28-41]|3990_[42-55]|3990_[56-69]|3990_[70-83]|3990_[84-97]|3990_[98-111]|4109|4112|4113|4114|4115|… 11 jobs running"
+	want "stuck+blocked+held: 14 lines of the queue table's 29" eval 'census_says "$manysmall_totals" 40 small 14 && census_says "$manysmall_totals" 40 room 29'
+}
+# Source: the settled classifier (stuck-classifier notes, 2026-10-06): only a
+# closed allow-list of reasons collapses; any other pending reason keeps its row
+# as stuck, so an unknown one fails loud instead of vanishing into "… n jobs
+# pending".  QOSGrpCpuLimit is on neither list.
+c_compact_unlisted_h24() {
+	T_TITLE="unlisted at 24 lines: a pending reason on neither list (QOSGrpCpuLimit) keeps its row as stuck, not counted in '… 20 jobs pending'"
+	xfail "$T_TITLE; sq has no --compact yet"
+	compact_case unlisted 100 24 "1 1 0 1" "152 128 24 0"
+	want "4231 (QOSGrpCpuLimit) has a row" eval 'labelled QROW | grep -qE "^4231 .*\(QOSGrpCpuLimit\)$"'
+	want "the ordinary pending are still 20 ('… 20 jobs pending') and no stuck/blocked/held line hides it" eval 'labelled QELL | grep -qx "… 20 jobs pending" && ! labelled QELL | grep -qE "jobs (stuck|blocked on nodes|held by admin)$"'
+	want "it is counted as stuck: 3 stuck rows" eval 'census "stuck=3 blocked=1 held=0 pending=20 running=128 other=0" 24 | grep -q "^rows stuck=3 "'
+}
+# quiet40 at 10 lines: no queue block fits, so the blank after the nodes and the
+# one before the finished line meet; one of them goes (CALL (made inside the
+# target screens, listed to Franz, overrulable): a blank with nothing to
+# separate is dropped), the other stays (decision 9: keep the blanks)
+labels_are() { [ "$(screen | cut -f1 | paste -sd' ')" = "$1" ]; }
+c_compact_quiet40_h10() {
+	T_TITLE="quiet40 at 10 lines: of the two blanks that meet, exactly one stays"
+	xfail "$T_TITLE; sq has no --compact yet"
+	compact_case quiet40 100 10 "1 1 0 1" "7 5 2 0"
+	want "title, blank, 2 nodes, ONE blank, the finished line, blank, footer" labels_are "TITLE BLANK NODE NODE BLANK FINLINE BLANK FOOTER"
+	want "the finished line is the newest failure" fin_line_is "recently finished: 4098 qc FAILED 1"
+}
+c_compact_sweep_manysmall() {   # decision 18: the order inside the cap
+	T_TITLE="manysmall at every height 6..70: stuck fills before blocked before held, the cap holds and lifts, and every sweep invariant"
+	xfail "$T_TITLE; sq has no --compact yet"
+	sweep_case manysmall 100 70 "1 1 0 1" "181 128 53 0" "$manysmall_totals" "recently finished: 4188 qc FAILED 1"
 }
 
 # What the screen at one height shows, for the sweep: one "KEY VALUE" line each.
@@ -1352,22 +1398,31 @@ c_compact_manystuck_h40() {   # decision 18
 #   lift N         1 if every running job is shown, a small section hides jobs,
 #                  and the screen still has a spare line (the cap did not lift)
 # A section's floor is 1 row and its "… n jobs" line, or all of it if 2 rows or
-# fewer; "past its floor": more than 2 rows, or 2 rows with jobs still hidden.
+# fewer (CALL (made inside the target screens, listed to Franz, overrulable): a small section with
+# 2 or more rows has a 2-line floor, never a bare ellipsis); "past its floor":
+# more than 2 rows, or 2 rows with jobs still hidden.
 census() {   # census TOTALS H
 	screen | TOTALS=$1 H=$2 LC_ALL=$utf8 gawk -F'\t' '
 		BEGIN { n = split(ENVIRON["TOTALS"], kv, " ")
 		        for (i = 1; i <= n; i++) { split(kv[i], p, "="); tot[p[1]] = p[2] }
 		        nsec = split("stuck blocked held pending running other", S, " ")
+		        # CALL (made inside the target screens, listed to Franz, overrulable): the ellipsis wording names the category
 		        L["stuck"] = "stuck"; L["blocked on nodes"] = "blocked"; L["held by admin"] = "held"
 		        L["pending"] = "pending"; L["running"] = "running"; L["other"] = "other" }
-		function sec(t,   m) {
+		# the settled classifier (stuck-classifier notes, 2026-10-06): a CLOSED
+		# allow-list of collapsible reasons (plus JobHeldUser, which Franz
+		# collapses) is ordinary pending; node reasons are blocked; JobHeldAdmin
+		# is held; EVERY OTHER reason is stuck, visible by default, so a misread
+		# or unknown reason fails loud.  The reason is what the NODE/REASON cell
+		# shows inside its parentheses (to the cell'"'"'s end, if the cell was cut).
+		function sec(t,   m, r) {
 			if (t ~ / RUNNING /) return "running"
 			if (t !~ / PENDING /) return "other"
-			if (!match(t, /\(([A-Za-z]+)/, m)) return "pending"
-			if (m[1] ~ /^(DependencyNeverSatisfied|BadConstraints|PartitionConfig|PartitionNodeLimit|PartitionTimeLimit|InvalidAccount|InvalidQOS)$/) return "stuck"
-			if (m[1] ~ /^(ReqNodeNotAvail|NodeDown|NodeDrain)/) return "blocked"
-			if (m[1] == "JobHeldAdmin") return "held"
-			return "pending"
+			r = match(t, /\(([^)]*)/, m) ? m[1] : ""
+			if (r ~ /^(None|Priority|Resources|Dependency|BeginTime|Prolog|Cleaning|SchedDefer|Reservation|Licenses|JobHeldUser)$/) return "pending"
+			if (r ~ /^ReqNodeNotAvail/ || r ~ /^(NodeDown|NodeDrain)$/ || r ~ /^Nodes required for job are /) return "blocked"
+			if (r == "JobHeldAdmin") return "held"
+			return "stuck"
 		}
 		{ nl++ }
 		$1 == "QROW" || $1 == "QELL" || $1 == "QNOTE" { qbody++ }
@@ -1457,6 +1512,7 @@ sweep_case() {
 	want "at most H lines (more at H =${fits:- none})" test -z "$fits"
 	want "footer ${foot[*]} last (not at H =${footer:- none})" test -z "$footer"
 	want "no line wider than $w (wider at H =${narrow:- none})" test -z "$narrow"
+	# CALL (made inside the target screens, listed to Franz, overrulable): a blank with nothing to separate is dropped
 	want "no two blank lines together (at H =${pairs:- none})" test -z "$pairs"
 	want "every section: all, none, or rows + one '… n jobs' (n >= 2) adding up to its total (not at H:section${acct:- none})" test -z "$acct"
 	want "the one-line finished form is '$finline' (not at H =${fin:- none})" test -z "$fin"
@@ -1486,7 +1542,7 @@ c_compact_sweep_manystuck() {   # decision 18: the cap
 		"stuck=30 blocked=1 held=0 pending=20 running=128 other=0" "recently finished: 4188 qc FAILED 1"
 }
 
-c_compact_sweep_quiet40() {   # a call inside the target screens: a blank with nothing to separate is dropped
+c_compact_sweep_quiet40() {   # CALL (made inside the target screens, listed to Franz, overrulable): a blank with nothing to separate is dropped
 	T_TITLE="quiet40 at every height 6..30: fits, footer last, no two blank lines together where the queue block vanishes, never fewer rows on a taller screen"
 	xfail "$T_TITLE; sq has no --compact yet"
 	sweep_case quiet40 100 30 "1 1 0 1" "7 5 2 0" \
@@ -1514,7 +1570,9 @@ cases=(
 	compact_elapsed24_h24 compact_emptyfin_h24 compact_noacct_h24 compact_quiet40_h40
 	compact_mix30_h16 compact_mix30_h18 compact_mix30_h30 compact_mix30_h45
 	compact_manystuck_h16 compact_manystuck_h24 compact_manystuck_h40
-	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_manystuck compact_sweep_quiet40
+	compact_manysmall_h40 compact_unlisted_h24 compact_quiet40_h10
+	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_manystuck compact_sweep_manysmall
+	compact_sweep_quiet40
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

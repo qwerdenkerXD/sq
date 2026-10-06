@@ -2,59 +2,59 @@
 # user, a stuck job, two blocked on the drained node02, ordinary pending.
 # squeue -S t,i: CG < PD < R < S as strings
 @include ../_common/squeue-defaults
-i=5101; j=train; u=mkoch; t=CG; T=COMPLETING; M=3:59:58; L=0:02; l=4:00:00; C=4
-i=5110; j=polish;   u=fsill; t=PD; T=PENDING; M=0:00; L=8:00:00;  R=(JobHeldAdmin); S=N/A
-i=5111; j=assemble; u=alice; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(Priority); S=N/A
-i=5112; j=merge;    u=alice; t=PD; T=PENDING; M=0:00; L=10-00:00:00; R=(PartitionTimeLimit); S=N/A
-i=5113; j=align;    u=bob;   t=PD; T=PENDING; M=0:00; L=6:00:00;  R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A
-i=5114; j=qc;       u=bob;   t=PD; T=PENDING; M=0:00; L=1:00:00;  R=(JobHeldUser); S=N/A
-i=5115; j=trim;     u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00;  R=(Resources); S=2099-01-01T00:00:00
-i=5116; j=bwa;      u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00;  R=(Priority); S=N/A
-i=5117; j=deseq;    u=bob;   t=PD; T=PENDING; M=0:00; L=3:00:00;  R=(JobHeldUser); S=N/A
-i=5118; j=plot;     u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00;  R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A
-i=5119_[0-19]; j=sweep; u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A
-i=5120; j=index;    u=fsill; t=PD; T=PENDING; M=0:00; L=0:30:00;  R=(Resources); S=N/A
-i=5050_0; j=map; u=alice; M=5:59:00; L=6:00:00; l=12:00:00
-i=5050_1; j=map; u=alice; M=5:59:00; L=6:00:00; l=12:00:00
-i=5050_2; j=map; u=alice; M=5:59:00; L=6:00:00; l=12:00:00
-i=5050_3; j=map; u=alice; M=5:59:00; L=6:00:00; l=12:00:00
-i=5050_4; j=map; u=alice; M=5:59:00; L=6:00:00; l=12:00:00
-i=5050_5; j=map; u=alice; M=5:59:00; L=6:00:00; l=12:00:00
-i=5050_6; j=map; u=alice; M=5:59:00; L=6:00:00; l=12:00:00
-i=5050_7; j=map; u=alice; M=5:59:00; L=6:00:00; l=12:00:00
-i=5050_8; j=map; u=alice; M=5:52:00; L=6:07:00; l=12:00:00
-i=5050_9; j=map; u=alice; M=5:52:00; L=6:07:00; l=12:00:00
-i=5050_10; j=map; u=alice; M=5:52:00; L=6:07:00; l=12:00:00
-i=5050_11; j=map; u=alice; M=5:52:00; L=6:07:00; l=12:00:00
-i=5050_12; j=map; u=alice; M=5:52:00; L=6:07:00; l=12:00:00
-i=5050_13; j=map; u=alice; M=5:52:00; L=6:07:00; l=12:00:00
-i=5050_14; j=map; u=alice; M=5:52:00; L=6:07:00; l=12:00:00
-i=5050_15; j=map; u=alice; M=5:52:00; L=6:07:00; l=12:00:00
-i=5050_16; j=map; u=alice; M=5:45:00; L=6:14:00; l=12:00:00
-i=5050_17; j=map; u=alice; M=5:45:00; L=6:14:00; l=12:00:00
-i=5050_18; j=map; u=alice; M=5:45:00; L=6:14:00; l=12:00:00
-i=5050_19; j=map; u=alice; M=5:45:00; L=6:14:00; l=12:00:00
-i=5050_20; j=map; u=alice; M=5:45:00; L=6:14:00; l=12:00:00
-i=5050_21; j=map; u=alice; M=5:45:00; L=6:14:00; l=12:00:00
-i=5050_22; j=map; u=alice; M=5:45:00; L=6:14:00; l=12:00:00
-i=5050_23; j=map; u=alice; M=5:45:00; L=6:14:00; l=12:00:00
-i=5050_24; j=map; u=alice; M=4:38:00; L=7:21:00; l=12:00:00
-i=5050_25; j=map; u=alice; M=4:38:00; L=7:21:00; l=12:00:00
-i=5050_26; j=map; u=alice; M=4:38:00; L=7:21:00; l=12:00:00
-i=5050_27; j=map; u=alice; M=4:38:00; L=7:21:00; l=12:00:00
-i=5050_28; j=map; u=alice; M=4:38:00; L=7:21:00; l=12:00:00
-i=5050_29; j=map; u=alice; M=4:38:00; L=7:21:00; l=12:00:00
-i=5050_30; j=map; u=alice; M=4:38:00; L=7:21:00; l=12:00:00
-i=5050_31; j=map; u=alice; M=4:38:00; L=7:21:00; l=12:00:00
-i=5060; j=deseq; u=bob; M=0:00:00; L=20:00:00; l=24:00:00; C=2
-i=5061; j=plot; u=mkoch; M=0:17:00; L=21:00:00; l=24:00:00; C=2
-i=5062; j=qc; u=bob; M=0:34:00; L=22:00:00; l=24:00:00; C=2
-i=5063; j=trim; u=mkoch; M=0:51:00; L=20:00:00; l=24:00:00; C=2
-i=5064; j=fastp; u=bob; M=1:08:00; L=21:00:00; l=24:00:00; C=2
-i=5065; j=sort; u=mkoch; M=1:25:00; L=22:00:00; l=24:00:00; C=2
-i=5066; j=dedup; u=bob; M=1:42:00; L=20:00:00; l=24:00:00; C=2
-i=5067; j=call; u=mkoch; M=1:59:00; L=21:00:00; l=24:00:00; C=2
-i=5068; j=annot; u=bob; M=2:16:00; L=22:00:00; l=24:00:00; C=2
-i=5069; j=vcf; u=mkoch; M=2:33:00; L=20:00:00; l=24:00:00; C=2
-i=5070; j=report; u=bob; M=2:50:00; L=21:00:00; l=24:00:00; C=2
+i=5101; j=train; u=mkoch; t=CG; T=COMPLETING; M=3:59:58; L=0:02; l=4:00:00; C=4; S=2026-10-06T16:00:02
+i=5110; j=polish;   u=fsill; t=PD; T=PENDING; M=0:00; L=8:00:00;  R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin; l=8:00:00
+i=5111; j=assemble; u=alice; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(Priority); S=N/A; r=Priority; l=12:00:00
+i=5112; j=merge;    u=alice; t=PD; T=PENDING; M=0:00; L=10-00:00:00; R=(PartitionTimeLimit); S=N/A; r=PartitionTimeLimit; l=10-00:00:00
+i=5113; j=align;    u=bob;   t=PD; T=PENDING; M=0:00; L=6:00:00;  R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02; l=6:00:00
+i=5114; j=qc;       u=bob;   t=PD; T=PENDING; M=0:00; L=1:00:00;  R=(JobHeldUser); S=N/A; r=JobHeldUser; l=1:00:00
+i=5115; j=trim;     u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00;  R=(Resources); S=2099-01-01T00:00:00; r=Resources; l=2:00:00
+i=5116; j=bwa;      u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00;  R=(Priority); S=N/A; r=Priority; l=6:00:00
+i=5117; j=deseq;    u=bob;   t=PD; T=PENDING; M=0:00; L=3:00:00;  R=(JobHeldUser); S=N/A; r=JobHeldUser; l=3:00:00
+i=5118; j=plot;     u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00;  R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02; l=1:00:00
+i=5119_[0-19]; j=sweep; u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A; r=Priority; l=1:00:00
+i=5120; j=index;    u=fsill; t=PD; T=PENDING; M=0:00; L=0:30:00;  R=(Resources); S=N/A; r=Resources; l=30:00
+i=5050_0; j=map; u=alice; M=5:59:00; L=6:00:00; l=11:59:00; S=2026-10-06T14:01:00
+i=5050_1; j=map; u=alice; M=5:59:00; L=6:00:00; l=11:59:00; S=2026-10-06T14:01:00
+i=5050_2; j=map; u=alice; M=5:59:00; L=6:00:00; l=11:59:00; S=2026-10-06T14:01:00
+i=5050_3; j=map; u=alice; M=5:59:00; L=6:00:00; l=11:59:00; S=2026-10-06T14:01:00
+i=5050_4; j=map; u=alice; M=5:59:00; L=6:00:00; l=11:59:00; S=2026-10-06T14:01:00
+i=5050_5; j=map; u=alice; M=5:59:00; L=6:00:00; l=11:59:00; S=2026-10-06T14:01:00
+i=5050_6; j=map; u=alice; M=5:59:00; L=6:00:00; l=11:59:00; S=2026-10-06T14:01:00
+i=5050_7; j=map; u=alice; M=5:59:00; L=6:00:00; l=11:59:00; S=2026-10-06T14:01:00
+i=5050_8; j=map; u=alice; M=5:52:00; L=6:07:00; l=11:59:00; S=2026-10-06T14:08:00
+i=5050_9; j=map; u=alice; M=5:52:00; L=6:07:00; l=11:59:00; S=2026-10-06T14:08:00
+i=5050_10; j=map; u=alice; M=5:52:00; L=6:07:00; l=11:59:00; S=2026-10-06T14:08:00
+i=5050_11; j=map; u=alice; M=5:52:00; L=6:07:00; l=11:59:00; S=2026-10-06T14:08:00
+i=5050_12; j=map; u=alice; M=5:52:00; L=6:07:00; l=11:59:00; S=2026-10-06T14:08:00
+i=5050_13; j=map; u=alice; M=5:52:00; L=6:07:00; l=11:59:00; S=2026-10-06T14:08:00
+i=5050_14; j=map; u=alice; M=5:52:00; L=6:07:00; l=11:59:00; S=2026-10-06T14:08:00
+i=5050_15; j=map; u=alice; M=5:52:00; L=6:07:00; l=11:59:00; S=2026-10-06T14:08:00
+i=5050_16; j=map; u=alice; M=5:45:00; L=6:14:00; l=11:59:00; S=2026-10-06T14:15:00
+i=5050_17; j=map; u=alice; M=5:45:00; L=6:14:00; l=11:59:00; S=2026-10-06T14:15:00
+i=5050_18; j=map; u=alice; M=5:45:00; L=6:14:00; l=11:59:00; S=2026-10-06T14:15:00
+i=5050_19; j=map; u=alice; M=5:45:00; L=6:14:00; l=11:59:00; S=2026-10-06T14:15:00
+i=5050_20; j=map; u=alice; M=5:45:00; L=6:14:00; l=11:59:00; S=2026-10-06T14:15:00
+i=5050_21; j=map; u=alice; M=5:45:00; L=6:14:00; l=11:59:00; S=2026-10-06T14:15:00
+i=5050_22; j=map; u=alice; M=5:45:00; L=6:14:00; l=11:59:00; S=2026-10-06T14:15:00
+i=5050_23; j=map; u=alice; M=5:45:00; L=6:14:00; l=11:59:00; S=2026-10-06T14:15:00
+i=5050_24; j=map; u=alice; M=4:38:00; L=7:21:00; l=11:59:00; S=2026-10-06T15:22:00
+i=5050_25; j=map; u=alice; M=4:38:00; L=7:21:00; l=11:59:00; S=2026-10-06T15:22:00
+i=5050_26; j=map; u=alice; M=4:38:00; L=7:21:00; l=11:59:00; S=2026-10-06T15:22:00
+i=5050_27; j=map; u=alice; M=4:38:00; L=7:21:00; l=11:59:00; S=2026-10-06T15:22:00
+i=5050_28; j=map; u=alice; M=4:38:00; L=7:21:00; l=11:59:00; S=2026-10-06T15:22:00
+i=5050_29; j=map; u=alice; M=4:38:00; L=7:21:00; l=11:59:00; S=2026-10-06T15:22:00
+i=5050_30; j=map; u=alice; M=4:38:00; L=7:21:00; l=11:59:00; S=2026-10-06T15:22:00
+i=5050_31; j=map; u=alice; M=4:38:00; L=7:21:00; l=11:59:00; S=2026-10-06T15:22:00
+i=5060; j=deseq; u=bob; M=0:00:00; L=20:00:00; l=20:00:00; C=2; S=2026-10-06T20:00:00
+i=5061; j=plot; u=mkoch; M=0:17:00; L=21:00:00; l=21:17:00; C=2; S=2026-10-06T19:43:00
+i=5062; j=qc; u=bob; M=0:34:00; L=22:00:00; l=22:34:00; C=2; S=2026-10-06T19:26:00
+i=5063; j=trim; u=mkoch; M=0:51:00; L=20:00:00; l=20:51:00; C=2; S=2026-10-06T19:09:00
+i=5064; j=fastp; u=bob; M=1:08:00; L=21:00:00; l=22:08:00; C=2; S=2026-10-06T18:52:00
+i=5065; j=sort; u=mkoch; M=1:25:00; L=22:00:00; l=23:25:00; C=2; S=2026-10-06T18:35:00
+i=5066; j=dedup; u=bob; M=1:42:00; L=20:00:00; l=21:42:00; C=2; S=2026-10-06T18:18:00
+i=5067; j=call; u=mkoch; M=1:59:00; L=21:00:00; l=22:59:00; C=2; S=2026-10-06T18:01:00
+i=5068; j=annot; u=bob; M=2:16:00; L=22:00:00; l=1-00:16:00; C=2; S=2026-10-06T17:44:00
+i=5069; j=vcf; u=mkoch; M=2:33:00; L=20:00:00; l=22:33:00; C=2; S=2026-10-06T17:27:00
+i=5070; j=report; u=bob; M=2:50:00; L=21:00:00; l=23:50:00; C=2; S=2026-10-06T17:10:00
 i=5045; j=longrun; u=bob; t=S; T=SUSPENDED; M=2-03:11:09; L=4-20:48:51; l=7-00:00:00

@@ -3,8 +3,8 @@
 # backfill start estimate far in the future
 @include ../_common/squeue-defaults
 i=1101; j=train; t=CG; T=COMPLETING
-i=1102; j=prep;  t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A
-i=1103; j=prep;  t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=2099-01-01T00:00:00
+i=1102; j=prep;  t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A; r=Priority
+i=1103; j=prep;  t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=2099-01-01T00:00:00; r=Resources
 i=1104; j=align
 i=1105; j=align; u=bob; R=node02
 i=1106; j=plot;  C=4; m=16G

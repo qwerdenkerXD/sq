@@ -1,0 +1,7 @@
+# busy24 with one more pending job whose reason is on neither of the settled
+# classifier's lists (stuck-classifier notes: a closed allow-list of collapsible
+# reasons, node reasons, JobHeldAdmin; every other reason stays visible as stuck)
+@include ../_common/squeue-defaults
+@include ../busy24/squeue-pending
+i=4231; j=bigmem; u=bob; t=PD; T=PENDING; M=0:00; L=8:00:00; l=8:00:00; R=(QOSGrpCpuLimit); S=N/A; r=QOSGrpCpuLimit
+@include ../busy24/squeue-running

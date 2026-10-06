@@ -1,17 +1,17 @@
 # the pending jobs of busy24 and elapsed24, in squeue -S t,i order: 2 stuck
 # (DependencyNeverSatisfied), 1 blocked on the down node02, 20 ordinary
 # (Priority/Resources; the 4230 bracket is 10 jobs)
-i=4201; j=assemble; u=fsill; t=PD; T=PENDING; M=0:00; L=1-00:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4202; j=merge;    u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4203; j=trim;     u=bob;   t=PD; T=PENDING; M=0:00; L=4:00:00; R=(Priority); S=N/A
-i=4204; j=trim;     u=bob;   t=PD; T=PENDING; M=0:00; L=4:00:00; R=(Priority); S=N/A
-i=4205; j=fastp;    u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00; R=(Resources); S=N/A
-i=4206; j=fastp;    u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00; R=(Priority); S=N/A
-i=4207; j=polish;   u=fsill; t=PD; T=PENDING; M=0:00; L=8:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A
-i=4210; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4211; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4212; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4213; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4214; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4215; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A
-i=4230_[0-9]; j=sweep; u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A
+i=4201; j=assemble; u=fsill; t=PD; T=PENDING; M=0:00; L=1-00:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3201(failed); l=1-00:00:00
+i=4202; j=merge;    u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3202(failed); l=12:00:00
+i=4203; j=trim;     u=bob;   t=PD; T=PENDING; M=0:00; L=4:00:00; R=(Priority); S=N/A; r=Priority; l=4:00:00
+i=4204; j=trim;     u=bob;   t=PD; T=PENDING; M=0:00; L=4:00:00; R=(Priority); S=N/A; r=Priority; l=4:00:00
+i=4205; j=fastp;    u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00; R=(Resources); S=N/A; r=Resources; l=2:00:00
+i=4206; j=fastp;    u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00; R=(Priority); S=N/A; r=Priority; l=2:00:00
+i=4207; j=polish;   u=fsill; t=PD; T=PENDING; M=0:00; L=8:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02; l=8:00:00
+i=4210; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A; r=Priority; l=6:00:00
+i=4211; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A; r=Priority; l=6:00:00
+i=4212; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A; r=Priority; l=6:00:00
+i=4213; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A; r=Priority; l=6:00:00
+i=4214; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A; r=Priority; l=6:00:00
+i=4215; j=bwa; u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00; R=(Priority); S=N/A; r=Priority; l=6:00:00
+i=4230_[0-9]; j=sweep; u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A; r=Priority; l=1:00:00

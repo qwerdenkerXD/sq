@@ -1,9 +1,9 @@
 # COMPACT scenario "quiet40": a quiet cluster where everything fits a 40-line screen
 @include ../_common/squeue-defaults
-i=4110; j=deseq; u=bob; t=PD; T=PENDING; M=0:00; L=2:00:00; R=(Resources); S=N/A
-i=4111; j=plot;  u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A
-i=4101; j=align; u=alice; M=1:12:40; L=4:47:20; l=6:00:00
-i=4102; j=align; u=alice; M=1:12:40; L=4:47:20; l=6:00:00; R=node02
-i=4103; j=trim;  u=bob;   M=22:05; L=1:37:55; l=2:00:00
-i=4104; j=qc;    u=fsill; M=3:10; L=56:50
-i=4105; j=index; u=mkoch; M=0:41; L=29:19; l=30:00
+i=4110; j=deseq; u=bob; t=PD; T=PENDING; M=0:00; L=2:00:00; R=(Resources); S=N/A; r=Resources; l=2:00:00
+i=4111; j=plot;  u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A; r=Priority; l=1:00:00
+i=4101; j=align; u=alice; M=1:12:40; L=4:47:20; l=6:00:00; S=2026-10-06T18:47:20
+i=4102; j=align; u=alice; M=1:12:40; L=4:47:20; l=6:00:00; R=node02; S=2026-10-06T18:47:20
+i=4103; j=trim;  u=bob;   M=22:05; L=1:37:55; l=2:00:00; S=2026-10-06T19:37:55
+i=4104; j=qc;    u=fsill; M=3:10; L=56:50; S=2026-10-06T19:56:50; l=1:00:00
+i=4105; j=index; u=mkoch; M=0:41; L=29:19; l=30:00; S=2026-10-06T19:59:19

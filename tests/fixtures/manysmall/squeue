@@ -1,0 +1,38 @@
+# COMPACT scenario "manysmall" (decision 18, the order inside the cap): busy24
+# with 30 more pending jobs, 4240-4269, cycling stuck (DependencyNeverSatisfied,
+# each its own failed parent), blocked on the down node02, held by admin: 12
+# stuck, 11 blocked, 10 held in all, interleaved so squeue order is not the
+# order the cap fills them in.
+@include ../_common/squeue-defaults
+@include ../busy24/squeue-pending
+i=4240; j=align; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3240(failed)
+i=4241; j=sort; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4242; j=merge; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+i=4243; j=index; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3243(failed)
+i=4244; j=call; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4245; j=annot; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+i=4246; j=vcf; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3246(failed)
+i=4247; j=report; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4248; j=trim; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+i=4249; j=fastp; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3249(failed)
+i=4250; j=dedup; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4251; j=plot; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+i=4252; j=qc; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3252(failed)
+i=4253; j=bwa; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4254; j=map; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+i=4255; j=polish; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3255(failed)
+i=4256; j=assemble; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4257; j=deseq; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+i=4258; j=count; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3258(failed)
+i=4259; j=filter; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4260; j=stats; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+i=4261; j=join; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3261(failed)
+i=4262; j=split; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4263; j=pack; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+i=4264; j=zip; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3264(failed)
+i=4265; j=tar; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4266; j=sync; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+i=4267; j=post; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; l=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3267(failed)
+i=4268; j=dump; u=bob; t=PD; T=PENDING; M=0:00; L=6:00:00; l=6:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=4269; j=load; u=mkoch; t=PD; T=PENDING; M=0:00; L=4:00:00; l=4:00:00; R=(JobHeldAdmin); S=N/A; r=JobHeldAdmin
+@include ../busy24/squeue-running

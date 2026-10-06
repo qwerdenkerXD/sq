@@ -4,32 +4,32 @@
 # every queue row from the 128 running jobs.
 @include ../_common/squeue-defaults
 @include ../busy24/squeue-pending
-i=4240; j=align; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4241; j=sort; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4242; j=merge; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4243; j=index; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4244; j=call; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4245; j=annot; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4246; j=vcf; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4247; j=report; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4248; j=trim; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4249; j=fastp; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4250; j=dedup; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4251; j=plot; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4252; j=qc; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4253; j=bwa; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4254; j=map; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4255; j=polish; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4256; j=assemble; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4257; j=deseq; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4258; j=count; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4259; j=filter; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4260; j=stats; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4261; j=join; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4262; j=split; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4263; j=pack; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4264; j=zip; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4265; j=tar; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4266; j=sync; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
-i=4267; j=post; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A
+i=4240; j=align; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3240(failed); l=12:00:00
+i=4241; j=sort; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3241(failed); l=12:00:00
+i=4242; j=merge; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3242(failed); l=12:00:00
+i=4243; j=index; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3243(failed); l=12:00:00
+i=4244; j=call; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3244(failed); l=12:00:00
+i=4245; j=annot; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3245(failed); l=12:00:00
+i=4246; j=vcf; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3246(failed); l=12:00:00
+i=4247; j=report; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3247(failed); l=12:00:00
+i=4248; j=trim; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3248(failed); l=12:00:00
+i=4249; j=fastp; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3249(failed); l=12:00:00
+i=4250; j=dedup; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3250(failed); l=12:00:00
+i=4251; j=plot; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3251(failed); l=12:00:00
+i=4252; j=qc; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3252(failed); l=12:00:00
+i=4253; j=bwa; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3253(failed); l=12:00:00
+i=4254; j=map; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3254(failed); l=12:00:00
+i=4255; j=polish; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3255(failed); l=12:00:00
+i=4256; j=assemble; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3256(failed); l=12:00:00
+i=4257; j=deseq; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3257(failed); l=12:00:00
+i=4258; j=count; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3258(failed); l=12:00:00
+i=4259; j=filter; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3259(failed); l=12:00:00
+i=4260; j=stats; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3260(failed); l=12:00:00
+i=4261; j=join; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3261(failed); l=12:00:00
+i=4262; j=split; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3262(failed); l=12:00:00
+i=4263; j=pack; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3263(failed); l=12:00:00
+i=4264; j=zip; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3264(failed); l=12:00:00
+i=4265; j=tar; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3265(failed); l=12:00:00
+i=4266; j=sync; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3266(failed); l=12:00:00
+i=4267; j=post; u=fsill; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(DependencyNeverSatisfied); S=N/A; r=DependencyNeverSatisfied; E=afterok:3267(failed); l=12:00:00
 @include ../busy24/squeue-running

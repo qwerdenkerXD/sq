@@ -1,3 +1,3 @@
 # --array=0-12:2 pending: 7 tasks, printed in Slurm's step syntax
 @include ../_common/squeue-defaults
-i=7001_[0-12:2]; j=sweep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A
+i=7001_[0-12:2]; j=sweep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A; r=Resources

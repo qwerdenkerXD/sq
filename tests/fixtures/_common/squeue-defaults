@@ -1,3 +1,7 @@
 # What a running job looks like in sq's default columns (i,j,u,T,M,L,C,m,R) and
 # its hidden ones (t,l,S), so a record only has to say what makes it different.
-@defaults u=alice; j=job; T=RUNNING; t=R; M=10:00; L=50:00; l=1:00:00; C=1; m=4G; R=node01; S=2026-10-06T08:00:00
+# r and E are what squeue prints for %r and %E, which COMPACT's classifier reads:
+# a running job's %r is "None" (seen live, stuck-classifier notes); a job with
+# no dependency prints %E as "(null)" (squeue's print.c; not checked live).  A
+# pending record sets r to its reason, R without the parentheses.
+@defaults u=alice; j=job; T=RUNNING; t=R; M=10:00; L=50:00; l=1:00:00; C=1; m=4G; R=node01; S=2026-10-06T08:00:00; r=None; E=(null)
