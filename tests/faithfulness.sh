@@ -96,11 +96,22 @@ verdict() {   # verdict LABEL DIR RECORDS: real.out vs stub.out in DIR
 		fails=$((fails+1))
 	fi
 }
+# Anything the real command writes on stderr fails the comparison, even at rc 0:
+# sinfo -O and squeue -O report an unknown field name there and go on with rc 0,
+# printing an empty field in its place, which a fixture would faithfully copy
+real_err() {  # real_err LABEL FILE: 0 if FILE is empty, else print it as an ERROR
+	[ -s "$2" ] || return 0
+	printf 'ERROR  %-16s real command wrote to stderr:\n' "$1"
+	sed 's/^/         | /' "$2"
+	fails=$((fails+1)); return 1
+}
 run_real() {  # run_real DIR words...: the real command's output in DIR/real.out
 	local d=$1; shift; mkdir -p "$d/fx"
-	real "$@" > "$d/real.out" 2> "$d/real.err" && return 0
-	printf 'ERROR  %-16s real command failed: %s\n' "${d##*/}" "$(head -1 "$d/real.err")"
-	fails=$((fails+1)); return 1
+	if ! real "$@" > "$d/real.out" 2> "$d/real.err"; then
+		printf 'ERROR  %-16s real command failed: %s\n' "${d##*/}" "$(head -1 "$d/real.err")"
+		fails=$((fails+1)); return 1
+	fi
+	real_err "${d##*/}" "$d/real.err"
 }
 run_stub() {  # run_stub DIR FIXTURE-DIR words...: the stub, same argv and env
 	local d=$1 fx=$2; shift 2; : > "$d/log"
@@ -170,7 +181,10 @@ fi
 # unsuffixed -O field is padded (the stub refuses that form).
 hdr() {   # hdr LABEL EXPECT words...: the first line of real output vs EXPECT (a regex)
 	local label=$1 want=$2; shift 2
-	local got; got=$(real "$@" 2>&1 | head -1)
+	local d=$work/$label got; mkdir -p "$d"
+	real "$@" > "$d/real.out" 2> "$d/real.err"
+	real_err "$label" "$d/real.err" || return
+	got=$(head -1 "$d/real.out")
 	if [[ $got =~ $want ]]; then printf 'MATCH  %-16s header %s\n' "$label" "$got"
 	else printf 'DIFFER %-16s header %s (wanted /%s/)\n' "$label" "$got" "$want"; fails=$((fails+1)); fi
 }

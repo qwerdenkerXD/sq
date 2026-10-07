@@ -12,7 +12,10 @@ the stubs in `tests/bin` were compared with the real clients on bioserver
 For each call shape, `faithfulness.sh` runs the real command with a separator
 shaped like sq's nonce (`N` + 24 hex), turns the real output into a fixture
 (one record per real record, values escaped), renders that fixture with the stub
-given the same argv and environment, and compares the bytes with `cmp`.
+given the same argv and environment, and compares the bytes with `cmp`. A real
+command that writes anything to stderr fails its comparison, even with rc 0, and
+the stderr is printed; on bioserver (2026-10-07) none of the commands below, nor
+the header checks, writes any.
 
 | shape | command (separators as sq mints them) | result 2026-10-06 |
 |---|---|---|
@@ -94,12 +97,13 @@ the nonce `N5c33003374c1ff99ec32cff8` on both nodes of bioserver:
   token without a colon (`Reason<N>`) drops both the field and its separator.
   So the record gate does not catch a misspelt field: sq would read an empty
   AllocMem as 0 and an empty CPUsLoad as unknown, without a caption, since it
-  ignores stderr when sinfo exits 0. Nor does `faithfulness.sh`: run with
-  `AllocMemX` it still says MATCH, because the empty field goes into the
-  fixture (`AllocMemX=`) and the stub renders it back; only the error in the
-  real command's stderr, which it does not check, tells. What guards the
-  names is `tests/run.sh` pinning the exact `-O` string sq sends (`c_mixed`),
-  together with the measurements above, made with those names.
+  ignores stderr when sinfo exits 0. The byte comparison alone would not catch
+  it either: the empty field goes into the fixture (`AllocMemX=`) and the stub
+  renders it back. So `faithfulness.sh` fails any comparison whose real command
+  writes to stderr, and prints what it wrote; run with `AllocMemX` it reports
+  `ERROR sinfo real command wrote to stderr: | sinfo: error: Invalid job format
+  specification: AllocMemX` (2026-10-07). `tests/run.sh` pins the exact `-O`
+  string sq sends (`c_mixed`), so the two together guard the names.
 - **Forms**: no reason is `none` and its TimeStamp `Unknown` (with
   `SLURM_TIME_FORMAT` standard, unset and relative); CPUsLoad has two decimals
   (`0.46`, `0.01`); AllocMem and FreeMem are whole MB (`0`, `1018271`).

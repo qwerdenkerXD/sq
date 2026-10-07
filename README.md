@@ -164,7 +164,8 @@ shapes that are hard to get from a live cluster: large arrays, hostile job names
 Slurm truncates, a controller that hangs. Each case asserts properties of the screen
 (counts, which rows appear, that nothing is forged), not a snapshot. Known defects are listed
 as expected failures, so a fix shows up as one. `tests/faithfulness.sh <host>` compares the
-stand-ins' output with the real tools, read-only.
+stand-ins' output with the real tools, read-only, and fails wherever a real tool complains on
+stderr.
 
 ## License
 
