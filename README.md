@@ -52,10 +52,10 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
   in use comes from the node's own free-memory reading, so it is meaningful even when Slurm is not
   configured to schedule memory (`CR_CORE`), which is exactly when you most need to watch it.
   Yellow past 85%, red past 95%.
-  Two caveats. CPU in use is the node's load average (`CPULoad`), which slurmctld refreshes only
-  with its node pings, minutes apart, and which counts processes outside Slurm too. Memory in use
-  is RealMemory − FreeMem, and FreeMem follows the kernel's `MemFree`, so page cache and the OS
-  count as used: use beyond the allocation is not necessarily jobs.
+  Two caveats. CPU in use is the node's 5-minute load average (`CPULoad`), refreshed only with
+  slurmctld's node pings, so it trails the node by minutes, and it counts processes outside Slurm
+  too. Memory in use is RealMemory − FreeMem, and FreeMem follows the kernel's `MemFree`, so page
+  cache and the OS count as used: use beyond the allocation is not necessarily jobs.
 - **Array jobs fold.** Tasks that agree on every displayed column collapse to one row,
   `4108_[0-3] ×4`. A pending array Slurm prints as one bracket reads `4109_[1,4,7-20%2] ×16`,
   and the counts include every task in it, not the row. When the id column is too narrow it

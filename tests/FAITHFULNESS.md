@@ -86,9 +86,20 @@ the nonce `N5c33003374c1ff99ec32cff8` on both nodes of bioserver:
   `-O` fields. `-O` then `-o`: the `-o` string is parsed in `-O`'s grammar
   (`Invalid job format specification: %NN…`, empty lines, rc 0); the stub refuses
   both together.
-- **An unknown field name** (`Bogus:0<N>`, or `Reason<N>` without a colon) is an
-  error on stderr with rc 0 and that field missing from every line; sq's record
-  gate then counts too few fields and says the node output is unreadable.
+- **An unknown field name** is an error on stderr (`Invalid job format
+  specification: AllocMemX`) with rc 0, and in sq's `Field:0<N>` form it keeps
+  its place: `…,CPUsLoad:0<N>,AllocMemX:0<N>` printed `0/128/0/128<N>fb2-bioinf<N>0.00<N><N>`,
+  an EMPTY field followed by its separator (`format_add_invalid` in
+  `src/sinfo/opts.c` keeps the suffix), so the field count stays right. Only a
+  token without a colon (`Reason<N>`) drops both the field and its separator.
+  So the record gate does not catch a misspelt field: sq would read an empty
+  AllocMem as 0 and an empty CPUsLoad as unknown, without a caption, since it
+  ignores stderr when sinfo exits 0. Nor does `faithfulness.sh`: run with
+  `AllocMemX` it still says MATCH, because the empty field goes into the
+  fixture (`AllocMemX=`) and the stub renders it back; only the error in the
+  real command's stderr, which it does not check, tells. What guards the
+  names is `tests/run.sh` pinning the exact `-O` string sq sends (`c_mixed`),
+  together with the measurements above, made with those names.
 - **Forms**: no reason is `none` and its TimeStamp `Unknown` (with
   `SLURM_TIME_FORMAT` standard, unset and relative); CPUsLoad has two decimals
   (`0.46`, `0.01`); AllocMem and FreeMem are whole MB (`0`, `1018271`).
