@@ -101,10 +101,6 @@ sq -u "$USER" -p gpu      # squeue's filters are passed on, by full long name fr
                           #  because squeue's own getopt would read "--iter=5" as
                           #  -i and "--forma=%i" as -o.  Some full names are refused
                           #  too, where they would replace the output sq parses
-sq --json                 # refused, like -O/--Format, -s/--steps, -i/--iterate,
-                          #  -l, -v and -V: each would replace or defeat the
-                          #  output sq parses.  (-o and --format are sq's own
-                          #  column list, above.)
 sq -C                     # centred in both axes
 ```
 
@@ -153,6 +149,9 @@ sq -C                     # centred in both axes
   replaced atomically so two running copies cannot tear it.
 - An unreachable controller makes `sinfo` and `squeue` hang rather than fail, so every call is
   bounded by `SQ_TIMEOUT`. A full outage therefore delays a refresh by about twice that.
+- **Refused:** `-O`/`--Format`, `-s`/`--steps`, `-i`/`--iterate`, `-l`, `-v`, `-V`, `--json` and
+  `--yaml`. Each would replace or defeat the output sq parses; sq exits with code 2 and says
+  why. (`-o`/`--format` are sq's own column list.)
 
 ## Tests
 
