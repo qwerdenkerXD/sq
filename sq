@@ -161,13 +161,16 @@ while [ $# -gt 0 ]; do
 			[ -z "$modeflag" ] || [ "$modeflag" = "$1" ] \
 				|| die "--compact and --full contradict each other; give one of them"
 			modeflag=$1; shift ;;
-		--reserve) [ $# -ge 2 ] || die "--reserve needs a number of lines, e.g. sq --reserve 2"
-			case $2 in
-				''|*[!0-9]*) die "--reserve needs a number of lines, not '$(printf '%s' "$2" \
-					| tr -d '[:cntrl:]' | cut -c1-40)'; e.g. sq --reserve 2" ;;
+		--reserve|--reserve=*)  # the value attached, or the next word
+			case $1 in
+				--reserve=*) reserve=${1#*=}; shift ;;
+				*) [ $# -ge 2 ] || die "--reserve needs a number of lines, e.g. sq --reserve 2"
+				   reserve=$2; shift 2 ;;
 			esac
-			reserve=$2; shift 2 ;;
-		--reserve=*) die "--reserve takes its value as the next word, e.g. sq --reserve 2" ;;
+			case $reserve in
+				''|*[!0-9]*) die "--reserve needs a number of lines, not '$(printf '%s' "$reserve" \
+					| tr -d '[:cntrl:]' | cut -c1-40)'; e.g. sq --reserve 2" ;;
+			esac ;;
 		-h|--help) awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
 		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
 		# the nonce-framed format below and collapse every record into one field

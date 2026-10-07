@@ -1608,32 +1608,43 @@ c_compact_full_both() {   # decision 22
 	done
 	stubs_answer
 }
-c_reserve_refused() {   # decision 23: sq only parses --reserve
-	T_TITLE="--reserve -1 / x / '' / 1.5 / no value: refused (rc 2) for the value, before any Slurm call"
-	local v
-	for v in -1 x "" 1.5; do
-		sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reserve "$v"
-		need_refused "--reserve '$v'"
-		need "--reserve '$v': refused for its value, naming --reserve" eval 'grep -q -- --reserve "$ERR" && ! unknown_option --compact && ! unknown_option --reserve'
+# --reserve takes its value as the next word or attached with "=" (decision
+# 27): reserve_arg SPELLING VALUE sets RARGS to the arguments that write it
+reserve_arg() { if [ "$1" = = ]; then RARGS=("--reserve=$2"); else RARGS=(--reserve "$2"); fi; }
+c_reserve_refused() {   # decisions 23 and 27: sq only parses --reserve
+	T_TITLE="--reserve -1 / x / '' / 1.5, as the next word or after '=', or no value: refused (rc 2) for the value, before any Slurm call"
+	local v sp
+	for sp in " " =; do
+		for v in -1 x "" 1.5; do
+			reserve_arg "$sp" "$v"
+			sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact "${RARGS[@]}"
+			need_refused "${RARGS[*]} ('$v')"
+			need "${RARGS[*]} ('$v'): refused for its value, naming --reserve" eval 'grep -q -- --reserve "$ERR" && ! unknown_option --compact && ! unknown_option --reserve'
+		done
 	done
 	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reserve
 	need_refused "--reserve with no value"
 	need "--reserve with no value: names --reserve" eval 'grep -q -- --reserve "$ERR" && ! unknown_option --compact'
 	stubs_answer
 }
-c_compact_reserve() {   # decision 23
-	T_TITLE="--reserve: 0 is no reserve, 2 at 26 lines is the screen of 24, and a reserve leaving one line draws the footer alone"
+c_compact_reserve() {   # decisions 23 and 27
+	T_TITLE="--reserve N and --reserve=N: 0 is no reserve, 2 at 26 lines is the screen of 24, and a reserve leaving one line draws the footer alone"
 	compact_case busy24 100 24 "1 1 0 1" "151 128 23 0"
-	local seq24 lines24 out24=$OUT
+	local seq24 lines24 out24=$OUT sp
 	seq24=$(queue_seq); lines24=$(plain | wc -l)
-	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reserve 0
-	need "0: the same screen as no --reserve, clock and AGO aside" eval 'rc_is 0 && cmp -s <(without_clock_ago "$out24") <(without_clock_ago "$OUT")'
-	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=26 -- --compact --reserve 2
-	need "2 at 26 lines: rc 0, footer last" eval 'rc_is 0 && footer_last 151 128 23 0'
-	need "2 at 26 lines: the queue and line count of 24 lines" eval '[ "$(queue_seq)" = "$seq24" ] && [ "$(plain | wc -l)" -eq "$lines24" ]'
-	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reserve 23
-	need "23 at 24 lines: rc 0, stubs called" eval 'rc_is 0 && calls_are 1 1 0 1'
-	need "23 at 24 lines: the footer line alone" eval '[ "$(plain | wc -l)" -eq 1 ] && footer_last 151 128 23 0'
+	for sp in " " =; do
+		reserve_arg "$sp" 0
+		sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact "${RARGS[@]}"
+		need "${RARGS[*]}: the same screen as no --reserve, clock and AGO aside" eval 'rc_is 0 && cmp -s <(without_clock_ago "$out24") <(without_clock_ago "$OUT")'
+		reserve_arg "$sp" 2
+		sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=26 -- --compact "${RARGS[@]}"
+		need "${RARGS[*]} at 26 lines: rc 0, footer last" eval 'rc_is 0 && footer_last 151 128 23 0'
+		need "${RARGS[*]} at 26 lines: the queue and line count of 24 lines" eval '[ "$(queue_seq)" = "$seq24" ] && [ "$(plain | wc -l)" -eq "$lines24" ]'
+		reserve_arg "$sp" 23
+		sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact "${RARGS[@]}"
+		need "${RARGS[*]} at 24 lines: rc 0, stubs called" eval 'rc_is 0 && calls_are 1 1 0 1'
+		need "${RARGS[*]} at 24 lines: the footer line alone" eval '[ "$(plain | wc -l)" -eq 1 ] && footer_last 151 128 23 0'
+	done
 }
 c_reservation_forwarded() {   # decision 23's caveat: no prefix clash with --reserve
 	T_TITLE="--reservation=x and --reservation x still reach squeue"
