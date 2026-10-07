@@ -9,7 +9,7 @@ watch -tc -n 5 sq
 ```
 ▌ SLURM node01  11:26:56
 
-node01   ████░░░░░░░░░░░░  28%  36/128 cpu   ███████████████░  98%  991/1007G mem  mixed
+node01   ████▒░░░░░░░░░░░  28%  36/128 cpu   ████████▓▓▓▓▓▓▓▓  98%  991/1007G mem  mixed
 node02   ░░░░░░░░░░░░░░░░   0%   0/24  cpu   ················   -%    -/79G   mem  down*
          ↳ Not responding · since 2025-10-19
 
@@ -46,9 +46,16 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
   Numbers are never cut while anything else can give.
 - **One right edge.** Node stats, the job table and the finished-jobs block are measured together
   and drawn to a common width, so the dashboard reads as one block rather than three.
-- **CPU and memory bars per node.** Memory comes from the node's own free-memory reading, so it is
-  meaningful even when Slurm is not configured to schedule memory (`CR_CORE`), which is exactly
-  when you most need to watch it. Yellow past 85%, red past 95%.
+- **CPU and memory bars per node, allocated and in use.** A cell is `█` in use, `▒` allocated but
+  idle, `▓` in use beyond the allocation (magenta), `░` free, and `·` where the use is not known
+  (sinfo says `N/A`). The figures beside the bars count allocated cores and memory in use. Memory
+  in use comes from the node's own free-memory reading, so it is meaningful even when Slurm is not
+  configured to schedule memory (`CR_CORE`), which is exactly when you most need to watch it.
+  Yellow past 85%, red past 95%.
+  Two caveats. CPU in use is the node's load average (`CPULoad`), which slurmctld refreshes only
+  with its node pings, minutes apart, and which counts processes outside Slurm too. Memory in use
+  is RealMemory − FreeMem, and FreeMem follows the kernel's `MemFree`, so page cache and the OS
+  count as used: use beyond the allocation is not necessarily jobs.
 - **Array jobs fold.** Tasks that agree on every displayed column collapse to one row,
   `4108_[0-3] ×4`. A pending array Slurm prints as one bracket reads `4109_[1,4,7-20%2] ×16`,
   and the counts include every task in it, not the row. When the id column is too narrow it
