@@ -1245,7 +1245,7 @@ END{
   shown = (d > RECENT_MAX) ? RECENT_MAX : d
   if (compact) shown = (SHOW["fin"] == 2) ? finrows() : 0
   # when the cap cuts the block above the newest failure, the failure takes its
-  # last row and "+N more" counts the newer jobs cut, so it is never lost
+  # last row, so it is never lost; "+N more" still counts every job not shown
   if (compact && shown && FAILJ > shown) {
     for (j=FAILJ; j>shown; j--) ord[j] = ord[j-1]
     ord[shown] = FAILG
