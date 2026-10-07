@@ -18,7 +18,7 @@ JOBID          NAME          USER   STATE    TIME     LEFT          CPU  MEM NOD
 4135           assemble      bob    RUNNING     2:54     0:05:06     16  64G node01
 4140           call_variants alice  PENDING     0:00     4:00:00      8  16G (Resources) → 14:32
 
-recently finished
+recently finished · last 2h
 JOBID            NAME         STATE        EXIT    ELAPSED      AGO
 4120_[0-3] ×4    qc_report    COMPLETED       0    0:01-0:03    10s
 4120_[4-5] ×2    qc_report    FAILED          7         0:00    13s
@@ -49,9 +49,10 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
 - **CPU and memory bars per node, allocated and in use.** A cell is `█` in use, `▒` allocated but
   idle, `▓` in use beyond the allocation (magenta), `░` free, and `·` where the use is not known
   (sinfo says `N/A`). The figures beside the bars count allocated cores and memory in use. Memory
-  in use comes from the node's own free-memory reading, so it is meaningful even when Slurm is not
-  configured to schedule memory (`CR_CORE`), which is exactly when you most need to watch it.
-  Yellow past 85%, red past 95%.
+  in use comes from the node's own free-memory reading, so it is shown even when Slurm is not
+  configured to schedule memory (`CR_CORE`), which is exactly when you most need to watch it;
+  nodes then report no memory allocated, so all of it draws as `▓`, in use beyond the allocation.
+  Bars turn yellow past 85%, memory red past 95%, and a down node's filled cells are red.
   Two caveats. CPU in use is the node's 5-minute load average (`CPULoad`), refreshed only with
   slurmctld's node pings, so it trails the node by minutes, and it counts processes outside Slurm
   too. Memory in use is RealMemory − FreeMem, and FreeMem follows the kernel's `MemFree`, so page
@@ -156,13 +157,14 @@ sq -C                     # centred in both axes
 ## Tests
 
 ```sh
-tests/run.sh              # ~90 s, no cluster needed
+tests/run.sh              # ~2 min, no cluster needed
 ```
 
 The suite puts stand-ins for `squeue`, `sinfo` and `sacct` first on `PATH` and feeds sq the
 shapes that are hard to get from a live cluster: large arrays, hostile job names, array ids
-Slurm truncates, a controller that hangs. Each case asserts properties of the screen
-(counts, which rows appear, that nothing is forged), not a snapshot. Known defects are listed
+Slurm truncates, a controller that hangs. Most cases assert properties of the screen
+(counts, which rows appear, that nothing is forged), not a snapshot; the node bars are compared
+byte for byte with the screens they were designed from. Known defects are listed
 as expected failures, so a fix shows up as one. `tests/faithfulness.sh <host>` compares the
 stand-ins' output with the real tools, read-only, and fails wherever a real tool complains on
 stderr.
