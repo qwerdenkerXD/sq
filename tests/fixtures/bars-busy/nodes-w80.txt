@@ -1,0 +1,2 @@
+  fb2-bioinf   ██████░  87%  112/128 cpu   ████▒░░  58%  566/977G mem  mixed
+  fb2-bioinf-0 ███████ 100%   24/24  cpu   ██████▒  88%   66/75G  mem  allocated

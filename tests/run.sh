@@ -17,7 +17,8 @@
 # The run fails on any FAIL or XPASS.
 #
 # Known gaps, left out on purpose because they are cosmetic: right alignment
-# of numeric columns, the truncation of a long drain reason, the bar glyphs.
+# of numeric columns, the truncation of a long drain reason.  The bar glyphs
+# are checked only on the node screens of the bars_* cases.
 
 set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -1843,6 +1844,44 @@ c_compact_error_screens() {
 	error_sweep squeue-garbage "1 1 0 1"
 }
 
+# ---- node bars: allocated and in use, against the screens Franz accepted ----
+# fixtures/bars-*/nodes-w<W>.{txt,ansi} are the node lines of the accepted target
+# screens (2026-10-07) at 120, 80 and 60 columns, without and with colour.  One
+# correction in the coloured ones: the prototype that drew them printed the
+# used-memory number bold, while sq keeps the colour it has there (bold red above
+# 95%, else none), so those two lines per screen carry that instead.
+node_lines() {    # the node block: after the blank below the title, up to the next blank
+	gawk 'b == 1 && $0 == "" { exit } b == 1 { print } $0 == "" { b++ }' "$OUT"
+}
+node_lines_are() { node_lines | cmp -s - "$1"; }
+bars_screens() {  # bars_screens SITUATION: its six screens, byte for byte
+	local w ext
+	for w in 120 80 60; do
+		for ext in txt ansi; do
+			sq_run "bars-$1" SQ_WIDTH=$w SQ_HEIGHT=40 -- --full $([ $ext = ansi ] && echo --color)
+			need "$w cols $ext: rc 0" rc_is 0
+			need "$w cols $ext: stderr empty" err_empty
+			need "$w cols $ext: node lines as on the screen" node_lines_are "$fixtures/bars-$1/nodes-w$w.$ext"
+		done
+	done
+}
+c_bars_idle()     { T_TITLE="bars, idle: all free, FreeMem above RealMemory reads as 0 in use"; bars_screens idle; }
+c_bars_busy()     { T_TITLE="bars, busy: allocation and use agree, █ up to both"; bars_screens busy; }
+c_bars_waste()    { T_TITLE="bars, waste: all allocated, little used, ▒ for the idle part"; bars_screens waste; }
+c_bars_over()     { T_TITLE="bars, over: use beyond the allocation in magenta ▓"; bars_screens over; }
+c_bars_overfull() { T_TITLE="bars, overfull: a load above the core count fills the bar, no more"; bars_screens overfull; }
+c_bars_down()     { T_TITLE="bars, down: load and FreeMem N/A draw · where nothing is allocated"; bars_screens down; }
+c_bars_round() {
+	T_TITLE="bars: counts round to the nearest cell, so a tiny allocation and load draw none"
+	local w
+	for w in 120 80; do
+		sq_run bars-round SQ_WIDTH=$w --
+		need "$w cols: rc 0" rc_is 0
+		need "$w cols: node01's bars are all ░" eval 'lines_matching "^ +node01 " | grep -qE "^ +node01 +░+ +0% .* cpu +░+ +0% "'
+		need "$w cols: node02, half allocated, does draw ▒" eval 'lines_matching "^ +node02 " | grep -qE "^ +node02 +▒+░+ +50% "'
+	done
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -1871,6 +1910,7 @@ cases=(
 	reserve_refused compact_reserve reservation_forwarded
 	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full
 	compact_no_size compact_error_screens
+	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

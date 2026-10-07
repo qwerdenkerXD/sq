@@ -1,0 +1,3 @@
+# bioserver as measured live 2026-10-07: idle, FreeMem above RealMemory
+CPUsState=0/128/0/128; NodeList=fb2-bioinf; FreeMem=1018423; Memory=1000000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.22; AllocMem=0
+CPUsState=0/24/0/24; NodeList=fb2-bioinf-0; FreeMem=77470; Memory=76800; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0

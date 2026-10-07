@@ -1,0 +1,5 @@
+# node01 has 1 of 128 CPUs and 1000 of 1000000 MB allocated and a load of 0.30:
+# rounded to the nearest cell that is none, at every bar width sq draws (<= 28)
+CPUsState=1/127/0/128; NodeList=node01; FreeMem=999000; Memory=1000000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=0.30; AllocMem=1000
+# node02, half allocated and idle, shows that ▒ is drawn at all
+CPUsState=64/64/0/128; NodeList=node02; FreeMem=999000; Memory=1000000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=500000

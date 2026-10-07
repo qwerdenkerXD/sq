@@ -1,0 +1,4 @@
+# small node not responding: CPUsLoad and FreeMem N/A, the form sinfo prints for an
+# unknown value (slurmctld resets a downed node's load to 0, see FAITHFULNESS.md)
+CPUsState=112/16/0/128; NodeList=fb2-bioinf; FreeMem=420000; Memory=1000000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=109.40; AllocMem=645120
+CPUsState=0/0/24/24; NodeList=fb2-bioinf-0; FreeMem=N/A; Memory=76800; StateLong=down*; Reason=Not responding; TimeStamp=2026-10-06T21:14:03; CPUsLoad=N/A; AllocMem=0

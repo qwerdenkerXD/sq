@@ -1,0 +1,11 @@
+@include ../_common/squeue-defaults
+@defaults u=carol; j=scriber; T=RUNNING; t=R; M=6:02:13; L=1-17:57:47; l=2-00:00:00; C=16; m=110G; R=fb2-bioinf; S=2026-10-07T00:30:00; r=None; E=(null)
+i=6001_0
+i=6001_1
+i=6001_2
+i=6001_3
+i=6001_4
+i=6001_5
+i=6001_6
+i=6001_7
+i=6002; u=dave; j=notebook; C=16; m=64G; R=fb2-bioinf-0; M=2-04:40:10; L=4-19:19:50; l=7-00:00:00; S=2026-10-05T01:52:00

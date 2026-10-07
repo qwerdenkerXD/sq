@@ -1,0 +1,10 @@
+@include ../_common/squeue-defaults
+@defaults u=alice; j=assemble; T=RUNNING; t=R; M=3:12:40; L=4-20:47:20; l=5-00:00:00; C=16; m=90G; R=fb2-bioinf; S=2026-10-07T03:20:00; r=None; E=(null)
+i=5001_0
+i=5001_1
+i=5001_2
+i=5001_3
+i=5001_4
+i=5001_5
+i=5001_6
+i=5002; u=bob; j=blast; C=24; m=70G; R=fb2-bioinf-0; M=1-02:11:05; L=1-21:48:55; l=3-00:00:00; S=2026-10-06T04:21:00

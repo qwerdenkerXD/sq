@@ -1,0 +1,4 @@
+@include ../_common/squeue-defaults
+@defaults u=erin; j=hmmscan; T=RUNNING; t=R; M=0:48:31; L=11:11:29; l=12:00:00; C=16; m=64G; R=fb2-bioinf; S=2026-10-07T05:44:00; r=None; E=(null)
+i=7001
+i=7002

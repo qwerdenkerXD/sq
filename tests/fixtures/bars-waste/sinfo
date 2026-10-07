@@ -1,0 +1,3 @@
+# everything allocated, little of it used (jobs asked for more than they use)
+CPUsState=128/0/0/128; NodeList=fb2-bioinf; FreeMem=931000; Memory=1000000; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=9.62; AllocMem=901120
+CPUsState=16/8/0/24; NodeList=fb2-bioinf-0; FreeMem=70100; Memory=76800; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=1.02; AllocMem=65536

@@ -1,0 +1,3 @@
+# more in use than allocated (threads beyond the request, or work outside Slurm)
+CPUsState=32/96/0/128; NodeList=fb2-bioinf; FreeMem=600000; Memory=1000000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=71.30; AllocMem=131072
+CPUsState=0/24/0/24; NodeList=fb2-bioinf-0; FreeMem=74000; Memory=76800; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.03; AllocMem=0

@@ -1,0 +1,3 @@
+# both nodes well used: allocation and use agree
+CPUsState=112/16/0/128; NodeList=fb2-bioinf; FreeMem=420000; Memory=1000000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=109.40; AllocMem=645120
+CPUsState=24/0/0/24; NodeList=fb2-bioinf-0; FreeMem=9100; Memory=76800; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=23.81; AllocMem=71680

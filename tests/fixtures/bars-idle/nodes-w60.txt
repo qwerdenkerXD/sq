@@ -1,0 +1,2 @@
+  fb2-bioinf     0%  0/128 cpu     0%  0/977G mem  idle
+  fb2-bioinf-0   0%  0/24  cpu     0%  0/75G  mem  idle

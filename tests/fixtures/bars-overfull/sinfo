@@ -1,0 +1,3 @@
+# everything allocated AND more in use than that: load above the core count
+CPUsState=128/0/0/128; NodeList=fb2-bioinf; FreeMem=20000; Memory=1000000; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=161.20; AllocMem=901120
+CPUsState=24/0/0/24; NodeList=fb2-bioinf-0; FreeMem=9100; Memory=76800; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=23.81; AllocMem=71680

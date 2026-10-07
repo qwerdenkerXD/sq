@@ -140,7 +140,7 @@ Premises never seen on the cluster are taken from the Slurm 23.11.4 source (tag
   `cpu_load` at 0 (`node_conf.c:781`) and resets it to 0 when a node is downed
   or powered down (`node_mgr_reset_node_stats`, `src/slurmctld/node_mgr.c:4597`),
   so a down node most likely shows CPUsLoad `0.00`, not `N/A`. The fixtures
-  with `CPUsLoad=N/A` exercise sq's handling of a value Slurm can
+  with `CPUsLoad=N/A` (`bars-down`) exercise sq's handling of a value Slurm can
   print, not one bioserver was seen to print. AllocMem is always a number
   (`_print_alloc_mem`, `"%"PRIu64`).
 - **A long REASON.** No reason can be set read-only. `_print_str` prints a size-0
@@ -168,6 +168,6 @@ Other limits:
 
 ## Known gaps of the suite
 
-Left out on purpose, as cosmetic: right alignment of the numeric columns, the
-truncation of a long drain reason, and the bar glyphs. None of them carries a
-count or a row.
+Left out on purpose, as cosmetic: right alignment of the numeric columns and
+the truncation of a long drain reason. Neither carries a count or a row. The bar
+glyphs are checked only on the node screens of the `bars_*` cases.
