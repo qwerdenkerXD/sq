@@ -809,14 +809,12 @@ function clip(x, wd) { return (length(x) > wd) ? substr(x, 1, wd-1) "…" : x }
 # one node bar of wd cells: a allocated and u in use, of tot.  █ in use within
 # the allocation (hue), ▒ allocated but idle (dim hue), ▓ in use beyond the
 # allocation (magenta), ░ free (dim), or · when the use is not known (u < 0).
-# Both counts round to the nearest cell and stop at the end of the bar, so a load
-# above the core count simply fills it.  No cells, no escapes either
+# Both counts round to the nearest cell; a load above the core count simply
+# fills the bar.  No cells, no escapes either
 function cells(a, u, tot, wd, hue,   na, nu, i, x) {
   if (wd <= 0) return ""
   na = tot ? int(a*wd/tot + 0.5) : 0
   nu = (u < 0) ? -1 : tot ? int(u*wd/tot + 0.5) : 0
-  if (na > wd) na = wd
-  if (nu > wd) nu = wd
   for (i=0; i<wd; i++)
     if      (i < na && i < nu) x = x e(hue) "█"
     else if (i < na)           x = x e("2;" hue) "▒"
@@ -985,7 +983,9 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
   for (i=1; i<=need; i++) { F[i] = ACC[i]; gsub(/[[:cntrl:]]/, "?", F[i]) }
   anf = 0; delete ACC           # scrubbed before any width or colour is read
 
-  if (ARGIND == 1) {    # ---- sinfo: CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp ...
+  # ---- sinfo: CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp
+  #      CPUsLoad AllocMem
+  if (ARGIND == 1) {
     nn++
     node[nn] = F[2]; nst[nn] = F[5]
     split(F[1], cp, "/"); used[nn] = cp[1]+0; tot[nn] = cp[4]+0
