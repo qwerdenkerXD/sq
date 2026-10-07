@@ -1235,6 +1235,14 @@ c_compact_noacct_h24() {
 	need "the finished block is one line: the newest failure, from the fallback" \
 		fin_line_is "recently finished (no accounting): 4188 qc FAILED 1"
 }
+c_compact_filter_line() {   # decision 29
+	T_TITLE="noacct at 24 lines with --reservation=x: a filter sacct cannot express sends the block to the fallback, and the one line says so"
+	sq_run noacct SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reservation=x
+	need "rc 0, stderr empty, squeue and its -t all fallback, no sacct" eval 'rc_is 0 && err_empty && calls_are 1 1 1 0'
+	need "at most 24 lines, footer last" eval 'lines_within 24 && footer_last 151 128 23 0'
+	need "the one line names the filter and the newest failure" \
+		fin_line_is "recently finished (--reservation has no sacct equivalent): 4188 qc FAILED 1"
+}
 c_compact_quiet40_h40() {
 	T_TITLE="quiet40 at 40 lines: everything fits, so COMPACT is FULL byte for byte, the title's clock aside"
 	compact_case quiet40 100 40 "1 1 0 1" "7 5 2 0"
@@ -1841,7 +1849,7 @@ cases=(
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40
 	compact_busy24_h43 compact_busy24_h44 compact_busy24_h52 compact_busy24_h60
-	compact_elapsed24_h24 compact_emptyfin_h24 compact_noacct_h24 compact_quiet40_h40
+	compact_elapsed24_h24 compact_emptyfin_h24 compact_noacct_h24 compact_filter_line compact_quiet40_h40
 	compact_mix30_h16 compact_mix30_h18 compact_mix30_h30 compact_mix30_h45
 	compact_manystuck_h16 compact_manystuck_h24 compact_manystuck_h40
 	compact_manysmall_h40 compact_unlisted_h24 compact_throttled compact_quiet40_h10
