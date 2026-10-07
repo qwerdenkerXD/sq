@@ -1802,6 +1802,13 @@ c_compact_low_heights() {
 	local full24=$OUT
 	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=3 -- --full
 	need "FULL at 3: the screen of 24, clock and AGO aside" eval 'rc_is 0 && cmp -s <(without_clock_ago "$full24") <(without_clock_ago "$OUT")'
+	# centred vertically, the height FULL believes shows: 24 lines of output
+	sq_run quiet40 SQ_WIDTH=100 SQ_HEIGHT=24 SQ_CENTER=2 -- --full
+	need "FULL quiet40 centred at 24: rc 0, 24 lines" eval 'rc_is 0 && lines_are 24'
+	full24=$OUT
+	sq_run quiet40 SQ_WIDTH=100 SQ_HEIGHT=3 SQ_CENTER=2 -- --full
+	need "FULL quiet40 centred at 3: centred in 24 lines, the screen of 24, clock and AGO aside" \
+		eval 'rc_is 0 && lines_are 24 && cmp -s <(without_clock_ago_sgr "$full24") <(without_clock_ago_sgr "$OUT")'
 	for h in 1 2 3 4; do
 		sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
 		need "$h: rc 0, stubs called, at most $h lines, footer last" eval 'rc_is 0 && calls_are 1 1 0 1 && lines_within '"$h"' && footer_last 151 128 23 0'
