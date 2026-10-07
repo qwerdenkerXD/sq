@@ -1726,11 +1726,14 @@ c_compact_no_size() {   # decision 21
 	need "COMPACT fitted to 24 lines, footer last" busy_compact 24
 	stubs_answer
 }
-# oldfail: the newest failure (100) is older than 30 COMPLETED jobs, so it lies
+# oldfail: the newest failure (100) is older than 30 COMPLETED groups, so it lies
 # beyond the 25 rows COMPACT gives the finished block.  The one line names it;
 # once the block opens (decision 26, "pullin") the failure is its last row and
-# "+6 more" counts the newer jobs that did not fit, so it is named at every
-# height.  Reference renders: screens/fincap/pullin-h{30,40,60}.txt.
+# "+8 more" counts the newer jobs that did not fit, so it is named at every
+# height.  106, the group the cap cuts first, is a 3-task array: a failure
+# written over its row instead of shifting it would read "+6 more".
+# Reference renders: screens/fincap/pullin-h{30,40,60}.txt (made before 106
+# became an array, so they read "+6 more").
 c_compact_oldfail() {   # decision 26
 	T_TITLE="oldfail at every height 6..60: the newest failure, older than the finished block's cap, is named on screen; once the block opens it is its last row"
 	local h ran= lost=
@@ -1745,10 +1748,10 @@ c_compact_oldfail() {   # decision 26
 	need "the failure named at every height (not at H =${lost:- none})" test -z "$lost"
 	for h in 40 60; do
 		sq_run oldfail SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
-		need "$h lines: the block is the 24 newest, 130 down to 107, then 100 as its last row, then '+6 more'" \
-			fin_block_is "recently finished · last 2h" "$(seq -s ' ' 130 -1 107) 100" "+6 more"
-		need "$h lines: '+6 more' is the line right after the failure's row" \
-			eval 'screen | gawk -F"\t" '"'"'p && $1 == "FMORE" && $2 == "+6 more" { ok = 1 } { p = ($1 == "FROW" && $2 ~ /^100 /) } END { exit !ok }'"'"
+		need "$h lines: the block is the 24 newest, 130 down to 107, then 100 as its last row, then '+8 more' (106_[0-2] and 101-105)" \
+			fin_block_is "recently finished · last 2h" "$(seq -s ' ' 130 -1 107) 100" "+8 more"
+		need "$h lines: '+8 more' is the line right after the failure's row" \
+			eval 'screen | gawk -F"\t" '"'"'p && $1 == "FMORE" && $2 == "+8 more" { ok = 1 } { p = ($1 == "FROW" && $2 ~ /^100 /) } END { exit !ok }'"'"
 	done
 }
 # foldelapsed: with TIME hidden, array 7000 folds four tasks whose elapsed

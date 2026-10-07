@@ -1,5 +1,8 @@
-# "oldfail": the newest failure (100) is older than 30 COMPLETED jobs, so it
-# lies beyond the finished block's default cap of 25 rows in COMPACT
+# "oldfail": the newest failure (100) is older than 30 COMPLETED groups, so it
+# lies beyond the finished block's default cap of 25 rows in COMPACT.  106, the
+# group the cap cuts first, is a 3-task array: when the failure takes the last
+# row, 106 moves into "+N more" with its 3 jobs, so "+8 more" (not 6) tells a
+# shifted block from one where the failure merely overwrote that row.
 @include ../_common/sacct-defaults
 JobID=100; JobName=bad; State=FAILED; ExitCode=1:0; End=2026-10-06T07:00:00
 JobID=101; JobName=ok1; End=2026-10-06T07:01:00
@@ -7,7 +10,9 @@ JobID=102; JobName=ok2; End=2026-10-06T07:02:00
 JobID=103; JobName=ok3; End=2026-10-06T07:03:00
 JobID=104; JobName=ok4; End=2026-10-06T07:04:00
 JobID=105; JobName=ok5; End=2026-10-06T07:05:00
-JobID=106; JobName=ok6; End=2026-10-06T07:06:00
+JobID=106_0; JobName=ok6; End=2026-10-06T07:06:00
+JobID=106_1; JobName=ok6; End=2026-10-06T07:06:00
+JobID=106_2; JobName=ok6; End=2026-10-06T07:06:00
 JobID=107; JobName=ok7; End=2026-10-06T07:07:00
 JobID=108; JobName=ok8; End=2026-10-06T07:08:00
 JobID=109; JobName=ok9; End=2026-10-06T07:09:00
