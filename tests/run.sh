@@ -312,8 +312,9 @@ c_mixed() {
 	need "sacct: -p --delimiter=SQ_NONCE2 -n -S now-2hours -E now -a -o <8 fields>" eval '
 		argv_has sacct -p "--delimiter=$(env_of sacct 1 SQ_NONCE2)" -n -S now-2hours -E now -a -o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName'
 	need "sacct's delimiter is not the queue nonce" eval '[ "$(env_of sacct 1 SQ_NONCE2)" != "$(env_of sacct 1 SQ_NONCE)" ]'
-	need "sinfo: -hN -o framed by SQ_NONCE3" eval '
-		n=$(env_of sinfo 1 SQ_NONCE3); argv_has sinfo -hN -o "%C$n%N$n%e$n%m$n%T$n%E$n%H$n"'
+	need "sinfo: -hN -O, every field size 0 and framed by SQ_NONCE3" eval '
+		n=$(env_of sinfo 1 SQ_NONCE3)
+		argv_has sinfo -hN -O "CPUsState:0$n,NodeList:0$n,FreeMem:0$n,Memory:0$n,StateLong:0$n,Reason:0$n,TimeStamp:0$n,CPUsLoad:0$n,AllocMem:0$n"'
 	sq_run mixed SQ_ETA=0 --
 	need "SQ_ETA=0: rc 0"             rc_is 0
 	need "SQ_ETA=0: no estimate"      eval 'rows queue | grep -qE "^ +1103 .*PENDING .*\(Resources\)$"'

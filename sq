@@ -346,11 +346,12 @@ mint_nonce() {
 nonce=$(mint_nonce)   || die "no usable random field separator"
 # Two of the three separators cannot travel in the environment, so they are
 # visible in /proc/<pid>/cmdline (mode 0444) and each gets its OWN nonce:
-# sacct's --delimiter has no environment equivalent at all, and sinfo's
-# SINFO_FORMAT is silently IGNORED in -N mode (23.11.4: honoured without -N,
-# replaced by the default node format with it, rc 0).  A reader who catches one
-# can then forge nothing in the other two blocks, and the queue nonce - the only
-# one covering user-supplied text - never leaves the 0400 environment.
+# sacct's --delimiter has no environment equivalent at all, nor has sinfo's -O
+# (SINFO_FORMAT is -o's, and even that is silently IGNORED in -N mode - 23.11.4:
+# honoured without -N, replaced by the default node format with it, rc 0).  A
+# reader who catches one can then forge nothing in the other two blocks, and the
+# queue nonce - the only one covering user-supplied text - never leaves the 0400
+# environment.
 nonce2=$(mint_nonce)  || die "no usable random field separator"
 nonce3=$(mint_nonce)  || die "no usable random field separator"
 [ "$nonce" != "$nonce2" ] && [ "$nonce" != "$nonce3" ] && [ "$nonce2" != "$nonce3" ] \
@@ -453,14 +454,21 @@ err_of() { [ "$1" = 124 ] && echo "no response after ${tmo}s" || head -1 "$2"; }
 # a literal "...", and a small inherited value cuts every bracket - each such
 # id fails the record anchor and the whole row is dropped
 # The node collector is framed like the job ones, because a node's drain/down
-# REASON (%E) is free text: a "|" in it used to shift the whole node block and a
-# newline split the record.  %C ("alloc/idle/other/total") leads, so a record is
-# anchored by a machine-emitted field the way a job record is anchored by %i, and
-# the trailing nonce leaves the empty field that ends one unambiguously.  sinfo's
-# -o puts the letter BEFORE the literal text, so a nonce suffix is never read as
-# a field width the way squeue's -O would read it.
-nfmt="%C$nonce3%N$nonce3%e$nonce3%m$nonce3%T$nonce3%E$nonce3%H$nonce3"
-SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" sinfo -hN -o "$nfmt" > "$tmp/nodes" 2> "$tmp/nodes.err"
+# REASON is free text: a "|" in it used to shift the whole node block and a
+# newline split the record.  CPUsState ("alloc/idle/other/total") leads, so a
+# record is anchored by a machine-emitted field the way a job record is anchored
+# by %i, and the trailing nonce leaves the empty field that ends one
+# unambiguously.  It is -O, not -o, because AllocMem has no -o letter.  -O reads
+# type:[.][size][suffix], so every field says size 0 - printed whole, neither
+# padded nor cut (measured on 23.11.4) - and the nonce follows as the suffix:
+# letter-led, so strtol cannot take any of it for a width, and alphanumeric, so
+# it holds no "," to split the field list.  Those eight fields print byte for
+# byte what -o's %C %N %e %m %T %E %H %O print (measured, same nonce).
+nfmt=
+for f in CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp CPUsLoad AllocMem; do
+	nfmt="$nfmt${nfmt:+,}$f:0$nonce3"
+done
+SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" sinfo -hN -O "$nfmt" > "$tmp/nodes" 2> "$tmp/nodes.err"
 nerr=$?; [ $nerr -eq 0 ] && nerr= || nerr=$(err_of $nerr "$tmp/nodes.err")
 
 SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT=$fmt timeout -k 2 "$tmo" squeue -h -S t,i "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
@@ -848,7 +856,7 @@ BEGIN{
   n = split(keys, k, ",")
   FQ = n + (compact ? 7 : 5)    # %i, n displayed, %t %l %S (COMPACT: %r %M), the sentinel
   FR = SACCT ? 9 : 11           # 8 sacct / 10 -O fields, and the empty sentinel
-  FN = 8                        # %C %N %e %m %T %E %H, and the empty sentinel
+  FN = 10                       # the 9 sinfo -O fields, and the empty sentinel
   # every shape squeue prints for %i / JobID: plain, het component (10646+0),
   # array task (10646_3) and pending array (10646_[0-9,12%2], 10646_[0-12:2]).
   # The bracket is the grammar Slurm prints and nothing looser, because the
@@ -861,7 +869,7 @@ BEGIN{
   BRACKET = "^([^[]*_\\[)([^]]*)(\\].*)$"                 # base_[ content ]suffix
   # the same, plus the step suffix that dropping -X brings in (.batch, .extern, .0)
   SACCTID = ID "([.][A-Za-z0-9_+.-]+)?$"
-  # a node record leads with %C, alloc/idle/other/total: four machine-emitted
+  # a node record leads with CPUsState, alloc/idle/other/total: four machine-emitted
   # numbers, so no reason text can be taken for the start of a record
   NODEID = "^[0-9]+/[0-9]+/[0-9]+/[0-9]+$"
   H["a"]="ACCOUNT"; H["b"]="GRES";   H["C"]="CPU";    H["c"]="MIN_CPU"; H["D"]="NODES"
@@ -959,7 +967,7 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
   for (i=1; i<=need; i++) { F[i] = ACC[i]; gsub(/[[:cntrl:]]/, "?", F[i]) }
   anf = 0; delete ACC           # scrubbed before any width or colour is read
 
-  if (ARGIND == 1) {                            # ---- sinfo: %C %N %e %m %T %E %H
+  if (ARGIND == 1) {    # ---- sinfo: CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp ...
     nn++
     node[nn] = F[2]; nst[nn] = F[5]
     split(F[1], cp, "/"); used[nn] = cp[1]+0; tot[nn] = cp[4]+0

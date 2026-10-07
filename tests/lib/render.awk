@@ -24,14 +24,16 @@ function parse_format(   i, c, d, m, items, p, name, spec) {
         refuse("format '" fmt "': only bare %<letter> fields are emulated (no widths, no %%)")
       fld[++nf] = d; lit[nf] = ""; i++
     }
-  } else if (mode == "long") {                # squeue -O / SQUEUE_FORMAT2
-    m = split(fmt, items, ",")                # Field:suffix, suffix letter-led
-    for (i = 1; i <= m; i++) {
-      p = index(items[i], ":")
-      if (!p) refuse("-O field '" items[i] "' has no :suffix; squeue pads it to a default width, which is not emulated")
+  } else if (mode == "long") {                # squeue -O / SQUEUE_FORMAT2, sinfo -O:
+    m = split(fmt, items, ",")                # Field:suffix, suffix letter-led; sinfo
+    for (i = 1; i <= m; i++) {                # also Field:0suffix, size 0 (measured:
+      p = index(items[i], ":")                # the same bytes as Field:suffix)
+      if (!p) refuse("-O field '" items[i] "' has no :suffix; " tool " pads it to a default width, which is not emulated")
       name = substr(items[i], 1, p-1); spec = substr(items[i], p+1)
+      if (tool == "sinfo") sub(/^0/, "", spec)
       if (spec !~ /^[A-Za-z]/)
-        refuse("-O field '" items[i] "': only a letter-led suffix is emulated (no widths, no '.')")
+        refuse("-O field '" items[i] "': only a letter-led suffix is emulated (" \
+               (tool == "sinfo" ? "no width but 0" : "no widths") ", no '.')")
       fld[++nf] = tolower(name); lit[nf] = spec
     }
   } else if (mode == "sacct") {               # sacct -p/-P -o a,b,c --delimiter=D

@@ -1,2 +1,2 @@
-C=4/28/0/32; N=node01; e=98000; m=128000; T=mixed; E=none; H=Unknown
-C=1/31/0/32; N=node02; e=120000; m=128000; T=mixed; E=none; H=Unknown
+CPUsState=4/28/0/32; NodeList=node01; FreeMem=98000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=4.00; AllocMem=30000
+CPUsState=1/31/0/32; NodeList=node02; FreeMem=120000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=1.00; AllocMem=8000

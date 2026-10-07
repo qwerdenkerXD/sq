@@ -16,7 +16,8 @@ given the same argv and environment, and compares the bytes with `cmp`.
 
 | shape | command (separators as sq mints them) | result 2026-10-06 |
 |---|---|---|
-| nodes | `SLURM_TIME_FORMAT=standard sinfo -hN -o '%C<N3>%N<N3>%e<N3>%m<N3>%T<N3>%E<N3>%H<N3>'` | MATCH: 2 records, 448 bytes |
+| nodes | `SLURM_TIME_FORMAT=standard sinfo -hN -O 'CPUsState:0<N3>,NodeList:0<N3>,FreeMem:0<N3>,Memory:0<N3>,StateLong:0<N3>,Reason:0<N3>,TimeStamp:0<N3>,CPUsLoad:0<N3>,AllocMem:0<N3>'` | MATCH (2026-10-07): 2 records, 558 bytes |
+| nodes, no size | the same with `Field:<N3>` instead of `Field:0<N3>` | MATCH (2026-10-07): 2 records, 558 bytes |
 | queue | `SLURM_TIME_FORMAT=standard SQUEUE_FORMAT='%i<N>%j<N>…%t<N>%l<N>%S<N>' squeue -h -S t,i` | MATCH, but EMPTY: 0 bytes vs 0 bytes |
 | finished | `SLURM_TIME_FORMAT=standard sacct -p --delimiter=<N2> -n -S now-7days -E now -a -o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName` | MATCH: 1198 records, 325915 bytes |
 | fallback | `SLURM_TIME_FORMAT=standard SQUEUE_FORMAT2='JobID:<N>,StateCompact:<N>,…,Name:<N>' squeue -t all -h` | MATCH, but EMPTY: 0 bytes vs 0 bytes |
@@ -46,6 +47,8 @@ header is indirect evidence of the framing, not proof:
 | `-O` without suffix IS padded (so the stub refuses it) | `squeue -t all -O JobID,Name` | `JOBID` + 15 spaces, `NAME` + 16 spaces |
 | `SQUEUE_FORMAT` beats `SQUEUE_FORMAT2` (the stub does the same) | both set | `JOBID<N>` |
 | sinfo `-N -o` | `sinfo -N -o '%C<N3>%N<N3>%E<N3>'` | `CPUS(A/I/O/T)<N3>NODELIST<N3>REASON<N3>` |
+| sinfo `-N -O` `Field:0suffix` (2026-10-07) | `sinfo -N -O 'CPUsState:0<N3>,NodeList:0<N3>,Reason:0<N3>,CPUsLoad:0<N3>,AllocMem:0<N3>'` | `CPUS(A/I/O/T)<N3>NODELIST<N3>REASON<N3>CPU_LOAD<N3>ALLOCMEM<N3>` |
+| sinfo `-O` without size IS padded (so the stub refuses it) | `sinfo -N -O NodeList,Reason` | `NODELIST` + 12 spaces, `REASON` + 14 spaces |
 
 ## By hand (2026-10-06)
 
@@ -56,6 +59,41 @@ header is indirect evidence of the framing, not proof:
   `ArrayJobID`/`ArrayTaskID` and the sacct fixtures carry the id only.
 - `sinfo -hN` with no reason prints `none` for `%E` and `Unknown` for `%H`; the
   shared fixture `fixtures/_common/sinfo-two-idle` uses exactly that.
+
+## sinfo -O, by hand (2026-10-07)
+
+sq asks sinfo with `-O`, because AllocMem has no `-o` letter. Its grammar is
+`type[:[.][size][suffix]]`, the size read with `strtol` (`_parse_long_token`,
+`src/sinfo/opts.c`), so the size and the separator have to be told apart. With
+the nonce `N5c33003374c1ff99ec32cff8` on both nodes of bioserver:
+
+- **The eight fields `-o` also has are the same bytes.** `-hN -o
+  '%C<N>%N<N>%e<N>%m<N>%T<N>%E<N>%H<N>%O<N>'` and `-hN -O 'CPUsState:0<N>,…,CPUsLoad:0<N>,AllocMem:0<N>'`,
+  run back to back, print identical bytes up to `%O`; `-O` then adds AllocMem.
+  Both letters and names call the same `_print_*` function (`src/sinfo/print.c`).
+- **Size 0 is printed whole: no padding, no cut.** `Field:0<N>` and `Field:<N>`
+  print identical bytes. Without the node split, `NodeList:0<N>` printed
+  `fb2-bioinf,fb2-bioinf-0` (23 characters) whole, past the default 20.
+- **Any other size pads and cuts.** No colon pads to 20 (`fb2-bioinf` + 10
+  spaces); `:3` cuts (`fb2`, `non`, `0.4`) and pads (`0` + 2 spaces), `:8` pads
+  `idle` to 8, `:.8` right-justifies. `:0` without a suffix prints the fields
+  run together, with no separator at all.
+- **A digit-led suffix is a size**: `NodeList:12345x` pads the name to 12345
+  columns. A `:` inside the suffix is kept (`NodeList:0a:b<N>` prints `a:b<N>`).
+  A nonce is letter-led and alphanumeric, so it is never a size and never holds
+  the `,` that splits the field list.
+- **Precedence**: `SINFO_FORMAT='%N|%T'` with `-O` on the command line prints the
+  `-O` fields. `-O` then `-o`: the `-o` string is parsed in `-O`'s grammar
+  (`Invalid job format specification: %NN…`, empty lines, rc 0); the stub refuses
+  both together.
+- **An unknown field name** (`Bogus:0<N>`, or `Reason<N>` without a colon) is an
+  error on stderr with rc 0 and that field missing from every line; sq's record
+  gate then counts too few fields and says the node output is unreadable.
+- **Forms**: no reason is `none` and its TimeStamp `Unknown` (with
+  `SLURM_TIME_FORMAT` standard, unset and relative); CPUsLoad has two decimals
+  (`0.46`, `0.01`); AllocMem and FreeMem are whole MB (`0`, `1018271`).
+- **One line per node** with `-N`, so no min-max range (`0.10-0.46`) appears; a
+  range is printed only for a record covering several nodes.
 
 ## Not compared live, and what the stub rests on instead
 
@@ -93,6 +131,21 @@ Premises never seen on the cluster are taken from the Slurm 23.11.4 source (tag
 - **`squeue -S t` sorts compact state codes as strings** (`xstrcmp` of
   `job_state_string_compact`, `src/squeue/sort.c:658-672`): `CG` < `PD` < `R`.
   Fixtures list their queue records in that order, since the stub does not sort.
+
+- **N/A in FreeMem and CPUsLoad.** Both nodes were up, so neither was seen.
+  `_build_free_mem_min_max_64` and `_build_cpu_load_min_max_32`
+  (`src/sinfo/print.c`) print `N/A` for `NO_VAL64` / `NO_VAL`. slurmctld starts a
+  node with `free_mem = NO_VAL64` until it registers (`_init_node_record`,
+  `src/common/node_conf.c:784`), so FreeMem `N/A` is real; but it starts
+  `cpu_load` at 0 (`node_conf.c:781`) and resets it to 0 when a node is downed
+  or powered down (`node_mgr_reset_node_stats`, `src/slurmctld/node_mgr.c:4597`),
+  so a down node most likely shows CPUsLoad `0.00`, not `N/A`. The fixtures
+  with `CPUsLoad=N/A` exercise sq's handling of a value Slurm can
+  print, not one bioserver was seen to print. AllocMem is always a number
+  (`_print_alloc_mem`, `"%"PRIu64`).
+- **A long REASON.** No reason can be set read-only. `_print_str` prints a size-0
+  field with a bare `printf("%s")` (`src/sinfo/print.c`), and the 23-character
+  NodeList above shows size 0 does not cut.
 
 Other limits:
 

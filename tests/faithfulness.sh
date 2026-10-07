@@ -122,8 +122,15 @@ compare() {   # compare LABEL MODE NAMES SEP FILE words...
 
 # ---- the four call shapes of sq (sq ~388, ~391, ~457, ~474) ------------------
 # separators shaped as sq mints them, SLURM_TIME_FORMAT pinned as sq pins it
-compare sinfo pct C,N,e,m,T,E,H "$N3" sinfo \
-	SLURM_TIME_FORMAT=standard sinfo -hN -o "%C$N3%N$N3%e$N3%m$N3%T$N3%E$N3%H$N3"
+nfields="CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp CPUsLoad AllocMem"
+nfmt=; nfmt_nosize=                   # sq's form, size 0; and the same without the 0,
+for f in $nfields; do                 # which the stub takes as the same form
+	nfmt="$nfmt${nfmt:+,}$f:0$N3"; nfmt_nosize="$nfmt_nosize${nfmt_nosize:+,}$f:$N3"
+done
+compare sinfo long "${nfields// /,}" "$N3" sinfo \
+	SLURM_TIME_FORMAT=standard sinfo -hN -O "$nfmt"
+compare sinfo-nosize long "${nfields// /,}" "$N3" sinfo \
+	SLURM_TIME_FORMAT=standard sinfo -hN -O "$nfmt_nosize"
 compare squeue pct i,j,u,T,M,L,C,m,R,t,l,S "$N" squeue \
 	SLURM_TIME_FORMAT=standard \
 	SQUEUE_FORMAT="%i$N%j$N%u$N%T$N%M$N%L$N%C$N%m$N%R$N%t$N%l$N%S$N" squeue -h -S t,i
@@ -172,6 +179,9 @@ hdr hdr-O "^JOBID${N}ARRAY_TASK_ID${N}NAME${N}\$" SQUEUE_FORMAT2="JobID:$N,Array
 hdr hdr-O-unsized '^JOBID {15}NAME {16}$' squeue -t all -O JobID,Name
 hdr hdr-precedence "^JOBID${N}\$" SQUEUE_FORMAT="%i$N" SQUEUE_FORMAT2="JobID:Qq,Name:Qq" squeue -t all
 hdr hdr-sinfo "^CPUS\(A/I/O/T\)${N3}NODELIST${N3}REASON${N3}\$" sinfo -N -o "%C$N3%N$N3%E$N3"
+hdr hdr-sinfo-O "^CPUS\(A/I/O/T\)${N3}NODELIST${N3}REASON${N3}CPU_LOAD${N3}ALLOCMEM${N3}\$" \
+	sinfo -N -O "CPUsState:0$N3,NodeList:0$N3,Reason:0$N3,CPUsLoad:0$N3,AllocMem:0$N3"
+hdr hdr-sinfo-O-unsized '^NODELIST {12}REASON {14}$' sinfo -N -O NodeList,Reason
 
 [ $fails -eq 0 ] && echo "all comparisons match" || echo "$fails comparison(s) differ or failed"
 [ $fails -eq 0 ]

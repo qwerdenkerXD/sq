@@ -13,7 +13,8 @@
 #                   and a STUBERROR line for every refusal of the stub itself
 #
 # Formats, as the real tools take them (see tests/FAITHFULNESS.md):
-#   sinfo   -o FMT                       %<letter> grammar, needs -h and -N
+#   sinfo   -o FMT or -O FMT             %<letter> grammar or Field:0suffix
+#                                        grammar, needs -h and -N
 #   squeue  -o FMT, -O FMT, else $SQUEUE_FORMAT, else $SQUEUE_FORMAT2
 #           (%<letter> grammar or Field:suffix grammar), needs -h
 #   sacct   -o F1,F2,... with -p or -P and -n, --delimiter=D (default "|")
@@ -72,7 +73,7 @@ while [ $# -gt 0 ]; do
 	case $tool:$a in
 		# a value attached as --opt=value or -Xvalue
 		*:--*=*) v=${a#*=}; a=${a%%=*} ;;
-		squeue:-[SturpAqjMnwLRoO]?*|sacct:-[SEurAqjMo]?*|sinfo:-o?*)
+		squeue:-[SturpAqjMnwLRoO]?*|sacct:-[SEurAqjMo]?*|sinfo:-[oO]?*)
 			v=${a#??}; a=${a:0:2} ;;
 		*) v= ;;
 	esac
@@ -86,6 +87,7 @@ while [ $# -gt 0 ]; do
 		sinfo:-N|sinfo:--Node)     nodes=1; shift_n=1 ;;
 		sinfo:-hN|sinfo:-Nh)       noheader=1; nodes=1; shift_n=1 ;;
 		sinfo:-o|sinfo:--format)   take "$@"; cmd_o=$val ;;
+		sinfo:-O|sinfo:--Format)   take "$@"; cmd_O=$val ;;
 
 		squeue:-h|squeue:--noheader) noheader=1; shift_n=1 ;;
 		squeue:-o|squeue:--format)   take "$@"; cmd_o=$val ;;
@@ -126,8 +128,13 @@ case $tool in
 	sinfo)
 		[ $noheader = 1 ] || refuse "header lines are not emulated: pass -h"
 		[ $nodes = 1 ]    || refuse "only the node-oriented (-N) listing is emulated"
-		[ -n "$cmd_o" ]   || refuse "sinfo's default format is not emulated: pass -o"
-		mode=pct; fmt=$cmd_o; file=sinfo ;;
+		# measured on 23.11: an -o after -O is parsed in -O's grammar
+		if   [ -n "$cmd_o" ] && [ -n "$cmd_O" ]; then refuse "both -o and -O given"
+		elif [ -n "$cmd_o" ]; then mode=pct;  fmt=$cmd_o
+		elif [ -n "$cmd_O" ]; then mode=long; fmt=$cmd_O
+		else refuse "sinfo's default format is not emulated: pass -o or -O"
+		fi
+		file=sinfo ;;
 	squeue)
 		[ $noheader = 1 ] || refuse "header lines are not emulated: pass -h"
 		# precedence measured on 23.11: the command line beats the environment,
