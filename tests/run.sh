@@ -1882,6 +1882,36 @@ c_bars_round() {
 	done
 }
 
+# the cells of one bar as "SGR:glyph", one per cell, from the coloured output
+bar_of() {        # bar_of NODE K: the K-th bar (1 CPU, 2 memory) on NODE's line
+	LC_ALL=$utf8 gawk -v node="$1" -v k="$2" '
+		{ t = $0; gsub(/\033\[[0-9;]*m/, "", t); split(t, f, " ") }
+		f[1] != node { next }
+		{ s = $0; done = 0; nb = 0; prev = -1; out = ""
+		  while (match(s, /\033\[[0-9;]*m[█▒▓░·]/)) {
+			at = done + RSTART
+			if (at != prev + 1) nb++              # not adjacent: the next bar
+			if (nb == k) out = out (out == "" ? "" : " ") substr(s, RSTART + 2, RLENGTH - 4) ":" substr(s, RSTART + RLENGTH - 1, 1)
+			prev = done + RSTART + RLENGTH - 1; done = prev
+			s = substr(s, RSTART + RLENGTH)
+		  }
+		  print out; exit }' "$OUT"
+}
+bar_kinds() { bar_of "$1" "$2" | tr ' ' '\n' | sort -u | paste -sd' '; }   # its distinct cells
+bar_kinds_are() { [ "$(bar_kinds "$1" "$2")" = "$3" ]; }
+c_bars_edges() {
+	T_TITLE="bars: a draining node in the down hue, zero totals, the 85% boundary, a load that is no number"
+	sq_run bars-edges -- --full --color
+	need "rc 0, nothing on stderr" eval 'rc_is 0 && err_empty'
+	need "draining: CPU bar █ 31, ▒ 2;31, ░ 2" bar_kinds_are drn01 1 "2:░ 2;31:▒ 31:█"
+	need "draining: memory bar █ 31, ▒ 2;31, ░ 2" bar_kinds_are drn01 2 "2:░ 2;31:▒ 31:█"
+	need "0 CPUs, 0 memory: both bars all ░" eval 'bar_kinds_are zero01 1 "2:░" && bar_kinds_are zero01 2 "2:░"'
+	need "0 CPUs, 0 memory, use N/A: both bars all ·" eval 'bar_kinds_are zero02 1 "2:·" && bar_kinds_are zero02 2 "2:·"'
+	need "85% allocated: CPU bar green" bar_kinds_are pct85 1 "2:░ 32:█"
+	need "86% allocated: CPU bar yellow" bar_kinds_are pct86 1 "2:░ 33:█"
+	need "load '0.10-0.46': not known, ▒ then ·" bar_kinds_are ldrange 1 "2:· 2;32:▒"
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -1910,7 +1940,7 @@ cases=(
 	reserve_refused compact_reserve reservation_forwarded
 	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full
 	compact_no_size compact_error_screens
-	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round
+	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

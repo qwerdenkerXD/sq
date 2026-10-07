@@ -1,0 +1,13 @@
+# The cases no screen pins.  drn01 drains with jobs still on it (sinfo prints
+# "draining" for DRAIN on an allocated or mixed node; its unallocated CPUs count
+# as other): both bars in the down hue, 31, with load and FreeMem known
+CPUsState=16/0/8/24; NodeList=drn01; FreeMem=40000; Memory=76800; StateLong=draining; Reason=retire after jobs; TimeStamp=2026-10-06T10:00:00; CPUsLoad=12.00; AllocMem=49152
+# no CPUs and no memory at all: nothing to scale by, so nothing is drawn as used
+CPUsState=0/0/0/0; NodeList=zero01; FreeMem=0; Memory=0; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/0/0/0; NodeList=zero02; FreeMem=N/A; Memory=0; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0
+# the CPU hue boundary: 85% allocated is still green, 86% yellow
+CPUsState=85/15/0/100; NodeList=pct85; FreeMem=900000; Memory=1000000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=85.00; AllocMem=100000
+CPUsState=86/14/0/100; NodeList=pct86; FreeMem=900000; Memory=1000000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=86.00; AllocMem=100000
+# a load that is neither a plain decimal nor N/A (the min-max form sinfo prints for a
+# record of several nodes) is not known
+CPUsState=8/16/0/24; NodeList=ldrange; FreeMem=70000; Memory=76800; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=0.10-0.46; AllocMem=6800
