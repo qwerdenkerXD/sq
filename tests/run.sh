@@ -1700,26 +1700,28 @@ c_compact_no_size() {   # decision 21
 }
 # oldfail: the newest failure (100) is older than 30 COMPLETED jobs, so it lies
 # beyond the 25 rows COMPACT gives the finished block.  The one line names it;
-# from 38 lines on the block opens on the 25 newest and "+6 more", and the
-# failure is gone from the screen.  Two fixes are rendered for Franz
-# (screens/fincap: keepline keeps the one line, pullin makes the failure the
-# block's last row); both name it at every height, as this case asks.
-c_compact_oldfail() {
-	T_TITLE="oldfail at every height 6..60: the newest failure, older than the finished block's cap, is named on screen"
-	xfail "$T_TITLE; from 38 lines the block shows the 25 newest and '+6 more' without it, until Franz picks a fix"
-	local h ran= lost= shape=
+# once the block opens (decision 26, "pullin") the failure is its last row and
+# "+6 more" counts the newer jobs that did not fit, so it is named at every
+# height.  Reference renders: screens/fincap/pullin-h{30,40,60}.txt.
+c_compact_oldfail() {   # decision 26
+	T_TITLE="oldfail at every height 6..60: the newest failure, older than the finished block's cap, is named on screen; once the block opens it is its last row"
+	local h ran= lost=
 	sq_run oldfail SQ_WIDTH=100 SQ_HEIGHT=50 -- --full
 	need "FULL: rc 0, stubs called, footer 1/1/0/0" eval 'rc_is 0 && calls_are 1 1 0 1 && footer_is 1 1 0 0'
 	for h in $(seq 6 60); do
 		sq_run oldfail SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
 		{ rc_is 0 && err_empty && calls_are 1 1 0 1 && lines_within "$h"; } || ran="$ran $h"
-		matches '(^ *|: )100 +bad +FAILED +1( |$)' && continue
-		lost="$lost $h"
-		{ [ "$(labelled FROW | wc -l)" -eq 25 ] && [ "$(labelled FMORE)" = "+6 more" ]; } || shape="$shape $h"
+		matches '(^ *|: )100 +bad +FAILED +1( |$)' || lost="$lost $h"
 	done
 	need "rc 0, stderr empty, stubs called, at most H lines (not at H =${ran:- none})" test -z "$ran"
-	want "the failure named at every height (not at H =${lost:- none})" test -z "$lost"
-	today "where it is not named: the 25 newest rows and '+6 more' (not so at H =${shape:- none})" test -z "$shape"
+	need "the failure named at every height (not at H =${lost:- none})" test -z "$lost"
+	for h in 40 60; do
+		sq_run oldfail SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
+		need "$h lines: the block is the 24 newest, 130 down to 107, then 100 as its last row, then '+6 more'" \
+			fin_block_is "recently finished · last 2h" "$(seq -s ' ' 130 -1 107) 100" "+6 more"
+		need "$h lines: '+6 more' is the line right after the failure's row" \
+			eval 'screen | gawk -F"\t" '"'"'p && $1 == "FMORE" && $2 == "+6 more" { ok = 1 } { p = ($1 == "FROW" && $2 ~ /^100 /) } END { exit !ok }'"'"
+	done
 }
 # foldelapsed: with TIME hidden, array 7000 folds four tasks whose elapsed
 # times differ (1 minute, 9 hours); the row survives as long as its

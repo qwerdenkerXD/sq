@@ -1168,7 +1168,7 @@ END{
     for (j=1; j<=d && !(rst[ord[j]] in BAD); j++) ;   # "in": a lookup would add the
                                                        # key, and fcol() reads BAD by "in"
     if (j > d) j = 1                            # the one line: the newest failure, else
-    FAILG = ord[j]                              # the newest job; the block reaches
+    FAILJ = j; FAILG = ord[j]                   # the newest job; the block reaches
     FMIN = (j + 1 >= d) ? d : j + 1             # down to it at least
     if (FMIN > FSLOTS) FMIN = FSLOTS
     avail = lines - reserve
@@ -1239,6 +1239,12 @@ END{
   }
   shown = (d > RECENT_MAX) ? RECENT_MAX : d
   if (compact) shown = (SHOW["fin"] == 2) ? finrows() : 0
+  # when the cap cuts the block above the newest failure, the failure takes its
+  # last row and "+N more" counts the newer jobs cut, so it is never lost
+  if (compact && shown && FAILJ > shown) {
+    for (j=FAILJ; j>shown; j--) ord[j] = ord[j-1]
+    ord[shown] = FAILG
+  }
   more = 0                                      # jobs, not groups: "+2 more" must
   for (r=shown+1; r<=d; r++) more += gw2[ord[r]]      # not be able to hide 200 tasks
 
