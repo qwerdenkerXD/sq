@@ -1330,6 +1330,15 @@ c_compact_unlisted_h24() {
 	need "the ordinary pending are still 20 ('… 20 jobs pending') and no stuck/blocked/held line hides it" eval 'labelled QELL | grep -qx "… 20 jobs pending" && ! labelled QELL | grep -qE "jobs (stuck|blocked on nodes|held by admin)$"'
 	need "it is counted as stuck: 3 stuck rows" eval 'census "stuck=3 blocked=1 held=0 pending=20 running=128 other=0" 24 | grep -q "^rows stuck=3 "'
 }
+# throttled: a throttled array waits with JobArrayTaskLimit, which is ordinary
+# waiting (decision 28): its 8 tasks are counted in "… n jobs pending", no row
+c_compact_throttled() {   # decision 28
+	T_TITLE="throttled at 12 lines: the 8 tasks waiting with JobArrayTaskLimit are counted in '… 9 jobs pending', no row of them"
+	compact_case throttled 100 12 "1 1 0 1" "11 2 9 0"
+	need "the pending ones only in '… 9 jobs pending', before the running row" queue_seq_is "… 9 jobs pending|8000_[0-1]"
+	local totals="stuck=0 blocked=0 held=0 pending=9 running=2 other=0"
+	need "counted as pending, none as stuck, and every section adds up" eval 'census_says "$totals" 12 rows "stuck=0 blocked=0 held=0 pending=0 running=1 other=0 finished=0 nodes=2" && census_says "$totals" 12 acct ""'
+}
 # quiet40 at 10 lines: no queue block fits, so the blank after the nodes and the
 # one before the finished line meet; one of them goes (CALL (made inside the
 # target screens, listed to Franz, overrulable): a blank with nothing to
@@ -1384,7 +1393,7 @@ census() {   # census TOTALS H
 		        RANK["stuck"] = 1; RANK["blocked on nodes"] = 2; RANK["held by admin"] = 3; RANK["pending"] = 4 }
 		# the settled classifier (stuck-classifier notes, 2026-10-06): a CLOSED
 		# allow-list of collapsible reasons (plus JobHeldUser, which Franz
-		# collapses) is ordinary pending; node reasons and the other cluster
+		# collapses, and JobArrayTaskLimit, decision 28) is ordinary pending; node reasons and the other cluster
 		# faults are blocked; JobHeldAdmin and a launch failure Slurm requeued
 		# held are held; EVERY OTHER reason is stuck, visible by default, so a
 		# misread or unknown reason fails loud (NodeDrain, which 23.11 does not
@@ -1394,7 +1403,7 @@ census() {   # census TOTALS H
 			if (t ~ / RUNNING /) return "running"
 			if (t !~ / PENDING /) return "other"
 			r = match(t, /\(([^)]*)/, m) ? m[1] : ""
-			if (r ~ /^(None|Priority|Resources|Dependency|BeginTime|Prolog|Cleaning|SchedDefer|Reservation|Licenses|JobHeldUser)$/) return "pending"
+			if (r ~ /^(None|Priority|Resources|Dependency|BeginTime|Prolog|Cleaning|SchedDefer|Reservation|Licenses|JobHeldUser|JobArrayTaskLimit)$/) return "pending"
 			if (r ~ /^ReqNodeNotAvail/ || r ~ /^Nodes required for job are / ||
 			    r ~ /^(NodeDown|PartitionDown|PartitionInactive|FrontEndDown|PowerNotAvail|PowerReserved)$/) return "blocked"
 			if (r == "JobHeldAdmin" || r ~ /requeued held$/) return "held"
@@ -1835,7 +1844,7 @@ cases=(
 	compact_elapsed24_h24 compact_emptyfin_h24 compact_noacct_h24 compact_quiet40_h40
 	compact_mix30_h16 compact_mix30_h18 compact_mix30_h30 compact_mix30_h45
 	compact_manystuck_h16 compact_manystuck_h24 compact_manystuck_h40
-	compact_manysmall_h40 compact_unlisted_h24 compact_quiet40_h10
+	compact_manysmall_h40 compact_unlisted_h24 compact_throttled compact_quiet40_h10
 	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_manystuck compact_sweep_manysmall
 	compact_sweep_quiet40 compact_sweep_faults
 	recent_max_full compact_recent_max compact_no_folding compact_colour compact_oldfail compact_fold_elapsed compact_low_heights full_flag compact_full_both

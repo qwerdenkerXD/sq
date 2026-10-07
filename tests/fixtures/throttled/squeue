@@ -1,0 +1,8 @@
+# "throttled": array 8000 runs two tasks at a time (%2); its other eight
+# tasks wait in one bracket with reason JobArrayTaskLimit, which is ordinary
+# waiting (decision 28), beside one job waiting for Priority
+@include ../_common/squeue-defaults
+i=8000_[2-9%2]; j=sweep; t=PD; T=PENDING; M=0:00; R=(JobArrayTaskLimit); S=N/A; r=JobArrayTaskLimit
+i=8100; j=plot; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=8000_0; j=sweep; M=1:00:00; S=2026-10-06T08:00:00
+i=8000_1; j=sweep; M=1:00:00; S=2026-10-06T08:00:00
