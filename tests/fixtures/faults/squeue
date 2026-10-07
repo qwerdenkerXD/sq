@@ -1,8 +1,9 @@
 # "faults": pending reasons that name a fault of the cluster (blocked on
 # nodes: NodeDown, PartitionDown, PartitionInactive, FrontEndDown,
-# PowerNotAvail, PowerReserved), a launch failure Slurm requeued held (held
-# by admin), NodeDrain, which Slurm 23.11 has no such reason as (so it is
-# unknown: stuck), and ordinary waiting; then 8 running jobs
+# PowerNotAvail, PowerReserved), a launch failure Slurm requeued held and a
+# job it requeued in held state (held by admin), NodeDrain, which Slurm 23.11
+# has no such reason as (so it is unknown: stuck), and ordinary waiting; then
+# 8 running jobs
 @include ../_common/squeue-defaults
 i=601; j=job601; t=PD; T=PENDING; M=0:00; R=(PartitionDown); S=N/A; r=PartitionDown
 i=602; j=job602; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
@@ -17,6 +18,7 @@ i=610; j=job610; t=PD; T=PENDING; M=0:00; R=(launch failed requeued held); S=N/A
 i=611; j=job611; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
 i=612; j=job612; t=PD; T=PENDING; M=0:00; R=(NodeDown); S=N/A; r=NodeDown
 i=613; j=job613; t=PD; T=PENDING; M=0:00; R=(Resources); S=N/A; r=Resources
+i=614; j=job614; t=PD; T=PENDING; M=0:00; R=(job requeued in held state); S=N/A; r=job requeued in held state
 i=620; j=run0; M=1:00:00; S=2026-10-06T08:00:00
 i=621; j=run1; M=2:00:00; S=2026-10-06T07:00:00
 i=622; j=run2; M=3:00:00; S=2026-10-06T06:00:00

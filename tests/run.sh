@@ -1414,7 +1414,7 @@ census() {   # census TOTALS H
 			if (r ~ /^(None|Priority|Resources|Dependency|BeginTime|Prolog|Cleaning|SchedDefer|Reservation|Licenses|JobHeldUser|JobArrayTaskLimit)$/) return "pending"
 			if (r ~ /^ReqNodeNotAvail/ || r ~ /^Nodes required for job are / ||
 			    r ~ /^(NodeDown|PartitionDown|PartitionInactive|FrontEndDown|PowerNotAvail|PowerReserved)$/) return "blocked"
-			if (r == "JobHeldAdmin" || r ~ /requeued held$/) return "held"
+			if (r == "JobHeldAdmin" || r ~ /requeued held$/ || r ~ /^job requeued in /) return "held"
 			return "stuck"
 		}
 		{ nl++ }
@@ -1547,15 +1547,16 @@ c_compact_sweep_quiet40() {   # CALL (made inside the target screens, listed to 
 
 # faults: the categories of the VISIBLE reasons (a CALL, listed to Franz,
 # overrulable; the collapse rule is unchanged): a fault of the cluster is
-# blocked on nodes, a launch failure requeued held is held by admin, and
+# blocked on nodes, a launch failure requeued held and a job requeued in held
+# state are held by admin, and
 # NodeDrain, no reason 23.11 has, is unknown and so stuck
 c_compact_sweep_faults() {
-	T_TITLE="faults at every height 6..50: partition, front-end and power faults count as blocked on nodes, 'launch failed requeued held' as held, NodeDrain as stuck; every sweep invariant"
-	sweep_case faults 100 50 "1 1 0 1" "21 8 13 0" \
-		"stuck=1 blocked=6 held=2 pending=4 running=8 other=0" "recently finished: 600 qc FAILED 1"
+	T_TITLE="faults at every height 6..50: partition, front-end and power faults count as blocked on nodes, 'launch failed requeued held' and 'job requeued in held state' as held, NodeDrain as stuck; every sweep invariant"
+	sweep_case faults 100 50 "1 1 0 1" "22 8 14 0" \
+		"stuck=1 blocked=6 held=3 pending=4 running=8 other=0" "recently finished: 600 qc FAILED 1"
 	sq_run faults SQ_WIDTH=100 SQ_HEIGHT=17 -- --compact
-	need "17 lines: PartitionDown blocked, both requeued-held jobs held, NodeDrain stuck" \
-		queue_seq_is "601|604|608|610|… 5 jobs blocked on nodes|… 4 jobs pending|… 8 jobs running"
+	need "17 lines: PartitionDown blocked, NodeDrain stuck, 604 held and '… 2 jobs held by admin' hiding 610 and 614 (requeued in held state)" \
+		queue_seq_is "601|604|608|… 5 jobs blocked on nodes|… 2 jobs held by admin|… 4 jobs pending|… 8 jobs running"
 }
 
 # ---- 14. COMPACT: the behaviour rules no screen shows --------------------------

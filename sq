@@ -691,13 +691,14 @@ function when(t,   ep) {                                  # start estimate, comp
 # equality on %r, never a prefix: "Dependency" must not swallow
 # "DependencyNeverSatisfied".  A prefix is safe only on the visible side, which
 # only names the category: a cluster fault is "blocked on nodes", a hold that
-# needs an admin (or a launch failure Slurm requeued held) "held by admin".
+# needs an admin (a launch failure Slurm requeued held, or a job it requeued
+# in held state) "held by admin".
 function jclass(st, why) {
   if (st == "R")  return 5
   if (st != "PD") return 6
   if (why in WAITING) return 4
   if (why in FAULT || why ~ /^ReqNodeNotAvail/ || why ~ /^Nodes required for job are /) return 2
-  return (why == "JobHeldAdmin" || why ~ /requeued held$/) ? 3 : 1
+  return (why == "JobHeldAdmin" || why ~ /requeued held$/ || why ~ /^job requeued in /) ? 3 : 1
 }
 # The screen is GROWN along one fixed list of steps (fit) and stops at the first
 # step that does not fit, so a taller screen only ever adds: lines a step could
