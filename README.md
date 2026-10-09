@@ -3,7 +3,7 @@
 An auto-fitting Slurm dashboard for the terminal. One bash script, meant to run under `watch`:
 
 ```sh
-watch -tc -n 5 sq
+watch -tc -n 1 'sq -C'
 ```
 
 ```
