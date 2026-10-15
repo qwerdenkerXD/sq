@@ -56,7 +56,8 @@ ESC=$'\033'
 # sq_run FIXTURE [VAR=value | -VAR]... -- [sq args...]
 # Runs sq in a clean environment: the stubs first on PATH, a fresh HOME (the
 # bell's state file lives under it), a small timeout and a fixed size; VAR=value
-# adds or overrides a variable, -VAR removes one.  --no-bell is always passed.
+# adds or overrides a variable, -VAR removes one.  --no-bell is passed unless
+# BELL=1, which only rings with a terminal (PTY=1, below).
 # NOTTY=1 runs sq in a new session (setsid), so it has no controlling terminal.
 # Leaves OUT, ERR, LOG (the stub log) and RC for the assertions below.
 sq_run() {
@@ -80,10 +81,11 @@ sq_run() {
 	# (the 30s bound below) leaves nothing behind once $work is removed
 	mkdir -p "$RUN/tmp"; env[TMPDIR]=$RUN/tmp
 	for k in "${!env[@]}"; do envlist+=("$k=${env[$k]}"); done
+	[ -n "${BELL:-}" ] || set -- --no-bell "$@"
 	if [ -n "${PTY:-}" ]; then pty_exec "${envlist[@]}" -- "$@"
 	else  # bounded, so a hanging sq fails its case instead of hanging the suite;
 		# setsid outside timeout, so a hanging sq stays timeout's own child
-		env -i "${envlist[@]}" ${NOTTY:+setsid -w} timeout -k 2 30 "$sq" --no-bell "$@" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
+		env -i "${envlist[@]}" ${NOTTY:+setsid -w} timeout -k 2 30 "$sq" "$@" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
 		[ $RC -ne 124 ] || T_FAIL+=("sq did not finish within 30s")
 	fi
 	note_run
@@ -100,7 +102,7 @@ pty_exec() {
 		T_FAIL+=("util-linux script is not installed (needed for the pty cases)"); RC=127; : > "$OUT"; return
 	fi
 	local inner
-	inner="stty rows $PTY_ROWS cols $PTY_COLS; exec $(printf '%q ' "$sq" --no-bell "$@")"
+	inner="stty rows $PTY_ROWS cols $PTY_COLS; exec $(printf '%q ' "$sq" "$@")"
 	[ -n "${PTY_STDIN:-}" ] && inner="$inner < $(printf '%q' "$PTY_STDIN")"
 	# --foreground: without it timeout stops script's child with SIGTTOU in the pty
 	env -i "${envlist[@]}" SHELL=/bin/sh \
@@ -517,6 +519,56 @@ c_backslash_text() {
 		sq_run "$fx" --
 		need "$f stderr: rc 0, shown literally" eval 'rc_is 0 && bs_kept'
 	done
+}
+
+# What only the bell reads takes the same road: a user name and a cache path
+# that -v would have unescaped reach gawk as given.  The bell rings only with a
+# terminal, so these run on a pty with the bell left on.
+bell_fixture() {   # bell_fixture: a job of alice's that FAILED a minute ago, nothing else
+	local d=$T_DIR/fx-bell; mkdir -p "$d"
+	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
+	printf '@include %s\n' "$fixtures/_common/empty" > "$d/squeue"
+	printf '@include %s\nJobID=7001; JobName=crash; State=FAILED; ExitCode=1:0; End=\\{now-1m}\n' \
+		"$fixtures/_common/sacct-defaults" > "$d/sacct"
+	printf '%s' "$d"
+}
+bell_run() {       # bell_run FIXTURE [VAR=value...]: sq on a pty, the bell on
+	BELL=1 PTY=1 PTY_ROWS=40 PTY_COLS=100 sq_run "$1" TERM=xterm-256color "${@:2}" --
+}
+c_bell_text() {
+	T_TITLE="SQ_BELL_USER, SQ_BELL_ALL and an XDG_CACHE_HOME holding '\\n' reach the bell byte for byte"
+	local fx cache=$T_DIR/'c\nd'
+	fx=$(bell_fixture)
+	bell_run "$fx" SQ_BELL_USER=alice XDG_CACHE_HOME="$cache"
+	need "alice's fresh failure: rc 0, one bell" eval 'rc_is 0 && [ "$(bels)" -eq 1 ]'
+	need "remembered in the cache path as given" eval 'grep -q "^7001[[:space:]]" "$cache/sq/alerted" 2>/dev/null'
+	bell_run "$fx" SQ_BELL_USER=alice XDG_CACHE_HOME="$cache"
+	need "run again: rc 0, silent, as it read that memory back" eval 'rc_is 0 && [ "$(bels)" -eq 0 ]'
+	bell_run "$fx" SQ_BELL_USER='al\x69ce'
+	need "SQ_BELL_USER='al\\x69ce' is not alice: rc 0, silent" eval 'rc_is 0 && [ "$(bels)" -eq 0 ]'
+	bell_run "$fx" SQ_BELL_USER=bob
+	need "bob: rc 0, silent, the job is alice's" eval 'rc_is 0 && [ "$(bels)" -eq 0 ]'
+	bell_run "$fx" SQ_BELL_USER=bob SQ_BELL_ALL=1
+	need "bob with SQ_BELL_ALL=1: rc 0, one bell" eval 'rc_is 0 && [ "$(bels)" -eq 1 ]'
+}
+# -c centres the screen in the width, -C in the height too: the screen moves
+# as a whole and nothing in it changes.  At 140 columns "mixed" is 80 wide.
+c_centre() {
+	T_TITLE="-c moves the whole screen to the middle of the width, -C also of the height"
+	local margin top centred
+	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 --
+	margin=$(( (140 - $(section queue | head -n 1 | gawk '{ print length($0) - 2 }')) / 2 ))
+	need "uncentred: rc 0, narrower than the screen" eval 'rc_is 0 && [ "$margin" -gt 2 ]'
+	local plain=$RUN/uncentred; without_clock "$OUT" > "$plain"
+	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 -- -c
+	need "-c: rc 0, every line $margin in instead of 2, nothing else changed" eval '
+		rc_is 0 && cmp -s <(sed -E "s/^  /$(printf "%*s" "$margin" "")/" "$plain") <(without_clock "$OUT")'
+	centred=$RUN/centred; without_clock "$OUT" > "$centred"
+	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 -- -C
+	top=$(( (30 - $(wc -l < "$centred")) / 2 ))
+	need "-C: rc 0, -c's screen under $top blank lines" eval '
+		rc_is 0 && [ "$top" -gt 0 ] && [ -z "$(head -n "$top" "$OUT" | tr -d "\n")" ] &&
+		cmp -s "$centred" <(tail -n +$((top + 1)) "$OUT" | without_clock /dev/stdin)'
 }
 
 # ---- 8. sacct fails: the squeue -t all fallback -----------------------------
@@ -2024,7 +2076,7 @@ c_bars_width_sweep() {
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_garbage both_fail
-	finished user_filter backslash_text sacct_fallback
+	finished user_filter backslash_text bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
