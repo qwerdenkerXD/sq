@@ -150,9 +150,11 @@ sq -C                     # centred in both axes
   and its steps (the first non-zero one, except that an out-of-memory always wins):
   `rc/sigN` is signal N as Slurm records it, `rc/oom` out of memory, and `rc/errN` the low
   7 bits of a Slurm error code, not errno, from slurmd starting the job or step: 53 task
-  I/O setup failed (the stdin, stdout or stderr file, or the link back to srun), 52 the
-  tasks could not be started (Slurm calls it execve failed; a failed fork, chdir, or task or
-  spank plugin call reads so too), 46 the process-tracking container for the step could
+  I/O setup failed (the stdin, stdout or stderr file, or the link back to srun), 52
+  slurmstepd could not start the tasks: a fork, chdir, pam_setup or privilege drop failed, or
+  a task or proctrack plugin call did (a missing or non-executable program is not 52: it
+  exits with its errno, e.g. exit 2 for a missing file; a spank plugin failing after start-up
+  reads as an exit code, not an errN), 46 the process-tracking container for the step could
   not be created, 48 switching to the user's ids failed (setuid/setgid), 54 the
   prolog failed or never started, 115 the spank plugin stack failed to initialize. So EXIT
   can show a step's OOM on a job that finished COMPLETED. A folded row lists its distinct
