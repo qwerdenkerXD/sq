@@ -1027,9 +1027,9 @@ footer_last()  { # footer_last JOBS RUNNING PENDING OTHER: the one footer, on th
 	[ "$(labelled FOOTER | wc -l)" -eq 1 ] &&
 	plain | tail -n 1 | grep -qE "^ *$1 jobs +$2 running +$3 pending +$4 other\$"
 }
-# the title is "▌ SLURM <host>  HH:MM:SS", nothing more, whatever the host is called
+# the title is "▌ SLURM <host>  HH:MM:SS ZONE", nothing more, whatever the host is called
 # (CALL (made inside the target screens, listed to Franz, overrulable): no "· compact" mode marker)
-title_first()  { screen | head -n 1 | grep -qE '^TITLE'$'\t''▌ SLURM [^ ]+  [0-9]{2}:[0-9]{2}:[0-9]{2}$'; }
+title_first()  { screen | head -n 1 | grep -qE '^TITLE'$'\t''▌ SLURM [^ ]+  [0-9]{2}:[0-9]{2}:[0-9]{2} [^ ]+$'; }
 nothing_unlabelled() { [ -z "$(labelled OTHER)$(labelled QNOTE)" ]; }
 qrows_are()    { [ "$(labelled QROW | first_words)" = "$1" ]; }
 ellipses_are() { [ "$(labelled QELL | paste -sd'|')" = "$1" ]; }
@@ -1056,7 +1056,7 @@ jobid_fits_shown() {
 }
 # what two runs of the same screen may differ in: the title's clock, and AGO,
 # which can tick over an hour between them (the fixtures' end times are fixed)
-without_clock_ago() { sed -E '1s/[0-9]{2}:[0-9]{2}:[0-9]{2}$//; s/ +([0-9]+[smh]|-)$//' "$1"; }
+without_clock_ago() { sed -E '1s/[0-9]{2}:[0-9]{2}:[0-9]{2} [^ ]+$//; s/ +([0-9]+[smh]|-)$//' "$1"; }
 
 # compact_case FIXTURE W H "SINFO QUEUE FALLBACK SACCT" "JOBS RUNNING PENDING OTHER" [VAR=value...]
 # The FULL twin, then COMPACT at W x H with what every accepted screen has: it

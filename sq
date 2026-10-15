@@ -582,7 +582,7 @@ gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v center="$center" -v fo
      -v recent="$recent" -v rsrc="$rsrc" -v rwhy="$rwhy" -v rerr="$rerr" \
      -v rwhyc="$rwhyc" -v rmax="$rmax" -v compact="$compact" -v reserve="$reserve" \
      -v wtxt="$wtxt" -v sfilt="$sfilt" -v uidmap="$uidmap" \
-     -v host="$(hostname -s)" -v now="$(date '+%H:%M:%S')" '
+     -v host="$(hostname -s)" -v now="$(date '+%H:%M:%S %Z')" '
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
   m = split(list, a, ",")

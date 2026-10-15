@@ -7,7 +7,7 @@ watch -tc -n 1 'sq -C'
 ```
 
 ```
-▌ SLURM node01  11:26:56
+▌ SLURM node01  11:26:56 UTC
 
 node01   ████▒░░░░░░░░░░░  28%  36/128 cpu   ████████▓▓▓▓▓▓▓▓  98%  991/1007G mem  mixed
 node02   ░░░░░░░░░░░░░░░░   0%   0/24  cpu   ················   -%    -/79G   mem  down*
@@ -149,6 +149,9 @@ sq -C                     # centred in both axes
   replaced atomically so two running copies cannot tear it.
 - An unreachable controller makes `sinfo` and `squeue` hang rather than fail, so every call is
   bounded by `SQ_TIMEOUT`. A full outage therefore delays a refresh by about twice that.
+- **Clock times are the server's,** in its time zone, which the title names (`UTC` on many
+  clusters). Set `TZ`, e.g. `TZ=Europe/Berlin sq`, to read the title and the start estimates
+  in your own.
 - **Refused:** `-O`/`--Format`, `-s`/`--steps`, `-i`/`--iterate`, `-l`, `-v`, `-V`, `--json` and
   `--yaml`. Each would replace or defeat the output sq parses; sq exits with code 2 and says
   why. (`-o`/`--format` are sq's own column list.)
