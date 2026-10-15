@@ -1340,8 +1340,10 @@ END{
   if (rtabw > target) target = rtabw
   if (target > budget) target = budget
 
-  if (nodew < target) {                         # node block grows: bars first
-    bar += target - nodew
+  if (nodew < target) {                         # node block grows: bars first, to
+    bar = target - nfix                         # nfix + bar.  "+= target - nodew" left
+                                                # out the gap of bars that had collapsed
+                                                # and ran one column past the edge
     if (bar > BAR_MAX) { npad = bar - BAR_MAX; bar = BAR_MAX }
   }
   gap[1] = 0                                    # table grows: gaps first, capped, then

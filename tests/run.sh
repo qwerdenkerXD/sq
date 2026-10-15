@@ -1975,6 +1975,27 @@ c_bars_edges() {
 	need "86% allocated: CPU bar yellow" bar_kinds_are pct86 1 "2:░ 33:█"
 	need "load '0.10-0.46': not known, ▒ then ·" bar_kinds_are ldrange 1 "2:· 2;32:▒"
 }
+# Bars that start collapsed (too narrow for BAR_MIN) and then grow to the
+# shared right edge must bring back the gap they collapsed: they did not, and
+# the node line ran one column past the screen (array fixtures at 50-53).
+# Narrower than the line with its bars collapsed no layout fits, so the bound
+# is the screen or that line, whichever is wider.
+node_width() { plain | LC_ALL=$utf8 gawk '/ cpu .* mem / { if (length($0) > m) m = length($0) } END { print m+0 }'; }
+c_bars_width_sweep() {
+	T_TITLE="no node line wider than the screen at any width 21..140 that holds it with its bars collapsed"
+	local fx w nmin over
+	for fx in array-running busy24 bars-busy mix30; do
+		sq_run "$fx" SQ_WIDTH=21 -- --full
+		nmin=$(node_width)
+		need "$fx at 21: rc 0, node lines drawn" eval 'rc_is 0 && [ "$nmin" -gt 0 ]'
+		over=
+		for w in $(seq 21 140); do
+			sq_run "$fx" SQ_WIDTH="$w" -- --full
+			[ "$(node_width)" -le $(( w > nmin ? w : nmin )) ] || over="$over $w"
+		done
+		need "$fx: no node line past the screen (past it at W =${over:- none})" test -z "$over"
+	done
+}
 
 # ============================================================================
 cases=(
@@ -2005,6 +2026,7 @@ cases=(
 	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full
 	compact_no_size compact_error_screens
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
+	bars_width_sweep
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do
