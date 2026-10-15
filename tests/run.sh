@@ -587,8 +587,8 @@ stderr_fixture() {   # stderr_fixture FILE|none TEXT: "wide", but its FILE colle
 	printf '@include %s\n' "$fixtures/wide/squeue" > "$d/squeue"
 	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
 	printf '@include %s\n' "$fixtures/_common/empty" > "$d/squeue-all"
-	# the fallback is reached only when sacct fails too, here silently, and the
-	# caption then names sacct's failure, "sacct failed (exit 1)", not the fallback's
+	# the fallback is reached only when sacct fails too, here silently, so the
+	# fallback's error is the one real reason and the caption shows it
 	[ "$1" != squeue-all ] || printf '@exit 1\n' > "$d/sacct"
 	[ "$1" = none ] || printf '@stderr %s: error: %s\n@exit 1\n' "${1%-all}" "$2" > "$d/$1"
 	printf '%s' "$d"
@@ -611,16 +611,11 @@ c_backslash_text() {
 	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "%%s\\n" %q\n' "$bs_text" > "$hbin/hostname"; chmod +x "$hbin/hostname"
 	sq_run wide PATH="$hbin:$here/bin:$PATH" --
 	need "host name: rc 0, on the title, literally" eval 'rc_is 0 && bs_kept && plain | head -1 | grep -qF "SLURM $bs_text "'
-	for f in sinfo squeue sacct; do
+	for f in sinfo squeue sacct squeue-all; do
 		fx=$(bs_fixture "$f")
 		sq_run "$fx" --
 		need "$f stderr: rc 0, shown literally" eval 'rc_is 0 && bs_kept'
 	done
-	# the fallback's error never reaches the screen: sacct failed first, and its
-	# reason outranks the fallback's on the caption
-	sq_run "$(bs_fixture squeue-all)" --
-	need "squeue-all stderr: rc 0, nothing it spells out happened, the caption names sacct" \
-		eval 'rc_is 0 && bs_inert && has "finished jobs unavailable · sacct failed (exit 1)"'
 }
 
 # Control characters.  squeue echoes what the user typed into its stderr
@@ -641,8 +636,7 @@ c_control_text() {
 		fx=$(stderr_fixture "$f" "$ctl_fixture_text")
 		sq_run "$fx" --
 		need "$f stderr: rc 0, stderr empty" eval 'rc_is 0 && err_empty'
-		[ "$f" = squeue-all ] ||    # whose error the caption never shows, see backslash_text
-		need "$f stderr: shown without its control characters" has "$f: error: $ctl_shown"
+		need "$f stderr: shown without its control characters" has "${f%-all}: error: $ctl_shown"
 		need "$f stderr: no ESC, no CR in the output" ctl_inert
 	done
 	fx=$(stderr_fixture squeue "$ctl_fixture_text")
@@ -691,6 +685,28 @@ c_silent_failure() {
 	need "sinfo exit 1, stderr a lone BEL: rc 0, 'sinfo failed (exit 1)', no BEL byte" eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · sinfo failed \(exit 1\)$" && [ "$(bels)" -eq 0 ]'
 	sq_run "$(silent_fixture sacct 1)" --
 	need "sacct exit 1, no stderr: rc 0, the fallback caption names it" eval 'rc_is 0 && calls_are 1 1 1 1 && has "recently finished · recent only (no accounting) · sacct failed (exit 1)"'
+}
+# Where a line could name several reasons, a real one (stderr, the timeout)
+# beats one made up from an exit status; among real ones the order stays: the
+# filter or sacct's, then the fallback's, then squeue's; sinfo's, then squeue's
+c_real_reason_wins() {
+	T_TITLE="a real error text beats 'failed (exit N)': the fallback's stderr over a silent sacct, squeue's over a silent sinfo"
+	local fx
+	fx=$(silent_fixture squeue-all 1 'squeue: error: the fallback says why')     # sacct fails silently there
+	sq_run "$fx" --
+	need "sacct silent, the fallback with stderr: rc 0, its text on the caption" \
+		eval 'rc_is 0 && calls_are 1 1 1 1 && has "finished jobs unavailable · squeue: error: the fallback says why"'
+	fx=$(silent_fixture squeue-all 1)
+	sq_run "$fx" --
+	need "sacct and the fallback both silent: rc 0, 'sacct failed (exit 1)'" eval 'rc_is 0 && has "finished jobs unavailable · sacct failed (exit 1)"'
+	fx=$(silent_fixture squeue 1 'squeue: error: the controller says why'); printf '@exit 1\n' > "$fx/sacct"
+	sq_run "$fx" --
+	need "sacct silent, squeue with stderr: rc 0, squeue's text on the caption" \
+		eval 'rc_is 0 && calls_are 1 1 0 1 && has "finished jobs unavailable · squeue: error: the controller says why"'
+	fx=$(silent_fixture squeue 1 'squeue: error: the controller says why'); printf '@exit 1\n' > "$fx/sinfo"
+	sq_run "$fx" --
+	need "sinfo silent, squeue with stderr: rc 0, squeue's text on the banner" \
+		eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · squeue: error: the controller says why$"'
 }
 
 # What only the bell reads takes the same road: a user name and a cache path
@@ -2314,7 +2330,7 @@ c_bars_width_sweep() {
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text silent_failure bell_text centre sacct_fallback
+	finished user_filter backslash_text control_text silent_failure real_reason_wins bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
