@@ -451,8 +451,18 @@ case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeou
 [ -n "$(printf '%s' "$tmo" | tr -d '0.')" ] || tmo=5    # 0, 0.0 mean "no limit"
 # why a collector failed: the timeout, or the first line of its stderr, which
 # can echo what the user typed and so loses its control characters like every
-# other outside text
-err_of() { [ "$1" = 124 ] && echo "no response after ${tmo}s" || head -1 "$2" | tr -d '[:cntrl:]'; }
+# other outside text.  With nothing readable there (a crash prints nothing) it
+# is the exit status, because an empty reason reads as success: "queue is
+# empty" and a footer of 0 jobs from a squeue that never answered
+err_of() {   # err_of RC STDERR-FILE TOOL
+	local why
+	[ "$1" = 124 ] && { echo "no response after ${tmo}s"; return; }
+	why=$(head -1 "$2" | tr -d '[:cntrl:]')
+	if   [ -n "$why" ];    then echo "$why"
+	elif [ "$1" -gt 128 ]; then echo "$3 crashed (signal $(($1 - 128)))"
+	else                        echo "$3 failed (exit $1)"
+	fi
+}
 
 # SLURM_TIME_FORMAT is pinned on every collector: "relative" or a custom
 # format turns a date into something epoch() cannot read, which silently kills
@@ -477,10 +487,10 @@ for f in CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp CPUsLoad A
 	nfmt="$nfmt${nfmt:+,}$f:0$nonce3"
 done
 SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" sinfo -hN -O "$nfmt" > "$tmp/nodes" 2> "$tmp/nodes.err"
-nerr=$?; [ $nerr -eq 0 ] && nerr= || nerr=$(err_of $nerr "$tmp/nodes.err")
+nerr=$?; [ $nerr -eq 0 ] && nerr= || nerr=$(err_of $nerr "$tmp/nodes.err" sinfo)
 
 SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT=$fmt timeout -k 2 "$tmo" squeue -h -S t,i "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
-jerr=$?; [ $jerr -eq 0 ] && jerr= || jerr=$(err_of $jerr "$tmp/jobs.err")
+jerr=$?; [ $jerr -eq 0 ] && jerr= || jerr=$(err_of $jerr "$tmp/jobs.err" squeue)
 
 # ---- the recently-finished block's source --------------------------------
 # sacct and squeue spell the same letters differently and several take a value
@@ -555,7 +565,7 @@ if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	# is what the closed whitelist above is for; rc!=0 can still leave a partial
 	# file behind, so that is thrown away rather than rendered
 	if [ $se -eq 0 ]; then rsrc=sacct
-	else rwhy=$(err_of $se "$tmp/recent.err"); rwhyc=acct; : > "$tmp/recent"
+	else rwhy=$(err_of $se "$tmp/recent.err" sacct); rwhyc=acct; : > "$tmp/recent"
 	fi
 fi
 
@@ -568,7 +578,7 @@ if [ "$recent" != 0 ] && [ "$rsrc" = none ] && [ -z "$jerr" ]; then
 		"${args[@]+"${args[@]}"}" > "$tmp/recent" 2> "$tmp/recent.err"
 	fe=$?
 	if [ $fe -eq 0 ]; then rsrc=squeue
-	else rerr=$(err_of $fe "$tmp/recent.err"); : > "$tmp/recent"
+	else rerr=$(err_of $fe "$tmp/recent.err" squeue); : > "$tmp/recent"
 	fi
 fi
 

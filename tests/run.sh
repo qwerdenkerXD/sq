@@ -578,8 +578,8 @@ stderr_fixture() {   # stderr_fixture FILE|none TEXT: "wide", but its FILE colle
 	printf '@include %s\n' "$fixtures/wide/squeue" > "$d/squeue"
 	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
 	printf '@include %s\n' "$fixtures/_common/empty" > "$d/squeue-all"
-	# the fallback is reached only when sacct fails too, and with nothing on
-	# stderr, so its error shows
+	# the fallback is reached only when sacct fails too, here silently, and the
+	# caption then names sacct's failure, "sacct failed (exit 1)", not the fallback's
 	[ "$1" != squeue-all ] || printf '@exit 1\n' > "$d/sacct"
 	[ "$1" = none ] || printf '@stderr %s: error: %s\n@exit 1\n' "${1%-all}" "$2" > "$d/$1"
 	printf '%s' "$d"
@@ -602,11 +602,16 @@ c_backslash_text() {
 	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "%%s\\n" %q\n' "$bs_text" > "$hbin/hostname"; chmod +x "$hbin/hostname"
 	sq_run wide PATH="$hbin:$here/bin:$PATH" --
 	need "host name: rc 0, on the title, literally" eval 'rc_is 0 && bs_kept && plain | head -1 | grep -qF "SLURM $bs_text "'
-	for f in sinfo squeue sacct squeue-all; do
+	for f in sinfo squeue sacct; do
 		fx=$(bs_fixture "$f")
 		sq_run "$fx" --
 		need "$f stderr: rc 0, shown literally" eval 'rc_is 0 && bs_kept'
 	done
+	# the fallback's error never reaches the screen: sacct failed first, and its
+	# reason outranks the fallback's on the caption
+	sq_run "$(bs_fixture squeue-all)" --
+	need "squeue-all stderr: rc 0, nothing it spells out happened, the caption names sacct" \
+		eval 'rc_is 0 && bs_inert && has "finished jobs unavailable · sacct failed (exit 1)"'
 }
 
 # Control characters.  squeue echoes what the user typed into its stderr
@@ -624,7 +629,8 @@ c_control_text() {
 		fx=$(stderr_fixture "$f" "$ctl_fixture_text")
 		sq_run "$fx" --
 		need "$f stderr: rc 0, stderr empty" eval 'rc_is 0 && err_empty'
-		need "$f stderr: shown without its control characters" has "${f%-all}: error: $ctl_shown"
+		[ "$f" = squeue-all ] ||    # whose error the caption never shows, see backslash_text
+		need "$f stderr: shown without its control characters" has "$f: error: $ctl_shown"
 		need "$f stderr: no ESC, no CR in the output" ctl_inert
 	done
 	fx=$(stderr_fixture squeue "$ctl_fixture_text")
@@ -635,6 +641,34 @@ c_control_text() {
 	sq_run wide PATH="$hbin:$here/bin:$PATH" --
 	need "host name: rc 0, on the title without its control characters" eval 'rc_is 0 && plain | head -1 | grep -qF "SLURM node[2JboomX "'
 	need "host name: no ESC, no CR in the output" ctl_inert
+}
+
+# A collector that fails with nothing readable on stderr (a crash prints
+# nothing; a line of control characters scrubs to nothing) used to read as
+# success: squeue's "queue is empty" and a footer of 0 jobs, sinfo's node lines
+# gone without a banner.  The reason is then its exit status, as Franz chose
+# 2026-10-15: "<tool> failed (exit N)", or "<tool> crashed (signal N)" above 128.
+silent_fixture() {   # silent_fixture FILE EXIT [LINE]: as stderr_fixture, FILE exits EXIT with LINE (fixture escapes) or nothing on stderr
+	local d; d=$(stderr_fixture "$1" x)
+	{ [ $# -lt 3 ] || printf '@stderr %s\n' "$3"; printf '@exit %s\n' "$2"; } > "$d/$1"
+	printf '%s' "$d"
+}
+c_silent_failure() {
+	T_TITLE="a collector failing with nothing readable on stderr names its exit status: 'squeue failed (exit 1)', 'squeue crashed (signal 11)'"
+	sq_run "$(silent_fixture sinfo 1)" --
+	need "sinfo exit 1, no stderr: rc 0, the banner 'sinfo failed (exit 1)'" eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · sinfo failed \(exit 1\)$"'
+	sq_run "$(silent_fixture squeue 1)" --
+	need "squeue exit 1, no stderr: rc 0, the banner 'squeue failed (exit 1)'" eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · squeue failed \(exit 1\)$"'
+	need "squeue exit 1: 'job list unavailable' and the '?' footer, like any squeue failure" eval 'has "job list unavailable" && lacks "queue is empty" && footer_unknown'
+	sq_run "$(silent_fixture squeue 139)" --
+	need "squeue exit 139, no stderr: rc 0, the banner 'squeue crashed (signal 11)'" eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · squeue crashed \(signal 11\)$"'
+	need "squeue exit 139: 'job list unavailable' and the '?' footer" eval 'has "job list unavailable" && footer_unknown'
+	sq_run "$(silent_fixture squeue 1 '\r')" --
+	need "squeue exit 1, stderr a lone CR: rc 0, 'squeue failed (exit 1)', no CR byte" eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · squeue failed \(exit 1\)$" && ctl_inert && footer_unknown'
+	sq_run "$(silent_fixture sinfo 1 '\a')" --
+	need "sinfo exit 1, stderr a lone BEL: rc 0, 'sinfo failed (exit 1)', no BEL byte" eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · sinfo failed \(exit 1\)$" && [ "$(bels)" -eq 0 ]'
+	sq_run "$(silent_fixture sacct 1)" --
+	need "sacct exit 1, no stderr: rc 0, the fallback caption names it" eval 'rc_is 0 && calls_are 1 1 1 1 && has "recently finished · recent only (no accounting) · sacct failed (exit 1)"'
 }
 
 # What only the bell reads takes the same road: a user name and a cache path
@@ -2257,7 +2291,7 @@ c_bars_width_sweep() {
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text bell_text centre sacct_fallback
+	finished user_filter backslash_text control_text silent_failure bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
