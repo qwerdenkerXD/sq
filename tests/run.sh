@@ -991,7 +991,8 @@ c_locale_missing() {
 	env -i PATH="$here/bin:$PATH" LC_ALL=$bad "$noop" 2> "$T_DIR/startup"
 	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 LC_ALL=$bad --
 	need "rc 0, the UTF-8 screen"     eval 'rc_is 0 && cmp -s "$want" <(without_clock "$OUT")'
-	need "stderr: what a script doing nothing gets from bash, no more" cmp -s "$T_DIR/startup" "$ERR"
+	# every line, not the whole: a wrapper given as SQ_UNDER_TEST starts a bash too
+	need "stderr: only the line bash prints starting any script" eval '! grep -qvxFf "$T_DIR/startup" "$ERR"'
 }
 # A multibyte locale is not a UTF-8 one: under ja_JP.eucJP gawk counts "…" as
 # one character, as UTF-8 does, but "█" as two, and warns of invalid data on
