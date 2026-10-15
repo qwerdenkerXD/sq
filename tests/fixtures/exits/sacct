@@ -1,0 +1,59 @@
+# The EXIT cell: ExitCode's second field is a signal only up to 31; 125 is
+# Slurm's OOM marker and any other value the low 7 bits of one of its own
+# error codes (slurm_errno.h of 23.11: ESLURMD_IO_ERROR 4021 -> 53).  Like the
+# rows bioserver's accounting holds: the allocation row of a job whose step
+# failed often says 0:0.  Every End is distinct, so the order is fixed:
+# the folded failure 6200 is the newest failure, for the one-line form.
+@include ../_common/sacct-defaults
+@defaults State=FAILED
+# 6200: one array, every kind of exit; worst first is rc first, then N
+JobID=6200_0; JobName=sweep; ExitCode=1:0; End=\{now-1m}
+JobID=6200_1; JobName=sweep; ExitCode=0:9; End=\{now-1m}
+JobID=6200_2; JobName=sweep; ExitCode=0:53; End=\{now-1m}
+JobID=6200_3; JobName=sweep; ExitCode=0:125; End=\{now-1m}
+JobID=6200_4; JobName=sweep; ExitCode=2:0; End=\{now-1m}
+JobID=6200_5; JobName=sweep; ExitCode=0:15; End=\{now-1m}
+# 6300: rc 0 only, so N alone orders it: 125 before 53 before 9, which
+# the label text (err < oom < sig) would not give
+JobID=6300_0; JobName=rczero; ExitCode=0:9; End=\{now-2m}
+JobID=6300_1; JobName=rczero; ExitCode=0:53; End=\{now-2m}
+JobID=6300_2; JobName=rczero; ExitCode=0:125; End=\{now-2m}
+# 6400: 126 is worse than 125 by number, and the cap of three cuts 9
+JobID=6400_0; JobName=oom126; ExitCode=0:125; End=\{now-3m}
+JobID=6400_1; JobName=oom126; ExitCode=0:126; End=\{now-3m}
+JobID=6400_2; JobName=oom126; ExitCode=0:102; End=\{now-3m}
+JobID=6400_3; JobName=oom126; ExitCode=0:9; End=\{now-3m}
+# 6500: one rc, three N: 53 before 9 before none
+JobID=6500_0; JobName=rcone; ExitCode=1:9; End=\{now-4m}
+JobID=6500_1; JobName=rcone; ExitCode=1:53; End=\{now-4m}
+JobID=6500_2; JobName=rcone; ExitCode=1:0; End=\{now-4m}
+# 6100: a launch failure (53, task I/O setup) on the allocation row and its step
+JobID=6100; JobName=launch; ExitCode=0:53; End=\{now-5m}
+JobID=6100.batch; User=; JobName=batch; State=CANCELLED; ExitCode=0:53; End=\{now-5m}
+# 6101: OOM on the allocation row
+JobID=6101; JobName=oomalloc; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-6m}
+JobID=6101.batch; User=; JobName=batch; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-6m}
+# 6102: a COMPLETED job whose srun step ran out of memory: EXIT says so,
+# STATE (and so colour and bell) stays the job's
+JobID=6102; JobName=stepoom; State=COMPLETED; ExitCode=0:0; End=\{now-7m}
+JobID=6102.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; End=\{now-7m}
+JobID=6102.0; User=; JobName=srun; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-7m}
+# 6103: the batch step cancelled (15) first in row order, an srun step OOM
+# after it: 125 wins over the earlier non-zero field
+JobID=6103; JobName=latoom; State=OUT_OF_MEMORY; ExitCode=0:0; End=\{now-8m}
+JobID=6103.batch; User=; JobName=batch; State=CANCELLED; ExitCode=0:15; End=\{now-8m}
+JobID=6103.extern; User=; JobName=extern; State=COMPLETED; ExitCode=0:0; End=\{now-8m}
+JobID=6103.0; User=; JobName=srun; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-8m}
+# 6104: the return code from the batch step, the OOM from an srun step
+JobID=6104; JobName=mixrows; ExitCode=1:0; End=\{now-9m}
+JobID=6104.batch; User=; JobName=batch; ExitCode=1:0; End=\{now-9m}
+JobID=6104.0; User=; JobName=srun; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-9m}
+# the edges of the label: 31 is the last signal, 32 the first error
+JobID=6105; JobName=sig31; ExitCode=0:31; End=\{now-10m}
+JobID=6106; JobName=err32; ExitCode=0:32; End=\{now-11m}
+JobID=6107; JobName=err124; ExitCode=0:124; End=\{now-12m}
+JobID=6108; JobName=err126; ExitCode=0:126; End=\{now-13m}
+JobID=6109; JobName=err127; ExitCode=0:127; End=\{now-14m}
+# a step cancelled by a user keeps its canceller after the label
+JobID=6110; JobName=killed; State=CANCELLED by 1025; ExitCode=0:0; End=\{now-15m}
+JobID=6110.0; User=; JobName=srun; State=CANCELLED by 1025; ExitCode=0:53; End=\{now-15m}

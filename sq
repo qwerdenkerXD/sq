@@ -686,25 +686,33 @@ function elap(s) {                        # 3-12:04:05 -> 3d12h.  The zero-padde
   if (s < 86400) return int(s/3600) "h" sprintf("%02dm", int(s % 3600 / 60))
   return int(s/86400) "d" sprintf("%02dh", int(s % 86400 / 3600))   # overrun the edge
 }
-function exset(list, cap,   a, m, i, seen, sk, idx, o, c, nd, p, rc, sg) {
+function exset(list, cap,   a, m, i, seen, sk, idx, o, c, nd, x) {
   m = split(list, a, ",")                 # distinct exits, WORST FIRST, then capped:
   for (i=1; i<=m; i++) {                  # taking them in row order hid the loudest
     if (a[i] in seen) continue            # failure behind the ellipsis, because row
-    seen[a[i]] = 1                        # order is task order
-    p  = index(a[i], "/")
-    rc = (p ? substr(a[i], 1, p-1) : a[i]) + 0
-    sg = p ? substr(a[i], p+4) + 0 : 0
-    sk[sprintf("%09d:%09d:%s", 999999999-rc, 999999999-sg, a[i])] = a[i]
-  }
+    seen[a[i]] = 1                        # order is task order.  The list holds raw
+    split(a[i], x, ":")                   # "rc:N" pairs, so the order is numeric and
+    sk[sprintf("%03d:%03d", 999-x[1], 999-x[2])] = exlabel(x[1], x[2])   # no label
+  }                                       # text is ever parsed back
   nd = asorti(sk, idx)
   for (i=1; i<=nd; i++) if (++c <= cap) o = o (o?",":"") sk[idx[i]]
   return (nd > cap) ? o ",…" : o
 }
-function xcm(id, x,   a) {                # the first non-zero return code and the
-  split(x, a, ":")                        # first signal found among a job and its
-  if (JRC[id]+0 == 0 && a[1]+0 != 0) JRC[id] = a[1]+0           # steps; "sacct -X"
-  if (JSG[id]+0 == 0 && a[2]+0 != 0) JSG[id] = a[2]+0           # reports 0:0 here
+function exlabel(rc, sg) {                # the second field of an ExitCode is a
+  if (sg == 0)   return rc ""             # signal only up to 31: Slurm stores its
+  if (sg <= 31)  return rc "/sig" sg      # own errors (53 = task I/O setup failed)
+  if (sg == 125) return rc "/oom"         # and its OOM marker, 125, in that slot too
+  return rc "/err" sg
 }
+# one field of an ExitCode: sacct prints 0-127, so anything but 1-3 digits
+# ("1e3", "53.9", "+inf", "-1", empty) reads as 0 instead of leaking through
+function exfield(s) { return (s ~ /^[0-9]{1,3}$/) ? s+0 : 0 }
+function xcm(id, x,   a, rc, sg) {        # per job, over its allocation row and its
+  split(x, a, ":")                        # steps ("sacct -X" would say 0:0): the
+  rc = exfield(a[1]); sg = exfield(a[2])  # first non-zero return code and the first
+  if (JRC[id] == 0 && rc != 0) JRC[id] = rc               # non-zero second field,
+  if (JSG[id] == 0 && sg != 0 || sg == 125) JSG[id] = sg  # but an OOM always wins,
+}                                         # never hidden behind an earlier 15
 function fcol(code) {                     # one table drives finished-ness, the bell
   if (code == "") return "36"             # and the colour, so PREEMPTED and REVOKED
   if (code == "CD") return "32"           # stop reading as failures and an unknown
@@ -1050,9 +1058,9 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     next
   }
   if (SACCT) {       # ---- sacct: JobID User State ExitCode Elapsed End Node Name
-    if ((dot = index(F[1], ".")) > 0) {   # a step row exists only to supply the
-      xcm(substr(F[1], 1, dot-1), F[4])   # signal its allocation row calls 0:0
-      next
+    if ((dot = index(F[1], ".")) > 0) {   # a step row only adds its exit to the
+      xcm(substr(F[1], 1, dot-1), F[4])   # job: a signal, an OOM or a launch error
+      next                                # often shows on a step row alone
     }
     xcm(F[1], F[4])
     ep = epoch(F[6])
@@ -1087,7 +1095,10 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     next
   }
   if (!(F[2] in DONE)) next                     # ---- squeue -t all, finished only
-  xcm(F[1], F[4])
+  # squeue decodes the raw exit_code of slurmctld, which sets 1 for a job it
+  # ended itself (a deadline, a lost batch script, a node gone): squeue calls
+  # that signal 1, so "0:1" is read as 1:0, as slurmdbd stores it
+  xcm(F[1], (F[4] == "0:1") ? "1:0" : F[4])
   dq++
   did[dq]=F[1]; dname[dq]=F[10]; dsc[dq]=F[2]; dstate[dq]=F[3]
   dlbl[dq]=tid; dw[dq]=tw         # shown as sacct shows it; the bell keeps the JobID
@@ -1160,9 +1171,7 @@ END{
       rst[d]=dsc[r]; rend[d]=rmin[d]=dend[r]; gbase2[d]=daj[r]
       guser[d]=duser[r]; gmin[d]=gmax[d]=dsec[r]
     }
-    rcv = JRC[did[r]]+0                         # the first non-zero return code and
-    sgv = JSG[did[r]]+0                         # the first signal this job or any of
-    ex  = (sgv > 0) ? (rcv "/sig" sgv) : (rcv "")        # its steps reported
+    ex = (JRC[did[r]]+0) ":" (JSG[did[r]]+0)    # raw, labelled by exset
     grows[g]++
     gex[g]  = (grows[g] > 1 ? gex[g]  "," : "") ex
     gids[g] = (grows[g] > 1 ? gids[g] "," : "") did[r]

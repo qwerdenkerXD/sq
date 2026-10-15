@@ -471,6 +471,66 @@ c_finished() {
 	need "caption from sacct"         eval 'section recent | head -1 | grep -qE "^ +recently finished · last 2h$"'
 	need "no unreadable note"         no_skips
 }
+# ---- 7b. the EXIT cell: ExitCode's second field --------------------------
+# A signal only up to 31; 125 is Slurm's OOM marker, any other value the low
+# 7 bits of one of Slurm's own error codes.  The cell is rc, rc/sigN, rc/oom or
+# rc/errN; a folded group lists its distinct exits by rc, then N, as numbers.
+fin_exit() {   # fin_exit ID: the EXIT cell of the finished row whose first cell is ID
+	rows recent | ID=$1 LC_ALL=$utf8 gawk '$1 == ENVIRON["ID"] {
+		i = ($2 ~ /^×[0-9]+$/) ? 5 : 4                  # past the ×N of a fold, NAME and STATE
+		x = $i; for (j = i + 1; j <= NF - 2; j++) x = x " " $j   # ELAPSED and AGO end the row
+		print x; exit }'
+}
+exit_is() { [ "$(fin_exit "$1")" = "$2" ]; }    # exit_is ID EXIT
+c_exit_labels() {
+	T_TITLE="EXIT: 1-31 sigN, 125 oom, any other N errN, from the allocation row or a step; 125 wins; folds rc first, then N"
+	sq_run exits SQ_RECENT_MAX=50 --
+	need "rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
+	need "15 finished rows, no step row"    eval '[ "$(nrows recent)" -eq 15 ] && ! rows recent | grep -qE "batch|extern|srun"'
+	need "53 on the allocation row and its step: 0/err53" exit_is 6100 0/err53
+	need "125 on the allocation row: 0/oom"                exit_is 6101 0/oom
+	need "125 on a step of a COMPLETED job: 0/oom, STATE stays COMPLETED" \
+		eval 'exit_is 6102 0/oom && rows recent | grep -qE "^ +6102 +stepoom +COMPLETED "'
+	need "125 on a later step wins over the batch step's earlier 15" exit_is 6103 0/oom
+	need "rc from the batch step, oom from an srun step: 1/oom" exit_is 6104 1/oom
+	need "31 is a signal, 32 an error"      eval 'exit_is 6105 0/sig31 && exit_is 6106 0/err32'
+	need "124, 126, 127 are errors"         eval 'exit_is 6107 0/err124 && exit_is 6108 0/err126 && exit_is 6109 0/err127'
+	need "the canceller follows the label"  eval '[[ "$(fin_exit 6110)" == "0/err53 by "?* ]]'
+	need "fold of every kind: 2, 1, then the cap" eval 'row_cell recent "6200_[0-5] ×6" && exit_is 6200_[0-5] "2,1,0/oom,…"'
+	need "rc 0 only: 125, 53, 9 by number, not err < oom < sig by text" exit_is 6300_[0-2] "0/oom,0/err53,0/sig9"
+	need "126 before 125 by number; the cap of three cuts the rest" exit_is 6400_[0-3] "0/err126,0/oom,0/err102,…"
+	need "one rc: 53 before 9 before none" exit_is 6500_[0-2] "1/err53,1/sig9,1"
+}
+c_exit_compact() {
+	T_TITLE="EXIT in COMPACT's one-line form: the newest failure, a fold, with the same cell as its row"
+	sq_run exits SQ_WIDTH=100 SQ_HEIGHT=10 -- --compact
+	need "rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
+	need "one line: 6200 with its exits rc first, then N, capped" \
+		fin_line_is "recently finished: 6200_[0-5] ×6 sweep FAILED 2,1,0/oom,…"
+}
+c_exit_garbage() {
+	T_TITLE="EXIT: a field that is not 1-3 ASCII digits reads as 0, so no 1e3, 53.9, +inf or -1 leaks through"
+	local id
+	sq_run exits-garbage SQ_RECENT_MAX=50 --
+	need "rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
+	need "22 finished rows"                 eval '[ "$(nrows recent)" -eq 22 ]'
+	for id in 101 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119; do
+		need "$id ($(rows recent | gawk -v i=$id '$1 == i { print $2 }')): 0" exit_is $id 0
+	done
+	need "':53' and '0:53:7': field 2 is 53"  eval 'exit_is 102 0/err53 && exit_is 103 0/err53'
+	need "three digits read: 0:999 is err999, 007:0 is 7" eval 'exit_is 120 0/err999 && exit_is 121 7'
+	need "a fold of junk: the junk is 0:0"    exit_is 7300_[0-2] "0/sig9,0"
+}
+c_exit_fallback() {
+	T_TITLE="EXIT from squeue -t all, in 23.11's n:n form: 0:125 oom, 0:53 err53, 0:1 read as 1:0, empty and junk 0"
+	sq_run exits-fallback --
+	need "rc 0, stderr empty, stubs: sacct, then the fallback" eval 'rc_is 0 && err_empty && calls_are 1 1 1 1'
+	need "9 finished rows, the running job not among them" eval '[ "$(nrows recent)" -eq 9 ] && ! row_cell recent 3001'
+	need "1:0 is 1, 137:0 is 137 (not reduced)" eval 'exit_is 6001 1 && exit_is 6003 137'
+	need "0:125 is 0/oom, 0:53 0/err53, 0:9 0/sig9" eval 'exit_is 6002 0/oom && exit_is 6005 0/err53 && exit_is 6007 0/sig9'
+	need "0:1, slurmctld's raw 1, is exit 1, not signal 1" exit_is 6006 1
+	need "nothing (NO_VAL) and 0:1x are 0, 0:0 is 0" eval 'exit_is 6004 0 && exit_is 6008 0 && exit_is 6009 0'
+}
 c_user_filter() {
 	T_TITLE="-u alice reaches squeue and sacct as -u alice, and sacct gets no -a"
 	sq_run empty -- -u alice
@@ -2156,6 +2216,7 @@ cases=(
 	compact_no_size compact_error_screens
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
+	exit_labels exit_compact exit_garbage exit_fallback
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

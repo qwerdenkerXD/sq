@@ -1,0 +1,16 @@
+# squeue -t all prints exit_code as 23.11 does, "%u:%u" of the raw status
+# (_print_job_exit_code, src/squeue/print.c): exit status:0, or 0:signal,
+# nothing at all for NO_VAL.  Field 1 is not reduced by 128 as sacct does,
+# and slurmctld's raw 1 for a job it ended itself prints as 0:1
+@include ../_common/squeue-all-defaults
+@defaults StateCompact=F; State=FAILED
+JobID=3001; StateCompact=R; State=RUNNING; TimeUsed=10:00; EndTime=Unknown; Name=still-running
+JobID=6001; exit_code=1:0; Name=rc1; EndTime=\{now-1m}
+JobID=6002; StateCompact=OOM; State=OUT_OF_MEMORY; exit_code=0:125; Name=oom; EndTime=\{now-2m}
+JobID=6003; exit_code=137:0; Name=shell137; EndTime=\{now-3m}
+JobID=6004; exit_code=; Name=noval; EndTime=\{now-4m}
+JobID=6005; exit_code=0:53; Name=launch; EndTime=\{now-5m}
+JobID=6006; StateCompact=DL; State=DEADLINE; exit_code=0:1; Name=ctldfail; EndTime=\{now-6m}
+JobID=6007; StateCompact=CA; State=CANCELLED; exit_code=0:9; Name=killed; EndTime=\{now-7m}
+JobID=6008; exit_code=0:1x; Name=junk; EndTime=\{now-8m}
+JobID=6009; StateCompact=CD; State=COMPLETED; exit_code=0:0; Name=fine; EndTime=\{now-9m}

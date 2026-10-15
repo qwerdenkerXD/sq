@@ -2,4 +2,4 @@
 # skipped with the note, beside a good row
 @include ../_common/squeue-all-defaults
 JobID=7100; Name=single
-JobID=8100; StateCompact=CA; State=CANCELLED; exit_code=0; TimeUsed=0:00; ArrayJobID=8100; ArrayTaskID=5-2; Name=reversed
+JobID=8100; StateCompact=CA; State=CANCELLED; exit_code=0:0; TimeUsed=0:00; ArrayJobID=8100; ArrayTaskID=5-2; Name=reversed
