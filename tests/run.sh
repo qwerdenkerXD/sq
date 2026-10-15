@@ -5,10 +5,11 @@
 #
 #   tests/run.sh [-k|--keep] [NAME...]     NAME: run only the case of that name
 #
-# Needs bash, gawk, coreutils, and util-linux `script` and `setsid` for the
-# terminal cases.  The stubs in tests/bin stand in for squeue/sinfo/sacct
-# (tests/lib/stub.sh says how, tests/FAITHFULNESS.md how they were checked
-# against the real ones); tests/bin/stty only logs and runs the real stty.
+# Needs bash, gawk, coreutils, util-linux `script` and `setsid` for the
+# terminal cases, and glibc's localedef with its locale sources for one case.
+# The stubs in tests/bin stand in for squeue/sinfo/sacct (tests/lib/stub.sh
+# says how, tests/FAITHFULNESS.md how they were checked against the real
+# ones); tests/bin/stty only logs and runs the real stty.
 # Every case must see a stub answer, so the suite cannot pass against a real
 # Slurm by accident.
 #
@@ -28,7 +29,7 @@ keep=0; only=()
 for a in "$@"; do
 	case $a in
 		-k|--keep) keep=1 ;;
-		-h|--help) sed -n '2,16{s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,17{s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
 		-*) printf 'run.sh: unknown option %s\n' "$a" >&2; exit 2 ;;
 		*) only+=("$a") ;;
 	esac
@@ -988,6 +989,27 @@ c_locale_missing() {
 	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 LC_ALL=$bad --
 	need "rc 0, the UTF-8 screen"     eval 'rc_is 0 && cmp -s "$want" <(without_clock "$OUT")'
 	need "stderr: what a script doing nothing gets from bash, no more" cmp -s "$T_DIR/startup" "$ERR"
+}
+# A multibyte locale is not a UTF-8 one: under ja_JP.eucJP gawk counts "…" as
+# one character, as UTF-8 does, but "█" as two, and warns of invalid data on
+# stderr: that locale passed a probe that only measured "…".
+# glibc has no such locale installed by default, so the case builds one with
+# localedef (glibc's own) where only this run's LOCPATH can see it.
+c_locale_not_utf8() {
+	T_TITLE="LC_ALL=ja_JP.eucJP is no UTF-8 locale: sq draws byte for byte the UTF-8 screen, with nothing on stderr"
+	local loc=$T_DIR/loc args want
+	mkdir -p "$loc"; localedef -i ja_JP -f EUC-JP "$loc/ja_JP.eucJP" > /dev/null 2>&1
+	if ! [ "$(LOCPATH=$loc LC_ALL=ja_JP.eucJP locale charmap 2>/dev/null)" = EUC-JP ]; then
+		T_FAIL+=("localedef could not build ja_JP.eucJP (needs glibc's locale sources)"); return
+	fi
+	for args in "bars-busy SQ_WIDTH=100" "shrink-pending SLURM_BITSTR_LEN=0 SQ_WIDTH=79"; do
+		set -- $args
+		sq_run "$@" -- --color
+		want=$RUN/screen.utf8; without_clock "$OUT" > "$want"
+		sq_run "$@" LC_ALL=ja_JP.eucJP LOCPATH="$loc" -- --color
+		need "$args: rc 0, the UTF-8 screen" eval 'rc_is 0 && cmp -s "$want" <(without_clock "$OUT")'
+		need "$args: stderr empty"    err_empty
+	done
 }
 # A NAME is no id, even one that looks like a bracket: it keeps the plain cut
 name_cut() {         # name_cut SECTION ID: the NAME of row ID is a right cut of the full name
@@ -2100,7 +2122,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale locale_pinned locale_missing shrink_name shrink_extent
+	shrink_locale locale_pinned locale_missing locale_not_utf8 shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40
