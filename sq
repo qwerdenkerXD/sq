@@ -55,7 +55,7 @@
 # Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4,
 # and a bracket Slurm prints reads 9008_[4-9] x6 with or without -x: the
 # footer and "+N more" count every task in it, not the row.
-# EXIT: rc, rc/sigN (signal N), rc/oom (out of memory), rc/errN (Slurm error N)
+# EXIT: rc/sigN signal N, rc/oom out of memory, rc/errN low 7 bits of a Slurm error
 # Finished jobs come from the accounting DB, so the window is SQ_SINCE and not
 # MinJobAge: a job that ended while nobody watched is still seen.  Step rows
 # are read along with it, because the allocation row of a signalled job
