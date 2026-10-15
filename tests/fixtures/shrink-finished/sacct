@@ -3,8 +3,8 @@
 # both ids too wide for a narrow terminal, and with one row allowed both are
 # what "+N more" counts
 @include ../_common/sacct-defaults
-JobID=7100; JobName=single; End=2026-10-06T09:00:00
-JobID=600_[1,4,7,10,13,16,19,22,25,28,31,34,37,40,43,46,49,52,55,58,61,64,67,70,73,76,79,82,85,88,91,94,97,100,103,106,109,112,115,118,121,124,127,130,133,136,139,142,145,148,151,154,157,160,163,166,169,172,175,178,181,184,187,190,193,196,199]; JobName=sweep; State=CANCELLED by 1025; ExitCode=0:0; Elapsed=00:00:00; NodeList=None assigned; End=2026-10-06T08:30:00
+JobID=7100; JobName=single; End=\{now-11h}
+JobID=600_[1,4,7,10,13,16,19,22,25,28,31,34,37,40,43,46,49,52,55,58,61,64,67,70,73,76,79,82,85,88,91,94,97,100,103,106,109,112,115,118,121,124,127,130,133,136,139,142,145,148,151,154,157,160,163,166,169,172,175,178,181,184,187,190,193,196,199]; JobName=sweep; State=CANCELLED by 1025; ExitCode=0:0; Elapsed=00:00:00; NodeList=None assigned; End=\{now-11h30m}
 JobID=5000_0; JobName=sweep; State=FAILED; ExitCode=1:0
 JobID=5000_2; JobName=sweep; State=FAILED; ExitCode=1:0
 JobID=5000_4; JobName=sweep; State=FAILED; ExitCode=1:0

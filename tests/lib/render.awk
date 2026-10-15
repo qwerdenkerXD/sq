@@ -47,7 +47,22 @@ function parse_format(   i, c, d, m, items, p, name, spec) {
   if (!nf) refuse("format '" fmt "' requests no field")
 }
 
-function decode(s,   out, i, c, d) {
+# \{now-1h30m}: the time that far from the moment the stub runs, printed the way
+# SLURM_TIME_FORMAT=standard prints one.  A fixture says how long ago a job
+# ended, never when, so the ages sq renders from it cannot change with the date
+# the suite runs on.  OFF is "", or a sign and d/h/m/s terms: "-1h30m", "+2d"
+function reltime(off,   sign, sec, u) {
+  sign = (substr(off, 1, 1) == "+") ? 1 : -1
+  sec = 0; off = substr(off, 2)
+  while (match(off, /^[0-9]+[dhms]/)) {
+    u = substr(off, RLENGTH, 1)
+    sec += substr(off, 1, RLENGTH - 1) * (u == "d" ? 86400 : u == "h" ? 3600 : u == "m" ? 60 : 1)
+    off = substr(off, RLENGTH + 1)
+  }
+  return strftime("%Y-%m-%dT%H:%M:%S", systime() + sign * sec)
+}
+
+function decode(s,   out, i, c, d, n) {
   out = ""
   for (i = 1; i <= length(s); i++) {
     c = substr(s, i, 1)
@@ -63,6 +78,9 @@ function decode(s,   out, i, c, d) {
     else if (d == "\\") out = out "\\"
     else if (d == "x" && substr(s, i+1, 2) ~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) {
       out = out sprintf("%c", strtonum("0x" substr(s, i+1, 2))); i += 2
+    }
+    else if (d == "{" && match(substr(s, i+1), /^now([-+]([0-9]+[dhms])+)?}/)) {
+      n = RLENGTH; out = out reltime(substr(s, i+4, n-4)); i += n
     }
     else refuse(where() ": unknown escape \\" d)
   }

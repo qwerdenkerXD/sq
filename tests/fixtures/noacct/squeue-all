@@ -143,6 +143,6 @@ JobID=4112; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=call
 JobID=4113; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=annot
 JobID=4114; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=vcf
 JobID=4115; StateCompact=R; State=RUNNING; EndTime=Unknown; Name=report
-JobID=4195; StateCompact=CD; State=COMPLETED; TimeUsed=41:10; EndTime=2026-10-06T19:42:48; UserName=bob; Name=trim
-JobID=4193; StateCompact=CD; State=COMPLETED; TimeUsed=12:03; EndTime=2026-10-06T19:40:48; UserName=alice; Name=fastp
-JobID=4188; StateCompact=F; State=FAILED; exit_code=1; TimeUsed=0:42; EndTime=2026-10-06T19:39:48; UserName=fsill; Name=qc
+JobID=4195; StateCompact=CD; State=COMPLETED; TimeUsed=41:10; EndTime=\{now-17m12s}; UserName=bob; Name=trim
+JobID=4193; StateCompact=CD; State=COMPLETED; TimeUsed=12:03; EndTime=\{now-19m12s}; UserName=alice; Name=fastp
+JobID=4188; StateCompact=F; State=FAILED; exit_code=1; TimeUsed=0:42; EndTime=\{now-20m12s}; UserName=fsill; Name=qc

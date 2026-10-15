@@ -61,7 +61,9 @@ ESC=$'\033'
 # Leaves OUT, ERR, LOG (the stub log) and RC for the assertions below.
 sq_run() {
 	local fixture=$1; shift
-	local -A env=([PATH]="$here/bin:$PATH" [LC_ALL]=$utf8
+	# TZ=UTC: a fixture's \{now-2h} is printed in local time and sq reads it back
+	# with mktime, which cannot tell the two passes of a repeated DST hour apart
+	local -A env=([PATH]="$here/bin:$PATH" [LC_ALL]=$utf8 [TZ]=UTC
 	              [SQSTUB_FIXTURE]=$([[ $fixture == /* ]] && echo "$fixture" || echo "$fixtures/$fixture")
 	              [SQ_TIMEOUT]=3 [SQ_WIDTH]=120 [SQ_HEIGHT]=50)
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do

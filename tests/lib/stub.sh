@@ -28,6 +28,10 @@
 # Fields are separated by ";", spaces around names and values are ignored.
 # Escapes in values: \n newline  \t tab  \r CR  \e ESC  \a BEL  \s space
 #                    \xHH any byte  \; semicolon  \\ backslash
+#                    \{now-1h30m} the time that long before the stub runs
+#                    (\{now}, \{now+2d}; d h m s), as SLURM_TIME_FORMAT=standard
+#                    prints it: write every time sq reads an age from this way,
+#                    so the screen does not change with the date of the run
 # Lines starting with "#" and blank lines are ignored.  Directives, run in order:
 #   @defaults k=v; ...  fields every later record has unless it sets them
 #   @include FILE       read FILE (relative to this file, or absolute) here
