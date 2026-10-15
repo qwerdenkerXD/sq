@@ -149,11 +149,14 @@ sq -C                     # centred in both axes
 - **Reading EXIT:** the exit code, then what ExitCode's second field says, taken from the job
   and its steps (the first non-zero one, except that an out-of-memory always wins):
   `rc/sigN` is signal N as Slurm records it, `rc/oom` out of memory, and `rc/errN` the low
-  7 bits of a Slurm error code, not errno: 53 task I/O setup failed (the stdin, stdout or
-  stderr file, or the link back to srun), 52 exec failed, 46 environment setup, 48
-  setuid/setgid, 54 prolog, 115 spank plugin. So EXIT can show a step's OOM on a job that
-  finished COMPLETED. A folded row lists its distinct exits, highest exit code first, then
-  highest N. Known limits: a launch or communication failure can read as `sig11`, `sig12` or
+  7 bits of a Slurm error code, not errno, from slurmd starting the job or step: 53 task
+  I/O setup failed (the stdin, stdout or stderr file, or the link back to srun), 52 the
+  tasks could not be started (Slurm calls it execve failed; a failed fork, chdir, or task or
+  spank plugin call reads so too), 46 job setup failed (the user's environment, or the
+  process-tracking container), 48 switching to the user's ids failed (setuid/setgid), 54 the
+  prolog failed or never started, 115 the spank plugin stack failed to initialize. So EXIT
+  can show a step's OOM on a job that finished COMPLETED. A folded row lists its distinct
+  exits, highest exit code first, then highest N. Known limits: a launch or communication failure can read as `sig11`, `sig12` or
   `sig13` (Slurm's own log calls it RaisedSignal); steps Slurm closes for a dead node read
   `sig9`; an OOM caught by OverMemoryKill or missed by the cgroup detection reads `sig9`; a
   real-time signal (34–64) reads `errN`; a signal passed through a shell as exit 128+N reads
