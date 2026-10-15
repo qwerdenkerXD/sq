@@ -530,11 +530,13 @@ c_exit_fallback() {
 	T_TITLE="EXIT from squeue -t all, in 23.11's n:n form: 0:125 oom, 0:53 err53, 0:1 read as 1:0, empty and junk 0"
 	sq_run exits-fallback --
 	need "rc 0, stderr empty, stubs: sacct, then the fallback" eval 'rc_is 0 && err_empty && calls_are 1 1 1 1'
-	need "10 finished rows, the running job not among them" eval '[ "$(nrows recent)" -eq 10 ] && ! row_cell recent 3001'
+	need "14 finished rows, the running job not among them" eval '[ "$(nrows recent)" -eq 14 ] && ! row_cell recent 3001'
 	need "1:0 is 1, 137:0 is 137 (not reduced)" eval 'exit_is 6001 1 && exit_is 6003 137'
 	need "0:125 is 0/oom, 0:53 0/err53, 0:9 0/sig9" eval 'exit_is 6002 0/oom && exit_is 6005 0/err53 && exit_is 6007 0/sig9'
 	need "0:1, slurmctld's raw 1, is exit 1, not signal 1" exit_is 6006 1
 	need "2:1 stays 2/sig1: only rc 0 with signal 1 is read as exit 1" exit_is 6010 2/sig1
+	need "the values are read, not the text: ' 0:1', 00:1, 0:01, 0:1:0 are exit 1 too" \
+		eval 'exit_is 6011 1 && exit_is 6012 1 && exit_is 6013 1 && exit_is 6014 1'
 	need "nothing (NO_VAL) and 0:1x are 0, 0:0 is 0" eval 'exit_is 6004 0 && exit_is 6008 0 && exit_is 6009 0'
 }
 c_user_filter() {

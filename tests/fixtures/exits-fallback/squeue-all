@@ -17,3 +17,9 @@ JobID=6009; StateCompact=CD; State=COMPLETED; exit_code=0:0; Name=fine; EndTime=
 # a form squeue cannot print (exit and signal both set), pinning that only
 # an rc of 0 with signal 1 is read as exit 1
 JobID=6010; exit_code=2:1; Name=both; EndTime=\{now-10m}
+# forms squeue cannot print either: the 0:1 reading is of the values, so each
+# of these is exit 1 like 0:1 itself
+JobID=6011; exit_code=\s0:1; Name=lead; EndTime=\{now-11m}
+JobID=6012; exit_code=00:1; Name=zero2; EndTime=\{now-12m}
+JobID=6013; exit_code=0:01; Name=one2; EndTime=\{now-13m}
+JobID=6014; exit_code=0:1:0; Name=third; EndTime=\{now-14m}
