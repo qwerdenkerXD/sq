@@ -84,6 +84,17 @@ shopt -u checkwinsize
 
 die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
 
+# Outside text - a filter, a setting, the host name, a collector's stderr - loses
+# every control character before it reaches the screen or a message: C0 and DEL
+# as bytes, and C1 (U+0080-U+009F; \xc2\x9b is CSI, \xc2\x9d OSC) as the UTF-8
+# pair it arrives as, again and again, because taking one pair out can join the
+# halves of another.  Bytes, never the locale (GNU tr is byte-based anyway), so
+# any other UTF-8 text passes unchanged; under env, so bash itself never switches
+# locale for it
+scrub() {
+	env LC_ALL=C tr -d '\000-\037\177' | env LC_ALL=C sed -e ':a' -e $'s/\xc2[\x80-\x9f]//g' -e 'ta'
+}
+
 fields=${SQ_FMT:-i,j,u,T,M,L,C,m,R}
 fsrc=${SQ_FMT:+SQ_FMT}; fsrc=${fsrc:--o}         # which one to blame for a bad letter
 center=${SQ_CENTER:-0}
@@ -173,7 +184,7 @@ while [ $# -gt 0 ]; do
 			esac
 			case $reserve in
 				''|*[!0-9]*) die "--reserve needs a number of lines, not '$(printf '%s' "$reserve" \
-					| tr -d '[:cntrl:]' | cut -c1-40)'; e.g. sq --reserve 2" ;;
+					| scrub | cut -c1-40)'; e.g. sq --reserve 2" ;;
 			esac ;;
 		-h|--help) awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
 		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
@@ -254,7 +265,7 @@ while [ $# -gt 0 ]; do
 						# value, and "--all=x" forwarded raw came back as a
 						# fake outage
 						[ "$1" = "$opt" ] || die "$opt takes no value; write it on its own, e.g. sq $opt" ;;
-					--*) die "$(printf '%s' "$opt" | tr -d '[:cntrl:]' \
+					--*) die "$(printf '%s' "$opt" | scrub \
 						| cut -c1-40) is not one of the long options sq forwards; sq -h lists them" ;;
 				esac
 				args+=("$1"); shift; continue
@@ -286,7 +297,7 @@ while [ $# -gt 0 ]; do
 					case $val in
 						-*) opt_hint "$kopt"
 							die "$opt needs $vnoun, not '$(printf '%s' "$val" \
-								| tr -d '[:cntrl:]' | cut -c1-40)'; e.g. sq $opt $vex" ;;
+								| scrub | cut -c1-40)'; e.g. sq $opt $vex" ;;
 					esac ;;
 			esac
 			# REPEAT, for every filter and not only the six: squeue keeps the LAST
@@ -457,7 +468,7 @@ case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeou
 err_of() {   # err_of RC STDERR-FILE TOOL
 	local why
 	[ "$1" = 124 ] && { echo "no response after ${tmo}s"; return; }
-	why=$(head -1 "$2" | tr -d '[:cntrl:]')
+	why=$(head -1 "$2" | scrub)
 	if   [ -n "$why" ];    then echo "$why"
 	elif [ "$1" -gt 128 ]; then echo "$3 crashed (signal $(($1 - 128)))"
 	else                        echo "$3 failed (exit $1)"
@@ -527,13 +538,13 @@ while [ $ai -lt ${#args[@]} ]; do
 	sargs+=("$sf" "$v"); sfilt="$sfilt · $lbl=$v"
 	[ "$sf" = -u ] && suser=1
 done
-sfilt=$(printf '%s' "$sfilt" | tr -d '[:cntrl:]')
-sskip=$(printf '%s' "$sskip" | tr -d '[:cntrl:]')
+sfilt=$(printf '%s' "$sfilt" | scrub)
+sskip=$(printf '%s' "$sskip" | scrub)
 
 # an overlap filter, so a job that started days ago and ended inside the window
 # is returned - which is the whole point.  Never --state: that redefines -S/-E
 # from "overlapped the window" to "was in that state during it".
-since=$(printf '%s' "${SQ_SINCE:-now-2hours}" | tr -d '[:cntrl:]' | cut -c1-40)
+since=$(printf '%s' "${SQ_SINCE:-now-2hours}" | scrub | cut -c1-40)
 [ -n "$since" ] || since=now-2hours
 case $since in
 	now-*) wtxt="last $(printf '%s' "${since#now-}" | sed -E 's/^([0-9]+)([A-Za-z]).*$/\1\2/')" ;;
@@ -622,7 +633,7 @@ fi
 # only what sq minted or validated itself: numbers, fixed words, field letters.
 # sqv names them once: each is the shell variable of that name, exported as
 # SQV_<name>, and gawk reads the same list back into its own variable.
-statef=$statedir/alerted host=$(hostname -s | tr -d '[:cntrl:]') now=$(date '+%H:%M:%S %Z')
+statef=$statedir/alerted host=$(hostname -s | scrub) now=$(date '+%H:%M:%S %Z')
 sqv="center fold color bell eta recent bellall me statef statetmp nerr jerr rwhy rerr wtxt sfilt host now"
 for v in $sqv; do export "SQV_$v=${!v}"; done
 env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \

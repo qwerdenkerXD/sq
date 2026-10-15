@@ -621,9 +621,12 @@ c_backslash_text() {
 # outside text, so ESC[2J reads "[2J" and the CR is gone.
 ctl_fixture_text='Invalid user: \e[2Jboom\rX'      # in the stub's escapes: ESC and CR
 ctl_shown='Invalid user: [2JboomX'
+ctl_c1_fixture_text='Invalid user: a\xc2\x9b2Jb\xc2\x85c\xc2\x9dd é€✓ \xc2\xa0!'   # C1 CSI NEL OSC, then text that stays
+ctl_c1_shown=$(printf 'Invalid user: a2Jbcd é€✓ \xc2\xa0!')                     # U+00A0 is no control
+c1_inert() { ! LC_ALL=C grep -q $'\xc2[\x80-\x9f]' "$OUT"; }
 ctl_inert() { [ "$(escapes)" -eq 0 ] && ! LC_ALL=C grep -q $'\r' "$OUT"; }   # no ESC, no CR byte
 c_control_text() {
-	T_TITLE="ESC and CR in squeue's, sinfo's, sacct's and the fallback's stderr and in the host name are scrubbed before they reach the screen"
+	T_TITLE="ESC and CR in squeue's, sinfo's, sacct's and the fallback's stderr and in the host name, and C1 controls in stderr and a filter, are scrubbed before they reach the screen"
 	local f fx hbin=$T_DIR/hbin
 	for f in squeue sinfo sacct squeue-all; do
 		fx=$(stderr_fixture "$f" "$ctl_fixture_text")
@@ -637,6 +640,16 @@ c_control_text() {
 	sq_run "$fx" COLUMNS=120 LINES=50 --
 	need "squeue stderr in colour: rc 0, the banner scrubbed" eval 'rc_is 0 && has "slurm unreachable · squeue: error: $ctl_shown"'
 	need "squeue stderr in colour: every ESC is sq's own SGR, no CR" eval 'escapes_all_sgr && ! LC_ALL=C grep -q $'"'"'\r'"'"' "$OUT"'
+	# C1 controls arrive as UTF-8 pairs (\xc2\x9b is CSI, \x85 NEL, \x9d OSC), which a
+	# byte-wise tr never saw; any other UTF-8 text stays as it is
+	for f in squeue sinfo; do
+		sq_run "$(stderr_fixture "$f" "$ctl_c1_fixture_text")" --
+		need "$f stderr with C1: rc 0, shown without them, the other UTF-8 text kept" eval 'rc_is 0 && has "$f: error: $ctl_c1_shown"'
+		need "$f stderr with C1: no C1 pair in the output" c1_inert
+	done
+	sq_run wide -- -u "$(printf 'al\xc2\x9bi\xc2\x9dce')"
+	need "-u with C1: rc 0, the caption names user=alice" eval 'rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h · user=alice"'
+	need "-u with C1: no C1 pair in the output" c1_inert
 	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "node\\033[2Jboom\\rX\\n"\n' > "$hbin/hostname"; chmod +x "$hbin/hostname"
 	sq_run wide PATH="$hbin:$here/bin:$PATH" --
 	need "host name: rc 0, on the title without its control characters" eval 'rc_is 0 && plain | head -1 | grep -qF "SLURM node[2JboomX "'
