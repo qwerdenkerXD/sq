@@ -572,18 +572,20 @@ bs_text='x\nFORGED: 0 jobs\tT\033[31mR\\B'
 bs_inert() { ! matches '^ *FORGED' && [ "$(escapes)" -eq 0 ] && ! grep -q $'\t' "$OUT"; }   # nothing it spells out happened
 bs_kept()  { has "$bs_text" && bs_inert; }     # ... and it is on the screen as typed
 # "wide" has a job name wider than any screen, so no caption is clipped short
-bs_fixture() {   # bs_fixture FILE|none: "wide", but its FILE collector fails, printing bs_text on stderr
+stderr_fixture() {   # stderr_fixture FILE|none TEXT: "wide", but its FILE collector fails, printing TEXT (fixture escapes) on stderr
 	local d=$T_DIR/fx-$1; mkdir -p "$d"
 	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
 	printf '@include %s\n' "$fixtures/wide/squeue" > "$d/squeue"
 	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
 	printf '@include %s\n' "$fixtures/_common/empty" > "$d/squeue-all"
-	# the fixture escape for a backslash is a doubled one; the fallback is reached
-	# only when sacct fails too, and with nothing on stderr, so its error shows
+	# the fallback is reached only when sacct fails too, and with nothing on
+	# stderr, so its error shows
 	[ "$1" != squeue-all ] || printf '@exit 1\n' > "$d/sacct"
-	[ "$1" = none ] || printf '@stderr %s: error: %s\n@exit 1\n' "${1%-all}" "${bs_text//\\/\\\\}" > "$d/$1"
+	[ "$1" = none ] || printf '@stderr %s: error: %s\n@exit 1\n' "${1%-all}" "$2" > "$d/$1"
 	printf '%s' "$d"
 }
+# the fixture escape for a backslash is a doubled one
+bs_fixture() { stderr_fixture "$1" "${bs_text//\\/\\\\}"; }   # bs_fixture FILE|none: bs_text on FILE's stderr
 c_backslash_text() {
 	T_TITLE="'\\n' '\\t' '\\033' '\\\\' in -u, -p, -n, SQ_SINCE, the host name and every collector's stderr reach the screen byte for byte"
 	local f fx hbin=$T_DIR/hbin
@@ -605,6 +607,34 @@ c_backslash_text() {
 		sq_run "$fx" --
 		need "$f stderr: rc 0, shown literally" eval 'rc_is 0 && bs_kept'
 	done
+}
+
+# Control characters.  squeue echoes what the user typed into its stderr
+# ("Invalid user: <name>"), and that first line went to the banner raw, as did
+# sinfo's and the host name to the title: an ESC could clear the screen, a CR
+# overwrite the line.  They lose their control characters like every other
+# outside text, so ESC[2J reads "[2J" and the CR is gone.
+ctl_fixture_text='Invalid user: \e[2Jboom\rX'      # in the stub's escapes: ESC and CR
+ctl_shown='Invalid user: [2JboomX'
+ctl_inert() { [ "$(escapes)" -eq 0 ] && ! LC_ALL=C grep -q $'\r' "$OUT"; }   # no ESC, no CR byte
+c_control_text() {
+	T_TITLE="ESC and CR in squeue's, sinfo's, sacct's and the fallback's stderr and in the host name are scrubbed before they reach the screen"
+	local f fx hbin=$T_DIR/hbin
+	for f in squeue sinfo sacct squeue-all; do
+		fx=$(stderr_fixture "$f" "$ctl_fixture_text")
+		sq_run "$fx" --
+		need "$f stderr: rc 0, stderr empty" eval 'rc_is 0 && err_empty'
+		need "$f stderr: shown without its control characters" has "${f%-all}: error: $ctl_shown"
+		need "$f stderr: no ESC, no CR in the output" ctl_inert
+	done
+	fx=$(stderr_fixture squeue "$ctl_fixture_text")
+	sq_run "$fx" COLUMNS=120 LINES=50 --
+	need "squeue stderr in colour: rc 0, the banner scrubbed" eval 'rc_is 0 && has "slurm unreachable · squeue: error: $ctl_shown"'
+	need "squeue stderr in colour: every ESC is sq's own SGR, no CR" eval 'escapes_all_sgr && ! LC_ALL=C grep -q $'"'"'\r'"'"' "$OUT"'
+	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "node\\033[2Jboom\\rX\\n"\n' > "$hbin/hostname"; chmod +x "$hbin/hostname"
+	sq_run wide PATH="$hbin:$here/bin:$PATH" --
+	need "host name: rc 0, on the title without its control characters" eval 'rc_is 0 && plain | head -1 | grep -qF "SLURM node[2JboomX "'
+	need "host name: no ESC, no CR in the output" ctl_inert
 }
 
 # What only the bell reads takes the same road: a user name and a cache path
@@ -2227,7 +2257,7 @@ c_bars_width_sweep() {
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text bell_text centre sacct_fallback
+	finished user_filter backslash_text control_text bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column

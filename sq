@@ -449,7 +449,10 @@ trap 'rm -rf "$tmp"; rm -f "$statetmp"' EXIT
 tmo=${SQ_TIMEOUT:-5}
 case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeout
 [ -n "$(printf '%s' "$tmo" | tr -d '0.')" ] || tmo=5    # 0, 0.0 mean "no limit"
-err_of() { [ "$1" = 124 ] && echo "no response after ${tmo}s" || head -1 "$2"; }
+# why a collector failed: the timeout, or the first line of its stderr, which
+# can echo what the user typed and so loses its control characters like every
+# other outside text
+err_of() { [ "$1" = 124 ] && echo "no response after ${tmo}s" || head -1 "$2" | tr -d '[:cntrl:]'; }
 
 # SLURM_TIME_FORMAT is pinned on every collector: "relative" or a custom
 # format turns a date into something epoch() cannot read, which silently kills
@@ -552,7 +555,7 @@ if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	# is what the closed whitelist above is for; rc!=0 can still leave a partial
 	# file behind, so that is thrown away rather than rendered
 	if [ $se -eq 0 ]; then rsrc=sacct
-	else rwhy=$(err_of $se "$tmp/recent.err" | tr -d '[:cntrl:]'); rwhyc=acct; : > "$tmp/recent"
+	else rwhy=$(err_of $se "$tmp/recent.err"); rwhyc=acct; : > "$tmp/recent"
 	fi
 fi
 
@@ -565,7 +568,7 @@ if [ "$recent" != 0 ] && [ "$rsrc" = none ] && [ -z "$jerr" ]; then
 		"${args[@]+"${args[@]}"}" > "$tmp/recent" 2> "$tmp/recent.err"
 	fe=$?
 	if [ $fe -eq 0 ]; then rsrc=squeue
-	else rerr=$(err_of $fe "$tmp/recent.err" | tr -d '[:cntrl:]'); : > "$tmp/recent"
+	else rerr=$(err_of $fe "$tmp/recent.err"); : > "$tmp/recent"
 	fi
 fi
 
@@ -609,7 +612,7 @@ fi
 # only what sq minted or validated itself: numbers, fixed words, field letters.
 # sqv names them once: each is the shell variable of that name, exported as
 # SQV_<name>, and gawk reads the same list back into its own variable.
-statef=$statedir/alerted host=$(hostname -s) now=$(date '+%H:%M:%S %Z')
+statef=$statedir/alerted host=$(hostname -s | tr -d '[:cntrl:]') now=$(date '+%H:%M:%S %Z')
 sqv="center fold color bell eta recent bellall me statef statetmp nerr jerr rwhy rerr wtxt sfilt host now"
 for v in $sqv; do export "SQV_$v=${!v}"; done
 env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \
