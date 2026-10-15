@@ -1846,10 +1846,9 @@ c_compact_error_screens() {
 
 # ---- node bars: allocated and in use, against the screens Franz accepted ----
 # fixtures/bars-*/nodes-w<W>.{txt,ansi} are the node lines of the accepted target
-# screens (2026-10-07) at 120, 80 and 60 columns, without and with colour.  One
-# correction in the coloured ones: the prototype that drew them printed the
-# used-memory number bold, while sq keeps the colour it has there (bold red above
-# 95%, else none), so those two lines per screen carry that instead.
+# screens (2026-10-07) at 120, 80 and 60 columns, without and with colour.  The
+# used-memory number is bold like the CPU one (bold red above 95%), as Franz chose
+# 2026-10-15; the prototype that drew the screens already printed it so.
 node_lines() {    # the node block: after the blank below the title, up to the next blank
 	gawk 'b == 1 && $0 == "" { exit } b == 1 { print } $0 == "" { b++ }' "$OUT"
 }

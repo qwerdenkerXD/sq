@@ -1396,7 +1396,7 @@ END{
                        lm, e("1"), wn, node[r], e("0"), sc, (bar?" ":""), p,
                        e("1"), wu, used[r], e("0"), wt, tot[r],
                        sm, (bar?" ":""), (mp<0 ? "-" : sprintf("%d", mp)),
-                       e(mp>95 && mp>=0 ? "1;31" : "0"), wf, memu[r], e("0"), wm, memt[r],
+                       e(mp>95 && mp>=0 ? "1;31" : "1"), wf, memu[r], e("0"), wm, memt[r],
                        npad+0, "", e("2"), nst[r], e("0"))
     if (SHOW["reasons"] && nreason[r] != "") {
       x = nreason[r]
