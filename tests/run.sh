@@ -476,6 +476,48 @@ c_user_filter() {
 	need "sacct: no -a (sacct takes the last of -u/-a, so -a would mean everybody)" argv_lacks sacct -a
 	need "caption names the filter"   has "recently finished · last 2h · user=alice"
 }
+# Backslashes in outside text.  gawk processes the escapes of a -v value after
+# sq has scrubbed the control characters, so "\n" in a filter, an env setting,
+# the host name or a collector's stderr became a newline - a forged line - and
+# "\033" a raw ESC.  Every path must show the text byte for byte.
+bs_text='x\nFORGED: 0 jobs\tT\033[31mR\\B'
+bs_inert() { ! matches '^ *FORGED' && [ "$(escapes)" -eq 0 ] && ! grep -q $'\t' "$OUT"; }   # nothing it spells out happened
+bs_kept()  { has "$bs_text" && bs_inert; }     # ... and it is on the screen as typed
+# "wide" has a job name wider than any screen, so no caption is clipped short
+bs_fixture() {   # bs_fixture FILE|none: "wide", but its FILE collector fails, printing bs_text on stderr
+	local d=$T_DIR/fx-$1; mkdir -p "$d"
+	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
+	printf '@include %s\n' "$fixtures/wide/squeue" > "$d/squeue"
+	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
+	printf '@include %s\n' "$fixtures/_common/empty" > "$d/squeue-all"
+	# the fixture escape for a backslash is a doubled one; the fallback is reached
+	# only when sacct fails too, and with nothing on stderr, so its error shows
+	[ "$1" != squeue-all ] || printf '@exit 1\n' > "$d/sacct"
+	[ "$1" = none ] || printf '@stderr %s: error: %s\n@exit 1\n' "${1%-all}" "${bs_text//\\/\\\\}" > "$d/$1"
+	printf '%s' "$d"
+}
+c_backslash_text() {
+	T_TITLE="'\\n' '\\t' '\\033' '\\\\' in -u, -p, -n, SQ_SINCE, the host name and every collector's stderr reach the screen byte for byte"
+	local f fx hbin=$T_DIR/hbin
+	for f in -u -p; do
+		sq_run wide -- "$f" "$bs_text"
+		need "$f: rc 0, stubs called"     eval 'rc_is 0 && calls_are 1 1 0 1'
+		need "$f: the filter on the caption, literally, and no forged line" bs_kept
+	done
+	sq_run "$(bs_fixture none)" -- -n "$bs_text"      # -n has no sacct equivalent: the fallback
+	need "-n: rc 0, the value forwarded to squeue as typed" eval 'rc_is 0 && argv_has squeue -n "$bs_text"'
+	need "-n: no forged line, no ESC, no tab" bs_inert
+	sq_run wide SQ_SINCE="$bs_text" --
+	need "SQ_SINCE: rc 0, the window on the caption, literally" eval 'rc_is 0 && bs_kept'
+	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "%%s\\n" %q\n' "$bs_text" > "$hbin/hostname"; chmod +x "$hbin/hostname"
+	sq_run wide PATH="$hbin:$here/bin:$PATH" --
+	need "host name: rc 0, on the title, literally" eval 'rc_is 0 && bs_kept && plain | head -1 | grep -qF "SLURM $bs_text "'
+	for f in sinfo squeue sacct squeue-all; do
+		fx=$(bs_fixture "$f")
+		sq_run "$fx" --
+		need "$f stderr: rc 0, shown literally" eval 'rc_is 0 && bs_kept'
+	done
+}
 
 # ---- 8. sacct fails: the squeue -t all fallback -----------------------------
 c_sacct_fallback() {
@@ -1917,7 +1959,7 @@ c_bars_edges() {
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_garbage both_fail
-	finished user_filter sacct_fallback
+	finished user_filter backslash_text sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column

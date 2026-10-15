@@ -575,14 +575,18 @@ if [ "$rsrc" = sacct ]; then
 	done
 fi
 
-gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v center="$center" -v fold="$fold" \
-     -v color="$color" -v bell="$bell" -v eta="$eta" -v statef="$statedir/alerted" \
-     -v statetmp="$statetmp" -v hastty="$hastty" -v horizon="$horizon" \
-     -v nerr="$nerr" -v jerr="$jerr" -v me="$me" -v bellall="$bellall" \
-     -v recent="$recent" -v rsrc="$rsrc" -v rwhy="$rwhy" -v rerr="$rerr" \
-     -v rwhyc="$rwhyc" -v rmax="$rmax" -v compact="$compact" -v reserve="$reserve" \
-     -v wtxt="$wtxt" -v sfilt="$sfilt" -v uidmap="$uidmap" \
-     -v host="$(hostname -s)" -v now="$(date '+%H:%M:%S %Z')" '
+# Every value that can carry outside text - a setting, a filter, a path, the
+# host name, a collector's stderr - reaches gawk through ENVIRON, which it takes
+# byte for byte.  A -v value has its backslash escapes processed AFTER the tr
+# above, so "sq -u 'alice\nFORGED: 0 jobs'" printed a forged line.  -v carries
+# only what sq minted or validated itself: numbers, fixed words, field letters.
+SQV_center=$center SQV_fold=$fold SQV_color=$color SQV_bell=$bell SQV_eta=$eta \
+SQV_recent=$recent SQV_bellall=$bellall SQV_me=$me SQV_statef=$statedir/alerted \
+SQV_statetmp=$statetmp SQV_nerr=$nerr SQV_jerr=$jerr SQV_rwhy=$rwhy SQV_rerr=$rerr \
+SQV_wtxt=$wtxt SQV_sfilt=$sfilt SQV_host=$(hostname -s) SQV_now=$(date '+%H:%M:%S %Z') \
+gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \
+     -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
+     -v compact="$compact" -v reserve="$reserve" -v uidmap="$uidmap" '
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
   m = split(list, a, ",")
@@ -852,6 +856,9 @@ function qrow(r,   js, jc, line, i, x, fw, cc) {         # one queue row, colour
 }
 
 BEGIN{
+  split("center fold color bell eta recent bellall me statef statetmp nerr jerr " \
+        "rwhy rerr wtxt sfilt host now", sqv, " ")        # passed as SQV_<name>,
+  for (i in sqv) SYMTAB[sqv[i]] = ENVIRON["SQV_" sqv[i]]  # see the shell side
   NONCE = ENVIRON["SQ_NONCE"]                             # the shell minted and
   if (NONCE !~ /^[A-Za-z][A-Za-z0-9]{16,}$/) {            # validated it; refuse to
     print "sq: internal field separator missing" > "/dev/stderr"   # guess at a
