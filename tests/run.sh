@@ -486,7 +486,7 @@ c_exit_labels() {
 	T_TITLE="EXIT: 1-31 sigN, 125 oom, any other N errN, from the allocation row or a step; the first non-zero field, but 125 wins; folds rc first, then N"
 	sq_run exits SQ_RECENT_MAX=50 --
 	need "rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
-	need "20 finished rows, no step row"    eval '[ "$(nrows recent)" -eq 20 ] && ! rows recent | grep -qE "batch|extern|srun"'
+	need "22 finished rows, no step row"    eval '[ "$(nrows recent)" -eq 22 ] && ! rows recent | grep -qE "batch|extern|srun"'
 	need "53 on the allocation row and its step: 0/err53" exit_is 6100 0/err53
 	need "125 on the allocation row: 0/oom"                exit_is 6101 0/oom
 	need "125 on a step of a COMPLETED job: 0/oom, STATE stays COMPLETED" \
@@ -498,6 +498,7 @@ c_exit_labels() {
 	need "the canceller follows the label"  eval '[[ "$(fin_exit 6110)" == "0/err53 by "?* ]]'
 	need "125 on a later step wins over an earlier 53 too" exit_is 6111 0/oom
 	need "only 125 wins: a later 126 leaves the earlier 15" exit_is 6112 0/sig15
+	need "only 125 wins: a later 124 leaves the earlier 15" exit_is 6116 0/sig15
 	need "the first non-zero rc (batch 3, then srun 5): 3" exit_is 6113 3
 	need "the first non-zero N (batch 15, then srun 9): 0/sig15" exit_is 6114 0/sig15
 	need "sacct 0:1 is signal 1: the 0:1 reading is the fallback's alone" exit_is 6115 0/sig1
@@ -505,6 +506,7 @@ c_exit_labels() {
 	need "rc 0 only: 125, 53, 9 by number, not err < oom < sig by text" exit_is 6300_[0-2] "0/oom,0/err53,0/sig9"
 	need "126 before 125 by number; the cap of three cuts the rest" exit_is 6400_[0-3] "0/err126,0/oom,0/err102,…"
 	need "one rc: 53 before 9 before none" exit_is 6500_[0-2] "1/err53,1/sig9,1"
+	need "three-digit return codes by number: 127, then 100" exit_is 6600_[0-1] "127,100"
 }
 c_exit_compact() {
 	T_TITLE="EXIT in COMPACT's one-line form: the newest failure, a fold, with the same cell as its row"
@@ -530,11 +532,12 @@ c_exit_fallback() {
 	T_TITLE="EXIT from squeue -t all, in 23.11's n:n form: 0:125 oom, 0:53 err53, 0:1 read as 1:0, empty and junk 0"
 	sq_run exits-fallback --
 	need "rc 0, stderr empty, stubs: sacct, then the fallback" eval 'rc_is 0 && err_empty && calls_are 1 1 1 1'
-	need "14 finished rows, the running job not among them" eval '[ "$(nrows recent)" -eq 14 ] && ! row_cell recent 3001'
+	need "15 finished rows, the running job not among them" eval '[ "$(nrows recent)" -eq 15 ] && ! row_cell recent 3001'
 	need "1:0 is 1, 137:0 is 137 (not reduced)" eval 'exit_is 6001 1 && exit_is 6003 137'
 	need "0:125 is 0/oom, 0:53 0/err53, 0:9 0/sig9" eval 'exit_is 6002 0/oom && exit_is 6005 0/err53 && exit_is 6007 0/sig9'
 	need "0:1, slurmctld's raw 1, is exit 1, not signal 1" exit_is 6006 1
 	need "2:1 stays 2/sig1: only rc 0 with signal 1 is read as exit 1" exit_is 6010 2/sig1
+	need "1:1 stays 1/sig1 as well" exit_is 6015 1/sig1
 	need "the values are read, not the text: ' 0:1', 00:1, 0:01, 0:1:0 are exit 1 too" \
 		eval 'exit_is 6011 1 && exit_is 6012 1 && exit_is 6013 1 && exit_is 6014 1'
 	need "nothing (NO_VAL) and 0:1x are 0, 0:0 is 0" eval 'exit_is 6004 0 && exit_is 6008 0 && exit_is 6009 0'

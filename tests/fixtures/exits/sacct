@@ -78,3 +78,10 @@ JobID=6114.0; User=; JobName=srun; State=CANCELLED; ExitCode=0:9; End=\{now-19m}
 # it as exit 1
 JobID=6115; JobName=hup; ExitCode=0:1; End=\{now-20m}
 JobID=6115.batch; User=; JobName=batch; State=CANCELLED; ExitCode=0:1; End=\{now-20m}
+# 6116: 124, next to the OOM marker, does not displace an earlier 15 either
+JobID=6116; JobName=late124; ExitCode=0:0; End=\{now-21m}
+JobID=6116.batch; User=; JobName=batch; State=CANCELLED; ExitCode=0:15; End=\{now-21m}
+JobID=6116.0; User=; JobName=srun; ExitCode=0:124; End=\{now-21m}
+# 6600: return codes past two digits still order by number: 127, then 100
+JobID=6600_0; JobName=bigrc; ExitCode=100:0; End=\{now-22m}
+JobID=6600_1; JobName=bigrc; ExitCode=127:0; End=\{now-22m}
