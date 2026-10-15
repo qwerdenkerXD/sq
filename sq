@@ -575,12 +575,26 @@ if [ "$rsrc" = sacct ]; then
 	done
 fi
 
+# gawk measures every width with length(), which counts characters only under
+# a UTF-8 locale: under LC_ALL=C (cron, systemd, containers) it counts bytes,
+# and the whole layout changes meaning.  So gawk runs under the caller's locale
+# if that is UTF-8, else C.UTF-8, else the first UTF-8 locale installed; with
+# none at all, under the caller's as before.  Asked of gawk, since gawk counts.
+utf8_ok() { LC_ALL=$1 gawk 'BEGIN { exit length("…") != 1 }' 2>/dev/null; }
+gloc=${LC_ALL:-}                 # empty: gawk reads LC_CTYPE and LANG as before
+if ! utf8_ok "$gloc"; then
+	gloc=C.UTF-8
+	utf8_ok "$gloc" || gloc=$(locale -a 2>/dev/null | LC_ALL=C grep -i '\.utf-\{0,1\}8' |
+		while read -r l; do utf8_ok "$l" && { printf '%s' "$l"; break; }; done)
+	[ -n "$gloc" ] || gloc=${LC_ALL:-}
+fi
+
 # Every value that can carry outside text - a setting, a filter, a path, the
 # host name, a collector's stderr - reaches gawk through ENVIRON, which it takes
 # byte for byte.  A -v value has its backslash escapes processed AFTER the tr
 # above, so "sq -u 'alice\nFORGED: 0 jobs'" printed a forged line.  -v carries
 # only what sq minted or validated itself: numbers, fixed words, field letters.
-SQV_center=$center SQV_fold=$fold SQV_color=$color SQV_bell=$bell SQV_eta=$eta \
+LC_ALL=$gloc SQV_center=$center SQV_fold=$fold SQV_color=$color SQV_bell=$bell SQV_eta=$eta \
 SQV_recent=$recent SQV_bellall=$bellall SQV_me=$me SQV_statef=$statedir/alerted \
 SQV_statetmp=$statetmp SQV_nerr=$nerr SQV_jerr=$jerr SQV_rwhy=$rwhy SQV_rerr=$rerr \
 SQV_wtxt=$wtxt SQV_sfilt=$sfilt SQV_host=$(hostname -s) SQV_now=$(date '+%H:%M:%S %Z') \

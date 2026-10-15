@@ -879,9 +879,11 @@ c_shrink_finished() {
 	need "capped: '+97 more'"         eval '[ "$(more_count)" = 97 ]'
 	need "footer 0/0/0/0"             footer_is 0 0 0 0
 }
-# sq does not pin the locale: under LC_ALL=C length() counts bytes and "…" is
-# 3, so the elision must measure it rather than assume 1.  Only ×N and valid
-# UTF-8 are asserted here: the rest of the layout is byte-based under C anyway.
+# Under LC_ALL=C length() counts bytes and "…" is 3, so the elision measures
+# it rather than assuming 1.  sq now runs gawk under a UTF-8 locale whenever one
+# exists (locale_pinned compares whole screens), so this guard on the elided id,
+# its exact ×N in valid UTF-8, holds for that path; a host without any UTF-8
+# locale, where the bytes are counted, is not one the suite can make.
 # Validity is checked byte by byte in gawk, needing no tool beyond the suite's.
 utf8_valid() {
 	LC_ALL=C gawk '{ s = $0
@@ -897,6 +899,27 @@ c_shrink_locale() {
 		need "$wd: stubs called"      calls_are 1 1 0 1
 		need "$wd: the 600 row shows ×67" eval '[ "$(xmarks queue 600)" = 67 ]'
 		need "$wd: valid UTF-8"       utf8_valid
+	done
+}
+# gawk counts characters only under a UTF-8 locale, and cron, systemd and
+# containers run sq under C or none at all: under C the old build cut the id
+# cell at another width (and split a character at some).  sq pins a UTF-8
+# locale for gawk, so the screen, colour and all, is the one the UTF-8 caller
+# gets: an elided id, the shrink ladder, bar glyphs, a COMPACT "… n jobs".
+without_clock() { sed -E '1s/[0-9]{2}:[0-9]{2}:[0-9]{2}//' "$1"; }
+c_locale_pinned() {
+	T_TITLE="under LC_ALL=C, and with no locale set at all, sq draws byte for byte the screen it draws under UTF-8"
+	local fx args want how
+	for args in "shrink-pending SLURM_BITSTR_LEN=0 SQ_WIDTH=79" "shrink-pending SLURM_BITSTR_LEN=0 SQ_WIDTH=80" \
+	            "shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=50" "shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=80" \
+	            "bars-busy SQ_WIDTH=60" "bars-busy SQ_WIDTH=100" "busy24 SQ_WIDTH=100 SQ_HEIGHT=24"; do
+		set -- $args; fx=$1; shift
+		sq_run "$fx" "$@" -- --color --compact
+		want=$RUN/screen.utf8; without_clock "$OUT" > "$want"
+		for how in LC_ALL=C -LC_ALL; do
+			sq_run "$fx" "$@" "$how" -- --color --compact
+			need "$args, $how: rc 0, the UTF-8 screen" eval 'rc_is 0 && cmp -s "$want" <(without_clock "$OUT")'
+		done
 	done
 }
 # A NAME is no id, even one that looks like a bracket: it keeps the plain cut
@@ -2010,7 +2033,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale shrink_name shrink_extent
+	shrink_locale locale_pinned shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40
