@@ -45,9 +45,10 @@
 #      SQ_COLOR  0 = never colour, 1 = always
 #      SQ_TIMEOUT seconds to wait for slurm before declaring it unreachable (5)
 #      SQ_SINCE  how far back the finished block looks (sacct -S; now-2hours)
-#      SQ_RECENT_MAX  finished rows (default: the space left, clamped 3-25; a
-#                     value you set is used as given in FULL, and is an
-#                     upper limit in COMPACT, never pushing the footer off)
+#      SQ_RECENT_MAX  finished rows (default: every one in FULL, the space
+#                     left up to 25 in COMPACT; a value you set is used as
+#                     given in FULL, and is an upper limit in COMPACT, never
+#                     pushing the footer off)
 #      SQ_COMPACT 1 = always COMPACT, 0 = always FULL, else auto-detect
 #      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect; they
 #                     never choose the mode
@@ -911,7 +912,7 @@ BEGIN{
     print "sq: internal field separator missing" > "/dev/stderr"   # is kept apart for it
     fatal = 1; exit 1
   }
-  BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4   # RECENT_MAX: see END
+  BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4
   n = split(keys, k, ",")
   FQ = n + (compact ? 7 : 5)    # %i, n displayed, %t %l %S (COMPACT: %r %M), the sentinel
   FR = SACCT ? 9 : 11           # 8 sacct / 10 -O fields, and the empty sentinel
@@ -1289,31 +1290,10 @@ END{
     w[big]--; tabw--
   }
 
-  # 6 rows were chosen for the 300s window squeue could see.  Against a 2h
-  # window that hid ~94% of it on a 40-line terminal while the queue table
-  # above was uncapped, so count what the screen actually has left: every
-  # other line in the buffer is already decided by here.  A tall queue
-  # squeezes this block instead of pushing the footer off the screen.
-  if (rmax) RECENT_MAX = rmax
-  else {
-    chrome = 2                                  # title, blank
-    if (nerr != "" || jerr != "") chrome += 2   # blank, unreachable banner
-    chrome += nn + 1                            # node lines, blank
-    for (r=1; r<=nn; r++) if (nreason[r] != "") chrome++
-    if (nbad || ntrunc) chrome++                # the caption that replaces them
-    chrome += rows ? rows + 1 : 1               # header and rows, or one caption
-    chrome += 3                                 # blank, caption, column header
-    if (skip[1]) chrome++
-    if (skip[2]) chrome++
-    if (skip[3]) chrome++
-    if (!qtrunc && !qbad) chrome += 2           # blank, counts footer
-    RECENT_MAX = lines - chrome
-    if (RECENT_MAX < 3)  RECENT_MAX = 3         # never let the block vanish ...
-    if (d > RECENT_MAX) RECENT_MAX--            # "+N more" costs a line, if it comes:
-                                                # after the floor, or the floor undid it
-    if (RECENT_MAX > 25) RECENT_MAX = 25        # ... and never let it run away
-  }
-  shown = (d > RECENT_MAX) ? RECENT_MAX : d
+  # FULL shows every finished job: SQ_SINCE already bounds the block, and cut
+  # to the height of the screen it hid an old failure behind "+N more".  A
+  # SQ_RECENT_MAX you set still caps it, as given
+  shown = (rmax && d > rmax) ? rmax : d
   if (compact) shown = (SHOW["fin"] == 2) ? finrows() : 0
   # when the cap cuts the block above the newest failure, the failure takes its
   # last row, so it is never lost; "+N more" still counts every job not shown

@@ -726,9 +726,11 @@ c_colour() {
 	need "NO_COLOR: no ESC"           eval '[ "$(escapes)" -eq 0 ]'
 }
 # Width: the "wide" fixture shrinks the table to exactly the width sq believes
-# in (see section 12).  Height: with 34 finished jobs (30 single, and an older
-# 4-task array that folds into one row) and no SQ_RECENT_MAX the finished block
-# takes what the screen has left, so the output fills the height exactly; the
+# in (see section 12).  Height: FULL shows every finished job whatever the
+# height, so the height is read through --compact.  With 34 finished jobs (30
+# single, and an older 4-task array that folds into one row) and no
+# SQ_RECENT_MAX the finished block takes what the screen has left, so the
+# output fills the height exactly; the
 # array is the oldest, so it is never shown, and "+N more" must count its 4 tasks:
 # the JOBS shown (a ×K row is K) plus "+N more" account for all 34.
 jobs_shown() { rows recent | LC_ALL=$utf8 gawk '{ n += ($2 ~ /^×[0-9]+$/) ? substr($2, 2) : 1 } END { print n+0 }'; }
@@ -737,20 +739,20 @@ fills() {     # fills HEIGHT: the output is HEIGHT lines and accounts for all 34
 	[ $(( $(jobs_shown) + $(more_count) )) -eq 34 ]
 }
 c_layout_size() {
-	T_TITLE="in a pipe: SQ_WIDTH, COLUMNS, SQ_HEIGHT and LINES set the layout"
+	T_TITLE="in a pipe: SQ_WIDTH, COLUMNS, SQ_HEIGHT and LINES set the layout (the height through --compact)"
 	sq_run wide SQ_WIDTH=123 --
 	need "SQ_WIDTH=123: widest line 123"  eval 'calls_are 1 1 0 1 && [ "$(width)" -eq 123 ]'
 	sq_run wide SQ_WIDTH=123 COLUMNS=90 --
 	need "SQ_WIDTH beats COLUMNS"         eval 'calls_are 1 1 0 1 && [ "$(width)" -eq 123 ]'
 	sq_run wide -SQ_WIDTH COLUMNS=110 --
 	need "COLUMNS=110: widest line 110"   eval 'calls_are 1 1 0 1 && [ "$(width)" -eq 110 ]'
-	sq_run many-finished SQ_HEIGHT=20 --
+	sq_run many-finished SQ_HEIGHT=20 -- --compact
 	need "SQ_HEIGHT=20: 20 lines, 34 jobs accounted, the hidden array in +N more" eval 'calls_are 1 1 0 1 && fills 20'
-	sq_run many-finished SQ_HEIGHT=30 --
+	sq_run many-finished SQ_HEIGHT=30 -- --compact
 	need "SQ_HEIGHT=30: 30 lines, 34 jobs accounted, the hidden array in +N more" eval 'calls_are 1 1 0 1 && fills 30'
-	sq_run many-finished -SQ_HEIGHT LINES=20 --
+	sq_run many-finished -SQ_HEIGHT LINES=20 -- --compact
 	need "LINES=20: 20 lines, 34 jobs accounted, the hidden array in +N more" eval 'calls_are 1 1 0 1 && fills 20'
-	sq_run many-finished SQ_HEIGHT=20 LINES=30 --
+	sq_run many-finished SQ_HEIGHT=20 LINES=30 -- --compact
 	need "SQ_HEIGHT beats LINES"        eval 'calls_are 1 1 0 1 && fills 20'
 }
 
@@ -1825,26 +1827,25 @@ c_recent_max_full() {   # decision 4, FULL half: true today already
 	need "100: rc 0, stubs called"        eval 'rc_is 0 && calls_are 1 1 0 1'
 	need "100: all 31 rows, 34 jobs, no '+N more'" eval '[ "$(nrows recent)" -eq 31 ] && [ "$(jobs_shown)" -eq 34 ] && [ -z "$(more_count)" ]'
 }
-# FULL sizes the finished block from the lines the rest leaves (chrome): the
-# block takes them all, at least 3 (the floor) and at most 25 rows and its
-# "+N more".  With more than 25 groups that is exactly chrome + clamp(H -
-# chrome, 3, 26) lines.  The floor used to undo the line kept for "+N more",
-# so where exactly 3 were left the screen ran one line over the height.
+# FULL shows every finished job: the window (SQ_SINCE) bounds the block, not
+# the height.  It used to be cut to the lines the rest left, at most 25 rows,
+# which hid an old failure behind "+N more" (Franz, 2026-10-15)
 c_full_recent_fits() {
-	T_TITLE="FULL at every height 6..50: the finished block fills what is left, 3 lines at least and 25 rows + '+N more' at most, never one over"
-	local fx h chrome want off
+	T_TITLE="FULL at every height 6..50 shows every finished job: the screen of height 100, no '+N more'"
+	local fx h off tall
 	for fx in oldfail many-finished; do
 		sq_run "$fx" SQ_HEIGHT=100 -- --full
-		chrome=$(( $(plain | wc -l) - 26 ))
-		need "$fx at 100: rc 0, 25 rows and '+N more'" eval 'rc_is 0 && [ "$(nrows recent)" -eq 25 ] && [ -n "$(more_count)" ]'
+		need "$fx at 100: rc 0, no '+N more'" eval 'rc_is 0 && [ -z "$(more_count)" ]'
+		tall=$RUN/tall; without_clock_ago "$OUT" > "$tall"
 		off=
 		for h in $(seq 6 50); do
 			sq_run "$fx" SQ_HEIGHT="$h" -- --full
-			want=$(( h - chrome )); [ $want -ge 3 ] || want=3; [ $want -le 26 ] || want=26
-			[ "$(plain | wc -l)" -eq $(( chrome + want )) ] || off="$off $h"
+			{ rc_is 0 && cmp -s "$tall" <(without_clock_ago "$OUT"); } || off="$off $h"
 		done
-		need "$fx: chrome + clamp(H - chrome, 3, 26) lines (not at H =${off:- none})" test -z "$off"
+		need "$fx: the screen of height 100, clock and AGO aside (not at H =${off:- none})" test -z "$off"
 	done
+	sq_run many-finished SQ_HEIGHT=20 --
+	need "many-finished at 20: all 31 rows, 34 jobs, no '+N more'" eval 'rc_is 0 && [ "$(nrows recent)" -eq 31 ] && [ "$(jobs_shown)" -eq 34 ] && [ -z "$(more_count)" ]'
 }
 c_compact_recent_max() {   # decision 4, COMPACT half
 	T_TITLE="COMPACT takes SQ_RECENT_MAX as a cap: 3 at 60 lines is 4195 4193 4188 and '+17 more'; 100 at 24 lines changes nothing"

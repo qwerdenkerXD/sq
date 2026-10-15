@@ -129,7 +129,7 @@ sq -C                     # centred in both axes
 | `SQ_COLOR` | `0` never, `1` always. |
 | `SQ_TIMEOUT` | Seconds to wait for Slurm before declaring it unreachable (default 5). |
 | `SQ_SINCE` | How far back the finished block looks (`sacct -S` syntax, default `now-2hours`). |
-| `SQ_RECENT_MAX` | Finished rows shown (default: the space left on screen, 3–25; a value you set is used as given in FULL, and is an upper limit in COMPACT, which never pushes the footer off screen). |
+| `SQ_RECENT_MAX` | Finished rows shown (default: every finished job in FULL, the space left on screen up to 25 in COMPACT; a value you set is used as given in FULL, and is an upper limit in COMPACT, which never pushes the footer off screen). |
 | `SQ_COMPACT` | `1` always COMPACT, `0` always FULL; anything else, or unset, decides by where the output goes. The flags beat it. |
 | `SQ_BELL_HORIZON` | A failure only rings while it is this fresh (default 600 s; `0` mutes). |
 | `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size. They never choose the mode. |
