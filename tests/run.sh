@@ -445,6 +445,22 @@ c_squeue_hangs() {
 	need "no '0 jobs' footer while the job list is unavailable" eval '! section footer | grep -qE "^ *0 jobs "'
 	need "footer ? ? ? ?, the last line" footer_unknown
 }
+# A squeue that ignores SIGTERM outlives the deadline and is killed 2s later:
+# timeout then exits 137, as for any SIGKILL, and the screen called the
+# timeout "squeue crashed (signal 9)".  A SIGKILL before the deadline is still
+# that crash.  (bash reports the kill on sq's stderr, so stderr is not checked.)
+c_squeue_ignores_term() {
+	T_TITLE="squeue ignoring SIGTERM, killed after SQ_TIMEOUT=1: 'no response after 1s'; a SIGKILL before it: 'crashed (signal 9)'"
+	local t0=$SECONDS
+	sq_run squeue-hangs SQ_TIMEOUT=1 SQSTUB_IGNORE_TERM=squeue --
+	need "rc 0, stubs: queue once, no fallback" eval 'rc_is 0 && calls_are 1 1 0 1'
+	need "finished within 10s"        eval '[ $((SECONDS - t0)) -lt 10 ]'
+	need "banner 'no response after 1s'" matches "^  ⚠ slurm unreachable · no response after 1s$"
+	need "'job list unavailable', footer ? ? ? ?" eval 'has "job list unavailable" && footer_unknown'
+	sq_run "$(silent_fixture squeue 137)" --
+	need "squeue exit 137 at once, no stderr: rc 0, 'squeue crashed (signal 9)'" \
+		eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · squeue crashed \(signal 9\)$"'
+}
 c_squeue_garbage() {
 	T_TITLE="squeue answers unframed text: 'queue output unreadable', footer '? jobs'"
 	sq_run squeue-garbage --
@@ -2329,7 +2345,7 @@ c_bars_width_sweep() {
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
-	squeue_fails squeue_hangs squeue_garbage queue_cut both_fail
+	squeue_fails squeue_hangs squeue_ignores_term squeue_garbage queue_cut both_fail
 	finished user_filter backslash_text control_text silent_failure real_reason_wins bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size

@@ -11,6 +11,8 @@
 #   SQSTUB_LOG      file every invocation is appended to, one line per call:
 #                   CALL <tool> <argv, %q-quoted> <VAR=%q value | VAR(unset)>...
 #                   and a STUBERROR line for every refusal of the stub itself
+#   SQSTUB_IGNORE_TERM  a tool name: that tool ignores SIGTERM, so sq's timeout
+#                   has to kill it, and timeout then exits 137, not 124
 #
 # Formats, as the real tools take them (see tests/FAITHFULNESS.md):
 #   sinfo   -o FMT or -O FMT             %<letter> grammar or Field:0suffix
@@ -164,5 +166,7 @@ esac
 path=$SQSTUB_FIXTURE/$file
 [ -f "$path" ] || refuse "fixture $path does not exist (an unexpected call?)"
 
+# an ignored signal stays ignored across exec, and in the sleep of an @hang
+[ "${SQSTUB_IGNORE_TERM:-}" != "$tool" ] || trap '' TERM
 STUB_TOOL=$tool STUB_MODE=$mode STUB_FMT=$fmt STUB_DELIM=$delim STUB_TRAIL=$trail \
 STUB_FILE=$path LC_ALL=C exec gawk -f "$stubdir/render.awk"
