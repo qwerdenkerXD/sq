@@ -580,7 +580,10 @@ fi
 # and the whole layout changes meaning.  So gawk runs under the caller's locale
 # if that is UTF-8, else C.UTF-8, else the first UTF-8 locale installed; with
 # none at all, under the caller's as before.  Asked of gawk, since gawk counts.
-utf8_ok() { LC_ALL=$1 gawk 'BEGIN { exit length("…") != 1 }' 2>/dev/null; }
+# Set through env, never as "LC_ALL=x cmd": bash applies that to itself too,
+# and restoring a caller's LC_ALL that names no installed locale puts a
+# setlocale warning on the screen each time.
+utf8_ok() { env LC_ALL="$1" gawk 'BEGIN { exit length("…") != 1 }' 2>/dev/null; }
 gloc=${LC_ALL:-}                 # empty: gawk reads LC_CTYPE and LANG as before
 if ! utf8_ok "$gloc"; then
 	gloc=C.UTF-8
@@ -599,9 +602,9 @@ fi
 statef=$statedir/alerted host=$(hostname -s) now=$(date '+%H:%M:%S %Z')
 sqv="center fold color bell eta recent bellall me statef statetmp nerr jerr rwhy rerr wtxt sfilt host now"
 for v in $sqv; do export "SQV_$v=${!v}"; done
-LC_ALL=$gloc gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \
-                  -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
-                  -v compact="$compact" -v reserve="$reserve" -v uidmap="$uidmap" -v sqv="$sqv" '
+env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \
+                      -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
+                      -v compact="$compact" -v reserve="$reserve" -v uidmap="$uidmap" -v sqv="$sqv" '
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
   m = split(list, a, ",")

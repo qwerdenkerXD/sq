@@ -974,6 +974,21 @@ c_locale_pinned() {
 		done
 	done
 }
+# A caller's LC_ALL may name a locale that is not installed.  bash says so
+# once as it starts, which sq cannot help; sq itself must add nothing, since
+# watch shows stderr on the screen.  "LC_ALL=x cmd" in sq's shell made bash
+# warn again each time it put the caller's value back.
+c_locale_missing() {
+	T_TITLE="LC_ALL naming no installed locale: the UTF-8 screen, and on stderr only bash's own warning as it starts"
+	local bad=sq_TEST.UTF-8 want noop=$T_DIR/noop
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 --
+	want=$RUN/screen.utf8; without_clock "$OUT" > "$want"
+	printf '#!/usr/bin/env bash\n:\n' > "$noop"; chmod +x "$noop"
+	env -i PATH="$here/bin:$PATH" LC_ALL=$bad "$noop" 2> "$T_DIR/startup"
+	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 LC_ALL=$bad --
+	need "rc 0, the UTF-8 screen"     eval 'rc_is 0 && cmp -s "$want" <(without_clock "$OUT")'
+	need "stderr: what a script doing nothing gets from bash, no more" cmp -s "$T_DIR/startup" "$ERR"
+}
 # A NAME is no id, even one that looks like a bracket: it keeps the plain cut
 name_cut() {         # name_cut SECTION ID: the NAME of row ID is a right cut of the full name
 	rows "$1" | ID=$2 LC_ALL=$utf8 gawk '
@@ -2085,7 +2100,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale locale_pinned shrink_name shrink_extent
+	shrink_locale locale_pinned locale_missing shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40
