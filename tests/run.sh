@@ -186,6 +186,7 @@ footer_is() { # footer_is JOBS RUNNING PENDING OTHER
 	section footer | grep -qE "^ *$1 jobs +$2 running +$3 pending +$4 other\$"
 }
 # the counts sq does not know: "?" for each, on the last line, the one footer
+footer_sgr() { tail -n 1 "$OUT" | LC_ALL=C grep -o "$ESC\[[0-9;]*m" | tr -d "$ESC" | paste -sd' '; }   # the footer's SGRs, ESC left out
 footer_unknown() { [ "$(section footer | wc -l)" -eq 1 ] && plain | tail -n 1 | grep -qE '^ *\? jobs +\? running +\? pending +\? other$'; }
 no_skips()   { lacks unreadable && lacks incomplete; }
 rc_is()      { [ "$RC" -eq "$1" ]; }
@@ -422,6 +423,14 @@ c_squeue_fails() {
 	need "finished block still from sacct" eval 'rows recent | grep -qE "^ +1001 +done +COMPLETED "'
 	need "no '0 jobs' footer while the job list is unavailable" eval '! section footer | grep -qE "^ *0 jobs "'
 	need "footer ? ? ? ?, the last line" footer_unknown
+	# the same colours as a footer with counts: the "?" only stands in for the numbers
+	local normal
+	sq_run mixed -- --color
+	normal=$(footer_sgr)
+	need "a footer with counts, coloured: bold jobs, green running, yellow pending, red other" \
+		eval 'rc_is 0 && [ "$normal" = "[1m [0m [32m [0m [33m [0m [31m [0m" ]'
+	sq_run squeue-fails -- --color
+	need "the '?' footer, coloured: the same SGR sequences" eval 'rc_is 0 && [ "$(footer_sgr)" = "$normal" ]'
 }
 c_squeue_hangs() {
 	T_TITLE="squeue hangs (cut at SQ_TIMEOUT=1): the job list is unavailable, and the footer says '? jobs' instead of a count"
