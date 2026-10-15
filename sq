@@ -9,7 +9,9 @@
 #                           refused: -O --Format -s --steps -i --iterate -l -v
 #                           -V --json --yaml, each of which would replace or
 #                           defeat the output sq parses
-#   sq -c / -C              centre horizontally / in both axes
+#   sq -c / -C              centre horizontally / in both axes; vertically
+#                           only on a screen (a terminal, or watch), and only
+#                           while the dashboard is shorter than it
 #   sq -x                   expand array tasks instead of folding them; a pending
 #                           bracket squeue prints (9008_[4-9] x6) stays one row,
 #                           which only --array splits
@@ -302,13 +304,14 @@ done
 # terminal on stdout, or COLUMNS and LINES both exported, which only watch
 # (or a deliberate export) does - an interactive shell keeps them unexported.
 # SQ_WIDTH/SQ_HEIGHT size the screen but never choose the mode.
+screen=0
+if [ -t 1 ] || { [ -n "${COLUMNS:-}" ] && [ -n "${LINES:-}" ]; }; then screen=1; fi
 compact=${SQ_COMPACT:-}
 case $modeflag in --compact) compact=1 ;; --full) compact=0 ;; esac
-case $compact in
-	0|1) ;;
-	*) if [ -t 1 ] || { [ -n "${COLUMNS:-}" ] && [ -n "${LINES:-}" ]; }
-	   then compact=1; else compact=0; fi ;;
-esac
+case $compact in 0|1) ;; *) compact=$screen ;; esac
+# -C centres vertically only on that screen: in a file or a pipe there is no
+# height to centre in, only blank lines above the dashboard
+[ "$center" != 2 ] || [ "$screen" = 1 ] || center=1
 
 # colour: honour NO_COLOR, else auto-detect.  A pipe with COLUMNS set is
 # watch, which wants the escapes; a bare pipe or redirect does not.

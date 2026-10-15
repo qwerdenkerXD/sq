@@ -626,10 +626,11 @@ c_bell_text() {
 	bell_run "$fx" SQ_BELL_USER=bob SQ_BELL_ALL=1
 	need "bob with SQ_BELL_ALL=1: rc 0, one bell" eval 'rc_is 0 && [ "$(bels)" -eq 1 ]'
 }
-# -c centres the screen in the width, -C in the height too: the screen moves
-# as a whole and nothing in it changes.  At 140 columns "mixed" is 80 wide.
+# -c centres the screen in the width, -C in the height too, but only on a
+# screen (a terminal, or COLUMNS and LINES set): the screen moves as a whole
+# and nothing in it changes.  At 140 columns "mixed" is 80 wide.
 c_centre() {
-	T_TITLE="-c moves the whole screen to the middle of the width, -C also of the height"
+	T_TITLE="-c moves the whole screen to the middle of the width, -C also of the height on a screen, not in a pipe"
 	local margin top centred
 	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 --
 	margin=$(( (140 - $(section queue | head -n 1 | gawk '{ print length($0) - 2 }')) / 2 ))
@@ -639,11 +640,17 @@ c_centre() {
 	need "-c: rc 0, every line $margin in instead of 2, nothing else changed" eval '
 		rc_is 0 && cmp -s <(sed -E "s/^  /$(printf "%*s" "$margin" "")/" "$plain") <(without_clock "$OUT")'
 	centred=$RUN/centred; without_clock "$OUT" > "$centred"
-	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 -- -C
+	# vertically only on a screen: COLUMNS and LINES set, as watch does (--full
+	# and --no-color keep it the screen above)
+	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 COLUMNS=140 LINES=30 -- -C --full --no-color
 	top=$(( (30 - $(wc -l < "$centred")) / 2 ))
-	need "-C: rc 0, -c's screen under $top blank lines" eval '
+	need "-C on a screen: rc 0, -c's screen under $top blank lines" eval '
 		rc_is 0 && [ "$top" -gt 0 ] && [ -z "$(head -n "$top" "$OUT" | tr -d "\n")" ] &&
 		cmp -s "$centred" <(tail -n +$((top + 1)) "$OUT" | without_clock /dev/stdin)'
+	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 -- -C
+	need "-C in a pipe: rc 0, -c's screen, no blank line above it" eval 'rc_is 0 && cmp -s "$centred" <(without_clock "$OUT")'
+	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 SQ_CENTER=2 --
+	need "SQ_CENTER=2 in a pipe: rc 0, the same" eval 'rc_is 0 && cmp -s "$centred" <(without_clock "$OUT")'
 }
 
 # ---- 8. sacct fails: the squeue -t all fallback -----------------------------
@@ -1254,6 +1261,10 @@ queue_seq() {
 		$1 == "QELL" { printf "%s%s", s, $2; s = "|" } END { print "" }'
 }
 lines_are()    { [ "$(plain | wc -l)" -eq "$1" ]; }
+centred_in()   { # centred_in H: under int((H - its length) / 2) blank lines, at least one
+	local body top; body=$(plain | sed '/./,$!d' | wc -l); top=$(( $(plain | wc -l) - body ))
+	[ "$top" -gt 0 ] && [ "$top" -eq $(( ($1 - body) / 2 )) ]
+}
 lines_within() { [ "$(plain | wc -l)" -le "$1" ]; }
 blanks_are()   { [ "$(labelled BLANK | wc -l)" -eq "$1" ]; }
 footer_last()  { # footer_last JOBS RUNNING PENDING OTHER: the one footer, on the last line
@@ -2058,13 +2069,15 @@ c_compact_low_heights() {
 	local full24=$OUT
 	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=3 -- --full
 	need "FULL at 3: the screen of 24, clock and AGO aside" eval 'rc_is 0 && cmp -s <(without_clock_ago "$full24") <(without_clock_ago "$OUT")'
-	# centred vertically, the height FULL believes shows: 24 lines of output
-	sq_run quiet40 SQ_WIDTH=100 SQ_HEIGHT=24 SQ_CENTER=2 -- --full
-	need "FULL quiet40 centred at 24: rc 0, 24 lines" eval 'rc_is 0 && lines_are 24'
+	# centred vertically, the height FULL believes shows: FULL shows every job at
+	# any height, so only the blank lines above tell, and -C draws them only on
+	# a screen (COLUMNS and LINES set, as watch does)
+	sq_run empty SQ_WIDTH=100 SQ_HEIGHT=24 COLUMNS=100 LINES=24 SQ_CENTER=2 -- --full
+	need "FULL empty centred at 24: rc 0, centred in 24 lines" eval 'rc_is 0 && centred_in 24'
 	full24=$OUT
-	sq_run quiet40 SQ_WIDTH=100 SQ_HEIGHT=3 SQ_CENTER=2 -- --full
-	need "FULL quiet40 centred at 3: centred in 24 lines, the screen of 24, clock and AGO aside" \
-		eval 'rc_is 0 && lines_are 24 && cmp -s <(without_clock_ago_sgr "$full24") <(without_clock_ago_sgr "$OUT")'
+	sq_run empty SQ_WIDTH=100 SQ_HEIGHT=3 COLUMNS=100 LINES=24 SQ_CENTER=2 -- --full
+	need "FULL empty centred at 3: the screen of 24, clock and AGO aside" \
+		eval 'rc_is 0 && cmp -s <(without_clock_ago_sgr "$full24") <(without_clock_ago_sgr "$OUT")'
 	for h in 1 2 3 4; do
 		sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
 		need "$h: rc 0, stubs called, at most $h lines, footer last" eval 'rc_is 0 && calls_are 1 1 0 1 && lines_within '"$h"' && footer_last 151 128 23 0'

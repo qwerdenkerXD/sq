@@ -109,7 +109,7 @@ sq -C                     # centred in both axes
 | Flag | Effect |
 |---|---|
 | `-o LIST` | Columns as squeue field letters, e.g. `i,j,u,T,M,L,C,m,R` (the default). `%` and widths are ignored, since widths are automatic. |
-| `-c` / `-C` | Centre horizontally / in both axes. With `-C`, keep `watch -t`, or watch's header pushes the bottom off screen. |
+| `-c` / `-C` | Centre horizontally / in both axes. Vertical centring happens only on a screen (a terminal, or `watch`; into a file or a pipe `-C` centres horizontally only) and shows only while the dashboard is shorter than the screen. With `-C`, keep `watch -t`, or watch's header pushes the bottom off screen. |
 | `-x` | Show array tasks one per row instead of folding them. |
 | `--no-recent` | Hide the recently-finished block. |
 | `--no-bell` | Never ring the bell. |
