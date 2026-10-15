@@ -594,13 +594,14 @@ fi
 # byte for byte.  A -v value has its backslash escapes processed AFTER the tr
 # above, so "sq -u 'alice\nFORGED: 0 jobs'" printed a forged line.  -v carries
 # only what sq minted or validated itself: numbers, fixed words, field letters.
-LC_ALL=$gloc SQV_center=$center SQV_fold=$fold SQV_color=$color SQV_bell=$bell SQV_eta=$eta \
-SQV_recent=$recent SQV_bellall=$bellall SQV_me=$me SQV_statef=$statedir/alerted \
-SQV_statetmp=$statetmp SQV_nerr=$nerr SQV_jerr=$jerr SQV_rwhy=$rwhy SQV_rerr=$rerr \
-SQV_wtxt=$wtxt SQV_sfilt=$sfilt SQV_host=$(hostname -s) SQV_now=$(date '+%H:%M:%S %Z') \
-gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \
-     -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
-     -v compact="$compact" -v reserve="$reserve" -v uidmap="$uidmap" '
+# sqv names them once: each is the shell variable of that name, exported as
+# SQV_<name>, and gawk reads the same list back into its own variable.
+statef=$statedir/alerted host=$(hostname -s) now=$(date '+%H:%M:%S %Z')
+sqv="center fold color bell eta recent bellall me statef statetmp nerr jerr rwhy rerr wtxt sfilt host now"
+for v in $sqv; do export "SQV_$v=${!v}"; done
+LC_ALL=$gloc gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \
+                  -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
+                  -v compact="$compact" -v reserve="$reserve" -v uidmap="$uidmap" -v sqv="$sqv" '
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
   m = split(list, a, ",")
@@ -870,9 +871,8 @@ function qrow(r,   js, jc, line, i, x, fw, cc) {         # one queue row, colour
 }
 
 BEGIN{
-  split("center fold color bell eta recent bellall me statef statetmp nerr jerr " \
-        "rwhy rerr wtxt sfilt host now", sqv, " ")        # passed as SQV_<name>,
-  for (i in sqv) SYMTAB[sqv[i]] = ENVIRON["SQV_" sqv[i]]  # see the shell side
+  split(sqv, sqvar, " ")                                  # each SQV_<name> the shell
+  for (i in sqvar) SYMTAB[sqvar[i]] = ENVIRON["SQV_" sqvar[i]]   # exported, by its name
   NONCE = ENVIRON["SQ_NONCE"]                             # the shell minted and
   if (NONCE !~ /^[A-Za-z][A-Za-z0-9]{16,}$/) {            # validated it; refuse to
     print "sq: internal field separator missing" > "/dev/stderr"   # guess at a
