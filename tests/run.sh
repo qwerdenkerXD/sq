@@ -145,7 +145,7 @@ section() {   # section queue|recent|footer: that block's lines
 		want == "queue"  && first ~ /^ *(queue is empty|job list unavailable|no readable rows|⚠ queue output)/ { print; exit }
 		want == "queue"  && first ~ HDR { print; exit }
 		want == "recent" && first ~ /^ *(recently finished|finished jobs unavailable)/ { print; exit }
-		want == "footer" && first ~ /^ *[0-9]+ jobs / { print; exit }'
+		want == "footer" && first ~ /^ *([0-9]+|\?) jobs / { print; exit }'
 }
 rows() {      # rows queue|recent: the data rows of a table, header and notes left out
 	section "$1" | LC_ALL=$utf8 gawk 'NR == 1 && /^ *[A-Z][A-Z\/_()]*( +[A-Z][A-Z\/_()]*)* *$/ { next }   # the queue header
@@ -185,7 +185,8 @@ column_aligned() {   # column_aligned HEADER, e.g. USER
 footer_is() { # footer_is JOBS RUNNING PENDING OTHER
 	section footer | grep -qE "^ *$1 jobs +$2 running +$3 pending +$4 other\$"
 }
-no_footer()  { [ -z "$(section footer)" ]; }
+# the counts sq does not know: "?" for each, on the last line, the one footer
+footer_unknown() { [ "$(section footer | wc -l)" -eq 1 ] && plain | tail -n 1 | grep -qE '^ *\? jobs +\? running +\? pending +\? other$'; }
 no_skips()   { lacks unreadable && lacks incomplete; }
 rc_is()      { [ "$RC" -eq "$1" ]; }
 # how often sq asked the terminal its size (tests/bin/stty logs every call)
@@ -407,11 +408,11 @@ c_trailing_junk() {
 }
 
 # ---- 6. squeue failing, hanging, or answering garbage -------------------------
-# With the job list unavailable sq still prints a "0 jobs" footer: a number it
-# does not know.  What it should print instead is not decided here, only that
-# it must not claim zero.
+# Whenever sq does not know the job counts, the footer keeps its shape with "?"
+# for each count, as Franz chose 2026-10-15: squeue failed or hung, and (a call
+# made for him) its stream was unreadable or cut off.  It used to claim 0 jobs.
 c_squeue_fails() {
-	T_TITLE=; xfail "squeue rc 1: the job list is unavailable, yet the footer claims 0 jobs"
+	T_TITLE="squeue rc 1: the job list is unavailable, and the footer says '? jobs' instead of a count"
 	sq_run squeue-fails --
 	need "rc 0"                       rc_is 0
 	need "stderr empty"               err_empty
@@ -419,11 +420,11 @@ c_squeue_fails() {
 	need "banner carries squeue's first stderr line" matches "^  ⚠ slurm unreachable · squeue: error: Unable to contact"
 	need "'job list unavailable'"     has "job list unavailable"
 	need "finished block still from sacct" eval 'rows recent | grep -qE "^ +1001 +done +COMPLETED "'
-	want "no '0 jobs' footer while the job list is unavailable" eval '! section footer | grep -qE "^ *0 jobs "'
-	today "footer 0/0/0/0"            footer_is 0 0 0 0
+	need "no '0 jobs' footer while the job list is unavailable" eval '! section footer | grep -qE "^ *0 jobs "'
+	need "footer ? ? ? ?, the last line" footer_unknown
 }
 c_squeue_hangs() {
-	T_TITLE=; xfail "squeue hangs (cut at SQ_TIMEOUT=1): the job list is unavailable, yet the footer claims 0 jobs"
+	T_TITLE="squeue hangs (cut at SQ_TIMEOUT=1): the job list is unavailable, and the footer says '? jobs' instead of a count"
 	local t0=$SECONDS
 	sq_run squeue-hangs SQ_TIMEOUT=1 --
 	need "rc 0"                       rc_is 0
@@ -432,18 +433,28 @@ c_squeue_hangs() {
 	need "finished within 10s"        eval '[ $((SECONDS - t0)) -lt 10 ]'
 	need "banner 'no response after 1s'" matches "^  ⚠ slurm unreachable · no response after 1s$"
 	need "'job list unavailable'"     has "job list unavailable"
-	want "no '0 jobs' footer while the job list is unavailable" eval '! section footer | grep -qE "^ *0 jobs "'
-	today "footer 0/0/0/0"            footer_is 0 0 0 0
+	need "no '0 jobs' footer while the job list is unavailable" eval '! section footer | grep -qE "^ *0 jobs "'
+	need "footer ? ? ? ?, the last line" footer_unknown
 }
 c_squeue_garbage() {
-	T_TITLE="squeue answers unframed text: 'queue output unreadable', no footer"
+	T_TITLE="squeue answers unframed text: 'queue output unreadable', footer '? jobs'"
 	sq_run squeue-garbage --
 	need "rc 0"                       rc_is 0
 	need "stderr empty"               err_empty
 	need "stubs called"               calls_are 1 1 0 1
 	need "caption 'queue output unreadable'" has "⚠ queue output unreadable (output format overridden?)"
 	need "no row from the garbage"    lacks "train"
-	need "no footer from an unreadable stream" no_footer
+	need "no counts from an unreadable stream: footer ? ? ? ?, the last line" footer_unknown
+	need "no unreachable banner"      lacks "slurm unreachable"
+}
+c_queue_cut() {
+	T_TITLE="squeue's stream ends inside a record: 'queue output incomplete', footer '? jobs'"
+	sq_run queue-cut --
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs called"               calls_are 1 1 0 1
+	need "caption 'queue output incomplete'" has "⚠ queue output incomplete"
+	need "no counts from a cut stream, only a lower bound: footer ? ? ? ?, the last line" footer_unknown
 	need "no unreachable banner"      lacks "slurm unreachable"
 }
 c_both_fail() {
@@ -1236,7 +1247,7 @@ screen() {
 		{ t = $0; sub(/^ +/, "", t); sub(/ +$/, "", t) }
 		NR == 1 && t ~ /^▌ SLURM /                    { print "TITLE\t" t; next }
 		t == ""                                       { print "BLANK\t"; zone = ""; next }
-		t ~ /^[0-9]+ jobs +[0-9]+ running /           { print "FOOTER\t" t; zone = ""; next }
+		t ~ /^([0-9]+|\?) jobs +([0-9]+|\?) running / { print "FOOTER\t" t; zone = ""; next }
 		t ~ /^recently finished( \([^)]*\))?: /       { print "FINLINE\t" t; zone = ""; next }
 		t ~ /^(recently finished|finished jobs unavailable)/ { print "FINCAP\t" t; zone = "f"; next }
 		zone == "f" && t ~ HDR                        { print "FHDR\t" t; next }
@@ -2086,8 +2097,9 @@ c_compact_low_heights() {
 	need "1: the footer alone" lines_are 1
 }
 # error screens: sinfo failing (the unreachable banner), squeue failing, a cut
-# queue stream (qtrunc) and an unreadable one (qbad, no footer): at every
-# height the screen fits and a footer, if any, is the last line
+# queue stream (qtrunc) and an unreadable one (qbad): at every height the
+# screen fits and the footer is the last line, its counts "?" where the job
+# list is unknown
 error_sweep() {   # error_sweep FIXTURE "CALLS"
 	local fx=$1 h fits= foot= wide=
 	sq_run "$fx" --
@@ -2095,15 +2107,15 @@ error_sweep() {   # error_sweep FIXTURE "CALLS"
 	for h in $(seq 6 30); do
 		sq_run "$fx" SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
 		{ rc_is 0 && lines_within "$h"; } || fits="$fits $h"
-		[ -z "$(labelled FOOTER)" ] || { [ "$(labelled FOOTER | wc -l)" -eq 1 ] && screen | tail -n 1 | grep -q '^FOOTER'; } || foot="$foot $h"
+		{ [ "$(labelled FOOTER | wc -l)" -eq 1 ] && screen | tail -n 1 | grep -q '^FOOTER'; } || foot="$foot $h"
 		[ "$(width)" -le 100 ] || wide="$wide $h"
 	done
 	need "$fx: rc 0 and at most H lines (not at H =${fits:- none})" test -z "$fits"
-	need "$fx: a footer is the last line (not at H =${foot:- none})" test -z "$foot"
+	need "$fx: the footer is the last line (not at H =${foot:- none})" test -z "$foot"
 	need "$fx: no line wider than 100 (wider at H =${wide:- none})" test -z "$wide"
 }
 c_compact_error_screens() {
-	T_TITLE="COMPACT error screens at every height 6..30: sinfo failing, squeue failing, a cut and an unreadable queue stream fit, footer last when there is one"
+	T_TITLE="COMPACT error screens at every height 6..30: sinfo failing, squeue failing, a cut and an unreadable queue stream fit, footer last"
 	error_sweep sinfo-fails "1 1 0 1"
 	error_sweep squeue-fails "1 1 0 1"
 	error_sweep queue-cut "1 1 0 1"
@@ -2214,7 +2226,7 @@ c_bars_width_sweep() {
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
-	squeue_fails squeue_hangs squeue_garbage both_fail
+	squeue_fails squeue_hangs squeue_garbage queue_cut both_fail
 	finished user_filter backslash_text bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size

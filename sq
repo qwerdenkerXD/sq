@@ -782,7 +782,7 @@ function finlines(   f) {
   return 2 + f + (f < d)                          # caption, header, rows, "+N more"
 }
 function height(   h, l) {
-  h = FOOT * (1 + SHOW["b4"]) + SHOW["title"] + SHOW["b1"] + SHOW["b2"]
+  h = 1 + SHOW["b4"] + SHOW["title"] + SHOW["b1"] + SHOW["b2"]
   h += BANNER * (SHOW["banner"] + SHOW["b0"]) + QCAP * SHOW["qcap"] + NOTES * SHOW["notes"]
   if (SHOW["nodes"] == 1) h++
   if (SHOW["nodes"] == 2) h += nn + (nbad || ntrunc) + (skip[1] > 0) + SHOW["reasons"] * NRSN
@@ -1232,7 +1232,10 @@ END{
   }
   for (x=1; x<=4; x++) ELLAT[x] = lastpd
   ELLAT[5] = SECR[5, SECN[5]]; ELLAT[6] = rows
-  FOOT   = !qtrunc && !qbad                     # no counts from a stream we could not read
+  # the counts come only from a whole, readable job list.  When squeue failed
+  # or hung, or its stream was unreadable or cut off (counting what arrived
+  # would be a lower bound), the footer says "?" for each instead of a number
+  QKNOWN = (jerr == "" && !qtrunc && !qbad)
   BANNER = (nerr != "" || jerr != "")
   QCAP   = (qbad || qtrunc || !rows)            # a caption stands in for the table
   NOTES  = (skip[2] > 0) + (skip[3] > 0)
@@ -1522,12 +1525,12 @@ END{
                          (i == 2 ? "queue" : "finished"),
                          (skip[i] > 1 ? "s" : ""), e("0"))
 
-  if (FOOT) {
-    if (SHOW["b4"]) out[++o] = ""
-    out[++o] = sprintf("%s%s%d%s jobs   %s%d running%s   %s%d pending%s   %s%d other%s", lm,
-                       e("1"), qjobs, e("0"), e("32"), cnt["R"]+0, e("0"),
-                       e("33"), cnt["PD"]+0, e("0"), e("31"), qjobs - cnt["R"] - cnt["PD"], e("0"))
-  }
+  if (SHOW["b4"]) out[++o] = ""                 # the footer, always the last line
+  out[++o] = sprintf("%s%s%s%s jobs   %s%s running%s   %s%s pending%s   %s%s other%s", lm,
+                     e("1"), QKNOWN ? qjobs+0 : "?", e("0"),
+                     e("32"), QKNOWN ? cnt["R"]+0 : "?", e("0"),
+                     e("33"), QKNOWN ? cnt["PD"]+0 : "?", e("0"),
+                     e("31"), QKNOWN ? qjobs - cnt["R"] - cnt["PD"] : "?", e("0"))
 
   if (compact) {                                # a blank with nothing to separate,
     m = 0                                       # where a section collapsed away, goes
