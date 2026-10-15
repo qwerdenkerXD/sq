@@ -11,7 +11,7 @@
 #                           defeat the output sq parses
 #   sq -c / -C              centre horizontally / in both axes; vertically
 #                           only on a screen (a terminal, or watch), and only
-#                           while the dashboard is shorter than it
+#                           while the dashboard is at least two lines shorter
 #   sq -x                   expand array tasks instead of folding them; a pending
 #                           bracket squeue prints (9008_[4-9] x6) stays one row,
 #                           which only --array splits
