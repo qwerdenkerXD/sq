@@ -2168,12 +2168,13 @@ c_compact_low_heights() {
 	need "FULL at 3: the screen of 24, clock and AGO aside" eval 'rc_is 0 && cmp -s <(without_clock_ago "$full24") <(without_clock_ago "$OUT")'
 	# centred vertically, the height FULL believes shows: FULL shows every job at
 	# any height, so only the blank lines above tell, and -C draws them only on
-	# a screen (COLUMNS and LINES set, as watch does)
-	sq_run empty SQ_WIDTH=100 SQ_HEIGHT=24 COLUMNS=100 LINES=24 SQ_CENTER=2 -- --full
+	# a screen (COLUMNS and LINES set, as watch does).  LINES is 30, not 24, so
+	# the case tells the fixed fallback of 24 from falling back to LINES
+	sq_run empty SQ_WIDTH=100 SQ_HEIGHT=24 COLUMNS=100 LINES=30 SQ_CENTER=2 -- --full
 	need "FULL empty centred at 24: rc 0, centred in 24 lines" eval 'rc_is 0 && centred_in 24'
 	full24=$OUT
-	sq_run empty SQ_WIDTH=100 SQ_HEIGHT=3 COLUMNS=100 LINES=24 SQ_CENTER=2 -- --full
-	need "FULL empty centred at 3: the screen of 24, clock and AGO aside" \
+	sq_run empty SQ_WIDTH=100 SQ_HEIGHT=3 COLUMNS=100 LINES=30 SQ_CENTER=2 -- --full
+	need "FULL empty centred at 3, LINES=30: the screen of 24, not of LINES, clock and AGO aside" \
 		eval 'rc_is 0 && cmp -s <(without_clock_ago_sgr "$full24") <(without_clock_ago_sgr "$OUT")'
 	for h in 1 2 3 4; do
 		sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
