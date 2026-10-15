@@ -152,8 +152,8 @@ sq -C                     # centred in both axes
   7 bits of a Slurm error code, not errno, from slurmd starting the job or step: 53 task
   I/O setup failed (the stdin, stdout or stderr file, or the link back to srun), 52 the
   tasks could not be started (Slurm calls it execve failed; a failed fork, chdir, or task or
-  spank plugin call reads so too), 46 job setup failed (the user's environment, or the
-  process-tracking container), 48 switching to the user's ids failed (setuid/setgid), 54 the
+  spank plugin call reads so too), 46 the process-tracking container for the step could
+  not be created, 48 switching to the user's ids failed (setuid/setgid), 54 the
   prolog failed or never started, 115 the spank plugin stack failed to initialize. So EXIT
   can show a step's OOM on a job that finished COMPLETED. A folded row lists its distinct
   exits, highest exit code first, then highest N. Known limits: a launch or communication failure can read as `sig11`, `sig12` or
