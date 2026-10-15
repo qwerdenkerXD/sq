@@ -483,10 +483,10 @@ fin_exit() {   # fin_exit ID: the EXIT cell of the finished row whose first cell
 }
 exit_is() { [ "$(fin_exit "$1")" = "$2" ]; }    # exit_is ID EXIT
 c_exit_labels() {
-	T_TITLE="EXIT: 1-31 sigN, 125 oom, any other N errN, from the allocation row or a step; 125 wins; folds rc first, then N"
+	T_TITLE="EXIT: 1-31 sigN, 125 oom, any other N errN, from the allocation row or a step; the first non-zero field, but 125 wins; folds rc first, then N"
 	sq_run exits SQ_RECENT_MAX=50 --
 	need "rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
-	need "15 finished rows, no step row"    eval '[ "$(nrows recent)" -eq 15 ] && ! rows recent | grep -qE "batch|extern|srun"'
+	need "20 finished rows, no step row"    eval '[ "$(nrows recent)" -eq 20 ] && ! rows recent | grep -qE "batch|extern|srun"'
 	need "53 on the allocation row and its step: 0/err53" exit_is 6100 0/err53
 	need "125 on the allocation row: 0/oom"                exit_is 6101 0/oom
 	need "125 on a step of a COMPLETED job: 0/oom, STATE stays COMPLETED" \
@@ -496,6 +496,11 @@ c_exit_labels() {
 	need "31 is a signal, 32 an error"      eval 'exit_is 6105 0/sig31 && exit_is 6106 0/err32'
 	need "124, 126, 127 are errors"         eval 'exit_is 6107 0/err124 && exit_is 6108 0/err126 && exit_is 6109 0/err127'
 	need "the canceller follows the label"  eval '[[ "$(fin_exit 6110)" == "0/err53 by "?* ]]'
+	need "125 on a later step wins over an earlier 53 too" exit_is 6111 0/oom
+	need "only 125 wins: a later 126 leaves the earlier 15" exit_is 6112 0/sig15
+	need "the first non-zero rc (batch 3, then srun 5): 3" exit_is 6113 3
+	need "the first non-zero N (batch 15, then srun 9): 0/sig15" exit_is 6114 0/sig15
+	need "sacct 0:1 is signal 1: the 0:1 reading is the fallback's alone" exit_is 6115 0/sig1
 	need "fold of every kind: 2, 1, then the cap" eval 'row_cell recent "6200_[0-5] ×6" && exit_is 6200_[0-5] "2,1,0/oom,…"'
 	need "rc 0 only: 125, 53, 9 by number, not err < oom < sig by text" exit_is 6300_[0-2] "0/oom,0/err53,0/sig9"
 	need "126 before 125 by number; the cap of three cuts the rest" exit_is 6400_[0-3] "0/err126,0/oom,0/err102,…"
@@ -525,10 +530,11 @@ c_exit_fallback() {
 	T_TITLE="EXIT from squeue -t all, in 23.11's n:n form: 0:125 oom, 0:53 err53, 0:1 read as 1:0, empty and junk 0"
 	sq_run exits-fallback --
 	need "rc 0, stderr empty, stubs: sacct, then the fallback" eval 'rc_is 0 && err_empty && calls_are 1 1 1 1'
-	need "9 finished rows, the running job not among them" eval '[ "$(nrows recent)" -eq 9 ] && ! row_cell recent 3001'
+	need "10 finished rows, the running job not among them" eval '[ "$(nrows recent)" -eq 10 ] && ! row_cell recent 3001'
 	need "1:0 is 1, 137:0 is 137 (not reduced)" eval 'exit_is 6001 1 && exit_is 6003 137'
 	need "0:125 is 0/oom, 0:53 0/err53, 0:9 0/sig9" eval 'exit_is 6002 0/oom && exit_is 6005 0/err53 && exit_is 6007 0/sig9'
 	need "0:1, slurmctld's raw 1, is exit 1, not signal 1" exit_is 6006 1
+	need "2:1 stays 2/sig1: only rc 0 with signal 1 is read as exit 1" exit_is 6010 2/sig1
 	need "nothing (NO_VAL) and 0:1x are 0, 0:0 is 0" eval 'exit_is 6004 0 && exit_is 6008 0 && exit_is 6009 0'
 }
 c_user_filter() {

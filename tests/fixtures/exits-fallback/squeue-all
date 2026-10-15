@@ -14,3 +14,6 @@ JobID=6006; StateCompact=DL; State=DEADLINE; exit_code=0:1; Name=ctldfail; EndTi
 JobID=6007; StateCompact=CA; State=CANCELLED; exit_code=0:9; Name=killed; EndTime=\{now-7m}
 JobID=6008; exit_code=0:1x; Name=junk; EndTime=\{now-8m}
 JobID=6009; StateCompact=CD; State=COMPLETED; exit_code=0:0; Name=fine; EndTime=\{now-9m}
+# a form squeue cannot print (exit and signal both set), pinning that only
+# an rc of 0 with signal 1 is read as exit 1
+JobID=6010; exit_code=2:1; Name=both; EndTime=\{now-10m}
