@@ -2091,21 +2091,34 @@ c_bars_edges() {
 # shared right edge must bring back the gap they collapsed: they did not, and
 # the node line ran one column past the screen (array fixtures at 50-53).
 # Narrower than the line with its bars collapsed no layout fits, so the bound
-# is the screen or that line, whichever is wider.
+# is the screen or that line, whichever is wider.  Where the bars are drawn
+# they end the node block on the shared right edge, the queue header's, not
+# short of it: the widest node line, as the state column is left-aligned.
 node_width() { plain | LC_ALL=$utf8 gawk '/ cpu .* mem / { if (length($0) > m) m = length($0) } END { print m+0 }'; }
+bars_edge() {   # bars_edge: "-" without bars, else the widest node line with bars "/" the queue header
+	plain | LC_ALL=$utf8 gawk 'hw == "" && /^ *[A-Z][A-Z\/_()]*( +[A-Z][A-Z\/_()]*)* *$/ { hw = length($0) }
+		/ cpu .* mem / && /[█▒▓░·]/ && length($0) > nw { nw = length($0) }
+		END { print nw ? nw "/" hw : "-" }'
+}
 c_bars_width_sweep() {
-	T_TITLE="no node line wider than the screen at any width 21..140 that holds it with its bars collapsed"
-	local fx w nmin over
+	T_TITLE="at every width 21..140 no node line is wider than the screen (or than with its bars collapsed), and bars end on the queue's right edge"
+	local fx w nmin over short edge drawn
 	for fx in array-running busy24 bars-busy mix30; do
 		sq_run "$fx" SQ_WIDTH=21 -- --full
 		nmin=$(node_width)
 		need "$fx at 21: rc 0, node lines drawn" eval 'rc_is 0 && [ "$nmin" -gt 0 ]'
-		over=
+		over= short= drawn=0
 		for w in $(seq 21 140); do
 			sq_run "$fx" SQ_WIDTH="$w" -- --full
 			[ "$(node_width)" -le $(( w > nmin ? w : nmin )) ] || over="$over $w"
+			edge=$(bars_edge)
+			[ "$edge" = - ] && continue
+			drawn=$((drawn + 1))
+			[ "${edge%/*}" = "${edge#*/}" ] || short="$short $w($edge)"
 		done
 		need "$fx: no node line past the screen (past it at W =${over:- none})" test -z "$over"
+		need "$fx: bars drawn at some width" test "$drawn" -gt 0
+		need "$fx: bars end on the queue header's edge (node/header not equal at W =${short:- none})" test -z "$short"
 	done
 }
 
