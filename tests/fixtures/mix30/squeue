@@ -8,7 +8,7 @@ i=5111; j=assemble; u=alice; t=PD; T=PENDING; M=0:00; L=12:00:00; R=(Priority); 
 i=5112; j=merge;    u=alice; t=PD; T=PENDING; M=0:00; L=10-00:00:00; R=(PartitionTimeLimit); S=N/A; r=PartitionTimeLimit; l=10-00:00:00
 i=5113; j=align;    u=bob;   t=PD; T=PENDING; M=0:00; L=6:00:00;  R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02; l=6:00:00
 i=5114; j=qc;       u=bob;   t=PD; T=PENDING; M=0:00; L=1:00:00;  R=(JobHeldUser); S=N/A; r=JobHeldUser; l=1:00:00
-i=5115; j=trim;     u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00;  R=(Resources); S=2099-01-01T00:00:00; r=Resources; l=2:00:00
+i=5115; j=trim;     u=alice; t=PD; T=PENDING; M=0:00; L=2:00:00;  R=(Resources); S=\{now+400d}; r=Resources; l=2:00:00
 i=5116; j=bwa;      u=mkoch; t=PD; T=PENDING; M=0:00; L=6:00:00;  R=(Priority); S=N/A; r=Priority; l=6:00:00
 i=5117; j=deseq;    u=bob;   t=PD; T=PENDING; M=0:00; L=3:00:00;  R=(JobHeldUser); S=N/A; r=JobHeldUser; l=3:00:00
 i=5118; j=plot;     u=alice; t=PD; T=PENDING; M=0:00; L=1:00:00;  R=(ReqNodeNotAvail, UnavailableNodes:node02); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:node02; l=1:00:00

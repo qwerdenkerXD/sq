@@ -297,7 +297,10 @@ c_empty() {
 # ---- 2. a normal mixed queue ------------------------------------------------
 c_mixed() {
 	T_TITLE="mixed queue: footer 6 jobs / 3 running / 2 pending / 1 other"
-	sq_run mixed --
+	# 1103's start estimate is 400 days ahead: its date, taken either side of
+	# the run in case the run straddles midnight
+	local est0 est1
+	est0=$(date -u -d '+400 days' +%F); sq_run mixed --; est1=$(date -u -d '+400 days' +%F)
 	need "rc 0"                       rc_is 0
 	need "stderr empty"               err_empty
 	need "stubs: sinfo, queue, sacct once each" calls_are 1 1 0 1
@@ -305,7 +308,7 @@ c_mixed() {
 	need "6 queue rows"               eval '[ "$(nrows queue)" -eq 6 ]'
 	need "rows are 1101..1106"        eval '[ "$(row_first_fields queue | sort | paste -sd,)" = 1101,1102,1103,1104,1105,1106 ]'
 	need "USER and NODE/REASON columns line up" eval 'column_aligned USER && column_aligned NODE/REASON'
-	need "pending reason with its backfill estimate" eval 'rows queue | grep -qE "^ +1103 .*PENDING .*\(Resources\) → 2099-01-01$"'
+	need "pending reason with its backfill estimate, over a year ahead: a date" eval 'rows queue | grep -qE "^ +1103 .*PENDING .*\(Resources\) → ($est0|$est1)$"'
 	need "no estimate where squeue has none" eval 'rows queue | grep -qE "^ +1102 .*PENDING .*\(Priority\)$"'
 	need "finished row 1001 COMPLETED" eval 'rows recent | grep -qE "^ +1001 +done +COMPLETED "'
 	need "finished block has 1 row (steps folded)" eval '[ "$(nrows recent)" -eq 1 ]'
