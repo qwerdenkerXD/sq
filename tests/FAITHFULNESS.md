@@ -134,6 +134,14 @@ Premises never seen on the cluster are taken from the Slurm 23.11.4 source (tag
   (`fixtures/_common/squeue-all-defaults`) rests on this, and it is load-bearing:
   sq skips a fallback row whose `ArrayTaskID` is not `N/A`, plain digits or a
   valid array expression.
+- **`-O exit_code`** prints `"%u:%u"` of the raw status: the exit status and 0,
+  or 0 and the signal, and nothing at all for `NO_VAL` (`_print_job_exit_code`,
+  `src/squeue/print.c:1721-1743`). So the first field is never reduced by 128 as
+  sacct reduces it, and slurmctld's raw `exit_code = 1` for a job it ended itself
+  (`src/slurmctld/job_mgr.c`, e.g. a deadline or a lost batch script) prints as
+  `0:1`, which slurmdbd stores as 256, exit 1 (`as_mysql_job.c:1230-1236`). The
+  fallback fixtures write `exit_code` in that `n:n` form; the stub renders
+  whatever the fixture says.
 - **The `%n` throttle** is appended after any shortening
   (`src/common/slurm_protocol_defs.c:6888`, in `xlate_array_task_str`), which the
   live sacct comparison confirmed (`10609_[...%3]` at length 4).

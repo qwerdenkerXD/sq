@@ -63,9 +63,11 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
   shrinks inside the brackets, `4109_[1,4,…] ×16`, so the count is never the part that gets cut.
   Finished tasks fold by array and by outcome, so failures never hide inside a
   count of successes; values that differ are shown as ranges.
-- **Recently finished jobs**, with state, exit code (and signal), elapsed time and age.
+- **Recently finished jobs**, with state, exit code (and signal, out of memory or Slurm error,
+  see below), elapsed time and age.
 - **A bell for your own failures.** A newly failed, timed-out or out-of-memory job of yours rings
-  the terminal bell once. Other people's jobs don't.
+  the terminal bell once. Other people's jobs don't. The bell and the colours follow STATE, not
+  EXIT: a COMPLETED job whose step ran out of memory shows `0/oom` but stays green and quiet.
 - **Time-limit pressure.** `LEFT` turns yellow under 10% of the job's limit and red under 2%.
 - **Start estimates** for pending jobs, from the backfill scheduler.
 - **Down-node reasons**, and a clear banner when the controller doesn't answer, instead of an
@@ -144,6 +146,18 @@ sq -C                     # centred in both axes
   too, because a signalled job's own row reports success and only its step carries the signal.
   Without accounting, or with a filter `sacct` has no equivalent for, the block falls back to
   `squeue -t all`, which only remembers jobs for `MinJobAge` (often 300 s), and the caption says so.
+- **Reading EXIT:** the exit code, then what ExitCode's second field says, taken from the job
+  and its steps (the first non-zero one, except that an out-of-memory always wins):
+  `rc/sigN` is signal N as Slurm records it, `rc/oom` out of memory, and `rc/errN` the low
+  7 bits of a Slurm error code, not errno: 53 task I/O setup failed (the stdin, stdout or
+  stderr file, or the link back to srun), 52 exec failed, 46 environment setup, 48
+  setuid/setgid, 54 prolog, 115 spank plugin. So EXIT can show a step's OOM on a job that
+  finished COMPLETED. A folded row lists its distinct exits, highest exit code first, then
+  highest N. Known limits: a launch or communication failure can read as `sig11`, `sig12` or
+  `sig13` (Slurm's own log calls it RaisedSignal); steps Slurm closes for a dead node read
+  `sig9`; an OOM caught by OverMemoryKill or missed by the cgroup detection reads `sig9`; a
+  real-time signal (34–64) reads `errN`; a signal passed through a shell as exit 128+N reads
+  as exit N (that is sacct's text; the `squeue -t all` fallback shows 128+N).
 - **The bell keeps a little state:** `<jobid><tab><end time>` lines in `~/.cache/sq/alerted`,
   added to and aged out after 24 h, never pruned just because one run looked at fewer jobs, and
   replaced atomically so two running copies cannot tear it.
