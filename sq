@@ -1274,8 +1274,9 @@ END{
     if (skip[3]) chrome++
     if (!qtrunc && !qbad) chrome += 2           # blank, counts footer
     RECENT_MAX = lines - chrome
-    if (d > RECENT_MAX) RECENT_MAX--            # "+N more" costs a line, if it comes
     if (RECENT_MAX < 3)  RECENT_MAX = 3         # never let the block vanish ...
+    if (d > RECENT_MAX) RECENT_MAX--            # "+N more" costs a line, if it comes:
+                                                # after the floor, or the floor undid it
     if (RECENT_MAX > 25) RECENT_MAX = 25        # ... and never let it run away
   }
   shown = (d > RECENT_MAX) ? RECENT_MAX : d

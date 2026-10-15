@@ -1638,6 +1638,27 @@ c_recent_max_full() {   # decision 4, FULL half: true today already
 	need "100: rc 0, stubs called"        eval 'rc_is 0 && calls_are 1 1 0 1'
 	need "100: all 31 rows, 34 jobs, no '+N more'" eval '[ "$(nrows recent)" -eq 31 ] && [ "$(jobs_shown)" -eq 34 ] && [ -z "$(more_count)" ]'
 }
+# FULL sizes the finished block from the lines the rest leaves (chrome): the
+# block takes them all, at least 3 (the floor) and at most 25 rows and its
+# "+N more".  With more than 25 groups that is exactly chrome + clamp(H -
+# chrome, 3, 26) lines.  The floor used to undo the line kept for "+N more",
+# so where exactly 3 were left the screen ran one line over the height.
+c_full_recent_fits() {
+	T_TITLE="FULL at every height 6..50: the finished block fills what is left, 3 lines at least and 25 rows + '+N more' at most, never one over"
+	local fx h chrome want off
+	for fx in oldfail many-finished; do
+		sq_run "$fx" SQ_HEIGHT=100 -- --full
+		chrome=$(( $(plain | wc -l) - 26 ))
+		need "$fx at 100: rc 0, 25 rows and '+N more'" eval 'rc_is 0 && [ "$(nrows recent)" -eq 25 ] && [ -n "$(more_count)" ]'
+		off=
+		for h in $(seq 6 50); do
+			sq_run "$fx" SQ_HEIGHT="$h" -- --full
+			want=$(( h - chrome )); [ $want -ge 3 ] || want=3; [ $want -le 26 ] || want=26
+			[ "$(plain | wc -l)" -eq $(( chrome + want )) ] || off="$off $h"
+		done
+		need "$fx: chrome + clamp(H - chrome, 3, 26) lines (not at H =${off:- none})" test -z "$off"
+	done
+}
 c_compact_recent_max() {   # decision 4, COMPACT half
 	T_TITLE="COMPACT takes SQ_RECENT_MAX as a cap: 3 at 60 lines is 4195 4193 4188 and '+17 more'; 100 at 24 lines changes nothing"
 	compact_case busy24 100 60 "1 1 0 1" "151 128 23 0" SQ_RECENT_MAX=3
@@ -1979,7 +2000,7 @@ cases=(
 	compact_manysmall_h40 compact_unlisted_h24 compact_throttled compact_quiet40_h10
 	compact_sweep_busy24 compact_sweep_mix30 compact_sweep_manystuck compact_sweep_manysmall
 	compact_sweep_quiet40 compact_sweep_faults
-	recent_max_full compact_recent_max compact_no_folding compact_colour compact_oldfail compact_fold_elapsed compact_low_heights full_flag compact_full_both
+	recent_max_full full_recent_fits compact_recent_max compact_no_folding compact_colour compact_oldfail compact_fold_elapsed compact_low_heights full_flag compact_full_both
 	reserve_refused compact_reserve reservation_forwarded
 	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full
 	compact_no_size compact_error_screens
