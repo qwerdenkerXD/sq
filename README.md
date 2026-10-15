@@ -147,22 +147,22 @@ sq -C                     # centred in both axes
   Without accounting, or with a filter `sacct` has no equivalent for, the block falls back to
   `squeue -t all`, which only remembers jobs for `MinJobAge` (often 300 s), and the caption says so.
 - **Reading EXIT:** the exit code, then what ExitCode's second field says, taken from the job
-  and its steps (the first non-zero one, except that an out-of-memory always wins):
-  `rc/sigN` is signal N as Slurm records it, `rc/oom` out of memory, and `rc/errN` the low
-  7 bits of a Slurm error code, not errno, from slurmd starting the job or step: 53 task
-  I/O setup failed (the stdin, stdout or stderr file, or the link back to srun), 52
-  slurmstepd could not start the tasks: a fork, chdir, pam_setup or privilege drop failed, or
-  a task or proctrack plugin call did (a missing or non-executable program is not 52: it
-  exits with its errno, e.g. exit 2 for a missing file; a spank plugin failing after start-up
-  reads as an exit code, not an errN), 46 the process-tracking container for the step could
-  not be created, 48 switching to the user's ids failed (setuid/setgid), 54 the
-  prolog failed or never started, 115 the spank plugin stack failed to initialize. So EXIT
-  can show a step's OOM on a job that finished COMPLETED. A folded row lists its distinct
-  exits, highest exit code first, then highest N. Known limits: a launch or communication failure can read as `sig11`, `sig12` or
-  `sig13` (Slurm's own log calls it RaisedSignal); steps Slurm closes for a dead node read
-  `sig9`; an OOM caught by OverMemoryKill or missed by the cgroup detection reads `sig9`; a
-  real-time signal (34–64) reads `errN`; a signal passed through a shell as exit 128+N reads
-  as exit N (that is sacct's text; the `squeue -t all` fallback shows 128+N).
+  and its steps (the first non-zero one, except that an out-of-memory always wins): `rc/sigN`
+  is signal N as Slurm records it, `rc/oom` out of memory, and `rc/errN` the low 7 bits of a
+  Slurm error code, not errno, from slurmd starting the job or step: 53 task I/O setup failed
+  (the stdin, stdout or stderr file, or the link back to srun), 52 slurmstepd could not start
+  the tasks: a fork, chdir, pam_setup or privilege drop failed, or a task or proctrack plugin
+  call did (a missing or non-executable program is not 52: it exits with its errno, e.g. exit 2
+  for a missing file; a spank plugin failing after start-up reads as an exit code, not an
+  errN), 46 the process-tracking container for the step could not be created, 48 switching to
+  the user's ids failed (setuid/setgid), 54 the prolog failed or never started, 115 the spank
+  plugin stack failed to initialize. So EXIT can show a step's OOM on a job that finished
+  COMPLETED. A folded row lists its distinct exits, highest exit code first, then highest N.
+  Known limits: a launch or communication failure can read as `sig11`, `sig12` or `sig13`
+  (Slurm's own log calls it RaisedSignal); steps Slurm closes for a dead node read `sig9`; an
+  OOM caught by OverMemoryKill or missed by the cgroup detection reads `sig9`; a real-time
+  signal (34–64) reads `errN`; a signal passed through a shell as exit 128+N reads as exit N
+  (that is sacct's text; the `squeue -t all` fallback shows 128+N).
 - **The bell keeps a little state:** `<jobid><tab><end time>` lines in `~/.cache/sq/alerted`,
   added to and aged out after 24 h, never pruned just because one run looked at fewer jobs, and
   replaced atomically so two running copies cannot tear it.
