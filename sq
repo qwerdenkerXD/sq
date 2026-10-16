@@ -98,12 +98,13 @@ die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
 # closed pipe.  With FILE only its first line is read, at most 1 MiB of it, and
 # a character that bound cut in half goes, as the cut made it, not the text.
 # Under env, so bash itself never switches locale for it.
-scrub() (   # scrub [MAX [FILE]]: stdin, or the first line of FILE, onto stdout
+scrub() (   # scrub [-f FILE] [MAX]: stdin, or the first line of FILE, onto stdout
 	bound=0
-	[ $# -lt 2 ] || { bound=1048576; exec < <(head -c $((bound + 1)) -- "$2"); }
+	[ "${1-}" != -f ] || { bound=1048576; exec < <(head -c $((bound + 1)) -- "$2"); shift 2; }
 	exec env LC_ALL=C gawk -v max="${1:-4096}" -v bound=$bound '
 	BEGIN {
 		CONT = "[\200-\277]"; BAD = "\342\220\232"     # a continuation byte; U+241A
+		CTL = "[^\040-\176\200-\377]"                 # C0 and DEL
 		# every unit that is not ASCII, the longest at each place (no group
 		# anywhere: one makes gawk track submatches, 40 times slower): a
 		# sequence of Unicode Table 3-7, else the longest start of one, else a
@@ -129,9 +130,9 @@ scrub() (   # scrub [MAX [FILE]]: stdin, or the first line of FILE, onto stdout
 	done { next }
 	# a line at a time, as a newline ends every sequence (and goes itself)
 	{	s = $0; cut = bound && length(s) > bound
-		if (!cut && s !~ /[\200-\377]/) gsub(/[^\040-\176]+/, "", s)
+		if (!cut && s !~ /[\200-\377]/) gsub(CTL "+", "", s)
 		else {
-			gsub(/[^\040-\176\200-\377]/, "\r", s)       # C0 and DEL: \001 \002 are free
+			gsub(CTL, "\r", s)                          # each a \r, so \001 \002 are free
 			gsub(UNIT, "\001&\002", s)
 			if (cut) {   # the unit the bound ran through, or the byte past it
 				tail = substr(s, length(s) - 5)        # room for \001, 4 bytes, \002
@@ -547,8 +548,8 @@ why_of() {   # why_of NAME RC OUTPUT TOOL: OUTPUT as collect left it, e.g. $tmp/
 	if [ "$rc" = 124 ] || { [ "$rc" = 137 ] && { [ -s "$3.tmo" ] || [ -z "$verbose" ]; }; }; then
 		real="no response after ${tmo}s"
 	elif [ "$rc" != 0 ]; then
-		real=$(scrub 4096 "$3.err")
-		[ -n "$real" ] || [ "$rc" != 125 ] || real=$(scrub 4096 "$3.tmo")
+		real=$(scrub -f "$3.err")
+		[ -n "$real" ] || [ "$rc" != 125 ] || real=$(scrub -f "$3.tmo")
 	fi
 	if [ "$rc" != 0 ]; then
 		if   [ -n "$real" ];    then why=$real
