@@ -90,9 +90,15 @@ die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
 # pair it arrives as, again and again, because taking one pair out can join the
 # halves of another.  Bytes, never the locale (GNU tr is byte-based anyway), so
 # any other UTF-8 text passes unchanged; under env, so bash itself never switches
-# locale for it
+# locale for it.  Pairs nested in pairs take one pass each, so the work grows with
+# the square of the input: only its first 4 KiB are kept, more than any screen
+# line shows (the text is cut to the width afterwards anyway), the rest is read
+# and dropped, so a writer never meets a closed pipe, and a character the cut
+# halved goes too
 scrub() {
-	env LC_ALL=C tr -d '\000-\037\177' | env LC_ALL=C sed -e ':a' -e $'s/\xc2[\x80-\x9f]//g' -e 'ta'
+	{ head -c 4096; cat > /dev/null; } | env LC_ALL=C tr -d '\000-\037\177' |
+		env LC_ALL=C sed -e ':a' -e $'s/\xc2[\x80-\x9f]//g' -e 'ta' \
+			-e $'s/[\xc0-\xdf]$//; s/[\xe0-\xef][\x80-\xbf]\\{0,1\\}$//; s/[\xf0-\xf7][\x80-\xbf]\\{0,2\\}$//'
 }
 
 fields=${SQ_FMT:-i,j,u,T,M,L,C,m,R}

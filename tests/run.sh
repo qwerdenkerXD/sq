@@ -773,6 +773,29 @@ c_real_reason_wins() {
 		eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · squeue: error: the controller says why$"'
 }
 
+# The scrub takes nested C1 pairs out one layer per pass, so its work grew with
+# the square of the text: 100 KB of them held sq for 30s, past any SQ_TIMEOUT.
+# It keeps the first 4 KiB only, more than a screen line shows, and drops a
+# character that cut halved, so what is shown does not change.
+raw_stderr_fixture() {   # raw_stderr_fixture NAME GAWK-PRINT: "wide" whose squeue fails with these raw bytes on stderr
+	local d; d=$(stderr_fixture squeue x); mv "$d" "$d-$1"; d=$d-$1
+	{ printf '@stderr squeue: error: '; LC_ALL=C gawk "BEGIN { $2 }"; printf '\n@exit 1\n'; } > "$d/squeue"
+	printf '%s' "$d"
+}
+c_scrub_bounded() {
+	T_TITLE="100 KB of nested C1 pairs on squeue's stderr: sq answers within seconds; a cut never halves a character"
+	local t0
+	t0=$SECONDS
+	sq_run "$(raw_stderr_fixture deep 'for (i=0; i<50000; i++) printf "\302"; for (i=0; i<50000; i++) printf "\233"')" --
+	need "50000 pairs nested: rc 0 within 10s, the banner shown" eval 'rc_is 0 && [ $((SECONDS - t0)) -lt 10 ] && has "⚠ slurm unreachable · squeue: error: "'
+	sq_run "$(raw_stderr_fixture tail 'for (i=0; i<2000; i++) printf "\302"; for (i=0; i<2000; i++) printf "\233"; for (i=0; i<96000; i++) printf "x"')" --
+	need "2000 pairs nested, then text: rc 0, stderr empty, the text after the pairs on the banner, no C1" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: xxxx" && c1_inert'
+	sq_run "$(raw_stderr_fixture halved 'for (i=0; i<3000; i++) printf "\303\251"')" --
+	need "é past 4 KiB, the cut inside one: rc 0, stderr empty (no invalid UTF-8 for gawk), é on the banner" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: éééé"'
+}
+
 # What only the bell reads takes the same road: a user name and a cache path
 # that -v would have unescaped reach gawk as given.  The bell rings only with a
 # terminal, so these run on a pty with the bell left on.
@@ -2394,7 +2417,7 @@ c_bars_width_sweep() {
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text silent_failure real_reason_wins bell_text centre sacct_fallback
+	finished user_filter backslash_text control_text scrub_bounded silent_failure real_reason_wins bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
