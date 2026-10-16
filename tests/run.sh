@@ -505,6 +505,12 @@ c_collector_killed() {
 	sq_run "$(silent_fixture squeue 125 'squeue: error: its own reason')" --
 	need "squeue exit 125 with its own stderr: rc 0, its line on the banner" \
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: its own reason$"'
+	# ... and so it is when timeout did say something, a warning of its own
+	local tbin=$T_DIR/tbin
+	mkdir -p "$tbin"; printf '#!/bin/sh\necho "timeout: a warning of its own" >&2\nexec %q "$@"\n' "$bound" > "$tbin/timeout"; chmod +x "$tbin/timeout"
+	sq_run "$(silent_fixture squeue 125 'squeue: error: its own reason')" PATH="$tbin:$here/bin:$PATH" --
+	need "squeue exit 125 with its own stderr, timeout warning on its own: rc 0, squeue's line on the banner" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: its own reason$"'
 }
 # sh -c gets the tool's name as its $0, so a client missing from PATH reads
 # "sinfo: ...: not found" on the banner, not "sh: ...", which names no tool
@@ -833,6 +839,8 @@ c_scrub_sites() {
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: p␚␚qrstuv␚␚w$"'
 	sq_run wide -- --reserve "${c1}x"
 	need "--reserve: refused, the value echoed as 'x'" eval 'rc_is 2 && grep -qF "not '"'"'x'"'"'" "$ERR" && c1_err_inert'
+	sq_run wide -- --reserve $'a\x7fb'       # plain ASCII, which takes a shorter way
+	need "--reserve with DEL in ASCII text: refused, the value echoed as 'ab'" eval 'rc_is 2 && grep -qF "not '"'"'ab'"'"'" "$ERR"'
 	sq_run wide -- "--fo${c1}o"
 	need "an unknown long option: refused, echoed as --foo" eval 'rc_is 2 && grep -qF "sq: --foo is not one of the long options" "$ERR" && c1_err_inert'
 	sq_run wide -- -u "-${c1}x"
@@ -880,6 +888,18 @@ c_scrub_not_utf8() {
 		need "a halved $x at the end of squeue's stderr: rc 0, stderr empty, 'end␚'" \
 			eval 'rc_is 0 && err_empty && utf8_valid && matches "^  ⚠ slurm unreachable · squeue: error: end␚$"'
 	done
+	# the edges of Unicode's Table 3-7, where a second byte outside the lead's
+	# range makes the lead no character: an overlong 3-byte form, a surrogate, an
+	# overlong 4-byte form, one above U+10FFFF, each next to its valid neighbour
+	local row bad good marks
+	for row in '\xe0\x80\x80:\xe0\xa0\x80' '\xed\xa0\x80:\xed\x9f\xbf' \
+	           '\xf0\x80\x80\x80:\xf0\x90\x80\x80' '\xf4\x90\x80\x80:\xf4\x8f\xbf\xbf'; do
+		IFS=: read -r bad good <<< "$row"
+		marks=${bad//\\x??/␚}                        # a ␚ for each byte
+		sq_run "$(stderr_fixture squeue "a${bad}b${good}c")" --
+		need "$bad then $good on squeue's stderr: rc 0, stderr empty, '$marks' then the character" \
+			eval 'rc_is 0 && err_empty && utf8_valid && lines_matching "⚠ slurm unreachable" | grep -qxF "  ⚠ slurm unreachable · squeue: error: a${marks}b$(printf "$good")c"'
+	done
 	sq_run wide -- -u "$(printf 'end\xf0\x9f\x98')"
 	need "-u ending in a halved 😀: rc 0, stderr empty, the caption says user=end␚" \
 		eval 'rc_is 0 && err_empty && utf8_valid && has "recently finished · last 2h · user=end␚"'
@@ -919,7 +939,8 @@ c_scrub_bounded() {
 # lost it (and then made up "squeue failed (exit 1)").  The 4096 also keep a long
 # text within what Linux takes as an environment string, which is how gawk gets
 # it: past 128 KiB exec failed with E2BIG, exit 126, no screen, the temp dir
-# left behind.  The four sites that echo a value keep 40 characters, not bytes.
+# left behind.  The four sites that echo a value keep 40 characters, not bytes;
+# the others 4096, seen whole only on the title, which draws the host name in full.
 tmp_left() { [ -n "$(ls -A "$RUN/tmp")" ]; }     # sq's temp dir outlived it
 since_given() {   # the -S value of sacct's first call, as sacct got it
 	local -a w; local i
@@ -927,8 +948,8 @@ since_given() {   # the -S value of sacct's first call, as sacct got it
 	for ((i = 0; i + 1 < ${#w[@]}; i++)); do [ "${w[i]}" != -S ] || { printf '%s' "${w[i+1]}"; return; }; done
 }
 c_scrub_counts() {
-	T_TITLE="the scrub counts characters once decoded: controls ahead of a message never push it out, long texts draw, the echoes keep 40 characters"
-	local m name bytes n u p c50 c40 c38 c14 x38
+	T_TITLE="the scrub counts characters once decoded: controls ahead of a message never push it out, long texts draw, the echoes keep 40 characters, the rest 4096"
+	local m name bytes n u p c50 c40 c38 c14 x38 u50 host hbin=$T_DIR/hbin
 	for m in 'cr5000 \r 5000' 'esc \033 4100' 'csi2100 \302\233 2100'; do
 		read -r name bytes n <<< "$m"
 		sq_run "$(raw_stderr_fixture "$name" "for (i=0; i<$n; i++) printf \"$bytes\"; printf \"the real message\"")" --
@@ -959,6 +980,12 @@ c_scrub_counts() {
 	need "--reserve of 14 中, a newline, 50 中: refused, 40 中 echoed, the newline gone" eval 'rc_is 2 && grep -qF "not '"'"'$c40'"'"';" "$ERR"'
 	sq_run wide -- "--$c50"
 	need "--中… of 52 characters: refused, echoed cut at 40" eval 'rc_is 2 && grep -qF "sq: --$c38 is not one" "$ERR"'
+	u50=$(printf 'u%.0s' {1..50}); host=$(printf 'h%.0s' {1..5000})
+	sq_run wide -- -u "$u50"
+	need "-u of 50 characters: rc 0, all 50 on the caption" eval 'rc_is 0 && has "recently finished · last 2h · user=$u50"'
+	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "%%s\\n" %q\n' "$host" > "$hbin/hostname"; chmod +x "$hbin/hostname"
+	sq_run wide PATH="$hbin:$here/bin:$PATH" --
+	need "a host name of 5000 characters: rc 0, the title shows 4096 of them" eval 'rc_is 0 && plain | head -1 | grep -qF "SLURM ${host:0:4096}  "'
 }
 
 # Of a collector's stderr only the first line is read, and only 1 MiB of it: a
@@ -970,6 +997,9 @@ c_scrub_read_bound() {
 	local pad=$((1048576 - 31))      # "squeue: error: the real message" is 31 bytes
 	sq_run "$(raw_stderr_fixture halved "printf \"the real message\"; for (i=0; i<$pad-2; i++) printf \"\\r\"; printf \"\\344\\270\\255tail\"")" --
 	need "中 across the bound: rc 0, stderr empty, dropped, no ␚, the message shown" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: the real message$"'
+	sq_run "$(raw_stderr_fixture halved4 "printf \"the real message\"; for (i=0; i<$pad-3; i++) printf \"\\r\"; printf \"\\360\\237\\230\\200tail\"")" --
+	need "😀 across the bound, 3 of its 4 bytes within: rc 0, stderr empty, dropped, no ␚, the message shown" \
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: the real message$"'
 	sq_run "$(raw_stderr_fixture whole "printf \"the real message\"; for (i=0; i<$pad-3; i++) printf \"\\r\"; printf \"\\344\\270\\255tail\"")" --
 	need "中 ending on the bound: rc 0, stderr empty, 中 kept, nothing after it" \
