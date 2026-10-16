@@ -749,6 +749,17 @@ c_silent_failure() {
 	need "sinfo exit 1, stderr a lone BEL: rc 0, 'sinfo failed (exit 1)', no BEL byte" eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · sinfo failed \(exit 1\)$" && [ "$(bels)" -eq 0 ]'
 	sq_run "$(silent_fixture sacct 1)" --
 	need "sacct exit 1, no stderr: rc 0, the fallback caption names it" eval 'rc_is 0 && calls_are 1 1 1 1 && has "recently finished · recent only (no accounting) · sacct failed (exit 1)"'
+	# the exit status as given, and 128 is still an exit: only above it is a signal
+	local x want
+	for x in 2:"squeue failed (exit 2)" 128:"squeue failed (exit 128)" 129:"squeue crashed (signal 1)"; do
+		want=${x#*:}
+		sq_run "$(silent_fixture squeue "${x%%:*}")" --
+		need "squeue exit ${x%%:*}, no stderr: rc 0, '$want'" eval 'rc_is 0 && lines_matching "⚠ slurm unreachable" | grep -qxF "  ⚠ slurm unreachable · $want"'
+	done
+	# a squeue failing silently has failed all the same: no fallback asks it again
+	fx=$(silent_fixture squeue 1); printf '@exit 1\n' > "$fx/sacct"
+	sq_run "$fx" --
+	need "squeue and sacct silent: rc 0, sacct asked, no fallback" eval 'rc_is 0 && calls_are 1 1 0 1'
 }
 # Where a line could name several reasons, a real one (stderr, the timeout)
 # beats one made up from an exit status; among real ones the order stays: the
@@ -771,6 +782,43 @@ c_real_reason_wins() {
 	sq_run "$fx" --
 	need "sinfo silent, squeue with stderr: rc 0, squeue's text on the banner" \
 		eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · squeue: error: the controller says why$"'
+	fx=$(silent_fixture squeue 1 'squeue: error: the controller says why'); printf '@stderr sinfo: error: sinfo says why\n@exit 1\n' > "$fx/sinfo"
+	sq_run "$fx" --
+	need "sinfo and squeue both with stderr: rc 0, sinfo's text on the banner, as before" \
+		eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · sinfo: error: sinfo says why$"'
+	# the filter no accounting can express is real text too, and outranks the fallback's
+	sq_run "$(silent_fixture squeue-all 1 'squeue: error: the fallback says why')" -- -n x
+	need "-n x, the fallback with stderr: rc 0, the filter on the caption" \
+		eval 'rc_is 0 && calls_are 1 1 1 0 && has "finished jobs unavailable · -n has no sacct equivalent"'
+}
+
+# Every byte rule of the scrub, on one stderr line: a pair nested in a pair, both
+# ends of the C1 range, DEL, the last C0 byte, NUL (bash would drop it from the
+# reason with a warning of its own), and a C0 byte between the halves of a pair,
+# which taking C0 out first joins.  Then each site that scrubs, with a C1 byte
+# none of them let through before: the three usage errors that echo a value,
+# the filter on the caption, the skipped filter, SQ_SINCE and the host name.
+c1_err_inert() { ! LC_ALL=C grep -q $'\xc2[\x80-\x9f]' "$ERR"; }
+c_scrub_sites() {
+	T_TITLE="the scrub's bytes (nested pair, \\xc2\\x80 and \\x9f, DEL, \\x1f, NUL, C0 inside a pair) and each site that scrubs: usage errors, filters, SQ_SINCE, host"
+	local hbin=$T_DIR/hbin c1=$'\xc2\x9b'
+	sq_run "$(stderr_fixture squeue 'p\xc2\xc2\x9b\x9bq\xc2\x80r\xc2\x9fs\x7ft\x1fu\x00v\xc2\x01\x9bw')" --
+	need "squeue stderr with every byte rule: rc 0, stderr empty, 'pqrstuvw' on the banner" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: pqrstuvw$"'
+	sq_run wide -- --reserve "${c1}x"
+	need "--reserve: refused, the value echoed as 'x'" eval 'rc_is 2 && grep -qF "not '"'"'x'"'"'" "$ERR" && c1_err_inert'
+	sq_run wide -- "--fo${c1}o"
+	need "an unknown long option: refused, echoed as --foo" eval 'rc_is 2 && grep -qF "sq: --foo is not one of the long options" "$ERR" && c1_err_inert'
+	sq_run wide -- -u "-${c1}x"
+	need "-u -x: refused, the value echoed as '-x'" eval 'rc_is 2 && grep -qF "not '"'"'-x'"'"'" "$ERR" && c1_err_inert'
+	sq_run "$(stderr_fixture none x)" -- "-nx${c1}y"
+	need "-nx…y (no sacct equivalent): rc 0, the caption names -nxy, no C1" \
+		eval 'rc_is 0 && calls_are 1 1 1 0 && has "recent only (-nxy has no sacct equivalent)" && c1_inert'
+	sq_run wide SQ_SINCE="2026-01-01${c1}T00" --
+	need "SQ_SINCE with C1: rc 0, the caption says since 2026-01-01T00, no C1" eval 'rc_is 0 && has "recently finished · since 2026-01-01T00" && c1_inert'
+	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "no\\302\\233de\\n"\n' > "$hbin/hostname"; chmod +x "$hbin/hostname"
+	sq_run wide PATH="$hbin:$here/bin:$PATH" --
+	need "host name with C1: rc 0, the title says node, no C1" eval 'rc_is 0 && plain | head -1 | grep -qF "SLURM node " && c1_inert'
 }
 
 # The scrub takes nested C1 pairs out one layer per pass, so its work grew with
@@ -2417,7 +2465,7 @@ c_bars_width_sweep() {
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_bounded silent_failure real_reason_wins bell_text centre sacct_fallback
+	finished user_filter backslash_text control_text scrub_sites scrub_bounded silent_failure real_reason_wins bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
