@@ -895,7 +895,7 @@ c_scrub_not_utf8() {
 	for row in '\xe0\x80\x80:\xe0\xa0\x80' '\xed\xa0\x80:\xed\x9f\xbf' \
 	           '\xf0\x80\x80\x80:\xf0\x90\x80\x80' '\xf4\x90\x80\x80:\xf4\x8f\xbf\xbf'; do
 		IFS=: read -r bad good <<< "$row"
-		marks=${bad//\\x??/␚}                        # a ␚ for each byte
+		marks=${bad//\\x??/␚}                        # each byte is its own broken piece
 		sq_run "$(stderr_fixture squeue "a${bad}b${good}c")" --
 		need "$bad then $good on squeue's stderr: rc 0, stderr empty, '$marks' then the character" \
 			eval 'rc_is 0 && err_empty && utf8_valid && lines_matching "⚠ slurm unreachable" | grep -qxF "  ⚠ slurm unreachable · squeue: error: a${marks}b$(printf "$good")c"'
