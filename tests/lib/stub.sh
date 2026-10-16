@@ -46,7 +46,9 @@
 #   @signal N           die by signal N before printing anything, as a crash
 #                       does (no core is dumped).  Read by this script, not
 #                       the renderer, whose gawk would catch a SIGSEGV itself,
-#                       so it counts only at the top of the tool's own file
+#                       so it counts on any line of the tool's own file (the
+#                       first one, before anything else runs), never from an
+#                       @include
 # Records are printed in file order: the stub sorts and filters nothing.
 
 set -u

@@ -21,7 +21,7 @@ case ${SQSTUB_TIMEOUT:-} in
 			case $a in
 				--verbose) printf "timeout: unrecognized option '--verbose'\nTry 'timeout --help' for more information.\n" >&2; exit 125 ;;
 				-*) ;;
-				*) break ;;    # the duration: options end here
+				*) break ;;    # the first word that is no option: -k's value, as sq puts --verbose first
 			esac
 		done
 		exec "$real" "$@" ;;
