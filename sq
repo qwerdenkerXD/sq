@@ -103,25 +103,28 @@ scrub() (   # scrub [MAX [FILE]]: stdin, or the first line of FILE, onto stdout
 	[ $# -lt 2 ] || { bound=1048576; exec < <(head -c $((bound + 1)) -- "$2"); }
 	exec env LC_ALL=C gawk -v max="${1:-4096}" -v bound=$bound '
 	BEGIN {
-		T = "[\200-\277]"; BAD = "\342\220\232"
+		CONT = "[\200-\277]"; BAD = "\342\220\232"     # a continuation byte; U+241A
 		# every unit that is not ASCII, the longest at each place (no group
 		# anywhere: one makes gawk track submatches, 40 times slower): a
 		# sequence of Unicode Table 3-7, else the longest start of one, else a
 		# byte that starts none
-		U = "[\302-\337]" T "|\340[\240-\277]" T "|[\341-\354\356\357]" T T "|\355[\200-\237]" T \
-		    "|\360[\220-\277]" T T "|[\361-\363]" T T T "|\364[\200-\217]" T T \
-		    "|[\302-\337]|\340[\240-\277]?|[\341-\354\356\357]" T "?|\355[\200-\237]?" \
-		    "|\360|\360[\220-\277]" T "?|[\361-\363]" T "?" T "?|\364|\364[\200-\217]" T "?" \
+		UNIT = "[\302-\337]" CONT \
+		    "|\340[\240-\277]" CONT "|[\341-\354\356\357]" CONT CONT "|\355[\200-\237]" CONT \
+		    "|\360[\220-\277]" CONT CONT "|[\361-\363]" CONT CONT CONT "|\364[\200-\217]" CONT CONT \
+		    "|[\302-\337]|\340[\240-\277]?|[\341-\354\356\357]" CONT "?|\355[\200-\237]?" \
+		    "|\360|\360[\220-\277]" CONT "?|[\361-\363]" CONT "?" CONT "?|\364|\364[\200-\217]" CONT "?" \
 		    "|[\200-\301\365-\377]"
-		# of those, wrapped in \001 \002, the ones that are no character: a
+		# of those, wrapped in \001 \002, the ill-formed ones, no character: a
 		# byte that leads none, or a lead with fewer bytes than it needs
-		ILL = "\001[\200-\337]\002|\001[\340-\357]" T "?\002|\001[\360-\377]" T "?" T "?\002"
+		ILL = "\001[\200-\337]\002|\001[\340-\357]" CONT "?\002|\001[\360-\377]" CONT "?" CONT "?\002"
 	}
-	function emit(s,   l, i, b) {   # s, as much of it as max still allows
-		l = length(s)
-		for (i = 1; i <= l && n < max; n++)              # a lead byte tells the length
-			i += (b = substr(s, i, 1)) < "\300" ? 1 : b < "\340" ? 2 : b < "\360" ? 3 : 4
-		printf "%s", substr(s, 1, i - 1); if (i <= l) done = 1
+	# globals, kept from line to line: kept, the characters printed so far, and
+	# done, set once nothing more is printed (max reached, or the one line of FILE)
+	function emit(s,   len, i, lead) {   # s, as much of it as max still allows
+		len = length(s)
+		for (i = 1; i <= len && kept < max; kept++)      # a lead byte tells the length
+			i += (lead = substr(s, i, 1)) < "\300" ? 1 : lead < "\340" ? 2 : lead < "\360" ? 3 : 4
+		printf "%s", substr(s, 1, i - 1); if (i <= len) done = 1
 	}
 	done { next }
 	# a line at a time, as a newline ends every sequence (and goes itself)
@@ -129,10 +132,10 @@ scrub() (   # scrub [MAX [FILE]]: stdin, or the first line of FILE, onto stdout
 		if (!cut && s !~ /[\200-\377]/) gsub(/[^\040-\176]+/, "", s)
 		else {
 			gsub(/[^\040-\176\200-\377]/, "\r", s)       # C0 and DEL: \001 \002 are free
-			gsub(U, "\001&\002", s)
+			gsub(UNIT, "\001&\002", s)
 			if (cut) {   # the unit the bound ran through, or the byte past it
-				t = substr(s, length(s) - 5)
-				s = substr(s, 1, length(s) - (match(t, /\001[\200-\377]+\002$/) ? length(t) - RSTART + 1 : 1))
+				tail = substr(s, length(s) - 5)        # room for \001, 4 bytes, \002
+				s = substr(s, 1, length(s) - (match(tail, /\001[\200-\377]+\002$/) ? length(tail) - RSTART + 1 : 1))
 			}
 			gsub(/\r+|\001\302[\200-\237]\002/, "", s)
 			gsub(ILL, BAD, s)
