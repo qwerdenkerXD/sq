@@ -71,7 +71,8 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
 - **Time-limit pressure.** `LEFT` turns yellow under 10% of the job's limit and red under 2%.
 - **Start estimates** for pending jobs, from the backfill scheduler.
 - **Down-node reasons**, and a clear banner when the controller doesn't answer, instead of an
-  empty screen that looks like an empty queue.
+  empty screen that looks like an empty queue. In its error text a `␚` stands for bytes that
+  are not valid UTF-8.
 - **Colour where it belongs:** on in a terminal and under `watch`, off when piped or redirected,
   off with [`NO_COLOR`](https://no-color.org).
 
