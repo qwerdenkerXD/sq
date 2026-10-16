@@ -50,6 +50,9 @@ if [ $keep = 1 ]; then echo "evidence kept in $work"; else trap 'rm -rf "$work"'
 trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
 
 ESC=$'\033'
+# the suite's own bound on sq, found before any case puts a fake timeout first
+# on PATH (tests/lib/timeout-as)
+bound=$(command -v timeout) || { echo "run.sh: no timeout on PATH" >&2; exit 2; }
 
 # ============================================================================
 # running sq
@@ -86,7 +89,7 @@ sq_run() {
 	if [ -n "${PTY:-}" ]; then pty_exec "${envlist[@]}" -- "$@"
 	else  # bounded, so a hanging sq fails its case instead of hanging the suite;
 		# setsid outside timeout, so a hanging sq stays timeout's own child
-		env -i "${envlist[@]}" ${NOTTY:+setsid -w} timeout -k 2 30 "$sq" "$@" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
+		env -i "${envlist[@]}" ${NOTTY:+setsid -w} "$bound" -k 2 30 "$sq" "$@" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
 		[ $RC -ne 124 ] || T_FAIL+=("sq did not finish within 30s")
 	fi
 	note_run
@@ -107,7 +110,7 @@ pty_exec() {
 	[ -n "${PTY_STDIN:-}" ] && inner="$inner < $(printf '%q' "$PTY_STDIN")"
 	# --foreground: without it timeout stops script's child with SIGTTOU in the pty
 	env -i "${envlist[@]}" SHELL=/bin/sh \
-		timeout --foreground -k 2 20 script -qec "$inner" /dev/null > "$OUT" 2> "$ERR" < /dev/null
+		"$bound" --foreground -k 2 20 script -qec "$inner" /dev/null > "$OUT" 2> "$ERR" < /dev/null
 	RC=$?
 }
 
@@ -446,20 +449,65 @@ c_squeue_hangs() {
 	need "footer ? ? ? ?, the last line" footer_unknown
 }
 # A squeue that ignores SIGTERM outlives the deadline and is killed 2s later:
-# timeout then exits 137, as for any SIGKILL, and the screen called the
-# timeout "squeue crashed (signal 9)".  A SIGKILL before the deadline is still
-# that crash.  (bash reports the kill on sq's stderr, so stderr is not checked.)
+# timeout then exits 137, as for any SIGKILL.  It is the timeout because
+# timeout said it signalled (--verbose, to its own stderr), or, where timeout
+# predates --verbose (coreutils < 8.29, faked by tests/lib/timeout-as), because
+# a 137 cannot be told apart there and reads as the timeout (Franz, 2026-10-16).
+# A SIGKILL timeout did not send is a crash; so is a SIGSEGV, whose "dumped
+# core" from timeout never reaches the screen.  bash's own "Killed" and
+# "Segmentation fault" notices stay off sq's stderr.
+timeout_as() { printf 'PATH=%s' "$here/lib/timeout-as:$here/bin:$PATH"; }   # timeout_as: the PATH for SQSTUB_TIMEOUT=...
+signal_fixture() {   # signal_fixture FILE N: as stderr_fixture, FILE dies by signal N at once
+	local d; d=$(stderr_fixture "$1" x)
+	printf '@signal %s\n' "$2" > "$d/$1"
+	printf '%s' "$d"
+}
 c_squeue_ignores_term() {
-	T_TITLE="squeue ignoring SIGTERM, killed after SQ_TIMEOUT=1: 'no response after 1s'; a SIGKILL before it: 'crashed (signal 9)'"
-	local t0=$SECONDS
-	sq_run squeue-hangs SQ_TIMEOUT=1 SQSTUB_IGNORE_TERM=squeue --
-	need "rc 0, stubs: queue once, no fallback" eval 'rc_is 0 && calls_are 1 1 0 1'
-	need "finished within 10s"        eval '[ $((SECONDS - t0)) -lt 10 ]'
-	need "banner 'no response after 1s'" matches "^  ⚠ slurm unreachable · no response after 1s$"
-	need "'job list unavailable', footer ? ? ? ?" eval 'has "job list unavailable" && footer_unknown'
+	T_TITLE="squeue ignoring SIGTERM, killed after SQ_TIMEOUT=1: 'no response after 1s', with and without timeout --verbose"
+	local t0 how
+	for how in verbose old; do
+		t0=$SECONDS
+		if [ $how = verbose ]; then sq_run squeue-hangs SQ_TIMEOUT=1 SQSTUB_IGNORE_TERM=squeue --
+		else sq_run squeue-hangs SQ_TIMEOUT=1 SQSTUB_IGNORE_TERM=squeue "$(timeout_as)" SQSTUB_TIMEOUT=old --; fi
+		need "$how: rc 0, stderr empty, stubs: queue once, no fallback" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
+		need "$how: finished within 10s" eval '[ $((SECONDS - t0)) -lt 10 ]'
+		need "$how: banner 'no response after 1s'" matches "^  ⚠ slurm unreachable · no response after 1s$"
+		need "$how: 'job list unavailable', footer ? ? ? ?" eval 'has "job list unavailable" && footer_unknown'
+	done
+}
+c_collector_killed() {
+	T_TITLE="a SIGKILL nobody's timeout sent, and a SIGSEGV with timeout's 'dumped core', are crashes; timeout failing itself (rc 125) says why"
+	sq_run "$(signal_fixture squeue 9)" --
+	need "squeue killed at once: rc 0, stderr empty, 'squeue crashed (signal 9)'" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue crashed \(signal 9\)$"'
 	sq_run "$(silent_fixture squeue 137)" --
 	need "squeue exit 137 at once, no stderr: rc 0, 'squeue crashed (signal 9)'" \
 		eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · squeue crashed \(signal 9\)$"'
+	sq_run "$(signal_fixture squeue 9)" "$(timeout_as)" SQSTUB_TIMEOUT=old --
+	need "squeue killed at once, timeout without --verbose: rc 0, read as the timeout" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · no response after 3s$"'
+	sq_run "$(signal_fixture squeue 11)" --
+	need "squeue SIGSEGV: rc 0, stderr empty, 'squeue crashed (signal 11)'" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue crashed \(signal 11\)$"'
+	sq_run "$(signal_fixture sinfo 11)" "$(timeout_as)" SQSTUB_TIMEOUT=core --
+	need "sinfo SIGSEGV, timeout says 'dumped core': rc 0, stderr empty, 'sinfo crashed (signal 11)'" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · sinfo crashed \(signal 11\)$" && lacks "dumped core"'
+	sq_run mixed "$(timeout_as)" SQSTUB_TIMEOUT=broken --
+	need "timeout fails itself (rc 125): rc 0, its first line on the banner, no client ran" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · timeout: fork system call failed" && [ "$(grep -c "^CALL" "$LOG")" -eq 0 ]'
+}
+# a timeout with a leading zero is still a number of seconds to timeout(1);
+# bash arithmetic would read 08 as a bad octal number and abort
+c_timeout_leading_zero() {
+	T_TITLE="SQ_TIMEOUT=08 and 09.5: sq runs, and a SIGKILL still reads as a crash"
+	local t
+	for t in 08 09.5; do
+		sq_run mixed SQ_TIMEOUT=$t --
+		need "$t: rc 0, stderr empty, footer 6/3/2/1" eval 'rc_is 0 && err_empty && footer_is 6 3 2 1'
+		sq_run "$(signal_fixture squeue 9)" SQ_TIMEOUT=$t --
+		need "$t, squeue killed at once: rc 0, stderr empty, 'squeue crashed (signal 9)'" \
+			eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue crashed \(signal 9\)$"'
+	done
 }
 c_squeue_garbage() {
 	T_TITLE="squeue answers unframed text: 'queue output unreadable', footer '? jobs'"
@@ -2345,7 +2393,7 @@ c_bars_width_sweep() {
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
-	squeue_fails squeue_hangs squeue_ignores_term squeue_garbage queue_cut both_fail
+	squeue_fails squeue_hangs squeue_ignores_term collector_killed timeout_leading_zero squeue_garbage queue_cut both_fail
 	finished user_filter backslash_text control_text silent_failure real_reason_wins bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size

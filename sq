@@ -460,6 +460,23 @@ trap 'rm -rf "$tmp"; rm -f "$statetmp"' EXIT
 tmo=${SQ_TIMEOUT:-5}
 case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeout
 [ -n "$(printf '%s' "$tmo" | tr -d '0.')" ] || tmo=5    # 0, 0.0 mean "no limit"
+# Every collector runs through collect, so its own stderr (NAME.err) and
+# timeout's (NAME.tmo) land apart: the client's fd 3 becomes its stderr, and
+# timeout keeps fd 2.  sh -c exec keeps the pid, so TERM and KILL reach the
+# client itself, and passing the tool as $0 lets sh say "sinfo: ... not found".
+# Wrapped in 2>/dev/null, so bash prints no "Killed" or "Segmentation fault"
+# notice of its own on the screen.  Environment prefixes on the call reach the
+# client.
+collect() {   # collect NAME TOOL ARGS...: stdout into $tmp/NAME
+	local name=$1; shift
+	{ timeout $verbose -k 2 "$tmo" sh -c 'exec "$@" 2>&3 3>&-' "$1" "$@" \
+		> "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo"; } 2>/dev/null
+}
+# --verbose makes timeout say "sending signal ..." before it signals; it exists
+# since coreutils 8.29, and an older timeout refuses it (rc 125) without running
+# anything, so it is asked for only where a silent probe accepts it
+verbose=
+timeout --verbose 1 true > /dev/null 2>&1 && verbose=--verbose
 # Why a collector failed, into NAME (empty: it did not), and into NAME_real the
 # part of that which is real text: the timeout, or the first line of its
 # stderr, which can echo what the user typed and so loses its control
@@ -468,16 +485,23 @@ case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeou
 # reason reads as success: "queue is empty" and a footer of 0 jobs from a
 # squeue that never answered.
 # A client that ignores SIGTERM is killed 2s past the deadline, and timeout
-# then exits 137 like any SIGKILL; it is the timeout when the call outlasted
-# the deadline by more than a second.  SECONDS counts whole seconds, so the
-# measured time is less than a second off: the kill measures more than
-# tmo + 1, a SIGKILL before the deadline less.
-why_of() {   # why_of NAME RC STDERR-FILE TOOL START (the SECONDS the call began at)
+# then exits 137 like any SIGKILL; it is the timeout when timeout said it
+# signalled (NAME.tmo is not empty - only its existence is read, never its
+# translatable text), or when this timeout cannot say so (no --verbose).  That
+# also counts a rare start-up warning of timeout's, or timeout itself killed
+# from outside, as the timeout.  A 137 that timeout kept quiet about is a SIGKILL
+# from elsewhere: a crash.  Otherwise NAME.tmo is shown only for rc 125 with
+# an empty NAME.err, timeout's own failure (an unknown option, no fork); its
+# "dumped core" after a crash never is.
+why_of() {   # why_of NAME RC OUTPUT TOOL: OUTPUT as collect left it, e.g. $tmp/nodes
 	local rc=$2 real= why=
-	[ "$rc" != 137 ] || [ $((SECONDS - $5)) -le $((${tmo%%.*} + 1)) ] || rc=124
+	if [ "$rc" = 124 ] || { [ "$rc" = 137 ] && { [ -s "$3.tmo" ] || [ -z "$verbose" ]; }; }; then
+		real="no response after ${tmo}s"
+	elif [ "$rc" != 0 ]; then
+		real=$(head -1 "$3.err" | scrub)
+		[ -n "$real" ] || [ "$rc" != 125 ] || real=$(head -1 "$3.tmo" | scrub)
+	fi
 	if [ "$rc" != 0 ]; then
-		if [ "$rc" = 124 ]; then real="no response after ${tmo}s"
-		else real=$(head -1 "$3" | scrub); fi
 		if   [ -n "$real" ];    then why=$real
 		elif [ "$rc" -gt 128 ]; then why="$4 crashed (signal $((rc - 128)))"
 		else                         why="$4 failed (exit $rc)"
@@ -515,13 +539,11 @@ nfmt=
 for f in CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp CPUsLoad AllocMem; do
 	nfmt="$nfmt${nfmt:+,}$f:0$nonce3"
 done
-t0=$SECONDS
-SLURM_TIME_FORMAT=standard timeout -k 2 "$tmo" sinfo -hN -O "$nfmt" > "$tmp/nodes" 2> "$tmp/nodes.err"
-why_of nerr $? "$tmp/nodes.err" sinfo $t0
+SLURM_TIME_FORMAT=standard collect nodes sinfo -hN -O "$nfmt"
+why_of nerr $? "$tmp/nodes" sinfo
 
-t0=$SECONDS
-SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT=$fmt timeout -k 2 "$tmo" squeue -h -S t,i "${args[@]+"${args[@]}"}" > "$tmp/jobs" 2> "$tmp/jobs.err"
-why_of jerr $? "$tmp/jobs.err" squeue $t0
+SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT=$fmt collect jobs squeue -h -S t,i "${args[@]+"${args[@]}"}"
+why_of jerr $? "$tmp/jobs" squeue
 
 # ---- the recently-finished block's source --------------------------------
 # sacct and squeue spell the same letters differently and several take a value
@@ -586,32 +608,28 @@ rsrc=none; rwhy=$sskip rwhy_real=$sskip; rerr= rerr_real=; rwhyc=
 # invariant the reassembler asserts.
 if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	aflag=(-a); [ "$suser" = 0 ] || aflag=()
-	t0=$SECONDS
-	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 timeout -k 2 "$tmo" \
+	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 collect recent \
 		sacct -p --delimiter="$nonce2" -n -S "$since" -E now \
 		"${aflag[@]+"${aflag[@]}"}" "${sargs[@]+"${sargs[@]}"}" \
-		-o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName \
-		> "$tmp/recent" 2> "$tmp/recent.err"
+		-o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName
 	se=$?
 	# rc=0 with no rows is not proof of success (-M/-r typos are silent), which
 	# is what the closed whitelist above is for; rc!=0 can still leave a partial
 	# file behind, so that is thrown away rather than rendered
 	if [ $se -eq 0 ]; then rsrc=sacct
-	else why_of rwhy $se "$tmp/recent.err" sacct $t0; rwhyc=acct; : > "$tmp/recent"
+	else why_of rwhy $se "$tmp/recent" sacct; rwhyc=acct; : > "$tmp/recent"
 	fi
 fi
 
 # every field is nonce-terminated, including the last, so gawk can tell a name
 # holding the delimiter, a tab or a newline from a real record boundary
 if [ "$recent" != 0 ] && [ "$rsrc" = none ] && [ -z "$jerr" ]; then
-	t0=$SECONDS
 	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 \
 		SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,State:$nonce,exit_code:$nonce,TimeUsed:$nonce,EndTime:$nonce,ArrayJobID:$nonce,ArrayTaskID:$nonce,UserName:$nonce,Name:$nonce" \
-		timeout -k 2 "$tmo" squeue -t all -h \
-		"${args[@]+"${args[@]}"}" > "$tmp/recent" 2> "$tmp/recent.err"
+		collect recent squeue -t all -h "${args[@]+"${args[@]}"}"
 	fe=$?
 	if [ $fe -eq 0 ]; then rsrc=squeue
-	else why_of rerr $fe "$tmp/recent.err" squeue $t0; : > "$tmp/recent"
+	else why_of rerr $fe "$tmp/recent" squeue; : > "$tmp/recent"
 	fi
 fi
 

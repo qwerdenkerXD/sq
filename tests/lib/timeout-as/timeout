@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# not a stub: the real timeout, behaving as another release or host would, for
+# the cases that put this directory first on PATH.  SQSTUB_TIMEOUT says how:
+#   old     coreutils before 8.29 (RHEL 7, Ubuntu 18.04): --verbose is an unknown
+#           option, refused with rc 125 before anything runs
+#   core    a host that dumps cores: a command that died of SIGSEGV gets the
+#           real timeout's "the monitored command dumped core" on stderr (the
+#           stub itself never dumps one)
+#   broken  timeout's own failure: every call fails with rc 125, as when it
+#           cannot fork
+real=
+IFS=: read -ra dirs <<< "$PATH"
+for dir in "${dirs[@]}"; do
+	[ -x "$dir/timeout" ] && ! [ "$dir/timeout" -ef "${BASH_SOURCE[0]}" ] && { real=$dir/timeout; break; }
+done
+[ -n "$real" ] || { echo "tests/lib/timeout-as/timeout: no real timeout on PATH" >&2; exit 127; }
+case ${SQSTUB_TIMEOUT:-} in
+	old)
+		for a in "$@"; do
+			case $a in
+				--verbose) printf "timeout: unrecognized option '--verbose'\nTry 'timeout --help' for more information.\n" >&2; exit 125 ;;
+				-*) ;;
+				*) break ;;    # the duration: options end here
+			esac
+		done
+		exec "$real" "$@" ;;
+	core)
+		{ "$real" "$@" 2>&3; } 3>&2 2>/dev/null; rc=$?    # without bash's own "Segmentation fault"
+		[ $rc != 139 ] || echo "timeout: the monitored command dumped core" >&2
+		exit $rc ;;
+	broken)
+		echo "timeout: fork system call failed: Resource temporarily unavailable" >&2; exit 125 ;;
+	*)	echo "tests/lib/timeout-as/timeout: SQSTUB_TIMEOUT is not old, core or broken" >&2; exit 125 ;;
+esac

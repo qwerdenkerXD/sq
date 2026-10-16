@@ -43,6 +43,10 @@
 #   @stderr TEXT        print TEXT (escapes decoded) on stderr
 #   @exit N             stop here with exit code N
 #   @hang [SECONDS]     block for SECONDS (default 30): exercises sq's timeout
+#   @signal N           die by signal N before printing anything, as a crash
+#                       does (no core is dumped).  Read by this script, not
+#                       the renderer, whose gawk would catch a SIGSEGV itself,
+#                       so it counts only at the top of the tool's own file
 # Records are printed in file order: the stub sorts and filters nothing.
 
 set -u
@@ -168,5 +172,13 @@ path=$SQSTUB_FIXTURE/$file
 
 # an ignored signal stays ignored across exec, and in the sleep of an @hang
 [ "${SQSTUB_IGNORE_TERM:-}" != "$tool" ] || trap '' TERM
+# a core limit of exactly 1 byte dumps nothing, even where cores go to a pipe
+# (systemd-coredump, WSL), which ignore a limit of 0; bash's ulimit counts in
+# blocks, hence prlimit, and without it 0 still stops a core file
+sig=$(LC_ALL=C sed -n 's/^@signal[[:space:]]\{1,\}\([0-9]\{1,\}\)[[:space:]]*$/\1/p' "$path" | head -n 1)
+if [ -n "$sig" ]; then
+	prlimit --pid $$ --core=1 2>/dev/null || ulimit -c 0 2>/dev/null
+	kill -"$sig" $$; refuse "still alive after @signal $sig"
+fi
 STUB_TOOL=$tool STUB_MODE=$mode STUB_FMT=$fmt STUB_DELIM=$delim STUB_TRAIL=$trail \
 STUB_FILE=$path LC_ALL=C exec gawk -f "$stubdir/render.awk"
