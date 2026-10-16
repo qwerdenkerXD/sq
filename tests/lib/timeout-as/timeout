@@ -7,7 +7,8 @@
 #           real timeout's "the monitored command dumped core" on stderr (the
 #           stub itself never dumps one)
 #   broken  timeout's own failure: every call fails with rc 125, as when it
-#           cannot fork
+#           cannot fork; SQSTUB_TIMEOUT_TEXT, when set, is what it says instead
+#           (printf %b: several lines, any bytes)
 real=
 IFS=: read -ra dirs <<< "$PATH"
 for dir in "${dirs[@]}"; do
@@ -29,6 +30,6 @@ case ${SQSTUB_TIMEOUT:-} in
 		[ $rc != 139 ] || echo "timeout: the monitored command dumped core" >&2
 		exit $rc ;;
 	broken)
-		echo "timeout: fork system call failed: Resource temporarily unavailable" >&2; exit 125 ;;
+		printf '%b\n' "${SQSTUB_TIMEOUT_TEXT:-timeout: fork system call failed: Resource temporarily unavailable}" >&2; exit 125 ;;
 	*)	echo "tests/lib/timeout-as/timeout: SQSTUB_TIMEOUT is not old, core or broken" >&2; exit 125 ;;
 esac

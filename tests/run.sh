@@ -434,6 +434,9 @@ c_squeue_fails() {
 		eval 'rc_is 0 && [ "$normal" = "[1m [0m [32m [0m [33m [0m [31m [0m" ]'
 	sq_run squeue-fails -- --color
 	need "the '?' footer, coloured: the same SGR sequences" eval 'rc_is 0 && [ "$(footer_sgr)" = "$normal" ]'
+	# of several lines of stderr, the first is the reason
+	sq_run "$(stderr_fixture squeue 'the first line\nthe second line')" --
+	need "squeue's stderr of two lines: rc 0, the first on the banner" eval 'rc_is 0 && matches "^  ⚠ slurm unreachable · squeue: error: the first line$"'
 }
 c_squeue_hangs() {
 	T_TITLE="squeue hangs (cut at SQ_TIMEOUT=1): the job list is unavailable, and the footer says '? jobs' instead of a count"
@@ -495,6 +498,27 @@ c_collector_killed() {
 	sq_run mixed "$(timeout_as)" SQSTUB_TIMEOUT=broken --
 	need "timeout fails itself (rc 125): rc 0, its first line on the banner, no client ran" \
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · timeout: fork system call failed" && [ "$(grep -c "^CALL" "$LOG")" -eq 0 ]'
+	sq_run mixed "$(timeout_as)" SQSTUB_TIMEOUT=broken SQSTUB_TIMEOUT_TEXT='timeout: \033[2Jcannot fork\nTry again later' --
+	need "timeout fails itself in two lines, an ESC in the first: rc 0, the first line on the banner, scrubbed" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · timeout: \[2Jcannot fork$" && [ "$(escapes)" -eq 0 ]'
+	# a client may exit 125 too: its own line is the reason, timeout said nothing
+	sq_run "$(silent_fixture squeue 125 'squeue: error: its own reason')" --
+	need "squeue exit 125 with its own stderr: rc 0, its line on the banner" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: its own reason$"'
+}
+# sh -c gets the tool's name as its $0, so a client missing from PATH reads
+# "sinfo: ...: not found" on the banner, not "sh: ...", which names no tool
+c_tool_missing() {
+	T_TITLE="sinfo missing from PATH: its 'not found' names sinfo, not sh"
+	local t dir dirs path= nobin=$T_DIR/nobin
+	mkdir -p "$nobin"
+	for t in squeue sacct stty; do printf '#!/bin/sh\nexec %q "$@"\n' "$here/bin/$t" > "$nobin/$t"; chmod +x "$nobin/$t"; done
+	IFS=: read -ra dirs <<< "$PATH"
+	for dir in "${dirs[@]}"; do [ -x "$dir/sinfo" ] || path=$path:$dir; done     # nor any other sinfo
+	sq_run mixed PATH="$nobin$path" --
+	need "rc 0, stderr empty, sinfo's 'not found' on the banner" eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · sinfo: .*not found"'
+	need "no 'sh:' on the banner" eval '! matches "^  ⚠ slurm unreachable · sh: "'
+	need "squeue still answered: footer 6/3/2/1" footer_is 6 3 2 1
 }
 # a timeout with a leading zero is still a number of seconds to timeout(1);
 # bash arithmetic would read 08 as a bad octal number and abort
@@ -2599,7 +2623,7 @@ c_bars_width_sweep() {
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
-	squeue_fails squeue_hangs squeue_ignores_term collector_killed timeout_leading_zero squeue_garbage queue_cut both_fail
+	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
 	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe silent_failure real_reason_wins bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
