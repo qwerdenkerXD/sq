@@ -823,6 +823,49 @@ c_scrub_sites() {
 	need "host name with C1: rc 0, the title says node, no C1" eval 'rc_is 0 && plain | head -1 | grep -qF "SLURM node " && c1_inert'
 }
 
+# Bytes that are no UTF-8 - Latin-1 text, a character cut in half - reach no
+# screen and no gawk as they are (gawk warned "Invalid multibyte data" on sq's
+# stderr, the terminal drew U+FFFD or worse): each piece of them, as long as it
+# could have been the start of a character, reads one ␚.  A ␚ or U+FFFD that
+# was in the text itself is a character like any other and stays.
+err_utf8_valid() { OUT=$ERR utf8_valid; }
+c_scrub_not_utf8() {
+	T_TITLE="Latin-1 bytes and halved characters read one ␚ each on a banner, a caption, a filter echo and a usage error; a genuine ␚ or U+FFFD stays"
+	local x
+	sq_run "$(stderr_fixture squeue 'user ren\xe9 not found')" --
+	need "Latin-1 in squeue's stderr: rc 0, stderr empty, 'user ren␚ not found' on the banner" \
+		eval 'rc_is 0 && err_empty && utf8_valid && matches "^  ⚠ slurm unreachable · squeue: error: user ren␚ not found$"'
+	sq_run "$(stderr_fixture sacct 'user ren\xe9')" --
+	need "Latin-1 in sacct's stderr: rc 0, stderr empty, 'user ren␚' on the fallback's caption" \
+		eval 'rc_is 0 && err_empty && utf8_valid && has "recent only (no accounting) · sacct: error: user ren␚"'
+	sq_run wide -- -u "$(printf 'ren\xe9')"
+	need "-u in Latin-1: rc 0, stderr empty, the caption says user=ren␚" \
+		eval 'rc_is 0 && err_empty && utf8_valid && has "recently finished · last 2h · user=ren␚"'
+	sq_run wide -- -u "$(printf -- '-ren\xe9')"
+	need "-u -ren… in Latin-1: refused, the value echoed as '-ren␚'" eval 'rc_is 2 && grep -qF "not '"'"'-ren␚'"'"'" "$ERR" && err_utf8_valid'
+	sq_run wide -- --reserve "$(printf 'ren\xe9')"
+	need "--reserve in Latin-1: refused, the value echoed as 'ren␚'" eval 'rc_is 2 && grep -qF "not '"'"'ren␚'"'"'" "$ERR" && err_utf8_valid'
+	sq_run wide -- "$(printf -- '--f\xfco')"
+	need "an unknown long option in Latin-1: refused, echoed as --f␚o" eval 'rc_is 2 && grep -qF "sq: --f␚o is not one of the long options" "$ERR" && err_utf8_valid'
+	# é, € and 😀 each lose their last byte: one ␚ apiece, mid-text and at the end
+	sq_run "$(stderr_fixture squeue 'a\xc3b\xe2\x82c\xf0\x9f\x98d')" --
+	need "halved 2-, 3- and 4-byte characters mid-text: rc 0, stderr empty, 'a␚b␚c␚d'" \
+		eval 'rc_is 0 && err_empty && utf8_valid && matches "^  ⚠ slurm unreachable · squeue: error: a␚b␚c␚d$"'
+	for x in '\xc3' '\xe2\x82' '\xf0\x9f\x98'; do
+		sq_run "$(stderr_fixture squeue "end$x")" --
+		need "a halved $x at the end of squeue's stderr: rc 0, stderr empty, 'end␚'" \
+			eval 'rc_is 0 && err_empty && utf8_valid && matches "^  ⚠ slurm unreachable · squeue: error: end␚$"'
+	done
+	sq_run wide -- -u "$(printf 'end\xf0\x9f\x98')"
+	need "-u ending in a halved 😀: rc 0, stderr empty, the caption says user=end␚" \
+		eval 'rc_is 0 && err_empty && utf8_valid && has "recently finished · last 2h · user=end␚"'
+	sq_run "$(stderr_fixture squeue 'a␚b\xef\xbf\xbdc')" --
+	need "a genuine ␚ and U+FFFD in squeue's stderr: rc 0, stderr empty, both kept, 'a␚b�c'" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: a␚b�c$"'
+	sq_run wide -- -u 'a␚b�c'
+	need "a genuine ␚ and U+FFFD in -u: rc 0, the caption says user=a␚b�c" eval 'rc_is 0 && err_empty && has "recently finished · last 2h · user=a␚b�c"'
+}
+
 # The scrub reads a text once, whatever it holds, so its work grows with the
 # length alone: 100 KB of nested C1 pairs held the old one, which looped, for
 # 30s.  It keeps 4096 characters, counted once decoded, so a character is never
@@ -845,6 +888,95 @@ c_scrub_bounded() {
 	sq_run "$(raw_stderr_fixture halved 'for (i=0; i<3000; i++) printf "\303\251"')" --
 	need "3000 é, 6000 bytes: rc 0, stderr empty (no invalid UTF-8 for gawk), é on the banner" \
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: éééé"'
+}
+
+# What the scrub keeps is counted in characters once decoded, so a run of
+# controls ahead of a message cannot push it out: past 4 KiB of them the banner
+# lost it (and then made up "squeue failed (exit 1)").  The 4096 also keep a long
+# text within what Linux takes as an environment string, which is how gawk gets
+# it: past 128 KiB exec failed with E2BIG, exit 126, no screen, the temp dir
+# left behind.  The four sites that echo a value keep 40 characters, not bytes.
+tmp_left() { [ -n "$(ls -A "$RUN/tmp")" ]; }     # sq's temp dir outlived it
+since_given() {   # the -S value of sacct's first call, as sacct got it
+	local -a w; local i
+	eval "w=($(gawk -F'\t' '$1 == "CALL" && $2 == "sacct" { print $3; exit }' "$LOG"))"
+	for ((i = 0; i + 1 < ${#w[@]}; i++)); do [ "${w[i]}" != -S ] || { printf '%s' "${w[i+1]}"; return; }; done
+}
+c_scrub_counts() {
+	T_TITLE="the scrub counts characters once decoded: controls ahead of a message never push it out, long texts draw, the echoes keep 40 characters"
+	local m name bytes n u p c50 c40 c38 c14 x38
+	for m in 'cr5000 \r 5000' 'esc \033 4100' 'csi2100 \302\233 2100'; do
+		read -r name bytes n <<< "$m"
+		sq_run "$(raw_stderr_fixture "$name" "for (i=0; i<$n; i++) printf \"$bytes\"; printf \"the real message\"")" --
+		need "$name ahead of the message: rc 0, stderr empty, the real message on the banner" \
+			eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: the real message$"'
+	done
+	sq_run "$(raw_stderr_fixture long 'for (i=0; i<100000; i++) printf "\303\251"')" --
+	need "a 200 KB line of é on squeue's stderr: rc 0, stderr empty, drawn, no temp dir left" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: éééé" && footer_unknown && ! tmp_left'
+	u=$(printf 'u%.0s' {1..70000}); p=$(printf 'p%.0s' {1..70000})
+	sq_run wide -- -u "$u" -p "$p"
+	need "-u and -p of 70 KB each: rc 0, stderr empty, drawn, no temp dir left" \
+		eval 'rc_is 0 && err_empty && calls_are 1 1 0 1 && has "recently finished · last 2h · user=uuuu" && ! tmp_left'
+	c14=$(printf '中%.0s' {1..14}); c38=$(printf '中%.0s' {1..38}); c40=$c38中中; c50=$(printf '中%.0s' {1..50})
+	x38=$(printf 'x%.0s' {1..38})
+	sq_run wide SQ_SINCE="$c14" --
+	need "SQ_SINCE of 14 中, 42 bytes: rc 0, stderr empty (no gawk warning), all 14 on the caption and to sacct" \
+		eval 'rc_is 0 && err_empty && has "recently finished · since $c14" && [ "$(since_given)" = "$c14" ]'
+	sq_run wide SQ_SINCE="$c50" --
+	need "SQ_SINCE of 50 中: rc 0, stderr empty, sacct -S gets the first 40" \
+		eval 'rc_is 0 && err_empty && [ "$(since_given)" = "$c40" ]'
+	sq_run wide -- -u "-${x38}éyyyy"
+	need "-u -xxx…xé…: refused, the value cut at 40 characters, é whole" \
+		eval 'rc_is 2 && grep -qF "not '"'"'-${x38}é'"'"';" "$ERR" && err_utf8_valid'
+	sq_run wide -- --reserve "$c50"
+	need "--reserve of 50 中: refused, the value cut at 40 characters" eval 'rc_is 2 && grep -qF "not '"'"'$c40'"'"';" "$ERR"'
+	sq_run wide -- --reserve "${c14}"$'\n'"$c50"
+	need "--reserve of 14 中, a newline, 50 中: refused, 40 中 echoed, the newline gone" eval 'rc_is 2 && grep -qF "not '"'"'$c40'"'"';" "$ERR"'
+	sq_run wide -- "--$c50"
+	need "--中… of 52 characters: refused, echoed cut at 40" eval 'rc_is 2 && grep -qF "sq: --$c38 is not one" "$ERR"'
+}
+
+# Of a collector's stderr only the first line is read, and only 1 MiB of it: a
+# character that bound cuts in half goes, as the cut made it and not the
+# collector, while bytes the collector left unfinished right there read ␚.
+# Controls fill the line, as they are never shown, so the cut lands in sight.
+c_scrub_read_bound() {
+	T_TITLE="a stderr line past 1 MiB: read up to 1 MiB, a character the bound halves dropped without a ␚, the message before it shown"
+	local pad=$((1048576 - 31))      # "squeue: error: the real message" is 31 bytes
+	sq_run "$(raw_stderr_fixture halved "printf \"the real message\"; for (i=0; i<$pad-2; i++) printf \"\\r\"; printf \"\\344\\270\\255tail\"")" --
+	need "中 across the bound: rc 0, stderr empty, dropped, no ␚, the message shown" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: the real message$"'
+	sq_run "$(raw_stderr_fixture whole "printf \"the real message\"; for (i=0; i<$pad-3; i++) printf \"\\r\"; printf \"\\344\\270\\255tail\"")" --
+	need "中 ending on the bound: rc 0, stderr empty, 中 kept, nothing after it" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: the real message中$"'
+	sq_run "$(raw_stderr_fixture own "printf \"the real message\"; for (i=0; i<$pad-1; i++) printf \"\\r\"; printf \"\\344tail\"")" --
+	need "a lone lead byte, the last within the bound, not continued: rc 0, stderr empty, its ␚ shown" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: the real message␚$"'
+	sq_run "$(raw_stderr_fixture ascii "printf \"the real message\"; for (i=0; i<$pad-1; i++) printf \"\\r\"; printf \"xtail\"")" --
+	need "ASCII only: rc 0, stderr empty, the byte on the bound kept, the one past it not" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: the real messagex$"'
+}
+
+# Fed from a pipe, the scrub reads to the end, past what it keeps: a writer
+# meeting a closed pipe dies of SIGPIPE, or, where SIGPIPE is ignored (a caller
+# may leave it so, and every child inherits it), says "Broken pipe" on sq's
+# stderr.  Many lines, so the end is not read with the first one.
+c_scrub_sigpipe() {
+	T_TITLE="SIGPIPE ignored: a scrub fed long many-line text from a filter, a usage error and a stderr file leaves sq's stderr clean"
+	local real=$sq line u d i
+	local sq=$T_DIR/sq-nopipe       # what sq_run runs, here and only here
+	printf '#!/usr/bin/env bash\ntrap "" PIPE\nexec %q "$@"\n' "$real" > "$sq"; chmod +x "$sq"
+	line=$(printf 'u%.0s' {1..99}); u=$(for i in {1..1200}; do printf '%s\n' "$line"; done)
+	sq_run wide -- -u "$u" -p "${u//u/p}"
+	need "-u and -p of 1200 lines each: rc 0, stderr empty, drawn" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1 && has "user=uuuu"'
+	sq_run wide -- -u "-$u"
+	need "-u -… of 1200 lines: refused, the one line of sq's on stderr" eval 'rc_is 2 && [ "$(wc -l < "$ERR")" -eq 1 ] && grep -q "^sq: -u needs a user name" "$ERR"'
+	d=$(stderr_fixture squeue x)
+	{ printf '@stderr squeue: error: the first line\n'; for i in {1..3000}; do printf '@stderr %s\n' "$line"; done; printf '@exit 1\n'; } > "$d/squeue"
+	sq_run "$d" --
+	need "squeue's stderr of 3000 lines: rc 0, stderr empty, the first line on the banner" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: the first line$"'
 }
 
 # What only the bell reads takes the same road: a user name and a cache path
@@ -2468,7 +2600,7 @@ c_bars_width_sweep() {
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_bounded silent_failure real_reason_wins bell_text centre sacct_fallback
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe silent_failure real_reason_wins bell_text centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
