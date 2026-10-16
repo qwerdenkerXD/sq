@@ -71,8 +71,7 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
 - **Time-limit pressure.** `LEFT` turns yellow under 10% of the job's limit and red under 2%.
 - **Start estimates** for pending jobs, from the backfill scheduler.
 - **Down-node reasons**, and a clear banner when the controller doesn't answer, instead of an
-  empty screen that looks like an empty queue. In its error text a `␚` stands for bytes that
-  are not valid UTF-8.
+  empty screen that looks like an empty queue.
 - **Colour where it belongs:** on in a terminal and under `watch`, off when piped or redirected,
   off with [`NO_COLOR`](https://no-color.org).
 
@@ -172,6 +171,9 @@ sq -C                     # centred in both axes
 - **Clock times are the server's,** in its time zone, which the title names (`UTC` on many
   clusters). Set `TZ`, e.g. `TZ=Europe/Berlin sq`, to read the title and the start estimates
   in your own.
+- **A `␚` stands for bytes that are not valid UTF-8,** one per broken piece, in any text sq shows
+  from outside Slurm's job tables: error messages, filters and `SQ_SINCE` on captions, usage
+  errors, the host name in the title. sq never writes one into a job name.
 - **Refused:** `-O`/`--Format`, `-s`/`--steps`, `-i`/`--iterate`, `-l`, `-v`, `-V`, `--json` and
   `--yaml`. Each would replace or defeat the output sq parses; sq exits with code 2 and says
   why. (`-o`/`--format` are sq's own column list.)
