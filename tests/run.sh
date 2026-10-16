@@ -795,16 +795,18 @@ c_real_reason_wins() {
 # Every byte rule of the scrub, on one stderr line: a pair nested in a pair, both
 # ends of the C1 range, DEL, the last C0 byte, NUL (bash would drop it from the
 # reason with a warning of its own), and a C0 byte between the halves of a pair,
-# which taking C0 out first joins.  Then each site that scrubs, with a C1 byte
-# none of them let through before: the three usage errors that echo a value,
-# the filter on the caption, the skipped filter, SQ_SINCE and the host name.
+# which taking C0 out first would join.  The nested pair's outer halves and the
+# split pair's are no UTF-8, so each reads ␚, and the pair inside goes.  Then
+# each site that scrubs, with a C1 byte none of them let through before: the
+# three usage errors that echo a value, the filter on the caption, the skipped
+# filter, SQ_SINCE and the host name.
 c1_err_inert() { ! LC_ALL=C grep -q $'\xc2[\x80-\x9f]' "$ERR"; }
 c_scrub_sites() {
 	T_TITLE="the scrub's bytes (nested pair, \\xc2\\x80 and \\x9f, DEL, \\x1f, NUL, C0 inside a pair) and each site that scrubs: usage errors, filters, SQ_SINCE, host"
 	local hbin=$T_DIR/hbin c1=$'\xc2\x9b'
 	sq_run "$(stderr_fixture squeue 'p\xc2\xc2\x9b\x9bq\xc2\x80r\xc2\x9fs\x7ft\x1fu\x00v\xc2\x01\x9bw')" --
-	need "squeue stderr with every byte rule: rc 0, stderr empty, 'pqrstuvw' on the banner" \
-		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: pqrstuvw$"'
+	need "squeue stderr with every byte rule: rc 0, stderr empty, 'p␚␚qrstuv␚␚w' on the banner" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: p␚␚qrstuv␚␚w$"'
 	sq_run wide -- --reserve "${c1}x"
 	need "--reserve: refused, the value echoed as 'x'" eval 'rc_is 2 && grep -qF "not '"'"'x'"'"'" "$ERR" && c1_err_inert'
 	sq_run wide -- "--fo${c1}o"
@@ -821,26 +823,27 @@ c_scrub_sites() {
 	need "host name with C1: rc 0, the title says node, no C1" eval 'rc_is 0 && plain | head -1 | grep -qF "SLURM node " && c1_inert'
 }
 
-# The scrub takes nested C1 pairs out one layer per pass, so its work grew with
-# the square of the text: 100 KB of them held sq for 30s, past any SQ_TIMEOUT.
-# It keeps the first 4 KiB only, more than a screen line shows, and drops a
-# character that cut halved, so what is shown does not change.
+# The scrub reads a text once, whatever it holds, so its work grows with the
+# length alone: 100 KB of nested C1 pairs held the old one, which looped, for
+# 30s.  It keeps 4096 characters, counted once decoded, so a character is never
+# halved: each half pair that is no UTF-8 counts as its ␚.
 raw_stderr_fixture() {   # raw_stderr_fixture NAME GAWK-PRINT: "wide" whose squeue fails with these raw bytes on stderr
 	local d; d=$(stderr_fixture squeue x); mv "$d" "$d-$1"; d=$d-$1
 	{ printf '@stderr squeue: error: '; LC_ALL=C gawk "BEGIN { $2 }"; printf '\n@exit 1\n'; } > "$d/squeue"
 	printf '%s' "$d"
 }
 c_scrub_bounded() {
-	T_TITLE="100 KB of nested C1 pairs on squeue's stderr: sq answers within seconds; a cut never halves a character"
+	T_TITLE="100 KB of nested C1 pairs on squeue's stderr: sq answers within seconds, a ␚ for each half; a cut never halves a character"
 	local t0
 	t0=$SECONDS
 	sq_run "$(raw_stderr_fixture deep 'for (i=0; i<50000; i++) printf "\302"; for (i=0; i<50000; i++) printf "\233"')" --
-	need "50000 pairs nested: rc 0 within 10s, the banner shown" eval 'rc_is 0 && [ $((SECONDS - t0)) -lt 10 ] && has "⚠ slurm unreachable · squeue: error: "'
+	need "50000 pairs nested: rc 0 within 10s, stderr empty (no gawk warning), ␚s on the banner" \
+		eval 'rc_is 0 && [ $((SECONDS - t0)) -lt 10 ] && err_empty && utf8_valid && matches "^  ⚠ slurm unreachable · squeue: error: ␚␚␚␚"'
 	sq_run "$(raw_stderr_fixture tail 'for (i=0; i<2000; i++) printf "\302"; for (i=0; i<2000; i++) printf "\233"; for (i=0; i<96000; i++) printf "x"')" --
-	need "2000 pairs nested, then text: rc 0, stderr empty, the text after the pairs on the banner, no C1" \
-		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: xxxx" && c1_inert'
+	need "2000 pairs nested, then text: rc 0, stderr empty, a ␚ for each outer half on the banner, no C1" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: ␚␚␚␚" && c1_inert'
 	sq_run "$(raw_stderr_fixture halved 'for (i=0; i<3000; i++) printf "\303\251"')" --
-	need "é past 4 KiB, the cut inside one: rc 0, stderr empty (no invalid UTF-8 for gawk), é on the banner" \
+	need "3000 é, 6000 bytes: rc 0, stderr empty (no invalid UTF-8 for gawk), é on the banner" \
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: éééé"'
 }
 

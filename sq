@@ -84,22 +84,63 @@ shopt -u checkwinsize
 
 die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
 
-# Outside text - a filter, a setting, the host name, a collector's stderr - loses
-# every control character before it reaches the screen or a message: C0 and DEL
-# as bytes, and C1 (U+0080-U+009F; \xc2\x9b is CSI, \xc2\x9d OSC) as the UTF-8
-# pair it arrives as, again and again, because taking one pair out can join the
-# halves of another.  Bytes, never the locale (GNU tr is byte-based anyway), so
-# any other UTF-8 text passes unchanged; under env, so bash itself never switches
-# locale for it.  Pairs nested in pairs take one pass each, so the work grows with
-# the square of the input: only its first 4 KiB are kept, more than any screen
-# line shows (the text is cut to the width afterwards anyway), the rest is read
-# and dropped, so a writer never meets a closed pipe, and a character the cut
-# halved goes too
-scrub() {
-	{ head -c 4096; cat > /dev/null; } | env LC_ALL=C tr -d '\000-\037\177' |
-		env LC_ALL=C sed -e ':a' -e $'s/\xc2[\x80-\x9f]//g' -e 'ta' \
-			-e $'s/[\xc0-\xdf]$//; s/[\xe0-\xef][\x80-\xbf]\\{0,1\\}$//; s/[\xf0-\xf7][\x80-\xbf]\\{0,2\\}$//'
-}
+# Outside text - a filter, a setting, the host name, a collector's stderr - is
+# decoded as UTF-8 before it reaches the screen or a message, as bytes and never
+# by the locale: a control character (C0 and DEL, and C1, U+0080-U+009F, whose
+# \302\233 is CSI and \302\235 OSC) goes, any other character stays as it is, and
+# each piece that is no UTF-8 at all (a Latin-1 byte, a halved character: one
+# "maximal subpart", Unicode §3.9) becomes one ␚, U+241A.  So the terminal and
+# gawk only ever get whole characters, and as only whole ones are taken out,
+# nothing new can join where one went: a single pass, its work linear.
+# At most MAX characters are kept, 4096 by default: more than a screen line
+# shows, while each text reaches gawk as an environment string, which Linux
+# refuses beyond 128 KiB.  The rest is still read, so a writer never meets a
+# closed pipe.  With FILE only its first line is read, at most 1 MiB of it, and
+# a character that bound cut in half goes, as the cut made it, not the text.
+# Under env, so bash itself never switches locale for it.
+scrub() (   # scrub [MAX [FILE]]: stdin, or the first line of FILE, onto stdout
+	bound=0
+	[ $# -lt 2 ] || { bound=1048576; exec < <(head -c $((bound + 1)) -- "$2"); }
+	exec env LC_ALL=C gawk -v max="${1:-4096}" -v bound=$bound '
+	BEGIN {
+		T = "[\200-\277]"; BAD = "\342\220\232"
+		# every unit that is not ASCII, the longest at each place (no group
+		# anywhere: one makes gawk track submatches, 40 times slower): a
+		# sequence of Unicode Table 3-7, else the longest start of one, else a
+		# byte that starts none
+		U = "[\302-\337]" T "|\340[\240-\277]" T "|[\341-\354\356\357]" T T "|\355[\200-\237]" T \
+		    "|\360[\220-\277]" T T "|[\361-\363]" T T T "|\364[\200-\217]" T T \
+		    "|[\302-\337]|\340[\240-\277]?|[\341-\354\356\357]" T "?|\355[\200-\237]?" \
+		    "|\360|\360[\220-\277]" T "?|[\361-\363]" T "?" T "?|\364|\364[\200-\217]" T "?" \
+		    "|[\200-\301\365-\377]"
+		# of those, wrapped in \001 \002, the ones that are no character: a
+		# byte that leads none, or a lead with fewer bytes than it needs
+		ILL = "\001[\200-\337]\002|\001[\340-\357]" T "?\002|\001[\360-\377]" T "?" T "?\002"
+	}
+	function emit(s,   l, i, b) {   # s, as much of it as max still allows
+		l = length(s)
+		for (i = 1; i <= l && n < max; n++)              # a lead byte tells the length
+			i += (b = substr(s, i, 1)) < "\300" ? 1 : b < "\340" ? 2 : b < "\360" ? 3 : 4
+		printf "%s", substr(s, 1, i - 1); if (i <= l) done = 1
+	}
+	done { next }
+	# a line at a time, as a newline ends every sequence (and goes itself)
+	{	s = $0; cut = bound && length(s) > bound
+		if (!cut && s !~ /[\200-\377]/) gsub(/[^\040-\176]+/, "", s)
+		else {
+			gsub(/[^\040-\176\200-\377]/, "\r", s)       # C0 and DEL: \001 \002 are free
+			gsub(U, "\001&\002", s)
+			if (cut) {   # the unit the bound ran through, or the byte past it
+				t = substr(s, length(s) - 5)
+				s = substr(s, 1, length(s) - (match(t, /\001[\200-\377]+\002$/) ? length(t) - RSTART + 1 : 1))
+			}
+			gsub(/\r+|\001\302[\200-\237]\002/, "", s)
+			gsub(ILL, BAD, s)
+			gsub(/[\001\002]+/, "", s)
+		}
+		emit(s); if (bound) done = 1
+	}'
+)
 
 fields=${SQ_FMT:-i,j,u,T,M,L,C,m,R}
 fsrc=${SQ_FMT:+SQ_FMT}; fsrc=${fsrc:--o}         # which one to blame for a bad letter
@@ -190,7 +231,7 @@ while [ $# -gt 0 ]; do
 			esac
 			case $reserve in
 				''|*[!0-9]*) die "--reserve needs a number of lines, not '$(printf '%s' "$reserve" \
-					| scrub | cut -c1-40)'; e.g. sq --reserve 2" ;;
+					| scrub 40)'; e.g. sq --reserve 2" ;;
 			esac ;;
 		-h|--help) awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
 		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
@@ -271,8 +312,7 @@ while [ $# -gt 0 ]; do
 						# value, and "--all=x" forwarded raw came back as a
 						# fake outage
 						[ "$1" = "$opt" ] || die "$opt takes no value; write it on its own, e.g. sq $opt" ;;
-					--*) die "$(printf '%s' "$opt" | scrub \
-						| cut -c1-40) is not one of the long options sq forwards; sq -h lists them" ;;
+					--*) die "$(printf '%s' "$opt" | scrub 40) is not one of the long options sq forwards; sq -h lists them" ;;
 				esac
 				args+=("$1"); shift; continue
 			fi
@@ -303,7 +343,7 @@ while [ $# -gt 0 ]; do
 					case $val in
 						-*) opt_hint "$kopt"
 							die "$opt needs $vnoun, not '$(printf '%s' "$val" \
-								| scrub | cut -c1-40)'; e.g. sq $opt $vex" ;;
+								| scrub 40)'; e.g. sq $opt $vex" ;;
 					esac ;;
 			esac
 			# REPEAT, for every filter and not only the six: squeue keeps the LAST
@@ -504,8 +544,8 @@ why_of() {   # why_of NAME RC OUTPUT TOOL: OUTPUT as collect left it, e.g. $tmp/
 	if [ "$rc" = 124 ] || { [ "$rc" = 137 ] && { [ -s "$3.tmo" ] || [ -z "$verbose" ]; }; }; then
 		real="no response after ${tmo}s"
 	elif [ "$rc" != 0 ]; then
-		real=$(head -1 "$3.err" | scrub)
-		[ -n "$real" ] || [ "$rc" != 125 ] || real=$(head -1 "$3.tmo" | scrub)
+		real=$(scrub 4096 "$3.err")
+		[ -n "$real" ] || [ "$rc" != 125 ] || real=$(scrub 4096 "$3.tmo")
 	fi
 	if [ "$rc" != 0 ]; then
 		if   [ -n "$real" ];    then why=$real
@@ -592,7 +632,7 @@ sskip=$(printf '%s' "$sskip" | scrub)
 # an overlap filter, so a job that started days ago and ended inside the window
 # is returned - which is the whole point.  Never --state: that redefines -S/-E
 # from "overlapped the window" to "was in that state during it".
-since=$(printf '%s' "${SQ_SINCE:-now-2hours}" | scrub | cut -c1-40)
+since=$(printf '%s' "${SQ_SINCE:-now-2hours}" | scrub 40)
 [ -n "$since" ] || since=now-2hours
 case $since in
 	now-*) wtxt="last $(printf '%s' "${since#now-}" | sed -E 's/^([0-9]+)([A-Za-z]).*$/\1\2/')" ;;
@@ -674,7 +714,7 @@ fi
 
 # Every value that can carry outside text - a setting, a filter, a path, the
 # host name, a collector's stderr - reaches gawk through ENVIRON, which it takes
-# byte for byte.  A -v value has its backslash escapes processed AFTER the tr
+# byte for byte.  A -v value has its backslash escapes processed AFTER the scrub
 # above, so "sq -u 'alice\nFORGED: 0 jobs'" printed a forged line.  -v carries
 # only what sq minted or validated itself: numbers, fixed words, field letters.
 # sqv names them once: each is the shell variable of that name, exported as
