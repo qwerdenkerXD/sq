@@ -1,0 +1,4 @@
+# _common/sinfo-two-idle with node01 in a second partition, its record after
+# node02's: sinfo -N prints one record per node and partition
+@include ../_common/sinfo-two-idle
+CPUsState=0/32/0/32; NodeList=node01; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0

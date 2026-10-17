@@ -1,0 +1,3 @@
+# node-one's node in two partitions
+CPUsState=0/32/0/32; NodeList=node01; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0
+CPUsState=0/32/0/32; NodeList=node01; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0

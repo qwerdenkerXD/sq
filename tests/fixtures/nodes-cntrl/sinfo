@@ -1,0 +1,6 @@
+# names that differ only in a control character, which the scrub turns into
+# the same "node?": three nodes, the last record node\x01 in a second partition
+CPUsState=0/32/0/32; NodeList=node\x01; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0
+CPUsState=0/32/0/32; NodeList=node?; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0
+CPUsState=0/32/0/32; NodeList=node\x02; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0
+CPUsState=0/32/0/32; NodeList=node\x01; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0

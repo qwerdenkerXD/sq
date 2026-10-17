@@ -1,0 +1,3 @@
+# drained/sinfo with the drained node02 in a second partition
+@include ../drained/sinfo
+CPUsState=0/0/32/32; NodeList=node02; FreeMem=121000; Memory=128000; StateLong=drained; Reason=bad|disk\nreplace; TimeStamp=2026-10-01T12:00:00; CPUsLoad=0.00; AllocMem=0

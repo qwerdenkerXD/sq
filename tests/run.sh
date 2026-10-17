@@ -379,6 +379,99 @@ c_drain_reason() {
 	need "footer 0 jobs"              footer_is 0 0 0 0
 }
 
+# ---- 4b. a node in more than one partition ------------------------------------
+# sinfo -N prints one record per node and partition, all alike: sq lists each
+# node once, where its first record came, and a dropped record is no unreadable
+# one.  A node is its raw name, so names only the scrub makes alike stay apart.
+# The fixtures repeat a record of _common/sinfo-two-idle (which `empty` shows),
+# of drained/sinfo or of node-one byte for byte.
+dup_nodes() { lines_matching " cpu " | first_words; }   # the node lines' names, on one line
+dup_two_idle() {   # dup_two_idle FIXTURE: in FULL, two-idle's node lines byte for byte
+	sq_run empty -- --full
+	need "each node once: rc 0"       rc_is 0
+	local once=$RUN/nodes; node_lines > "$once"
+	sq_run "$1" -- --full
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs called"               calls_are 1 1 0 1
+	need "node lines node01, node02, in that order" eval '[ "$(dup_nodes)" = "node01 node02" ]'
+	need "node lines byte for byte those of each node once" node_lines_are "$once"
+	need "no unreadable node note"    no_skips
+	need "no node caption"            lacks "node output"
+}
+# compact_case's labels know no "queue is empty", so the empty queue's COMPACT
+# screen is checked here: it fits, the footer last, and the one summary line
+dup_compact4() {   # dup_compact4 FIXTURE DIGEST: COMPACT at 4 lines, empty queue
+	sq_run "$1" SQ_WIDTH=100 SQ_HEIGHT=4 -- --compact
+	need "COMPACT at 4: rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
+	need "COMPACT at 4: at most 4 lines, footer 0/0/0/0 last" eval 'lines_within 4 && footer_last 0 0 0 0'
+	need "COMPACT at 4: '$2'"         nodes_digest "$2"
+}
+c_nodes_dup_apart()    { T_TITLE="a node in two partitions, its records apart: one line, where it came first"; dup_two_idle nodes-dup-apart; }
+c_nodes_dup_adjacent() { T_TITLE="a node in two partitions, its records adjacent: one line"; dup_two_idle nodes-dup-adjacent; }
+c_nodes_dup_digest() {
+	T_TITLE="COMPACT at 4 lines: the node summary counts a node in two partitions once"
+	dup_compact4 nodes-dup-apart "nodes: 2 idle · 0/64 cpu"
+}
+c_nodes_dup_drained() {
+	T_TITLE="a drained node in two partitions: one line, one ↳ reason, counted once in the summary"
+	sq_run drained-dup -- --full
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs called"               calls_are 1 1 0 1
+	need "node lines node01, node02"  eval '[ "$(dup_nodes)" = "node01 node02" ]'
+	need "one ↳ line, right after node02" eval '[ "$(lines_matching "^ +↳ " | wc -l)" -eq 1 ] &&
+		plain | grep -A1 -E "^ +node02 " | tail -1 | grep -qE "^ +↳ bad\|disk\?replace · since 2026-10-01$"'
+	need "no unreadable node note"    no_skips
+	need "no node caption"            lacks "node output"
+	dup_compact4 drained-dup "nodes: 1 idle, 1 drained · 0/64 cpu"
+}
+c_node_one_dup() {
+	T_TITLE="one node in two partitions: the screen of it in one, FULL and COMPACT at 4, 5 and 6 lines"
+	local h once
+	sq_run node-one -- --full
+	need "FULL, one partition: rc 0"  rc_is 0
+	once=$OUT
+	sq_run node-one-dup -- --full
+	need "FULL: rc 0, stderr empty"   eval 'rc_is 0 && err_empty'
+	need "FULL: the node once, in full" nodes_full node01 ""
+	need "FULL: the screen of one partition, clock aside" eval 'cmp -s <(without_clock_ago "$once") <(without_clock_ago "$OUT")'
+	for h in 4 5 6; do
+		sq_run node-one SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
+		need "$h, one partition: rc 0" rc_is 0
+		once=$OUT
+		sq_run node-one-dup SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
+		need "$h: rc 0, stderr empty"  eval 'rc_is 0 && err_empty'
+		need "$h: the node once, in full, no summary line" nodes_full node01 ""
+		need "$h: the screen of one partition, clock aside" eval 'cmp -s <(without_clock_ago "$once") <(without_clock_ago "$OUT")'
+	done
+}
+c_nodes_dup_compact() {
+	T_TITLE="two-idle with node01 in two partitions, COMPACT at 6..11 lines: the screen of each node once"
+	local fx h once off
+	for fx in nodes-dup-apart nodes-dup-adjacent; do
+		off=
+		for h in $(seq 6 11); do
+			sq_run empty SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
+			rc_is 0 || off="$off $h(each once: rc $RC)"
+			once=$OUT
+			sq_run "$fx" SQ_WIDTH=100 SQ_HEIGHT="$h" -- --compact
+			{ rc_is 0 && err_empty && cmp -s <(without_clock_ago "$once") <(without_clock_ago "$OUT"); } || off="$off $h"
+		done
+		need "$fx: the screen of each node once, clock aside (not at H =${off:- none})" test -z "$off"
+	done
+}
+c_nodes_dup_cntrl() {
+	T_TITLE="names alike only once scrubbed (node\\x01, node?, node\\x02) stay three nodes; node\\x01's second record goes"
+	sq_run nodes-cntrl -- --full
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs called"               calls_are 1 1 0 1
+	need "three node lines, each 'node?'" eval '[ "$(dup_nodes)" = "node? node? node?" ]'
+	need "no unreadable node note"    no_skips
+	need "no node caption"            lacks "node output"
+}
+
 # ---- 5. hostile job names, and a record that does not end where it should ----
 c_hostile_names() {
 	T_TITLE="names with | tab newline ESC and a fake record: 5 real rows, no forgery, no raw ESC"
@@ -2681,6 +2774,7 @@ cases=(
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
 	exit_labels exit_compact exit_garbage exit_fallback
+	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do
