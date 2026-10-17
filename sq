@@ -1145,12 +1145,15 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     anf = 0; delete ACC                         # -s emits step ids, say): lose that
     next                                        # record, never the rest of the stream
   }
+  if (ARGIND == 1) rawnode = ACC[2]             # the name as sinfo sent it, unscrubbed
   for (i=1; i<=need; i++) { F[i] = ACC[i]; gsub(/[[:cntrl:]]/, "?", F[i]) }
   anf = 0; delete ACC           # scrubbed before any width or colour is read
 
   # ---- sinfo: CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp
   #      CPUsLoad AllocMem
   if (ARGIND == 1) {
+    if (rawnode in nodeseen) next               # sinfo -N prints one record per node
+    nodeseen[rawnode] = 1                       # and partition: the first one stands
     nn++
     node[nn] = F[2]; nst[nn] = F[5]
     split(F[1], cp, "/"); used[nn] = cp[1]+0; tot[nn] = cp[4]+0
