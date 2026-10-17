@@ -1,0 +1,6 @@
+# each node in two partitions, one record of each unreadable (CPUsState is no
+# a/i/o/t count): unreadable first for node01, last for node02
+CPUsState=garbage; NodeList=node01; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0
+CPUsState=0/32/0/32; NodeList=node01; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0
+CPUsState=0/32/0/32; NodeList=node02; FreeMem=121000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=garbage; NodeList=node02; FreeMem=121000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0

@@ -383,8 +383,9 @@ c_drain_reason() {
 # sinfo -N prints one record per node and partition, all alike: sq lists each
 # node once, where its first record came, and a dropped record is no unreadable
 # one.  A node is its raw name, so names only the scrub makes alike stay apart.
-# The fixtures repeat a record of _common/sinfo-two-idle (which `empty` shows),
-# of drained/sinfo or of node-one byte for byte.
+# Most fixtures repeat a record of _common/sinfo-two-idle (which `empty` shows),
+# of drained/sinfo or of node-one byte for byte; nodes-cntrl, nodes-dup-unreadable
+# and nodes-dup-differ say in their sinfo what they hold.
 dup_nodes() { lines_matching " cpu " | first_words; }   # the node lines' names, on one line
 dup_two_idle() {   # dup_two_idle FIXTURE: in FULL, two-idle's node lines byte for byte
 	sq_run empty -- --full
@@ -470,6 +471,27 @@ c_nodes_dup_cntrl() {
 	need "three node lines, each 'node?'" eval '[ "$(dup_nodes)" = "node? node? node?" ]'
 	need "no unreadable node note"    no_skips
 	need "no node caption"            lacks "node output"
+}
+c_nodes_dup_unreadable() {
+	T_TITLE="an unreadable record of a node is skipped and counted, before or after its readable one"
+	sq_run nodes-dup-unreadable -- --full
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs called"               calls_are 1 1 0 1
+	need "node lines node01, node02, in that order" eval '[ "$(dup_nodes)" = "node01 node02" ]'
+	need "'↳ 2 unreadable node rows skipped', once" eval '[ "$(lines_matching "^ +↳ 2 unreadable node rows skipped$" | wc -l)" -eq 1 ]'
+	need "no node caption"            lacks "node output"
+}
+c_nodes_dup_differ() {
+	T_TITLE="a later record of a node changes nothing: node01 stays idle, with no reason line"
+	sq_run nodes-dup-differ -- --full
+	need "rc 0"                       rc_is 0
+	need "stderr empty"               err_empty
+	need "stubs called"               calls_are 1 1 0 1
+	need "node lines node01, node02, in that order" eval '[ "$(dup_nodes)" = "node01 node02" ]'
+	need "node01 idle, from its first record" matches "^ +node01 .* 0/32 cpu .* idle$"
+	need "no ↳ reason line, no 'drained'" eval '! matches "^ +↳ " && lacks drained'
+	need "no unreadable node note"    no_skips
 }
 
 # ---- 5. hostile job names, and a record that does not end where it should ----
@@ -2774,7 +2796,7 @@ cases=(
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
 	exit_labels exit_compact exit_garbage exit_fallback
-	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl
+	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

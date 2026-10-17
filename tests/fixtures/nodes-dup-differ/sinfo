@@ -1,0 +1,4 @@
+# _common/sinfo-two-idle, then node01 again drained with a reason: never in
+# one run of sinfo -N, but a later record must not change what the first shows
+@include ../_common/sinfo-two-idle
+CPUsState=0/0/32/32; NodeList=node01; FreeMem=120000; Memory=128000; StateLong=drained; Reason=other; TimeStamp=2026-10-01T12:00:00; CPUsLoad=0.01; AllocMem=0
