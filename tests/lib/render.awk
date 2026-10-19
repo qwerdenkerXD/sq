@@ -1,7 +1,8 @@
 # Renders a fixture in the format a Slurm client was asked for; driven by
 # tests/lib/stub.sh, which documents the fixture format.  Input comes from the
 # environment: STUB_TOOL, STUB_MODE (pct | long | sacct), STUB_FMT, STUB_DELIM,
-# STUB_TRAIL, STUB_FILE, SQSTUB_LOG.
+# STUB_TRAIL, STUB_FILE, SQSTUB_LOG, and STUB_MIRROR=1 when the queue's own file
+# answers sq's mirror call (stub.sh says how).
 
 function refuse(msg) {
   printf "stub %s: %s\n", tool, msg > "/dev/stderr"
@@ -168,14 +169,16 @@ function slurm_value(k, v,   len) {
   return v
 }
 
-function render(   rec, i, out, k) {
+function render(   rec, i, out, k, src) {
   parse_fields(cur_text, rec)
   out = lit[0]
   for (i = 1; i <= nf; i++) {
     k = fld[i]
-    if      (k in rec) out = out slurm_value(k, rec[k])
-    else if (k in DEF) out = out slurm_value(k, DEF[k])
-    else refuse(where() ": no value for " (mode == "pct" ? "%" k : k) \
+    src = (mirror && k == "jobid") ? "A" : k   # the mirror call: -O JobID is %A
+    if      (src in rec) out = out slurm_value(k, rec[src])
+    else if (src in DEF) out = out slurm_value(k, DEF[src])
+    else if (mirror && k == "tres_alloc") out = out "N/A"
+    else refuse(where() ": no value for " (mode == "pct" ? "%" src : src) \
                 " (the format asks for it; set it in the record or in @defaults)")
     if (i < nf || !cut_next) out = out lit[i]
   }
@@ -191,6 +194,7 @@ function run_file(path,   line, rc, saved_file, saved_line, dir, d, arg, tmp, k)
     if (line !~ /^@/) { cur_text = line; render(); continue }
     d = line; sub(/[ \t].*$/, "", d)
     arg = substr(line, length(d) + 1); sub(/^[ \t]/, "", arg)
+    if (mirror && d != "@defaults" && d != "@include") continue   # the records alone
     if (d == "@defaults")     { delete tmp; parse_fields(arg, tmp); for (k in tmp) DEF[k] = tmp[k] }
     else if (d == "@include") {
       dir = path; if (!sub(/\/[^\/]*$/, "", dir)) dir = "."
@@ -219,6 +223,7 @@ function run_file(path,   line, rc, saved_file, saved_line, dir, d, arg, tmp, k)
 
 BEGIN {
   tool = ENVIRON["STUB_TOOL"]; mode = ENVIRON["STUB_MODE"]; fmt = ENVIRON["STUB_FMT"]
+  mirror = (ENVIRON["STUB_MIRROR"] == "1")
   logf = ENVIRON["SQSTUB_LOG"]
   parse_format()
   run_file(ENVIRON["STUB_FILE"])

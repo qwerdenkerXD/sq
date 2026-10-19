@@ -9,7 +9,15 @@
 #   SQSTUB_FIXTURE  fixture directory; the stub reads <dir>/sinfo, <dir>/sacct,
 #                   <dir>/sstat, <dir>/squeue, or <dir>/squeue-all when squeue
 #                   gets "-t all", or <dir>/squeue-alloc when its format asks for
-#                   tres-alloc (sq's allocation call, so it can fail on its own)
+#                   StateCompact and tres-alloc (sq's allocation call, so it can
+#                   fail on its own), or <dir>/squeue-tres when it asks for
+#                   tres-alloc alone (sq's mirror call, ditto).  A fixture
+#                   without squeue-tres answers the mirror call from the file the
+#                   queue call reads: its records alone, whole (every directive
+#                   but @defaults and @include is skipped), JobID from each
+#                   record's A (-O JobID is %A) and tres-alloc from its
+#                   tres_alloc, else N/A, which Slurm prints for a job without
+#                   TRES and sq reads as no total
 #   SQSTUB_LOG      file every invocation is appended to, one line per call:
 #                   CALL <tool> <argv, %q-quoted> <VAR=%q value | VAR(unset)>...
 #                   and a STUBERROR line for every refusal of the stub itself
@@ -83,7 +91,7 @@ refuse() {
 } >> "$SQSTUB_LOG"
 
 # ---- argv: every option sq can send, nothing else --------------------------
-mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0
+mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0
 cmd_o=; cmd_O=; states=
 need_value() { [ $# -ge 2 ] || refuse "$1 needs a value"; }
 while [ $# -gt 0 ]; do
@@ -178,9 +186,13 @@ case $tool in
 		# "-t all" is the one filter that picks the fixture: it is a different
 		# question (finished jobs too), not a narrower one
 		case $states in [Aa][Ll][Ll]) file=squeue-all ;; *) file=squeue ;; esac
-		# sq's allocation call is a question of its own too, answered apart, so
-		# a case can fail it alone
-		case $mode:$fmt in long:*[Tt][Rr][Ee][Ss]-[Aa][Ll][Ll][Oo][Cc]*) file=squeue-alloc ;; esac ;;
+		# sq's allocation call and its mirror call are questions of their own
+		# too, answered apart, so a case can fail either alone
+		case $mode:$fmt in
+			long:*[Ss][Tt][Aa][Tt][Ee][Cc][Oo][Mm][Pp][Aa][Cc][Tt]*[Tt][Rr][Ee][Ss]-[Aa][Ll][Ll][Oo][Cc]*) file=squeue-alloc ;;
+			long:*[Tt][Rr][Ee][Ss]-[Aa][Ll][Ll][Oo][Cc]*)
+				if [ -f "$SQSTUB_FIXTURE/squeue-tres" ]; then file=squeue-tres; else mirror=1; fi ;;
+		esac ;;
 	sacct)
 		[ $parsable = 1 ] || refuse "only -p/-P output is emulated"
 		[ $noheader = 1 ] || refuse "header lines are not emulated: pass -n"
@@ -204,10 +216,11 @@ path=$SQSTUB_FIXTURE/$file
 # a core limit of exactly 1 byte dumps nothing, even where cores go to a pipe
 # (systemd-coredump, WSL), which ignore a limit of 0; bash's ulimit counts in
 # blocks, hence prlimit, and without it 0 still stops a core file
-sig=$(LC_ALL=C sed -n 's/^@signal[[:space:]]\{1,\}\([0-9]\{1,\}\)[[:space:]]*$/\1/p' "$path" | head -n 1)
+sig=; [ "$mirror" = 1 ] ||       # the mirror call answered from the queue's file: records alone
+	sig=$(LC_ALL=C sed -n 's/^@signal[[:space:]]\{1,\}\([0-9]\{1,\}\)[[:space:]]*$/\1/p' "$path" | head -n 1)
 if [ -n "$sig" ]; then
 	prlimit --pid $$ --core=1 2>/dev/null || ulimit -c 0 2>/dev/null
 	kill -"$sig" $$; refuse "still alive after @signal $sig"
 fi
 STUB_TOOL=$tool STUB_MODE=$mode STUB_FMT=$fmt STUB_DELIM=$delim STUB_TRAIL=$trail \
-STUB_FILE=$path LC_ALL=C exec gawk -f "$stubdir/render.awk"
+STUB_FILE=$path STUB_MIRROR=$mirror LC_ALL=C exec gawk -f "$stubdir/render.awk"

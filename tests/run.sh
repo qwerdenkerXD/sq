@@ -201,10 +201,12 @@ err_empty()  { [ ! -s "$ERR" ]; }
 out_empty()  { [ ! -s "$OUT" ]; }
 
 # ---- the stub log: one CALL line per invocation, see tests/lib/stub.sh ------
-calls() {     # calls sinfo|squeue|sacct|sstat|queue|fallback|alloc: how many
+calls() {     # calls sinfo|squeue|sacct|sstat|queue|fallback|alloc|mirror: how many
 	case $1 in
 		queue)    gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) !~ / -t all / && $0 !~ /tres-alloc/ { n++ } END { print n+0 }' "$LOG" ;;
-		alloc)    gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && $0 ~ /tres-alloc/ { n++ } END { print n+0 }' "$LOG" ;;
+		# JOBMEM's allocation call asks StateCompact too, MEMALLOC's mirror call not
+		alloc)    gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && $0 ~ /tres-alloc/ && $0 ~ /StateCompact/ { n++ } END { print n+0 }' "$LOG" ;;
+		mirror)   gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && $0 ~ /tres-alloc/ && $0 !~ /StateCompact/ { n++ } END { print n+0 }' "$LOG" ;;
 		fallback) gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) ~ / -t all /  { n++ } END { print n+0 }' "$LOG" ;;
 		*)        gawk -F'\t' -v t="$1" '$1 == "CALL" && $2 == t { n++ } END { print n+0 }' "$LOG" ;;
 	esac
@@ -2792,7 +2794,7 @@ mem_of() {    # mem_of ID: the MEM cell of row ID, plain (default columns: the o
 epoch_now() { printf '%(%s)T' -1; }
 mem_fixture() {   # mem_fixture FROM FILE TEXT: a copy of fixture FROM whose FILE is TEXT (fixture escapes)
 	local d=$T_DIR/fx-$2-$RANDOM f; mkdir -p "$d"
-	for f in sinfo sacct squeue squeue-alloc sstat squeue-all; do
+	for f in sinfo sacct squeue squeue-alloc squeue-tres sstat squeue-all; do
 		[ -f "$fixtures/$1/$f" ] && printf '@include %s\n' "$fixtures/$1/$f" > "$d/$f"
 	done
 	printf '%b\n' "$3" > "$d/$2"
@@ -2846,7 +2848,7 @@ c_jobmem_gates() {
 	# the screen's filters never reach the allocation call, nor narrow what sstat asks
 	mem_run jobmem SQ_WIDTH=110 -- --color -p main -j 11895 -u fsill -n flye
 	need "filters on the screen: the allocation call is still squeue -h -u 1041 and nothing else, sstat still asks for all 8" eval '
-		rc_is 0 && [ "$(gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"squeue\" && /tres-alloc/ { print \$3 }" "$LOG")" = "-h -u 1041 " ] &&
+		rc_is 0 && [ "$(gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"squeue\" && /tres-alloc/ && /StateCompact/ { print \$3 }" "$LOG")" = "-h -u 1041 " ] &&
 		argv_has sstat -j 11895,11898,11902,11903,11904,11905,11906,11908'
 	# fsill with a pending job only: no call
 	mkdir -p "$d"

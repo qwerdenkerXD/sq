@@ -171,16 +171,21 @@ Premises never seen on the cluster are taken from the Slurm 23.11.4 source (tag
   NodeList above shows size 0 does not cut.
 
 - **The memory calls** (2026-10-19): sq's allocation call (`squeue -h -u <uid>`
-  with `SQUEUE_FORMAT2='JobID:<N>,StateCompact:<N>,tres-alloc:<N>,NumNodes:<N>'`)
-  and `sstat -n -p -a --noconvert -j <ids> -o JobID,TRESUsageInTot` are not in
-  `faithfulness.sh` yet. The shapes the stub renders rest on the live sstat probes
-  of job 11893 (one `|`-ended row per step, `mem=` in bytes, errors on stderr with
-  rc 0, `No steps running for job N`) and on the 23.11.4 source (tres-alloc's
-  `mem=` in MB with an exact M/G/T/P suffix; `-O JobID` is the unique id; a step
-  id is printed with the step's own unique job id). The stub takes a `-O` name with
-  a `-` from a fixture field with `_` (`tres_alloc`), and answers the allocation
-  call from `squeue-alloc`, never `squeue`, so a fixture says what that call
-  returns, `-u` included.
+  with `SQUEUE_FORMAT2='JobID:<N>,StateCompact:<N>,tres-alloc:<N>,NumNodes:<N>'`),
+  its mirror call (2026-10-20: `squeue -h <the queue call's arguments>` with
+  `SQUEUE_FORMAT2='JobID:<N>,tres-alloc:<N>'`) and `sstat -n -p -a --noconvert -j
+  <ids> -o JobID,TRESUsageInTot` are not in `faithfulness.sh` yet. The shapes the
+  stub renders rest on the live sstat probes of job 11893 (one `|`-ended row per
+  step, `mem=` in bytes, errors on stderr with rc 0, `No steps running for job N`)
+  and on the 23.11.4 source (tres-alloc's `mem=` in MB with an exact M/G/T/P
+  suffix, the allocated TRES if set, else the requested, else `N/A`; `-O JobID` is
+  the unique id, `%A`; a step id is printed with the step's own unique job id).
+  The stub takes a `-O` name with a `-` from a fixture field with `_`
+  (`tres_alloc`), and answers the allocation call from `squeue-alloc`, never
+  `squeue`, so a fixture says what that call returns, `-u` included. The mirror
+  call comes from `squeue-tres`; a fixture without one answers it from the queue's
+  own file, its records alone, with JobID from each record's `A` and tres-alloc
+  from its `tres_alloc`, else `N/A`, so every older fixture keeps MEM as `%m`.
 
 Other limits:
 
