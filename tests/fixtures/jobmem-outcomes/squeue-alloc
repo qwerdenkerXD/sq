@@ -1,0 +1,10 @@
+# fsill's jobs, as sq's allocation call asks for them; 4008 ended in between
+@defaults StateCompact=R; NumNodes=1; tres_alloc=cpu=1,mem=4G,node=1,billing=1
+JobID=4001
+JobID=4002
+JobID=4003
+JobID=4004
+JobID=4005
+JobID=4006
+JobID=4007; NumNodes=2; tres_alloc=cpu=2,mem=8G,node=2,billing=2
+JobID=4010; StateCompact=PD; tres_alloc=(null)

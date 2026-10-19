@@ -1,0 +1,13 @@
+# Own arrays whose running tasks fold (every shown column alike): 6000 with
+# readings of 1G and 3.8G of 4G each and a task without one, 6100 with no
+# reading at all, 6200 with a failed one.  The task last started carries the
+# array's id as its unique id.
+@include ../_common/squeue-defaults
+@defaults u=fsill; U=1041; R=fb2-bioinf; M=1:00:00; m=4G
+i=6000_0; A=6001; j=fold
+i=6000_1; A=6002; j=fold
+i=6000_2; A=6000; j=fold
+i=6100_0; A=6101; j=quiet
+i=6100_1; A=6100; j=quiet
+i=6200_0; A=6201; j=broken
+i=6200_1; A=6200; j=broken

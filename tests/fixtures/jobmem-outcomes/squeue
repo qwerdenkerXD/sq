@@ -1,0 +1,18 @@
+# Each way a reading of an own running job (fsill, uid 1041) can come out:
+# ok, a step named on sstat's stderr, no steps yet, rows without mem=, an
+# array's two tasks (4005_1 is the last started, so its unique id is the
+# array's: sstat -j 4005 brings 4006's steps too), two nodes (not measured),
+# gone from the allocation call; and another user's row and an own pending
+# one, which keep MEM as it is.
+@include ../_common/squeue-defaults
+@defaults u=fsill; U=1041; R=fb2-bioinf; m=4G
+i=4001;   A=4001; j=ok;       M=1:00:00
+i=4002;   A=4002; j=steperr;  M=59:00
+i=4003;   A=4003; j=nosteps;  M=58:00
+i=4004;   A=4004; j=nomem;    M=57:00
+i=4005_1; A=4005; j=arr;      M=56:00
+i=4005_0; A=4006; j=arr;      M=55:00
+i=4007;   A=4007; j=twonodes; M=54:00; m=8G
+i=4008;   A=4008; j=gone;     M=53:00
+i=4009;   A=4009; j=theirs;   M=52:00; u=schroder; U=1012
+i=4010;   A=4010; j=waiting;  M=0:00;  t=PD; T=PENDING; R=(Priority); r=Priority

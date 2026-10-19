@@ -1,0 +1,17 @@
+# sstat -j 4001,4002,4003,4004,4005,4006, job by job as sstat loops: 4002's
+# second step failed on its node, 4003 has none yet, 4004's rows carry no mem=
+# (a gather plugin that reads none), and 4006's step comes twice, once for
+# -j 4005 (the array's id) and once for itself.  The last two lines name no
+# requested job: one names none at all, one a job whose id 4001 only starts.
+@defaults TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1073741824,pages=0,vmem=2147483648
+JobID=4001.batch
+JobID=4002.batch
+@stderr sstat: error: slurm_job_step_stat: there was an error with the request to fb2-bioinf rc = Communication connection failure
+@stderr sstat: error: problem getting step_layout for StepId=4002.0: Communication connection failure
+@stderr sstat: error: No steps running for job 4003
+JobID=4004.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,pages=0
+JobID=4005.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=536870912,pages=0,vmem=0
+JobID=4006.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1610612736,pages=0,vmem=0
+JobID=4006.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1610612736,pages=0,vmem=0
+@stderr sstat: error: something that names no job
+@stderr sstat: error: couldn't get steps for job 40011

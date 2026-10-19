@@ -2780,6 +2780,24 @@ mem_run() {   # mem_run FIXTURE [VAR=value | -VAR]... -- [sq args]: sq_run as fs
 	mkdir -p "$hb"; printf '#!/bin/sh\necho fb2-bioinf\n' > "$hb/hostname"; chmod +x "$hb/hostname"
 	sq_run "$fx" SQSTUB_UID=1041 TZ=CEST-2 PATH="$hb:$here/bin:$PATH" "$@"
 }
+row_raw() {   # row_raw ID: the queue row whose JOBID is ID, as printed
+	ID=$1 LC_ALL=$utf8 gawk '{ t = $0; gsub(/\033\[[0-9;]*m/, "", t); gsub(/\r/, "", t); split(t, f, " ") }
+		f[1] == ENVIRON["ID"] && t ~ / (RUNNING|PENDING) / { print; exit }' "$OUT"
+}
+row_has() { [[ "$(row_raw "$1")" == *"$2"* ]]; }        # row_has ID TEXT (escapes as $ESC[..m)
+row_sgr() { row_raw "$1" | LC_ALL=C grep -o "$ESC\[[0-9;]*m" | paste -sd' '; }   # its escapes
+mem_of() {    # mem_of ID: the MEM cell of row ID, plain (default columns: the one before NODE/REASON)
+	rows queue | ID=$1 gawk '$1 == ENVIRON["ID"] { print $(NF-1); exit }'
+}
+epoch_now() { printf '%(%s)T' -1; }
+mem_fixture() {   # mem_fixture FROM FILE TEXT: a copy of fixture FROM whose FILE is TEXT (fixture escapes)
+	local d=$T_DIR/fx-$2-$RANDOM f; mkdir -p "$d"
+	for f in sinfo sacct squeue squeue-alloc sstat squeue-all; do
+		[ -f "$fixtures/$1/$f" ] && printf '@include %s\n' "$fixtures/$1/$f" > "$d/$f"
+	done
+	printf '%b\n' "$3" > "$d/$2"
+	printf '%s' "$d"
+}
 c_jobmem_screens() {
 	T_TITLE="the accepted JOBMEM screens byte for byte, clock aside: b in a pipe, a on a narrow screen with colour, COMPACT keeping the jobs at risk"
 	local fx=$fixtures/jobmem n
@@ -2800,6 +2818,177 @@ c_jobmem_screens() {
 	need "b, COMPACT at 100x16: rc 0, stderr empty, the accepted screen" eval '
 		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/b__compact-w100-h16.ansi") <(without_clock "$OUT")'
 }
+c_jobmem_gates() {
+	T_TITLE="no allocation call and no sstat without an own running row, under a cluster selection, or without MEM; other rows keep MEM as it is"
+	local args base d=$T_DIR/fx-pending f
+	for args in "" "-M bioinf" "--clusters=bioinf" "--federation" "--sibling" "-o i,j,u,T,M,L,C,R"; do
+		mem_run jobmem SQSTUB_UID=4242 SQ_WIDTH=110 -- --color $args
+		base=$RUN/base; without_clock "$OUT" > "$base"
+		need "${args:-no args} as nobody of the queue: rc 0, no allocation call, no sstat" \
+			eval 'rc_is 0 && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ]'
+		[ -n "$args" ] || continue
+		mem_run jobmem SQ_WIDTH=110 -- --color $args
+		need "$args as fsill: rc 0, stderr empty, no allocation call, no sstat, the screen nobody gets" \
+			eval 'rc_is 0 && err_empty && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && cmp -s "$base" <(without_clock "$OUT")'
+	done
+	need "MEM not shown: no %A %U asked for either" eval '! env_of squeue 1 SQUEUE_FORMAT | grep -qE "%[AU]"'
+	mem_run jobmem SQSTUB_UID=4242 SQ_WIDTH=110 SLURM_CLUSTERS=bioinf -- --color
+	base=$RUN/base; without_clock "$OUT" > "$base"
+	mem_run jobmem SQ_WIDTH=110 SLURM_CLUSTERS=bioinf -- --color
+	need "SLURM_CLUSTERS set, as fsill: rc 0, no allocation call, no sstat, the screen nobody gets" \
+		eval 'rc_is 0 && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && cmp -s "$base" <(without_clock "$OUT")'
+	# fsill with a pending job only: no call
+	mkdir -p "$d"
+	for f in sinfo sacct; do printf '@include %s\n' "$fixtures/jobmem/$f" > "$d/$f"; done
+	{ printf '@include %s\n' "$fixtures/_common/squeue-defaults"; grep -E '^i=(11912|11880|11889);' "$fixtures/jobmem/squeue"; } > "$d/squeue"
+	mem_run "$d" SQSTUB_UID=4242 SQ_WIDTH=110 -- --color
+	base=$RUN/base; without_clock "$OUT" > "$base"
+	mem_run "$d" SQ_WIDTH=110 -- --color
+	need "fsill pending only: rc 0, no allocation call, no sstat, the screen nobody gets" \
+		eval 'rc_is 0 && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && cmp -s "$base" <(without_clock "$OUT")'
+	need "... and no state written" eval '[ ! -e "$RUN/home/.cache" ]'
+	# the feature on: other users' rows and fsill's pending one keep MEM and its colours
+	local sgr=() id i=0
+	mem_run jobmem SQSTUB_UID=4242 SQ_WIDTH=110 -- --color
+	for id in 11912 11880 11889; do sgr+=("$(row_sgr $id)"); done
+	mem_run jobmem SQ_WIDTH=110 -- --color
+	need "as fsill: rc 0, the allocation call and sstat once each" eval 'rc_is 0 && [ "$(calls alloc)" -eq 1 ] && [ "$(calls sstat)" -eq 1 ]'
+	for id in 11912 11880 11889; do
+		need "$id (not an own running job): MEM as %m prints it, the row coloured as without the feature" \
+			eval '[ "$(row_sgr '"$id"')" = "${sgr['"$i"']}" ] && [ "$(mem_of '"$id"')" = "$(grep -oE "^i='"$id"';.* m=[^;]+" "$fixtures/jobmem/squeue" | sed "s/.* m=//")" ]'
+		i=$((i + 1))
+	done
+}
+c_jobmem_throttle() {
+	T_TITLE="sstat at most every 30 s: a second run reuses the snapshot; an old, future, missing or garbled one calls again; a job started since reads ?; no usable state dir calls every run"
+	local cache=$T_DIR/cache first want=$T_DIR/memuse.want snap now bad
+	snap=$cache/sq/memuse
+	printf '%s\t%s\t%s\n' 11895 ok 89335316480 11898 ok 33260224512 11902 ok 8123781120 11903 ok 8227962880 \
+		11904 ok 17884241920 11905 ok 7911325696 11906 ok 50989846528 11908 none 0 > "$want"
+	now=$(epoch_now)
+	mkdir -p "$cache/sq"            # so a sq that writes no snapshot fails the needs, not the shell
+	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+	need "first run: rc 0, stderr empty, one sstat call" eval 'rc_is 0 && err_empty && [ "$(calls sstat)" -eq 1 ]'
+	need "the snapshot: the epoch of the call, then id, outcome and bytes of each job asked" \
+		eval 'e=$(head -n 1 "$snap" 2>/dev/null) && [ "$e" -ge "$now" ] && [ "$e" -le "$(epoch_now)" ] && cmp -s <(tail -n +2 "$snap") "$want"'
+	need "nothing else in the state dir: the temp renamed, no bell state" eval '[ "$(ls -A "$cache/sq")" = memuse ]'
+	first=$RUN/first; without_clock "$OUT" > "$first"
+	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+	need "within 30 s: rc 0, no sstat, the allocation asked again, the same screen" \
+		eval 'rc_is 0 && [ "$(calls sstat)" -eq 0 ] && [ "$(calls alloc)" -eq 1 ] && cmp -s "$first" <(without_clock "$OUT")'
+	sed -i "1s/.*/$(( $(epoch_now) - 31 ))/" "$snap" 2>/dev/null
+	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+	need "a snapshot 31 s old: rc 0, sstat called, the snapshot renewed, the same screen" \
+		eval 'rc_is 0 && [ "$(calls sstat)" -eq 1 ] && [ "$(head -n 1 "$snap" 2>/dev/null)" -ge "$(( $(epoch_now) - 5 ))" ] && cmp -s "$first" <(without_clock "$OUT")'
+	sed -i "1s/.*/$(( $(epoch_now) + 60 ))/" "$snap" 2>/dev/null
+	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+	need "a snapshot from the future: rc 0, sstat called" eval 'rc_is 0 && [ "$(calls sstat)" -eq 1 ]'
+	# a job started since the snapshot: a dim ?, and no call for it
+	{ epoch_now; echo; grep -v '^11904	' "$want"; } > "$snap"
+	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+	need "megahit not in a fresh snapshot: rc 0, no sstat, a dim ? before its allocation, the others read" \
+		eval 'rc_is 0 && [ "$(calls sstat)" -eq 0 ] && row_has 11904 "$ESC[2m?$ESC[0m/16G" && row_has 11898 "$ESC[31m  31/32G$ESC[0m"'
+	for bad in "garbage" "$(epoch_now)\n11895\tok\tlots" "$(epoch_now)\n11895 ok 89335316480" "" "$(epoch_now)\n11895\tmaybe\t0"; do
+		printf "$bad" > "$snap"
+		mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+		need "a garbled snapshot ('${bad//\\/\\\\}'): rc 0, stderr empty, sstat called, the readings shown" \
+			eval 'rc_is 0 && err_empty && [ "$(calls sstat)" -eq 1 ] && cmp -s "$first" <(without_clock "$OUT")'
+	done
+	rm -f "$snap"
+	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+	need "no snapshot: rc 0, sstat called" eval 'rc_is 0 && [ "$(calls sstat)" -eq 1 ]'
+	# no usable state dir: a call every run, silently, readings shown all the same
+	: > "$T_DIR/afile"
+	for f in 1 2; do
+		mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$T_DIR/afile" -- --color
+		need "state dir under a file, run $f: rc 0, stderr empty, sstat called, the readings shown" \
+			eval 'rc_is 0 && err_empty && [ "$(calls sstat)" -eq 1 ] && cmp -s "$first" <(without_clock "$OUT")'
+	done
+	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME=relcache -- --color
+	need "a relative XDG_CACHE_HOME is not used: the snapshot under HOME/.cache" eval 'rc_is 0 && [ -s "$RUN/home/.cache/sq/memuse" ]'
+}
+c_jobmem_outcomes() {
+	T_TITLE="each outcome: ok, a step error, no steps, no mem=, array steps once, two nodes, gone; sstat timing out, the allocation call failing; colour off"
+	local d t0 ms id cache=$T_DIR/cache
+	mem_run jobmem-outcomes -- --color
+	need "rc 0, stderr empty, sstat asked for the six measured jobs" eval 'rc_is 0 && err_empty && argv_has sstat -j 4001,4002,4003,4004,4005,4006'
+	need "ok: 1/4G, green; lines naming no job or another job leave it so" row_has 4001 "$ESC[32m  1/4G$ESC[0m"
+	need "a step named on stderr: a red ! on that job" row_has 4002 "$ESC[31m!$ESC[0m/4G"
+	need "'No steps running': a dim ?" row_has 4003 "$ESC[2m?$ESC[0m/4G"
+	need "rows without mem=: a red !" row_has 4004 "$ESC[31m!$ESC[0m/4G"
+	need "the task holding the array's id: its own step, 0.5/4G" row_has 4005_1 "$ESC[32m0.5/4G$ESC[0m"
+	need "a step that came twice counts once: 1.5/4G, green, not 3/4G" row_has 4005_0 "$ESC[32m1.5/4G$ESC[0m"
+	need "two nodes, not measured: a dim ? before the allocation" row_has 4007 "$ESC[2m?$ESC[0m/8G"
+	need "gone from the allocation call: a dim ? before MEM as it was, no slash" row_has 4008 "$ESC[2m?$ESC[0m4G "
+	need "another user's row and an own pending one: MEM as it is, uncoloured" eval 'row_has 4009 " 4G " && row_has 4010 " 4G "'
+	mem_run jobmem-outcomes -- --no-color
+	need "colour off: rc 0, no escapes, plain ! and ?" eval 'rc_is 0 && [ "$(escapes)" -eq 0 ] &&
+		[ "$(mem_of 4001) $(mem_of 4002) $(mem_of 4003) $(mem_of 4004) $(mem_of 4007) $(mem_of 4008)" = "1/4G !/4G ?/4G !/4G ?/8G ?4G" ]'
+	# sstat silent past its budget, min(SQ_TIMEOUT, 2) s
+	d=$(mem_fixture jobmem-outcomes sstat '@hang 8')
+	t0=$(date +%s%N)
+	mem_run "$d" SQ_TIMEOUT=6 XDG_CACHE_HOME="$cache" -- --color
+	ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+	need "sstat silent (SQ_TIMEOUT=6): rc 0, stderr empty, cut at 2 s, so done within 5 s (took ${ms}ms)" eval 'rc_is 0 && err_empty && [ "$ms" -lt 5000 ]'
+	for id in 4001 4002 4003 4004 4005_1 4005_0; do
+		need "timeout: $id a red !" row_has $id "$ESC[31m!$ESC[0m/4G"
+	done
+	need "timeout: the unmeasured keep their dim ?" eval 'row_has 4007 "$ESC[2m?$ESC[0m/8G" && row_has 4008 "$ESC[2m?$ESC[0m4G "'
+	need "timeout: no banner, nothing else changes" eval 'lacks "unreachable" && footer_is 10 9 1 0'
+	mem_run "$d" SQ_TIMEOUT=6 XDG_CACHE_HOME="$cache" -- --color
+	need "the failure is kept: a run within 30 s shows it again without asking" eval 'rc_is 0 && [ "$(calls sstat)" -eq 0 ] && row_has 4002 "$ESC[31m!$ESC[0m/4G" && row_has 4001 "$ESC[31m!$ESC[0m/4G"'
+	# the allocation call failing: every own running row a red !, MEM as it was
+	d=$(mem_fixture jobmem-outcomes squeue-alloc '@stderr squeue: error: Socket timed out on send/recv operation\n@exit 1')
+	mem_run "$d" -- --color
+	need "allocation call failed: rc 0, stderr empty, no sstat, no banner" eval 'rc_is 0 && err_empty && [ "$(calls sstat)" -eq 0 ] && lacks "unreachable"'
+	for id in 4001 4002 4003 4004 4005_1 4005_0 4008; do
+		need "allocation call failed: $id a red ! before MEM as it was" row_has $id "$ESC[31m!$ESC[0m4G "
+	done
+	need "allocation call failed: two nodes too, others unchanged" eval 'row_has 4007 "$ESC[31m!$ESC[0m8G " && row_has 4009 " 4G " && row_has 4010 " 4G "'
+}
+c_jobmem_forms() {
+	T_TITLE="form b: units M, G, T, the rounding guard, a width set by the allocations; form a only on a screen with colour, a pipe or no colour stays b"
+	local d head
+	mem_run jobmem-forms -- --color
+	need "rc 0, stderr empty" eval 'rc_is 0 && err_empty'
+	need "512M: in M, 200/512M" row_has 5001 "$ESC[32m  200/512M$ESC[0m"
+	need "1000M: in G already, 0.5/1G" row_has 5002 "$ESC[32m0.5/1G$ESC[0m"
+	need "2T: in T, 1.2/2T" row_has 5003 "$ESC[32m1.2/2T$ESC[0m"
+	need "15.97 of 16G: 15.9/16G, red, never 16/16G" row_has 5004 "$ESC[31m15.9/16G$ESC[0m"
+	need "16.2 of 16G: 16/16G, bold red" row_has 5005 "$ESC[1;31m  16/16G$ESC[0m"
+	need "1.50G: 0.6/1.5G" row_has 5006 "$ESC[32m  0.6/1.5G$ESC[0m"
+	head=$(section queue | head -n 1)
+	d=$(mem_fixture jobmem-forms sstat '@defaults TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1,pages=0,vmem=0\nJobID=5001.batch\nJobID=5002.batch\nJobID=5003.batch\nJobID=5004.batch\nJobID=5005.batch\nJobID=5006.batch')
+	mem_run "$d" -- --color
+	need "other readings, the same allocations: rc 0, the same column widths" eval 'rc_is 0 && [ "$(section queue | head -n 1)" = "$head" ] && row_has 5004 "$ESC[32m   0/16G$ESC[0m"'
+	mem_run jobmem-forms SQ_WIDTH=60 COLUMNS=60 LINES=30 -- --color
+	need "too narrow on a screen with colour: form a, the allocation as Slurm prints it" eval '
+		rc_is 0 && row_has 5006 "$ESC[32m1.50G$ESC[0m" && row_has 5001 "$ESC[32m512M$ESC[0m" && row_has 5004 "$ESC[31m16G$ESC[0m"'
+	mem_run jobmem SQ_WIDTH=80 -- --color --full
+	need "80 columns in a pipe, colour on: b, and the b cell whole while NODE/REASON is cut" eval '
+		rc_is 0 && row_has 11895 "$ESC[33m   83/100G$ESC[0m" && row_has 11903 "$ESC[32m 7.7/15G$ESC[0m" && rows queue | grep -q "…$"'
+	mem_run jobmem SQ_WIDTH=80 COLUMNS=80 LINES=30 -- --no-color --full
+	need "80 columns on a screen, colour off: b" eval 'rc_is 0 && [ "$(mem_of 11895)" = 83/100G ] && [ "$(mem_of 11908)" = "?/4G" ]'
+	PTY=1 PTY_ROWS=30 PTY_COLS=80 mem_run jobmem TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT -- --full
+	need "an 80-column terminal: rc 0, coloured, form a" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ] && [ "$(mem_of 11895)" = 100G ] && [ "$(mem_of 11903)" = 15600M ]'
+}
+c_jobmem_compact_arrays() {
+	T_TITLE="COMPACT keeps own rows at risk (>= 90 %, then >= 70 %) in squeue's order; a folded own array sums its readings, coloured by its fullest task"
+	mem_run jobmem SQSTUB_UID=4242 SQ_WIDTH=100 SQ_HEIGHT=16 -- --color --compact
+	need "COMPACT 100x16 as nobody: kraken2, megahit, busco hidden, as the longest-running stay" eval '
+		rc_is 0 && [ "$(row_first_fields queue | grep -v "^…" | paste -sd" ")" = "11912 11880 11889 11895 11906" ]'
+	mem_run jobmem SQ_WIDTH=100 SQ_HEIGHT=16 -- --color --compact
+	need "as fsill: kraken2 97 %, megahit 104 %, busco 92 %, then flye 83 %, in squeue order" eval '
+		rc_is 0 && [ "$(row_first_fields queue | grep -v "^…" | paste -sd" ")" = "11912 11895 11898 11904 11905" ]'
+	mem_run jobmem-arrays -- --color
+	need "rc 0, stderr empty, each task asked once" eval 'rc_is 0 && err_empty && argv_has sstat -j 6001,6002,6000,6101,6100,6201,6200'
+	need "the readings of 6000's tasks summed (1G + 3.8G of 4G + 4G), red for its 95 % task" row_has "6000_[0-2]" "$ESC[31m4.8/8G$ESC[0m"
+	need "6100 without a reading: a dim ? before both tasks' allocations" row_has "6100_[0-1]" "$ESC[2m?$ESC[0m/8G"
+	need "6200, a task failed and none read: a red !" row_has "6200_[0-1]" "$ESC[31m!$ESC[0m/8G"
+	mem_run jobmem-arrays -- --color -x
+	need "-x: each task its own reading" eval 'rc_is 0 && row_has 6000_0 "$ESC[32m  1/4G$ESC[0m" && row_has 6000_1 "$ESC[31m3.8/4G$ESC[0m" && row_has 6000_2 "$ESC[2m?$ESC[0m/4G"'
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -2832,7 +3021,7 @@ cases=(
 	bars_width_sweep
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
-	jobmem_screens
+	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

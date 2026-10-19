@@ -1,0 +1,10 @@
+# -j 6001,6002,6000,6101,6100,6201,6200 in that order; -j 6000 (the array's
+# id) brings its other tasks' steps again, 6000 itself has none
+JobID=6001.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1073741824,pages=0,vmem=0
+JobID=6002.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=4080218931,pages=0,vmem=0
+JobID=6001.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1073741824,pages=0,vmem=0
+JobID=6002.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=4080218931,pages=0,vmem=0
+@stderr sstat: error: No steps running for job 6101
+@stderr sstat: error: No steps running for job 6100
+@stderr sstat: error: problem getting step_layout for StepId=6201.0: Communication connection failure
+@stderr sstat: error: No steps running for job 6200

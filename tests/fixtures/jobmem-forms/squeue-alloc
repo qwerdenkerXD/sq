@@ -1,0 +1,7 @@
+@defaults StateCompact=R; NumNodes=1
+JobID=5001; tres_alloc=cpu=1,mem=512M,node=1,billing=1
+JobID=5002; tres_alloc=cpu=1,mem=1000M,node=1,billing=1
+JobID=5003; tres_alloc=cpu=1,mem=2T,node=1,billing=1
+JobID=5004; tres_alloc=cpu=1,mem=16G,node=1,billing=1
+JobID=5005; tres_alloc=cpu=1,mem=16G,node=1,billing=1
+JobID=5006; tres_alloc=cpu=1,mem=1.50G,node=1,billing=1

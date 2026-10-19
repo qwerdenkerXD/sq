@@ -1,0 +1,8 @@
+@defaults StateCompact=R; NumNodes=1; tres_alloc=cpu=1,mem=4G,node=1,billing=1
+JobID=6001
+JobID=6002
+JobID=6000
+JobID=6101
+JobID=6100
+JobID=6201
+JobID=6200
