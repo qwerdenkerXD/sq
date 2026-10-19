@@ -1155,15 +1155,11 @@ function fexit(g, cap) { return exset(gex[g], cap) (gcxl[g] == "" ? "" : " by " 
 # allocation), so a cell is as wide as its allocation makes it, whatever the
 # reading, and nothing moves under watch.  WHOLE is the narrower fallback for a
 # screen: an allocation from 10 up that is not whole is cut to a whole number
-# and its use cut the same way, with no guard (15/15G at 99 %: the colour says
-# the rest).  MARK ("?" no reading, "!" a failed one) stands in for the use.
+# and its use cut to a whole number too, with no guard (7.66 of 15.23 is 7/15G,
+# 15/15G at 99 %: the colour says the rest).  MARK ("?" no reading, "!" a failed one) stands in for the use.
 function memnum(x,   s) {
   if (x >= 9.95) return sprintf("%d", int(x + 0.5))
   s = sprintf("%.1f", x); sub(/[.]0$/, "", s); return s
-}
-function memcut(x,   s) {                       # memnum, cut instead of rounded
-  if (x >= 10) return sprintf("%d", int(x))
-  s = sprintf("%.1f", int(x * 10) / 10); sub(/[.]0$/, "", s); return s
 }
 function memcell(used_bytes, alloc_mb, mark, whole,   unit, mb_per_unit, tenths, alloc_shown, decimal, cut, used, pct, pad) {
   unit = (alloc_mb >= 1048576) ? "T" : (alloc_mb >= 1000) ? "G" : "M"
@@ -1176,7 +1172,7 @@ function memcell(used_bytes, alloc_mb, mark, whole,   unit, mb_per_unit, tenths,
   if (mark != "") used = mark
   else {
     used = used_bytes / 1048576 / mb_per_unit; pct = used_bytes / (alloc_mb * 1048576) * 100
-    if (cut) used = memcut(used)
+    if (cut) used = sprintf("%d", int(used))
     else {
       used = decimal ? sprintf("%.1f", used) : memnum(used)
       if (pct < 100 && used + 0 >= alloc_shown + 0) used = sprintf("%.1f", alloc_shown - 0.1)

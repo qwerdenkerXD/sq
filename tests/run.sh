@@ -3029,7 +3029,7 @@ c_jobmem_forms() {
 	need "80 columns in a pipe, colour on: b, and the b cell whole while NODE/REASON is cut" eval '
 		rc_is 0 && row_has 11895 "$ESC[33m   83/100G$ESC[0m" && row_has 11903 "$ESC[32m  7.7/15.2G$ESC[0m" && rows queue | grep -q "…$"'
 	mem_run jobmem SQ_WIDTH=80 COLUMNS=80 LINES=30 -- --no-color --full
-	need "80 columns on a screen, colour off: b in whole numbers" eval 'rc_is 0 && [ "$(mem_of 11895)" = 83/100G ] && [ "$(mem_of 11903)" = 7.6/15G ] && [ "$(mem_of 11908)" = "?/4G" ]'
+	need "80 columns on a screen, colour off: b in whole numbers" eval 'rc_is 0 && [ "$(mem_of 11895)" = 83/100G ] && [ "$(mem_of 11903)" = 7/15G ] && [ "$(mem_of 11908)" = "?/4G" ]'
 	PTY=1 PTY_ROWS=30 PTY_COLS=80 mem_run jobmem TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT -- --full
 	need "an 80-column terminal: rc 0, coloured, form a" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ] && [ "$(mem_of 11895)" = 100G ] && [ "$(mem_of 11903)" = 15600M ]'
 }
