@@ -177,9 +177,9 @@ function render(   rec, i, out, k) {
     else if (k in DEF) out = out slurm_value(k, DEF[k])
     else refuse(where() ": no value for " (mode == "pct" ? "%" k : k) \
                 " (the format asks for it; set it in the record or in @defaults)")
-    out = out lit[i]
+    if (i < nf || !cut_next) out = out lit[i]
   }
-  printf "%s%s\n", out, trail_next; trail_next = ""
+  printf "%s%s%s", out, trail_next, cut_next ? "" : "\n"; trail_next = ""; cut_next = 0
 }
 
 function run_file(path,   line, rc, saved_file, saved_line, dir, d, arg, tmp, k) {
@@ -198,6 +198,7 @@ function run_file(path,   line, rc, saved_file, saved_line, dir, d, arg, tmp, k)
       run_file(arg ~ /^\// ? arg : dir "/" arg)
     }
     else if (d == "@trail")   trail_next = decode(arg)
+    else if (d == "@cut")     cut_next = 1
     else if (d == "@raw")     printf "%s\n", decode(arg)
     else if (d == "@stderr")  printf "%s\n", decode(arg) > "/dev/stderr"
     else if (d == "@exit")    {

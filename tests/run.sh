@@ -2959,7 +2959,7 @@ c_jobmem_throttle() {
 	need "a relative XDG_CACHE_HOME is not used: the snapshot under HOME/.cache" eval 'rc_is 0 && [ -s "$RUN/home/.cache/sq/memuse" ]'
 }
 c_jobmem_outcomes() {
-	T_TITLE="each outcome: ok, a step error, no steps, no mem= (vmem= alone too), array steps once, two nodes, gone, own by uid alone; sstat timing out, the allocation call failing or unreadable; colour off"
+	T_TITLE="each outcome: ok, a step error, no steps, no mem= (vmem= alone too), array steps once, two nodes, gone, own by uid alone; a stderr line naming two jobs; sstat timing out, the allocation call failing, unreadable or cut off; colour off"
 	local d t0 ms id cache=$T_DIR/cache
 	mem_run jobmem-outcomes -- --color
 	need "rc 0, stderr empty, sstat asked for the eight measured jobs" eval 'rc_is 0 && err_empty && argv_has sstat -j 4001,4002,4003,4004,4005,4006,4011,4012'
@@ -2978,6 +2978,11 @@ c_jobmem_outcomes() {
 	d=$(mem_fixture jobmem-outcomes squeue "@include $fixtures/jobmem-outcomes/squeue\ni=4014; A=4014; j=mylogin; M=47:00; U=1012; u=$(id -un)")
 	mem_run "$d" -- --color
 	need "a row whose %u is the login running the suite, under another uid: MEM as it is" eval 'rc_is 0 && row_has 4014 " 4G " && row_has 4001 "$ESC[32m  1/4G$ESC[0m"'
+	# one stderr line naming two jobs fails both
+	d=$(mem_fixture jobmem-outcomes sstat "@include $fixtures/jobmem-outcomes/sstat\n@stderr sstat: error: problem getting step_layout for StepId=4001.0 and for job 4012: Communication connection failure")
+	mem_run "$d" -- --color
+	need "a stderr line naming two jobs: a red ! on both, the others as they were" \
+		eval 'rc_is 0 && row_has 4001 "$ESC[31m!$ESC[0m/4G" && row_has 4012 "$ESC[31m!$ESC[0m/4G" && row_has 4005_0 "$ESC[32m1.5/4G$ESC[0m"'
 	mem_run jobmem-outcomes -- --no-color
 	need "colour off: rc 0, no escapes, plain ! and ?" eval 'rc_is 0 && [ "$(escapes)" -eq 0 ] &&
 		[ "$(mem_of 4001) $(mem_of 4002) $(mem_of 4003) $(mem_of 4004) $(mem_of 4007) $(mem_of 4008)" = "1/4G !/4G ?/4G !/4G ?/8G ?4G" ]'
@@ -2997,9 +3002,13 @@ c_jobmem_outcomes() {
 	need "the failure is kept: a run within 30 s shows it again without asking" eval 'rc_is 0 && [ "$(calls sstat)" -eq 0 ] && row_has 4002 "$ESC[31m!$ESC[0m/4G" && row_has 4001 "$ESC[31m!$ESC[0m/4G"'
 	# the allocation call failing, or answering what cannot be read: every own
 	# running row a red !, MEM as it was
-	for how in "exit 1" "unreadable, exit 0"; do
-		if [ "$how" = "exit 1" ]; then d=$(mem_fixture jobmem-outcomes squeue-alloc '@stderr squeue: error: Socket timed out on send/recv operation\n@exit 1')
-		else d=$(mem_fixture jobmem-outcomes squeue-alloc "@include $fixtures/jobmem-outcomes/squeue-alloc\n@raw not a record"); fi
+	for how in "exit 1" "unreadable, exit 0" "cut off, exit 0"; do
+		case $how in
+			exit*)       d=$(mem_fixture jobmem-outcomes squeue-alloc '@stderr squeue: error: Socket timed out on send/recv operation\n@exit 1') ;;
+			unreadable*) d=$(mem_fixture jobmem-outcomes squeue-alloc "@include $fixtures/jobmem-outcomes/squeue-alloc\n@raw not a record") ;;
+			# the last record whole but for its closing separator and newline
+			cut*)        d=$(mem_fixture jobmem-outcomes squeue-alloc "@include $fixtures/jobmem-outcomes/squeue-alloc\n@cut\nJobID=4099") ;;
+		esac
 		mem_run "$d" -- --color
 		need "allocation call $how: rc 0, stderr empty, no sstat, no banner" eval 'rc_is 0 && err_empty && [ "$(calls sstat)" -eq 0 ] && lacks "unreachable"'
 		for id in 4001 4002 4003 4004 4005_1 4005_0 4008 4011 4012; do

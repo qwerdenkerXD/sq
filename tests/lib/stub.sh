@@ -43,6 +43,8 @@
 #   @include FILE       read FILE (relative to this file, or absolute) here
 #   @trail TEXT         append TEXT after the NEXT record's last separator: a
 #                       record that does not end where its format says
+#   @cut                print the NEXT record without its last separator and
+#                       its newline: a stream cut off as that record ends
 #   @raw TEXT           print TEXT (escapes decoded) as one output line
 #   @stderr TEXT        print TEXT (escapes decoded) on stderr
 #   @exit N             stop here with exit code N
