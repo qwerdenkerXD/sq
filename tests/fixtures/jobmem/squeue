@@ -1,0 +1,19 @@
+# The accepted JOBMEM screens (Franz, 2026-10-19): bioserver's queue as the
+# caller fsill (uid 1041; the cases set SQSTUB_UID=1041) sees it.  fsill's own
+# running jobs use about 83/97/12/50/104/92/74 % of their allocation (sstat),
+# and multiqc's step has not started ("No steps running"); deseq2 is fsill's
+# but pending, alphafold and cellranger are other users'.  11903 is
+# --mem-per-cpu=7800M -c 2: %m prints 7800M, its allocation is 15600M (in
+# squeue-alloc); hal's 11889 is --mem-per-cpu=2G -c 16.  Order: -S t,i.
+@include ../_common/squeue-defaults
+i=11912; A=11912; U=1041; j=deseq2;     u=fsill;    t=PD; T=PENDING; M=0:00;       L=1-00:00:00; l=1-00:00:00; C=8;  m=48G;   R=(Dependency); S=N/A; r=Dependency; E=afterok:11895(unfulfilled)
+i=11880; A=11880; U=1012; j=alphafold;  u=schroder; t=R;  T=RUNNING; M=1-04:12:33; L=1-19:47:27; l=3-00:00:00; C=16; m=100G;  R=fb2-bioinf
+i=11889; A=11889; U=1019; j=cellranger; u=hal;      t=R;  T=RUNNING; M=6:41:02;    L=17:18:58;   l=1-00:00:00; C=16; m=2G;    R=fb2-bioinf
+i=11895; A=11895; U=1041; j=flye;       u=fsill;    t=R;  T=RUNNING; M=5:12:47;    L=1-18:47:13; l=2-00:00:00; C=16; m=100G;  R=fb2-bioinf
+i=11898; A=11898; U=1041; j=kraken2;    u=fsill;    t=R;  T=RUNNING; M=2:03:19;    L=9:56:41;    l=12:00:00;   C=8;  m=32G;   R=fb2-bioinf
+i=11902; A=11902; U=1041; j=bwa-mem2;   u=fsill;    t=R;  T=RUNNING; M=1:20:55;    L=10:39:05;   l=12:00:00;   C=16; m=64G;   R=fb2-bioinf
+i=11903; A=11903; U=1041; j=salmon;     u=fsill;    t=R;  T=RUNNING; M=47:10;      L=3:12:50;    l=4:00:00;    C=2;  m=7800M; R=fb2-bioinf-0
+i=11904; A=11904; U=1041; j=megahit;    u=fsill;    t=R;  T=RUNNING; M=38:02;      L=7:21:58;    l=8:00:00;    C=8;  m=16G;   R=fb2-bioinf
+i=11905; A=11905; U=1041; j=busco;      u=fsill;    t=R;  T=RUNNING; M=1:02:44;    L=4:57:16;    l=6:00:00;    C=4;  m=8G;    R=fb2-bioinf-0
+i=11906; A=11906; U=1041; j=trinity;    u=fsill;    t=R;  T=RUNNING; M=3:40:12;    L=20:19:48;   l=1-00:00:00; C=16; m=64G;   R=fb2-bioinf
+i=11908; A=11908; U=1041; j=multiqc;    u=fsill;    t=R;  T=RUNNING; M=0:04;       L=59:56;      l=1:00:00;    C=1;  m=4G;    R=fb2-bioinf-0

@@ -4,4 +4,8 @@
 # a running job's %r is "None" (seen live, stuck-classifier notes); a job with
 # no dependency prints %E as "(null)" (squeue's print.c; not checked live).  A
 # pending record sets r to its reason, R without the parentheses.
-@defaults u=alice; j=job; T=RUNNING; t=R; M=10:00; L=50:00; l=1:00:00; C=1; m=4G; R=node01; S=2026-10-06T08:00:00; r=None; E=(null)
+# A (the unique job id) and U (the numeric uid) are hidden fields sq adds while
+# MEM is shown, to find the caller's own running jobs (run.sh's id answers
+# SQSTUB_UID to `id -u`).  U here is nobody's: a record is the caller's only
+# where a fixture says so, and then it sets A too.
+@defaults u=alice; j=job; T=RUNNING; t=R; M=10:00; L=50:00; l=1:00:00; C=1; m=4G; R=node01; S=2026-10-06T08:00:00; r=None; E=(null); A=0; U=31001

@@ -1,0 +1,15 @@
+# sstat -n -p -a --noconvert -j <fsill's running ids> -o JobID,TRESUsageInTot,
+# as 23.11.4 prints it (live format of job 11893): mem= in bytes, every row
+# ending in "|", errors on stderr, rc 0 always.  11902 has three steps (the
+# batch script, bwa-mem2 via srun, samtools sort), summed.
+JobID=11895.batch; TRESUsageInTot=cpu=3-01:44:10,energy=0,fs/disk=48213977088,mem=89335316480,pages=0,vmem=91752927232
+JobID=11898.batch; TRESUsageInTot=cpu=15:41:27,energy=0,fs/disk=61724123136,mem=33260224512,pages=0,vmem=34112045056
+JobID=11902.batch; TRESUsageInTot=cpu=00:00:01,energy=0,fs/disk=320170,mem=14888960,pages=0,vmem=27201536
+JobID=11902.0;     TRESUsageInTot=cpu=20:58:12,energy=0,fs/disk=20457779200,mem=7776034816,pages=0,vmem=8460148736
+JobID=11902.1;     TRESUsageInTot=cpu=00:11:52,energy=0,fs/disk=1876590592,mem=332857344,pages=0,vmem=371236864
+JobID=11903.batch; TRESUsageInTot=cpu=01:30:44,energy=0,fs/disk=3221225472,mem=8227962880,pages=0,vmem=8650752000
+JobID=11904.batch; TRESUsageInTot=cpu=04:51:03,energy=0,fs/disk=9663676416,mem=17884241920,pages=0,vmem=18471444480
+JobID=11905.batch; TRESUsageInTot=cpu=03:21:09,energy=0,fs/disk=2147483648,mem=7911325696,pages=0,vmem=8321499136
+JobID=11906.batch; TRESUsageInTot=cpu=00:00:02,energy=0,fs/disk=320170,mem=9539584,pages=0,vmem=19005440
+JobID=11906.0;     TRESUsageInTot=cpu=2-03:10:44,energy=0,fs/disk=88046829568,mem=50980306944,pages=0,vmem=53687091200
+@stderr sstat: error: No steps running for job 11908

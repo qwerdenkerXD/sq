@@ -1,0 +1,7 @@
+# bioserver's two nodes as sinfo -N prints them on 23.11.4,
+# one record per (node, partition) pair: fb2-bioinf in LocalQ and main,
+# fb2-bioinf-0 in LocalQ and small.  Allocation = the running jobs in squeue.
+CPUsState=96/32/0/128; NodeList=fb2-bioinf; FreeMem=703810; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=86.58; AllocMem=417792
+CPUsState=7/17/0/24; NodeList=fb2-bioinf-0; FreeMem=58820; Memory=80000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=6.02; AllocMem=27888
+CPUsState=96/32/0/128; NodeList=fb2-bioinf; FreeMem=703810; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=86.58; AllocMem=417792
+CPUsState=7/17/0/24; NodeList=fb2-bioinf-0; FreeMem=58820; Memory=80000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=6.02; AllocMem=27888

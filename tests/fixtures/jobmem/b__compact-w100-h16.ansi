@@ -1,0 +1,16 @@
+  [1;36m▌ SLURM[0m [2mfb2-bioinf[0m  [1m15:44:42 CEST[0m
+
+  [1mfb2-bioinf  [0m [32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[2;32m▒[2m░[2m░[2m░[2m░[0m  75%  [1m96[0m/128 cpu   [32m█[32m█[32m█[32m█[32m█[2;32m▒[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m  31%  [1m320[0m/1007G mem  [2mmixed[0m
+  [1mfb2-bioinf-0[0m [32m█[32m█[32m█[32m█[2;32m▒[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m  29%  [1m 7[0m/24  cpu   [32m█[32m█[32m█[32m█[2;32m▒[2;32m▒[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m  26%  [1m 21[0m/78G   mem  [2mmixed[0m
+
+  [4mJOBID    NAME       USER    STATE     TIME      LEFT         CPU   MEM          NODE/REASON [0m
+  [33m11912[0m    deseq2     fsill   [1;33mPENDING[0m      0:00   1-00:00:00     8          48G   (Dependency)
+  [32m11895[0m    flye       fsill   [1;32mRUNNING[0m   5:12:47   1-18:47:13    16   [33m   83/100G[0m   fb2-bioinf
+  [32m11898[0m    kraken2    fsill   [1;32mRUNNING[0m   2:03:19      9:56:41     8     [31m  31/32G[0m   fb2-bioinf
+  [32m11904[0m    megahit    fsill   [1;32mRUNNING[0m     38:02      7:21:58     8     [1;31m  17/16G[0m   fb2-bioinf
+  [32m11905[0m    busco      fsill   [1;32mRUNNING[0m   1:02:44      4:57:16     4       [31m7.4/8G[0m   fb2-bioinf-0
+  [2m… 6 jobs running[0m
+
+  [2mrecently finished: [0m[31m11897 cellranger OUT_OF_MEMORY 0/oom[0m
+
+  [1m11[0m jobs   [32m10 running[0m   [33m1 pending[0m   [31m0 other[0m

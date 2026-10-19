@@ -323,9 +323,9 @@ c_mixed() {
 	need "no unreadable/incomplete note" no_skips
 	need "queue call: squeue -h -S t,i" argv_has squeue -h -S t,i
 	need "every call has SLURM_TIME_FORMAT=standard" all_calls_env SLURM_TIME_FORMAT standard sinfo squeue sacct
-	need "queue format framed by SQ_NONCE, ends in hidden %t %l %S" eval '
+	need "queue format framed by SQ_NONCE, ends in hidden %t %l %S, and %A %U as MEM is shown" eval '
 		f=$(env_of squeue 1 SQUEUE_FORMAT); n=$(env_of squeue 1 SQ_NONCE)
-		[ "$f" = "%i$n%i$n%j$n%u$n%T$n%M$n%L$n%C$n%m$n%R$n%t$n%l$n%S$n" ]'
+		[ "$f" = "%i$n%i$n%j$n%u$n%T$n%M$n%L$n%C$n%m$n%R$n%t$n%l$n%S$n%A$n%U$n" ]'
 	need "sacct: -p --delimiter=SQ_NONCE2 -n -S now-2hours -E now -a -o <8 fields>" eval '
 		argv_has sacct -p "--delimiter=$(env_of sacct 1 SQ_NONCE2)" -n -S now-2hours -E now -a -o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName'
 	need "sacct's delimiter is not the queue nonce" eval '[ "$(env_of sacct 1 SQ_NONCE2)" != "$(env_of sacct 1 SQ_NONCE)" ]'
@@ -2769,6 +2769,38 @@ c_bars_width_sweep() {
 }
 
 # ============================================================================
+# memory use of the caller's own running jobs (JOBMEM-v4)
+# ============================================================================
+# The jobmem fixtures are bioserver's as fsill (uid 1041) sees it; mem_run
+# runs sq as fsill, on bioserver's host name and in the zone of the accepted
+# screens: TZ=CEST-2 prints "CEST" all year and has no DST hour that mktime
+# could read back wrong, which is why the other cases use UTC.
+mem_run() {   # mem_run FIXTURE [VAR=value | -VAR]... -- [sq args]: sq_run as fsill
+	local fx=$1 hb=$T_DIR/hostbin; shift
+	mkdir -p "$hb"; printf '#!/bin/sh\necho fb2-bioinf\n' > "$hb/hostname"; chmod +x "$hb/hostname"
+	sq_run "$fx" SQSTUB_UID=1041 TZ=CEST-2 PATH="$hb:$here/bin:$PATH" "$@"
+}
+c_jobmem_screens() {
+	T_TITLE="the accepted JOBMEM screens byte for byte, clock aside: b in a pipe, a on a narrow screen with colour, COMPACT keeping the jobs at risk"
+	local fx=$fixtures/jobmem n
+	mem_run jobmem SQ_WIDTH=110 SQ_HEIGHT=30 -- --color --full
+	need "b, FULL at 110 in a pipe: rc 0, stderr empty" eval 'rc_is 0 && err_empty'
+	need "b, FULL at 110: the accepted screen" eval 'cmp -s <(without_clock "$fx/b__full-w110-h30.ansi") <(without_clock "$OUT")'
+	need "one allocation call, squeue -h -u 1041, unfiltered" eval '[ "$(calls alloc)" -eq 1 ] && argv_has squeue -h -u 1041'
+	n=$(env_of squeue 2 SQ_NONCE)
+	need "its format in SQUEUE_FORMAT2, framed by the queue nonce, which stays off every command line" eval '
+		[ "$(env_of squeue 2 SQUEUE_FORMAT2)" = "JobID:$n,StateCompact:$n,tres-alloc:$n,NumNodes:$n" ] &&
+		[ "$(env_of squeue 2 SQUEUE_FORMAT)" = "(unset)" ] && ! grep "^CALL" "$LOG" | cut -f3 | grep -qF "$n"'
+	need "one sstat call for the 8 running jobs with an allocation, in the order of the allocation call" eval '
+		[ "$(calls sstat)" -eq 1 ] && argv_has sstat -n -p -a --noconvert -j 11895,11898,11902,11903,11904,11905,11906,11908 -o JobID,TRESUsageInTot'
+	mem_run jobmem SQ_WIDTH=80 SQ_HEIGHT=30 COLUMNS=80 LINES=30 -- --color --full
+	need "a, FULL at 80 on a screen: rc 0, stderr empty, the accepted screen" eval '
+		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/a-fallback__full-w80-h30.ansi") <(without_clock "$OUT")'
+	mem_run jobmem SQ_WIDTH=100 SQ_HEIGHT=16 COLUMNS=100 LINES=16 -- --color --compact
+	need "b, COMPACT at 100x16: rc 0, stderr empty, the accepted screen" eval '
+		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/b__compact-w100-h16.ansi") <(without_clock "$OUT")'
+}
+# ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
@@ -2800,6 +2832,7 @@ cases=(
 	bars_width_sweep
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
+	jobmem_screens
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

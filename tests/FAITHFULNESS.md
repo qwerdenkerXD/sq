@@ -170,6 +170,18 @@ Premises never seen on the cluster are taken from the Slurm 23.11.4 source (tag
   field with a bare `printf("%s")` (`src/sinfo/print.c`), and the 23-character
   NodeList above shows size 0 does not cut.
 
+- **The memory calls** (2026-10-19): sq's allocation call (`squeue -h -u <uid>`
+  with `SQUEUE_FORMAT2='JobID:<N>,StateCompact:<N>,tres-alloc:<N>,NumNodes:<N>'`)
+  and `sstat -n -p -a --noconvert -j <ids> -o JobID,TRESUsageInTot` are not in
+  `faithfulness.sh` yet. The shapes the stub renders rest on the live sstat probes
+  of job 11893 (one `|`-ended row per step, `mem=` in bytes, errors on stderr with
+  rc 0, `No steps running for job N`) and on the 23.11.4 source (tres-alloc's
+  `mem=` in MB with an exact M/G/T/P suffix; `-O JobID` is the unique id; a step
+  id is printed with the step's own unique job id). The stub takes a `-O` name with
+  a `-` from a fixture field with `_` (`tres_alloc`), and answers the allocation
+  call from `squeue-alloc`, never `squeue`, so a fixture says what that call
+  returns, `-u` included.
+
 Other limits:
 
 - **A squeue record.** The queue was empty; only the empty output and the header

@@ -1,0 +1,15 @@
+# sq's allocation call, squeue -h -u 1041 -O JobID,StateCompact,tres-alloc,
+# NumNodes: every job of fsill's, whatever the screen filters.  tres-alloc's
+# mem= is MB-based with an exact suffix, and the job's total also for
+# --mem-per-cpu (11903).  What a pending job prints there is not known; it is
+# never read.
+@defaults StateCompact=R; NumNodes=1
+JobID=11912; StateCompact=PD; tres_alloc=(null)
+JobID=11895; tres_alloc=cpu=16,mem=100G,node=1,billing=16
+JobID=11898; tres_alloc=cpu=8,mem=32G,node=1,billing=8
+JobID=11902; tres_alloc=cpu=16,mem=64G,node=1,billing=16
+JobID=11903; tres_alloc=cpu=2,mem=15600M,node=1,billing=2
+JobID=11904; tres_alloc=cpu=8,mem=16G,node=1,billing=8
+JobID=11905; tres_alloc=cpu=4,mem=8G,node=1,billing=4
+JobID=11906; tres_alloc=cpu=16,mem=64G,node=1,billing=16
+JobID=11908; tres_alloc=cpu=1,mem=4G,node=1,billing=1
