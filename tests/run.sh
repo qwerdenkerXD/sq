@@ -59,7 +59,9 @@ bound=$(command -v timeout) || { echo "run.sh: no timeout on PATH" >&2; exit 2; 
 # ============================================================================
 # sq_run FIXTURE [VAR=value | -VAR]... -- [sq args...]
 # Runs sq in a clean environment: the stubs first on PATH, a fresh HOME (the
-# bell's state file lives under it), a small timeout and a fixed size; VAR=value
+# bell's state file lives under it), a small timeout and a fixed size, and
+# `id -u` saying 4242 (tests/bin/id), a uid no record has unless a fixture
+# makes it the caller's own; VAR=value
 # adds or overrides a variable, -VAR removes one.  --no-bell is passed unless
 # BELL=1, which only rings with a terminal (PTY=1, below).
 # NOTTY=1 runs sq in a new session (setsid), so it has no controlling terminal.
@@ -70,7 +72,7 @@ sq_run() {
 	# with mktime, which cannot tell the two passes of a repeated DST hour apart
 	local -A env=([PATH]="$here/bin:$PATH" [LC_ALL]=$utf8 [TZ]=UTC
 	              [SQSTUB_FIXTURE]=$([[ $fixture == /* ]] && echo "$fixture" || echo "$fixtures/$fixture")
-	              [SQ_TIMEOUT]=3 [SQ_WIDTH]=120 [SQ_HEIGHT]=50)
+	              [SQ_TIMEOUT]=3 [SQ_WIDTH]=120 [SQ_HEIGHT]=50 [SQSTUB_UID]=4242)
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do
 		case $1 in -*) unset "env[${1#-}]" ;; *=*) env[${1%%=*}]=${1#*=} ;; esac
 		shift
@@ -199,9 +201,10 @@ err_empty()  { [ ! -s "$ERR" ]; }
 out_empty()  { [ ! -s "$OUT" ]; }
 
 # ---- the stub log: one CALL line per invocation, see tests/lib/stub.sh ------
-calls() {     # calls sinfo|squeue|sacct|queue|fallback: how many
+calls() {     # calls sinfo|squeue|sacct|sstat|queue|fallback|alloc: how many
 	case $1 in
-		queue)    gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) !~ / -t all / { n++ } END { print n+0 }' "$LOG" ;;
+		queue)    gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) !~ / -t all / && $0 !~ /tres-alloc/ { n++ } END { print n+0 }' "$LOG" ;;
+		alloc)    gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && $0 ~ /tres-alloc/ { n++ } END { print n+0 }' "$LOG" ;;
 		fallback) gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) ~ / -t all /  { n++ } END { print n+0 }' "$LOG" ;;
 		*)        gawk -F'\t' -v t="$1" '$1 == "CALL" && $2 == t { n++ } END { print n+0 }' "$LOG" ;;
 	esac

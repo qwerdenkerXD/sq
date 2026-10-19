@@ -35,6 +35,7 @@ function parse_format(   i, c, d, m, items, p, name, spec) {
         refuse("-O field '" items[i] "': only a letter-led suffix is emulated (" \
                (tool == "sinfo" ? "no width but 0" : "no widths") ", no '.')")
       fld[++nf] = tolower(name); lit[nf] = spec
+      gsub(/-/, "_", fld[nf])                 # tres-alloc: the fixture says tres_alloc
     }
   } else if (mode == "sacct") {               # sacct -p/-P -o a,b,c --delimiter=D
     m = split(fmt, items, ",")

@@ -1,0 +1,13 @@
+#!/bin/sh
+# not a stub: `id -u` answers SQSTUB_UID when that is set, so a fixture's %U
+# decides which rows are the caller's own; any other call, or with it unset,
+# is the real id.  POSIX sh, not bash: bash warns on stderr about a locale it
+# cannot set, and sq runs `id -un` with its stderr on the screen
+if [ $# -eq 1 ] && [ "$1" = -u ] && [ -n "${SQSTUB_UID:-}" ]; then
+	printf '%s\n' "$SQSTUB_UID"; exit 0
+fi
+IFS=:
+for dir in $PATH; do
+	[ -x "$dir/id" ] && ! [ "$dir/id" -ef "$0" ] && exec "$dir/id" "$@"
+done
+echo "tests/bin/id: no real id on PATH" >&2; exit 127

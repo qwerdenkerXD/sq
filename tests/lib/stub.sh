@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# The test double behind tests/bin/{squeue,sinfo,sacct}: renders whatever output
-# format sq asked for from a hand-written fixture, and logs every call.
+# The test double behind tests/bin/{squeue,sinfo,sacct,sstat}: renders whatever
+# output format sq asked for from a hand-written fixture, and logs every call.
 #
 #   tests/bin/<tool> -> stub.sh <tool> <argv...>
 #
 # Environment (set by tests/run.sh; without them the stub refuses to run, so it
 # can never be mistaken for Slurm):
 #   SQSTUB_FIXTURE  fixture directory; the stub reads <dir>/sinfo, <dir>/sacct,
-#                   <dir>/squeue, or <dir>/squeue-all when squeue gets "-t all"
+#                   <dir>/sstat, <dir>/squeue, or <dir>/squeue-all when squeue
+#                   gets "-t all", or <dir>/squeue-alloc when its format asks for
+#                   tres-alloc (sq's allocation call, so it can fail on its own)
 #   SQSTUB_LOG      file every invocation is appended to, one line per call:
 #                   CALL <tool> <argv, %q-quoted> <VAR=%q value | VAR(unset)>...
 #                   and a STUBERROR line for every refusal of the stub itself
@@ -20,13 +22,15 @@
 #   squeue  -o FMT, -O FMT, else $SQUEUE_FORMAT, else $SQUEUE_FORMAT2
 #           (%<letter> grammar or Field:suffix grammar), needs -h
 #   sacct   -o F1,F2,... with -p or -P and -n, --delimiter=D (default "|")
+#   sstat   -o F1,F2,... with -p or -P, -n, -a and --noconvert
 # Anything the stub cannot render exactly the way Slurm would (field widths,
 # headers, unsized -O fields, an unknown option) is refused with exit 97 and a
 # STUBERROR line, never approximated.
 #
 # Fixture format, one record per line, fields by name:
 #   i=1001; j=train; u=alice; t=R          letters for %-formats, Slurm's field
-#   JobID=5000_1; State=FAILED             names (any case) for -O and sacct
+#   JobID=5000_1; State=FAILED             names (any case) for -O and sacct;
+#   tres_alloc=cpu=1,mem=4G                a "-" in a name is written "_"
 # Fields are separated by ";", spaces around names and values are ignored.
 # Escapes in values: \n newline  \t tab  \r CR  \e ESC  \a BEL  \s space
 #                    \xHH any byte  \; semicolon  \\ backslash
@@ -77,7 +81,7 @@ refuse() {
 } >> "$SQSTUB_LOG"
 
 # ---- argv: every option sq can send, nothing else --------------------------
-mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0
+mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0
 cmd_o=; cmd_O=; states=
 need_value() { [ $# -ge 2 ] || refuse "$1 needs a value"; }
 while [ $# -gt 0 ]; do
@@ -85,7 +89,7 @@ while [ $# -gt 0 ]; do
 	case $tool:$a in
 		# a value attached as --opt=value or -Xvalue
 		*:--*=*) v=${a#*=}; a=${a%%=*} ;;
-		squeue:-[SturpAqjMnwLRoO]?*|sacct:-[SEurAqjMo]?*|sinfo:-[oO]?*)
+		squeue:-[SturpAqjMnwLRoO]?*|sacct:-[SEurAqjMo]?*|sinfo:-[oO]?*|sstat:-[jo]?*)
 			v=${a#??}; a=${a:0:2} ;;
 		*) v= ;;
 	esac
@@ -130,6 +134,17 @@ while [ $# -gt 0 ]; do
 		sacct:-q|sacct:--qos|sacct:-j|sacct:--jobs|sacct:-M|sacct:--clusters)
 			take "$@" ;;              # a filter: logged above, never applied
 
+		# sstat as sq asks it: --noconvert and -a are required, as without them
+		# sstat prints K-suffixed sizes and skips the .batch step, neither of
+		# which is emulated
+		sstat:-p|sstat:--parsable)   parsable=1; trail=1; shift_n=1 ;;
+		sstat:-P|sstat:--parsable2)  parsable=1; trail=0; shift_n=1 ;;
+		sstat:-n|sstat:--noheader)   noheader=1; shift_n=1 ;;
+		sstat:-a|sstat:--allsteps)   allsteps=1; shift_n=1 ;;
+		sstat:--noconvert)           noconvert=1; shift_n=1 ;;
+		sstat:-o|sstat:--format|sstat:--fields) take "$@"; cmd_o=$val ;;
+		sstat:-j|sstat:--jobs)       take "$@" ;;   # a filter: logged above, never applied
+
 		*) refuse "option '$1' is not emulated" ;;
 	esac
 	shift "$shift_n"
@@ -160,12 +175,22 @@ case $tool in
 		fi
 		# "-t all" is the one filter that picks the fixture: it is a different
 		# question (finished jobs too), not a narrower one
-		case $states in [Aa][Ll][Ll]) file=squeue-all ;; *) file=squeue ;; esac ;;
+		case $states in [Aa][Ll][Ll]) file=squeue-all ;; *) file=squeue ;; esac
+		# sq's allocation call is a question of its own too, answered apart, so
+		# a case can fail it alone
+		case $mode:$fmt in long:*[Tt][Rr][Ee][Ss]-[Aa][Ll][Ll][Oo][Cc]*) file=squeue-alloc ;; esac ;;
 	sacct)
 		[ $parsable = 1 ] || refuse "only -p/-P output is emulated"
 		[ $noheader = 1 ] || refuse "header lines are not emulated: pass -n"
 		[ -n "$cmd_o" ]   || refuse "sacct's default format is not emulated: pass -o"
 		mode=sacct; fmt=$cmd_o; file=sacct ;;
+	sstat)   # rendered like sacct -p/-P, from <fixture>/sstat
+		[ $parsable = 1 ]  || refuse "only -p/-P output is emulated"
+		[ $noheader = 1 ]  || refuse "header lines are not emulated: pass -n"
+		[ $allsteps = 1 ]  || refuse "without -a sstat skips the .batch step: not emulated"
+		[ $noconvert = 1 ] || refuse "converted (K-suffixed) sizes are not emulated: pass --noconvert"
+		[ -n "$cmd_o" ]    || refuse "sstat's default format is not emulated: pass -o"
+		mode=sacct; fmt=$cmd_o; file=sstat ;;
 	*) refuse "unknown tool" ;;
 esac
 
