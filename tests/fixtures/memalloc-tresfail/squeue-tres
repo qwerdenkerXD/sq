@@ -1,0 +1,4 @@
+# S2: the mirror call fails as a controller under load
+# answers (JOBMEM's allocation call, asked just before, still succeeded)
+@stderr squeue: error: Socket timed out on send/recv operation
+@exit 1

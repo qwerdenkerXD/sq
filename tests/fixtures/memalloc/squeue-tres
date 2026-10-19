@@ -1,0 +1,25 @@
+# sq's mirror call: squeue -h <the queue call's arguments>
+# with SQUEUE_FORMAT2=JobID,tres-alloc - one record per row of the main call,
+# JobID = %A.  Running: the allocation (job total, MB-based exact units);
+# pending: the request (an array meta record per task; per-CPU counts requested
+# CPUs; --mem=0 = RealMemory of LocalQ's first node, 1031000M).
+JobID=11912; tres_alloc=cpu=8,mem=48G,node=1,billing=8
+JobID=11920; tres_alloc=cpu=1,mem=7800M,node=1,billing=1
+JobID=11945; tres_alloc=cpu=1,mem=7800M,node=1,billing=1
+JobID=11947; tres_alloc=cpu=1,mem=7800M,node=1,billing=1
+JobID=11948; tres_alloc=cpu=32,mem=1031000M,node=1,billing=32
+JobID=11880; tres_alloc=cpu=16,mem=100G,node=1,billing=16
+JobID=11890; tres_alloc=cpu=16,mem=124800M,node=1,billing=16
+JobID=11895; tres_alloc=cpu=16,mem=100G,node=1,billing=16
+JobID=11903; tres_alloc=cpu=2,mem=15600M,node=1,billing=2
+JobID=11908; tres_alloc=cpu=2,mem=4G,node=1,billing=2
+JobID=11909; tres_alloc=cpu=2,mem=15600M,node=1,billing=2
+JobID=11911; tres_alloc=cpu=2,mem=6400M,node=1,billing=2
+JobID=11941; tres_alloc=cpu=2,mem=15600M,node=1,billing=2
+JobID=11942; tres_alloc=cpu=2,mem=15600M,node=1,billing=2
+JobID=11943; tres_alloc=cpu=2,mem=15600M,node=1,billing=2
+JobID=11944; tres_alloc=cpu=2,mem=15600M,node=1,billing=2
+JobID=11926; tres_alloc=cpu=2,mem=1000M,node=1,billing=2
+JobID=11938; tres_alloc=cpu=2,mem=4G,node=1,billing=2
+JobID=11939; tres_alloc=cpu=2,mem=4G,node=1,billing=2
+JobID=11930; tres_alloc=cpu=2,mem=4G,node=1,billing=2

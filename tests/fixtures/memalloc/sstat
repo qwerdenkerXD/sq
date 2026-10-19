@@ -1,0 +1,10 @@
+# sstat -n -p -a --noconvert -j 11895,11903,11908,11938,11939,11930: flye and
+# salmon as in jobmem, multiqc without steps, the fastqc array as jobmem-arrays
+# (11930, the array's id, brings its other tasks' steps again, none of its own)
+JobID=11895.batch; TRESUsageInTot=cpu=3-01:44:10,energy=0,fs/disk=48213977088,mem=89335316480,pages=0,vmem=91752927232
+JobID=11903.batch; TRESUsageInTot=cpu=01:30:44,energy=0,fs/disk=3221225472,mem=8227962880,pages=0,vmem=8650752000
+JobID=11938.batch; TRESUsageInTot=cpu=00:59:00,energy=0,fs/disk=0,mem=1073741824,pages=0,vmem=0
+JobID=11939.batch; TRESUsageInTot=cpu=00:59:00,energy=0,fs/disk=0,mem=4080218931,pages=0,vmem=0
+JobID=11938.batch; TRESUsageInTot=cpu=00:59:00,energy=0,fs/disk=0,mem=1073741824,pages=0,vmem=0
+JobID=11939.batch; TRESUsageInTot=cpu=00:59:00,energy=0,fs/disk=0,mem=4080218931,pages=0,vmem=0
+@stderr sstat: error: No steps running for job 11908

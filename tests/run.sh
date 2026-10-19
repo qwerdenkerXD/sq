@@ -3083,6 +3083,137 @@ c_jobmem_compact_arrays() {
 }
 
 # ============================================================================
+# every job's total memory in MEM (MEMALLOC-v3)
+# ============================================================================
+# The memalloc fixtures are a realistic bioserver queue (memalloc/squeue says
+# who asked for what, memalloc/squeue-tres what the mirror call answers);
+# mem_run runs sq as fsill, SQSTUB_UID=4242 as nobody of the queue.  Its
+# pinned screens are the ones Franz accepted on 2026-10-20, with folded arrays
+# as the sum he chose: S0 and S1 (fsill, nobody: FULL at 110 in a pipe), S2
+# (the mirror call failing), S3 (whole for all: nobody at 80 on a screen) and
+# S4 (own form a in the unit rule: fsill at 80 on a screen).
+# mirror_at: which squeue call of the run the mirror call was, for env_of
+mirror_at() { gawk -F'\t' '$1 == "CALL" && $2 == "squeue" { c++ } $1 == "CALL" && $2 == "squeue" && /tres-alloc/ && !/StateCompact/ { print c; exit }' "$LOG"; }
+c_memalloc_screens() {
+	T_TITLE="the accepted MEMALLOC screens byte for byte, clock aside: totals as fsill and as nobody in a pipe, a failed call marked, whole numbers for all and own form a in the unit rule on an 80-column screen"
+	local fx=$fixtures/memalloc
+	mem_run memalloc SQ_WIDTH=110 SQ_HEIGHT=30 -- --color --full
+	need "S0/S1 as fsill, FULL at 110 in a pipe: rc 0, stderr empty, the accepted screen" eval '
+		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/fsill__full-w110-h30.ansi") <(without_clock "$OUT")'
+	need "... busco (per CPU, -c16) 121.8G, not 7800M; --mem=0 pending 1006.8G, not 0; hal's ×4 60.9G; own flye still 83/100G" eval '
+		[ "$(mem_of 11890)" = 121.8G ] && [ "$(mem_of 11948)" = 1006.8G ] && [ "$(mem_of "11920_[0-3]")" = 60.9G ] && [ "$(mem_of 11895)" = 83/100G ]'
+	mem_run memalloc SQSTUB_UID=4242 SQ_WIDTH=110 SQ_HEIGHT=30 -- --color --full
+	need "S0/S1 as nobody, FULL at 110 in a pipe: rc 0, stderr empty, the accepted screen; fsill's rows are totals too" eval '
+		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/nobody__full-w110-h30.ansi") <(without_clock "$OUT") &&
+		[ "$(mem_of 11903)" = 15.2G ] && [ "$(mem_of "11930_[0-2]")" = 12G ]'
+	mem_run memalloc-tresfail SQ_WIDTH=110 SQ_HEIGHT=30 -- --color --full
+	need "S2, the mirror call failing, as fsill at 110: rc 0, stderr empty, the accepted screen" eval '
+		rc_is 0 && err_empty && cmp -s <(without_clock "$fixtures/memalloc-tresfail/fsill__full-w110-h30.ansi") <(without_clock "$OUT")'
+	mem_run memalloc SQSTUB_UID=4242 SQ_WIDTH=80 SQ_HEIGHT=30 COLUMNS=80 LINES=30 -- --color --full
+	need "S3 as nobody at 80 on a screen: rc 0, stderr empty, the accepted screen, every total whole" eval '
+		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/nobody__full-w80-h30.ansi") <(without_clock "$OUT") &&
+		[ "$(mem_of 11948)" = 1006G ] && [ "$(mem_of 11890)" = 121G ] && [ "$(mem_of 11926)" = 0.9G ]'
+	mem_run memalloc SQ_WIDTH=80 SQ_HEIGHT=30 COLUMNS=80 LINES=30 -- --color --full
+	need "S4 as fsill at 80 on a screen: rc 0, stderr empty, the accepted screen; own form a in the unit rule (salmon 15G, fastqc 8G, multiqc ?4G) beside whole totals" eval '
+		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/fsill__full-w80-h30.ansi") <(without_clock "$OUT") &&
+		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_[0-2…" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
+}
+c_memalloc_call() {
+	T_TITLE="the mirror call: the queue call's arguments and env pins without its sort, framed by the queue nonce; none with MEM hidden, a cluster selection, a failed or unreadable queue call, or no row"
+	local main mirror at n args f
+	mem_run memalloc SQ_WIDTH=110 -- --color -p main -n blastp,prokka --all -S i
+	main=$(gawk -F'\t' '$1 == "CALL" && $2 == "squeue" { print $3; exit }' "$LOG")
+	mirror=$(gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && /tres-alloc/ && !/StateCompact/ { print $3 }' "$LOG")
+	at=$(mirror_at); n=$(env_of squeue 1 SQ_NONCE)
+	need "rc 0, one mirror call, after the queue call and the allocation call" eval 'rc_is 0 && [ "$(calls mirror)" -eq 1 ] && [ "$at" = 3 ]'
+	need "its argv: the queue call's without -S t,i, the filters (and their own -S) as given" eval '
+		[ "$main" = "$(printf "%q " -h -S t,i -p main -n blastp,prokka --all -S i)" ] && [ "$mirror" = "$(printf "%q " -h -p main -n blastp,prokka --all -S i)" ]'
+	need "its env: the queue call's pins, SLURM_TIME_FORMAT=standard and SLURM_BITSTR_LEN=0" eval '
+		[ "$(env_of squeue "$at" SLURM_TIME_FORMAT)" = standard ] && [ "$(env_of squeue 1 SLURM_TIME_FORMAT)" = standard ] &&
+		[ "$(env_of squeue "$at" SLURM_BITSTR_LEN)" = 0 ] && [ "$(env_of squeue 1 SLURM_BITSTR_LEN)" = 0 ]'
+	need "its format in SQUEUE_FORMAT2, JobID and tres-alloc framed by the queue nonce, which stays off every command line" eval '
+		[ "$(env_of squeue "$at" SQUEUE_FORMAT2)" = "JobID:$n,tres-alloc:$n" ] && [ "$(env_of squeue "$at" SQUEUE_FORMAT)" = "(unset)" ] &&
+		! grep "^CALL" "$LOG" | cut -f3 | grep -qF "$n"'
+	# no call, MEM as %m prints it (a cluster selection) or not shown at all
+	for args in "-M bioinf" "--clusters=bioinf" "--federation" "--sibling"; do
+		mem_run memalloc SQ_WIDTH=110 -- --color $args
+		need "$args: rc 0, no mirror call, busco and hal's ×4 as %m prints them" eval '
+			rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7800M ] && [ "$(mem_of "11920_[0-3]")" = 7800M ]'
+	done
+	for f in bioinf ""; do
+		mem_run memalloc SQ_WIDTH=110 SLURM_CLUSTERS="$f" -- --color
+		need "SLURM_CLUSTERS='$f': rc 0, no mirror call, busco as %m prints it" eval 'rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7800M ]'
+	done
+	mem_run memalloc SQ_WIDTH=110 -- --color -o i,j,u,T,M,L,C,R
+	need "MEM not shown (-o without m): rc 0, no mirror call" eval 'rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(calls queue)" -eq 1 ]'
+	mem_run memalloc SQ_WIDTH=110 -- --color -o i,u,m
+	need "-o i,u,m: rc 0, one mirror call, busco 121.8G" eval 'rc_is 0 && [ "$(calls mirror)" -eq 1 ] && rows queue | grep -qE "^ +11890 +koch +121.8G$"'
+	mem_run memalloc SQ_WIDTH=110 -- --color -n --federation
+	need "-n --federation (a job name, no cluster): rc 0, one mirror call, totals" eval 'rc_is 0 && [ "$(calls mirror)" -eq 1 ] && [ "$(mem_of 11890)" = 121.8G ]'
+	for f in squeue-fails squeue-garbage empty; do
+		mem_run "$f" -- --color
+		need "$f (the queue call failed, unreadable, or no row): rc 0, no mirror call" eval 'rc_is 0 && [ "$(calls queue)" -eq 1 ] && [ "$(calls mirror)" -eq 0 ]'
+	done
+}
+c_memalloc_fail() {
+	T_TITLE="the mirror call failing (exit 1, a timeout, unreadable, its last record cut off): a red ! before %m on every cell it would fill, own cells as JOBMEM draws them; no answer for a job, no mem= or N/A: %m, silently; a repeated id: the first stands"
+	local how d id cell
+	for how in "exit 1" "timeout" "unreadable" "cut off"; do
+		case $how in
+			exit*)      d=$fixtures/memalloc-tresfail ;;
+			timeout)    d=$(mem_fixture memalloc squeue-tres '@hang 8') ;;
+			unreadable) d=$(mem_fixture memalloc squeue-tres "@include $fixtures/memalloc/squeue-tres\n@raw not a record") ;;
+			# the last record whole but for its closing separator and newline
+			cut*)       d=$(mem_fixture memalloc squeue-tres "@include $fixtures/memalloc/squeue-tres\n@cut\nJobID=11999; tres_alloc=cpu=1,mem=1G") ;;
+		esac
+		mem_run "$d" SQ_WIDTH=110 -- --color --full
+		need "mirror call $how: rc 0, stderr empty, no banner, one mirror call" eval 'rc_is 0 && err_empty && lacks unreachable && [ "$(calls mirror)" -eq 1 ]'
+		for cell in "11912 48G" "11920_[4-19%4] 7800M" "11948 0" "11880 100G" "11890 7800M" "11920_[0-3] 7800M" "11926 1000M"; do
+			id=${cell% *}
+			need "mirror call $how: $id a red ! before ${cell#* }" row_has "$id" "$ESC[31m!$ESC[0m${cell#* } "
+		done
+		need "mirror call $how: own running rows as JOBMEM draws them" eval '
+			row_has 11895 "$ESC[33m   83/100G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m/4G" && row_has "11930_[0-2]" "$ESC[31m4.8/8G$ESC[0m"'
+	done
+	mem_run memalloc-tresfail SQ_WIDTH=110 -- --no-color --full
+	need "colour off: rc 0, no escapes, a plain ! before %m" eval '
+		rc_is 0 && [ "$(escapes)" -eq 0 ] && [ "$(mem_of 11890) $(mem_of 11948) $(mem_of 11912) $(mem_of 11895)" = "!7800M !0 !48G 83/100G" ]'
+	# a race (busco not in the answer), a running job without mem=, a pending
+	# one with N/A, and alphafold a second time (-P), smaller: the first stands
+	d=$(mem_fixture memalloc squeue-tres "$(grep -v '^JobID=11890;' "$fixtures/memalloc/squeue-tres" |
+		sed -e 's/^JobID=11909;.*/JobID=11909; tres_alloc=cpu=2,node=1,billing=2/' -e 's|^JobID=11945;.*|JobID=11945; tres_alloc=N/A|')
+JobID=11880; tres_alloc=cpu=1,mem=1G,node=1,billing=1")
+	mem_run "$d" SQ_WIDTH=110 -- --color --full
+	need "no answer for busco, none with mem= for 11909, N/A for 11945: rc 0, stderr empty, %m uncoloured" eval '
+		rc_is 0 && err_empty && row_has 11890 "  7800M fb2" && row_has 11909 "  7800M fb2" && row_has 11945 "  7800M (Priority)"'
+	need "... and the others totals, alphafold the first of its two records" eval '
+		[ "$(mem_of 11880)" = 100G ] && [ "$(mem_of 11926)" = 0.9G ] && [ "$(mem_of 11947)" = 7.6G ]'
+}
+c_memalloc_fold() {
+	T_TITLE="folded rows show the sum: a folded group of its tasks, a pending bracket ×N its per-task request times N (a throttle does not reduce it), the same with and without -r; a task without a total leaves the group %m; own groups keep used/alloc"
+	local d cells
+	mem_run memalloc SQSTUB_UID=4242 SQ_WIDTH=110 -- --color --full
+	need "nobody: rc 0, hal's running ×4 60.9G (4 x 15600M), the pending ×16 bracket 121.8G (16 x 7800M, not 4), fsill's fastqc ×3 12G" eval '
+		rc_is 0 && [ "$(mem_of "11920_[0-3]")" = 60.9G ] && [ "$(mem_of "11920_[4-19%4]")" = 121.8G ] && [ "$(mem_of "11930_[0-2]")" = 12G ]'
+	cells=$(rows queue | gawk '{ print $(NF-1) }' | paste -sd' ')
+	mem_run memalloc-r SQSTUB_UID=4242 SQ_WIDTH=110 -- --color --full
+	need "nobody, the queue as squeue -r prints it: rc 0, the 16 pending tasks fold to one row of 121.8G, every MEM cell as without -r" eval '
+		rc_is 0 && [ "$(mem_of "11920_[4-19]")" = 121.8G ] && [ "$(rows queue | gawk "{ print \$(NF-1) }" | paste -sd" ")" = "$cells" ]'
+	mem_run memalloc SQ_WIDTH=110 -- --color --full
+	cells=$(rows queue | gawk '{ print $(NF-1) }' | paste -sd' ')
+	mem_run memalloc-r SQ_WIDTH=110 -- --color --full
+	need "fsill, with and without -r: rc 0, every MEM cell the same, own fastqc still 4.8/8G" eval '
+		rc_is 0 && [ "$(rows queue | gawk "{ print \$(NF-1) }" | paste -sd" ")" = "$cells" ] && row_has "11930_[0-2]" "$ESC[31m4.8/8G$ESC[0m"'
+	mem_run memalloc-r SQSTUB_UID=4242 SQ_WIDTH=110 -- --color --full -x
+	need "-x: each task its own total, a pending one 7.6G, a running one 15.2G" eval '
+		rc_is 0 && [ "$(mem_of 11920_4) $(mem_of 11920_19) $(mem_of 11920_0) $(mem_of 11930_1)" = "7.6G 7.6G 15.2G 4G" ]'
+	d=$(mem_fixture memalloc squeue-tres "$(grep -v '^JobID=11942;' "$fixtures/memalloc/squeue-tres")")
+	mem_run "$d" SQSTUB_UID=4242 SQ_WIDTH=110 -- --color --full
+	need "one of hal's running tasks without a total: rc 0, its group %m, uncoloured; the bracket still 121.8G" eval '
+		rc_is 0 && row_has "11920_[0-3]" "  7800M fb2" && [ "$(mem_of "11920_[4-19%4]")" = 121.8G ]'
+}
+
+# ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
@@ -3115,6 +3246,7 @@ cases=(
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
+	memalloc_screens memalloc_call memalloc_fail memalloc_fold
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

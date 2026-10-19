@@ -1,0 +1,38 @@
+# The accepted MEMALLOC screens (Franz, 2026-10-20): a realistic bioserver
+# queue (nodes fb2-bioinf 128 cpu / 1031000M, fb2-bioinf-0 24 cpu / 80000M;
+# partitions LocalQ (both, DefMemPerCPU 7800, default), main (fb2-bioinf,
+# 7800), small (fb2-bioinf-0, 3200);
+# ThreadsPerCore 2, so a running 1-CPU request holds 2 CPUs).  Caller fsill
+# (uid 1041) with JOBMEM's values (flye 83/100G, salmon 7.7/15.2G per-CPU,
+# multiqc ?/4G) and an own array whose tasks fold (jobmem-arrays' 4.8/8G).
+# Other users:
+#   schroder 11880 --mem=100G; 11947 --exclusive -c1, pending (request 7800M)
+#   koch     11890 -c16 per-CPU default (%m 7800M, alloc 124800M);
+#            11909 -c1 default running (15600M), 11945 -c1 default pending (7800M)
+#   hal      11920 array %4, -c1 default: tasks 0-3 running (15600M each, new
+#            unique ids 11941-11944), 4-19 pending in the meta record (A=11920,
+#            7800M per task); 11926 --mem=1000M
+#   weber    11911 small partition, -c2 default (2 x 3200M = 6400M)
+#   meyer    11948 --mem=0 -c32 on LocalQ, pending (%m 0, request 1031000M)
+# Order: -S t,i.
+@include ../_common/squeue-defaults
+i=11912; A=11912; U=1041; j=deseq2;     u=fsill;    t=PD; T=PENDING; M=0:00;       L=1-00:00:00; l=1-00:00:00; C=8;  m=48G;   R=(Dependency); S=N/A; r=Dependency; E=afterok:11895(unfulfilled)
+i=11920_[4-19%4]; A=11920; U=1019; j=blastp; u=hal; t=PD; T=PENDING; M=0:00;       L=12:00:00;   l=12:00:00;   C=1;  m=7800M; R=(JobArrayTaskLimit); S=N/A; r=JobArrayTaskLimit
+i=11945; A=11945; U=1027; j=prokka;     u=koch;     t=PD; T=PENDING; M=0:00;       L=6:00:00;    l=6:00:00;    C=1;  m=7800M; R=(Priority); S=N/A; r=Priority
+i=11947; A=11947; U=1012; j=cactus;     u=schroder; t=PD; T=PENDING; M=0:00;       L=3-00:00:00; l=3-00:00:00; C=1;  m=7800M; R=(Resources); S=N/A; r=Resources
+i=11948; A=11948; U=1033; j=wgs-asm;    u=meyer;    t=PD; T=PENDING; M=0:00;       L=2-00:00:00; l=2-00:00:00; C=32; m=0;     R=(Resources); S=N/A; r=Resources
+i=11880; A=11880; U=1012; j=alphafold;  u=schroder; t=R;  T=RUNNING; M=1-04:12:33; L=1-19:47:27; l=3-00:00:00; C=16; m=100G;  R=fb2-bioinf
+i=11890; A=11890; U=1027; j=busco;      u=koch;     t=R;  T=RUNNING; M=5:41:02;    L=18:18:58;   l=1-00:00:00; C=16; m=7800M; R=fb2-bioinf
+i=11895; A=11895; U=1041; j=flye;       u=fsill;    t=R;  T=RUNNING; M=5:12:47;    L=1-18:47:13; l=2-00:00:00; C=16; m=100G;  R=fb2-bioinf
+i=11903; A=11903; U=1041; j=salmon;     u=fsill;    t=R;  T=RUNNING; M=47:10;      L=3:12:50;    l=4:00:00;    C=2;  m=7800M; R=fb2-bioinf-0
+i=11908; A=11908; U=1041; j=multiqc;    u=fsill;    t=R;  T=RUNNING; M=0:04;       L=59:56;      l=1:00:00;    C=2;  m=4G;    R=fb2-bioinf-0
+i=11909; A=11909; U=1027; j=prokka;     u=koch;     t=R;  T=RUNNING; M=2:10:00;    L=3:50:00;    l=6:00:00;    C=2;  m=7800M; R=fb2-bioinf
+i=11911; A=11911; U=1052; j=fastp;      u=weber;    t=R;  T=RUNNING; M=31:12;      L=1:28:48;    l=2:00:00;    C=2;  m=3200M; R=fb2-bioinf-0
+i=11920_0; A=11941; U=1019; j=blastp;   u=hal;      t=R;  T=RUNNING; M=20:00;      L=11:40:00;   l=12:00:00;   C=2;  m=7800M; R=fb2-bioinf
+i=11920_1; A=11942; U=1019; j=blastp;   u=hal;      t=R;  T=RUNNING; M=20:00;      L=11:40:00;   l=12:00:00;   C=2;  m=7800M; R=fb2-bioinf
+i=11920_2; A=11943; U=1019; j=blastp;   u=hal;      t=R;  T=RUNNING; M=20:00;      L=11:40:00;   l=12:00:00;   C=2;  m=7800M; R=fb2-bioinf
+i=11920_3; A=11944; U=1019; j=blastp;   u=hal;      t=R;  T=RUNNING; M=20:00;      L=11:40:00;   l=12:00:00;   C=2;  m=7800M; R=fb2-bioinf
+i=11926; A=11926; U=1019; j=seqkit;     u=hal;      t=R;  T=RUNNING; M=1:00;       L=59:00;      l=1:00:00;    C=2;  m=1000M; R=fb2-bioinf
+i=11930_0; A=11938; U=1041; j=fastqc;   u=fsill;    t=R;  T=RUNNING; M=1:00:00;    L=1:00:00;    l=2:00:00;    C=2;  m=4G;    R=fb2-bioinf
+i=11930_1; A=11939; U=1041; j=fastqc;   u=fsill;    t=R;  T=RUNNING; M=1:00:00;    L=1:00:00;    l=2:00:00;    C=2;  m=4G;    R=fb2-bioinf
+i=11930_2; A=11930; U=1041; j=fastqc;   u=fsill;    t=R;  T=RUNNING; M=1:00:00;    L=1:00:00;    l=2:00:00;    C=2;  m=4G;    R=fb2-bioinf
