@@ -3040,9 +3040,11 @@ c_jobmem_forms() {
 	mem_run jobmem-forms SQ_WIDTH=70 -- --color
 	need "70 columns in a pipe: still the decimal form, NODE/REASON shaved" eval 'rc_is 0 && row_has 5007 "$ESC[31m 15.0/15.2G$ESC[0m" && section queue | head -n 1 | grep -q "NODE/REASO$"'
 	mem_run jobmem-forms SQ_WIDTH=70 COLUMNS=70 LINES=30 -- --color
-	need "70 columns on a screen: whole numbers, cut, no guard: 15/15G at 98.5 and 99.9 %, nothing else changes" eval '
-		rc_is 0 && row_has 5007 "$ESC[31m  15/15G$ESC[0m" && row_has 5008 "$ESC[31m  15/15G$ESC[0m" && row_has 5010 "$ESC[1;31m  15/15G$ESC[0m" &&
-		row_has 5009 "$ESC[31m 1.1/1.2G$ESC[0m" && row_has 5004 "$ESC[31m15.9/16G$ESC[0m" && ! rows queue | grep -q "…"'
+	need "70 columns on a screen: whole numbers, cut, no guard: 15/15G at 98.5, 99.9 and 100.5 %" eval '
+		rc_is 0 && row_has 5007 "$ESC[31m  15/15G$ESC[0m" && row_has 5008 "$ESC[31m  15/15G$ESC[0m" && row_has 5010 "$ESC[1;31m  15/15G$ESC[0m" && ! rows queue | grep -q "…"'
+	need "70 columns on a screen: every use whole, also of a whole allocation (15/16G) and under one (0/0.9G); below 10 the allocation keeps its decimal (1/1.2G)" eval '
+		row_has 5004 "$ESC[31m  15/16G$ESC[0m" && row_has 5005 "$ESC[1;31m  16/16G$ESC[0m" && row_has 5002 "$ESC[32m   0/0.9G$ESC[0m" &&
+		row_has 5009 "$ESC[31m   1/1.2G$ESC[0m" && row_has 5006 "$ESC[32m   0/1.5G$ESC[0m" && row_has 5003 "$ESC[32m  1/2T$ESC[0m" && row_has 5001 "$ESC[32m  200/512M$ESC[0m"'
 	mem_run jobmem-forms SQ_WIDTH=70 COLUMNS=70 LINES=30 -- --no-color
 	need "70 columns on a screen without colour: whole numbers as well" eval 'rc_is 0 && [ "$(mem_of 5007)" = 15/15G ]'
 	mem_run jobmem-forms SQ_WIDTH=64 COLUMNS=64 LINES=30 -- --color
@@ -3054,7 +3056,7 @@ c_jobmem_forms() {
 	need "80 columns in a pipe, colour on: b, and the b cell whole while NODE/REASON is cut" eval '
 		rc_is 0 && row_has 11895 "$ESC[33m   83/100G$ESC[0m" && row_has 11903 "$ESC[32m  7.7/15.2G$ESC[0m" && rows queue | grep -q "…$"'
 	mem_run jobmem SQ_WIDTH=80 COLUMNS=80 LINES=30 -- --no-color --full
-	need "80 columns on a screen, colour off: b in whole numbers" eval 'rc_is 0 && [ "$(mem_of 11895)" = 83/100G ] && [ "$(mem_of 11903)" = 7/15G ] && [ "$(mem_of 11908)" = "?/4G" ]'
+	need "80 columns on a screen, colour off: b in whole numbers" eval 'rc_is 0 && [ "$(mem_of 11895)" = 83/100G ] && [ "$(mem_of 11903)" = 7/15G ] && [ "$(mem_of 11902)" = 7/64G ] && [ "$(mem_of 11908)" = "?/4G" ]'
 	PTY=1 PTY_ROWS=30 PTY_COLS=80 mem_run jobmem TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT -- --full
 	need "an 80-column terminal: rc 0, coloured, form a" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ] && [ "$(mem_of 11895)" = 100G ] && [ "$(mem_of 11903)" = 15600M ]'
 }
