@@ -2871,9 +2871,14 @@ c_jobmem_gates() {
 	done
 }
 c_jobmem_throttle() {
-	T_TITLE="sstat at most every 30 s: a second run reuses the snapshot; one 30 s old, future, missing or garbled calls again; renamed into place; a job started since reads ?; no usable state dir (or memuse no file) calls every run"
+	T_TITLE="sstat at most every 30 s: a fresh snapshot is reused; one 30 s old by sq's clock, older, future, missing or garbled calls again; renamed into place; a job started since reads ?; no usable state dir (or memuse no file) calls every run"
 	local cache=$T_DIR/cache first want=$T_DIR/memuse.want snap now bad
 	snap=$cache/sq/memuse
+	# The clock may step a second or two between this shell reading it and sq
+	# reading it (WSL steps back about 1.5 s every 30 s), so a snapshot is dated
+	# well inside or outside the 30 s, never near an edge: 10 s old is fresh,
+	# 40 s old is stale.  snap_age AGE rewrites the epoch, keeping the job lines.
+	snap_age() { sed -i "1s/.*/$(( $(epoch_now) - $1 ))/" "$snap" 2>/dev/null; }
 	printf '%s\t%s\t%s\n' 11895 ok 89335316480 11898 ok 33260224512 11902 ok 8123781120 11903 ok 8227962880 \
 		11904 ok 17884241920 11905 ok 7911325696 11906 ok 50989846528 11908 none 0 > "$want"
 	now=$(epoch_now)
@@ -2881,21 +2886,22 @@ c_jobmem_throttle() {
 	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
 	need "first run: rc 0, stderr empty, one sstat call" eval 'rc_is 0 && err_empty && [ "$(calls sstat)" -eq 1 ]'
 	need "the snapshot: the epoch of the call, then id, outcome and bytes of each job asked" \
-		eval 'e=$(head -n 1 "$snap" 2>/dev/null) && [ "$e" -ge "$now" ] && [ "$e" -le "$(epoch_now)" ] && cmp -s <(tail -n +2 "$snap") "$want"'
+		eval 'e=$(head -n 1 "$snap" 2>/dev/null) && [ "$e" -ge "$((now - 5))" ] && [ "$e" -le "$(( $(epoch_now) + 5 ))" ] && cmp -s <(tail -n +2 "$snap") "$want"'
 	need "nothing else in the state dir: the temp renamed, no bell state" eval '[ "$(ls -A "$cache/sq")" = memuse ]'
 	first=$RUN/first; without_clock "$OUT" > "$first"
+	snap_age 10
 	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
-	need "within 30 s: rc 0, no sstat, the allocation asked again, the same screen" \
+	need "10 s old: rc 0, no sstat, the allocation asked again, the same screen" \
 		eval 'rc_is 0 && [ "$(calls sstat)" -eq 0 ] && [ "$(calls alloc)" -eq 1 ] && cmp -s "$first" <(without_clock "$OUT")'
-	sed -i "1s/.*/$(( $(epoch_now) - 31 ))/" "$snap" 2>/dev/null
+	snap_age 40
 	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
-	need "a snapshot 31 s old: rc 0, sstat called, the snapshot renewed, the same screen" \
-		eval 'rc_is 0 && [ "$(calls sstat)" -eq 1 ] && [ "$(head -n 1 "$snap" 2>/dev/null)" -ge "$(( $(epoch_now) - 5 ))" ] && cmp -s "$first" <(without_clock "$OUT")'
-	sed -i "1s/.*/$(( $(epoch_now) + 60 ))/" "$snap" 2>/dev/null
+	need "a snapshot 40 s old: rc 0, sstat called, the snapshot renewed, the same screen" \
+		eval 'rc_is 0 && [ "$(calls sstat)" -eq 1 ] && [ "$(head -n 1 "$snap" 2>/dev/null)" -ge "$(( $(epoch_now) - 10 ))" ] && cmp -s "$first" <(without_clock "$OUT")'
+	snap_age -60
 	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
 	need "a snapshot from the future: rc 0, sstat called" eval 'rc_is 0 && [ "$(calls sstat)" -eq 1 ]'
 	# a job started since the snapshot: a dim ?, and no call for it
-	{ epoch_now; echo; grep -v '^11904	' "$want"; } > "$snap"
+	grep -v '^11904	' "$want" | sed '1i\0' > "$snap"; snap_age 10
 	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
 	need "megahit not in a fresh snapshot: rc 0, no sstat, a dim ? before its allocation, the others read" \
 		eval 'rc_is 0 && [ "$(calls sstat)" -eq 0 ] && row_has 11904 "$ESC[2m?$ESC[0m/16G" && row_has 11898 "$ESC[31m  31/32G$ESC[0m"'
@@ -2905,20 +2911,29 @@ c_jobmem_throttle() {
 		need "a garbled snapshot ('${bad//\\/\\\\}'): rc 0, stderr empty, sstat called, the readings shown" \
 			eval 'rc_is 0 && err_empty && [ "$(calls sstat)" -eq 1 ] && cmp -s "$first" <(without_clock "$OUT")'
 	done
-	# exactly 30 s old is a call.  sq reads its clock a moment after the
-	# snapshot is dated here, so a try counts only if sq's epoch (the new
-	# snapshot's) is the one this dated it from; else it is tried again
-	local tries=0 hit=0 e0
-	while [ $tries -lt 10 ] && [ $hit = 0 ]; do
-		tries=$((tries + 1)); e0=$(epoch_now)
-		{ echo $((e0 - 30)); cat "$want"; } > "$snap"
-		mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
-		[ "$(calls sstat)" -eq 1 ] || break
-		[ "$(head -n 1 "$snap" 2>/dev/null)" = "$e0" ] && hit=1
+	# Exactly 30 s old is a call (>= 30, not > 30).  Only sq's own clock can
+	# tell a snapshot's age, and only a call shows it (the new snapshot's
+	# epoch).  So each try dates the snapshot 30 s before the second sq is
+	# expected to read, T, and counts as a hit only when sq called AND read T.
+	# A try that missed T says nothing either way and corrects the guess: a
+	# call shows the second sq read, no call means sq read before T.  A sq
+	# that wants more than 30 s never calls at T, so it never hits; a clock
+	# step only costs a try.  Each try is cheap (no finished block).
+	local tries=0 hit=0 lag=0 at target got
+	while [ $tries -lt 20 ] && [ $hit = 0 ]; do
+		tries=$((tries + 1)); at=$(epoch_now); target=$((at + lag))
+		{ echo $((target - 30)); cat "$want"; } > "$snap"
+		mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --no-recent
+		if [ "$(calls sstat)" -eq 1 ]; then
+			got=$(head -n 1 "$snap" 2>/dev/null)
+			if [ "$got" = "$target" ]; then hit=1; else lag=$(( got - at )); fi
+		else
+			lag=$((lag - 1)); [ $lag -ge -2 ] || lag=0
+		fi
 	done
-	need "a snapshot exactly 30 s old: sstat called (try $tries)" test $hit = 1
+	need "a snapshot exactly 30 s old by sq's clock: sstat called (hit at try $tries of at most 20)" test $hit = 1
 	# replaced by a rename: a hard link to the old snapshot keeps it intact
-	sed -i "1s/.*/$(( $(epoch_now) - 31 ))/" "$snap" 2>/dev/null
+	snap_age 40
 	rm -f "$T_DIR/old"; ln "$snap" "$T_DIR/old" 2>/dev/null; cp "$snap" "$T_DIR/old.want" 2>/dev/null
 	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
 	need "a new snapshot is renamed into place: the old file, held by a hard link, is untouched, no temp is left" \
@@ -2977,6 +2992,7 @@ c_jobmem_outcomes() {
 	done
 	need "timeout: the unmeasured keep their dim ?" eval 'row_has 4007 "$ESC[2m?$ESC[0m/8G" && row_has 4008 "$ESC[2m?$ESC[0m4G "'
 	need "timeout: no banner, nothing else changes" eval 'lacks "unreachable" && footer_is 13 12 1 0 && row_has 4013 " 4G "'
+	sed -i "1s/.*/$(( $(epoch_now) - 10 ))/" "$cache/sq/memuse" 2>/dev/null   # 10 s old: clear of any clock step
 	mem_run "$d" SQ_TIMEOUT=6 XDG_CACHE_HOME="$cache" -- --color
 	need "the failure is kept: a run within 30 s shows it again without asking" eval 'rc_is 0 && [ "$(calls sstat)" -eq 0 ] && row_has 4002 "$ESC[31m!$ESC[0m/4G" && row_has 4001 "$ESC[31m!$ESC[0m/4G"'
 	# the allocation call failing, or answering what cannot be read: every own

@@ -1,8 +1,11 @@
 # A quiet finished block: one OOM of another user's, two jobs of the caller's
+# Ends half a minute off a minute mark, so AGO (21m, 48m, 1h) stays put when the
+# clock steps a second or two between the stub dating them and sq reading them
+# (WSL steps back about 1.5 s every 30 s).
 @include ../_common/sacct-defaults
-JobID=11899; User=fsill; JobName=fastp; State=COMPLETED; ExitCode=0:0; Elapsed=00:24:51; End=\{now-21m}; NodeList=fb2-bioinf
-JobID=11899.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=00:24:51; End=\{now-21m}; NodeList=fb2-bioinf
-JobID=11897; User=hal; JobName=cellranger; State=OUT_OF_MEMORY; ExitCode=0:125; Elapsed=01:02:13; End=\{now-48m}; NodeList=fb2-bioinf
-JobID=11897.batch; User=; JobName=batch; State=OUT_OF_MEMORY; ExitCode=0:125; Elapsed=01:02:13; End=\{now-48m}; NodeList=fb2-bioinf
-JobID=11893; User=fsill; JobName=sq-memprobe; State=COMPLETED; ExitCode=0:0; Elapsed=00:09:05; End=\{now-1h12m}; NodeList=fb2-bioinf-0
-JobID=11893.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=00:09:05; End=\{now-1h12m}; NodeList=fb2-bioinf-0
+JobID=11899; User=fsill; JobName=fastp; State=COMPLETED; ExitCode=0:0; Elapsed=00:24:51; End=\{now-21m30s}; NodeList=fb2-bioinf
+JobID=11899.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=00:24:51; End=\{now-21m30s}; NodeList=fb2-bioinf
+JobID=11897; User=hal; JobName=cellranger; State=OUT_OF_MEMORY; ExitCode=0:125; Elapsed=01:02:13; End=\{now-48m30s}; NodeList=fb2-bioinf
+JobID=11897.batch; User=; JobName=batch; State=OUT_OF_MEMORY; ExitCode=0:125; Elapsed=01:02:13; End=\{now-48m30s}; NodeList=fb2-bioinf
+JobID=11893; User=fsill; JobName=sq-memprobe; State=COMPLETED; ExitCode=0:0; Elapsed=00:09:05; End=\{now-1h12m30s}; NodeList=fb2-bioinf-0
+JobID=11893.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; Elapsed=00:09:05; End=\{now-1h12m30s}; NodeList=fb2-bioinf-0
