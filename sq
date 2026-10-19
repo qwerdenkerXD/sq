@@ -1145,29 +1145,45 @@ function fexit(g, cap) { return exset(gex[g], cap) (gcxl[g] == "" ? "" : " by " 
 
 # ---- the MEM cell of the running jobs of the caller -------------------------
 # Form b, the default: used/allocated, both in the unit of the allocation,
-# binary: M below 1000 MiB, T from 1 TiB, else G.  A number from 10 up prints
-# whole, below that with one decimal and no ".0".  The used part is padded to
-# the width of the allocated number + 2, so a cell is as wide as its allocation
-# makes it, whatever the reading, and nothing moves under watch.  MARK ("?" no
-# reading, "!" a failed one) stands in for the used part.
+# binary: M below 1000 MiB, T from 1 TiB, else G.  A whole allocation prints
+# whole and its use as ever: from 10 up whole, below that with one decimal and
+# no ".0".  An allocation that is not whole prints with one decimal, cut, never
+# rounded up (15600M is 15.2G), and its use with one decimal too.  Within that
+# decimal form a job under its allocation never reads as much (one step, 0.1,
+# below it), nor one at or over it less.  The used part is padded to the
+# allocated figure + 2 (+ 1 with a decimal: either way a use up to ten times the
+# allocation), so a cell is as wide as its allocation makes it, whatever the
+# reading, and nothing moves under watch.  WHOLE is the narrower fallback for a
+# screen: an allocation from 10 up that is not whole is cut to a whole number
+# and its use cut the same way, with no guard (15/15G at 99 %: the colour says
+# the rest).  MARK ("?" no reading, "!" a failed one) stands in for the use.
 function memnum(x,   s) {
   if (x >= 9.95) return sprintf("%d", int(x + 0.5))
   s = sprintf("%.1f", x); sub(/[.]0$/, "", s); return s
 }
-function memcell(used_bytes, alloc_mb, mark,   unit, mb_per_unit, alloc_shown, used, pct) {
+function memcut(x,   s) {                       # memnum, cut instead of rounded
+  if (x >= 10) return sprintf("%d", int(x))
+  s = sprintf("%.1f", int(x * 10) / 10); sub(/[.]0$/, "", s); return s
+}
+function memcell(used_bytes, alloc_mb, mark, whole,   unit, mb_per_unit, tenths, alloc_shown, decimal, cut, used, pct, pad) {
   unit = (alloc_mb >= 1048576) ? "T" : (alloc_mb >= 1000) ? "G" : "M"
   mb_per_unit = (unit == "T") ? 1048576 : (unit == "G") ? 1024 : 1
-  alloc_shown = memnum(alloc_mb / mb_per_unit)
+  tenths = int(alloc_mb * 10 / mb_per_unit)    # the allocation in tenths, cut
+  if (alloc_mb % mb_per_unit == 0)  alloc_shown = sprintf("%d", alloc_mb / mb_per_unit)
+  else if (whole && tenths >= 100) { alloc_shown = sprintf("%d", int(tenths / 10)); cut = 1 }
+  else                              { alloc_shown = sprintf("%.1f", tenths / 10); decimal = 1 }
+  pad = length(alloc_shown) + (decimal ? 1 : 2)
   if (mark != "") used = mark
   else {
     used = used_bytes / 1048576 / mb_per_unit; pct = used_bytes / (alloc_mb * 1048576) * 100
-    # the rounding never makes a job under its allocation read full, nor one
-    # over it read under: 15.97 of 16G is 15.9/16G
-    if (pct < 100 && memnum(used) + 0 >= alloc_shown + 0) used = sprintf("%.1f", int(used * 10) / 10)
-    else if (pct >= 100 && memnum(used) + 0 < alloc_shown + 0) used = alloc_shown
-    else used = memnum(used)
+    if (cut) used = memcut(used)
+    else {
+      used = decimal ? sprintf("%.1f", used) : memnum(used)
+      if (pct < 100 && used + 0 >= alloc_shown + 0) used = sprintf("%.1f", alloc_shown - 0.1)
+      else if (pct >= 100 && used + 0 < alloc_shown + 0) used = alloc_shown
+    }
   }
-  return sprintf("%*s", length(alloc_shown) + 2, used) "/" alloc_shown unit
+  return sprintf("%*s", pad, used) "/" alloc_shown unit
 }
 function memcolour(p) { return (p >= 100) ? "1;31" : (p >= 90) ? "31" : (p >= 70) ? "33" : "32" }
 # COMPACT keeps own rows at risk longest: 0 from 90 %, 1 from 70 %, 2 the rest
@@ -1186,7 +1202,7 @@ function memadd(g, r,   p) {
     if (!(g in grp_worst_pct) || p > grp_worst_pct[g]) grp_worst_pct[g] = p
   }
 }
-# the text of group g in a form ("b" or "alloc", form a)
+# the text of group g in a form ("decimal", "whole": form b; "alloc": form a)
 # and the same text coloured: the number in its band, or the mark dim (no
 # reading) or red (failed) outside the escape of what follows it
 function memform_cell(g, form,   mark, markcolour, colour, text, at) {
@@ -1195,10 +1211,10 @@ function memform_cell(g, form,   mark, markcolour, colour, text, at) {
   if (mark == "") {
     colour = memcolour(grp_worst_pct[g])
     text = (form == "alloc") ? grp_alloc_text[g] \
-         : memcell(grp_read_bytes[g], grp_read_alloc_mb[g], "")
+         : memcell(grp_read_bytes[g], grp_read_alloc_mb[g], "", form == "whole")
     cell_text[g, form] = text; cell_coloured[g, form] = e(colour) text e("0")
   } else if (!grp_alloc_unknown[g] && grp_alloc_mb[g] > 0) {   # known: after the mark
-    text = (form == "alloc") ? mark grp_alloc_text[g] : memcell(0, grp_alloc_mb[g], mark)
+    text = (form == "alloc") ? mark grp_alloc_text[g] : memcell(0, grp_alloc_mb[g], mark, form == "whole")
     at = index(text, mark)
     cell_text[g, form] = text
     cell_coloured[g, form] = substr(text, 1, at - 1) e(markcolour) mark e("0") substr(text, at + 1)
@@ -1210,8 +1226,8 @@ function memform_cell(g, form,   mark, markcolour, colour, text, at) {
 function memcells(g) {
   if (g in grp_worst_pct) cell_colour[g] = memcolour(grp_worst_pct[g])   # a cut cell keeps it
   mem_as_ever[g] = v[g,mc]
-  memform_cell(g, "b"); memform_cell(g, "alloc")
-  v[g,mc] = cell_text[g, "b"]; mem_coloured[g] = cell_coloured[g, "b"]
+  memform_cell(g, "decimal"); memform_cell(g, "whole"); memform_cell(g, "alloc")
+  v[g,mc] = cell_text[g, "decimal"]; mem_coloured[g] = cell_coloured[g, "decimal"]
 }
 function memform(form,   g, r) {   # every own cell to FORM; MEM measured again
   for (g in grp_own) { v[g,mc] = cell_text[g, form]; mem_coloured[g] = cell_coloured[g, form] }
@@ -1665,11 +1681,13 @@ END{
 
   # ---- shrink whatever cannot fit -------------------------------------
   budget = cols - 2                             # keep at least the default margin
-  # own MEM cells are form b, used/allocated, unless the table with them is
-  # too wide for a screen that shows colour: then all of them are form a, the
-  # allocation, which the colour alone qualifies.  Off a screen, or without
-  # colour, always b.  A b cell is never cut: the other columns give more
+  # own MEM cells are form b with decimal allocations; on a screen where the
+  # table with them is too wide, all of them take whole numbers, and if that is
+  # still too wide and the screen shows colour, form a, the allocation, which
+  # the colour alone qualifies.  Off a screen always the decimal b.  A b cell
+  # is never cut: the other columns give more
   formb = (mc && length(grp_own))
+  if (formb && screen && tabw > budget) memform("whole")
   if (formb && screen && color && tabw > budget) { memform("alloc"); formb = 0 }
   while (tabw > budget) {                       # shave the widest flexible column
     big = 0

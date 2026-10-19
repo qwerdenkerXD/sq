@@ -1,4 +1,5 @@
-# 200M, 500M, 1.2T, 15.97G, 16.2G, 0.6G
+# 200M, 500M, 1.2T, 15.97G, 16.2G, 0.6G; 98.5, 99.9 and 100.5 % of 15600M,
+# 99.2 % of 1280M
 @defaults TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1,pages=0,vmem=0
 JobID=5001.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=209715200,pages=0,vmem=0
 JobID=5002.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=524288000,pages=0,vmem=0
@@ -6,3 +7,7 @@ JobID=5003.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=13194139533
 JobID=5004.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=17147697234,pages=0,vmem=0
 JobID=5005.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=17394617549,pages=0,vmem=0
 JobID=5006.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=644245094,pages=0,vmem=0
+JobID=5007.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=16112418816,pages=0,vmem=0
+JobID=5008.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=16341427814,pages=0,vmem=0
+JobID=5009.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1331439862,pages=0,vmem=0
+JobID=5010.batch; TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=16439574528,pages=0,vmem=0

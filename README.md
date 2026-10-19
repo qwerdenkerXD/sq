@@ -167,10 +167,10 @@ sq -C                     # centred in both axes
 - **The bell keeps a little state:** `<jobid><tab><end time>` lines in `~/.cache/sq/alerted`,
   added to and aged out after 24 h, never pruned just because one run looked at fewer jobs, and
   replaced atomically so two running copies cannot tear it.
-- **Your own running jobs show the memory they use** in MEM, as in use/allocated (`83/100G`),
-  green below 70 %, yellow from 70 %, red from 90 %, bold red from 100 % (on a screen too narrow
-  for that, with colour, the allocation alone, in the same colours). The reading comes from
-  `sstat` and refreshes at most
+- **Your own running jobs show the memory they use** in MEM, as in use/allocated (`83/100G`,
+  `7.7/15.2G`), green below 70 %, yellow from 70 %, red from 90 %, bold red from 100 % (on a
+  screen too narrow for that, whole numbers, `7.6/15G`; still too narrow, with colour, the
+  allocation alone, in the same colours). The reading comes from `sstat` and refreshes at most
   every 30 s: it is kept in `~/.cache/sq/memuse`, which every sq of yours shares. `?` means no
   reading: none yet, or a job sq does not measure (one on several nodes, or without a memory
   allocation); `!` that the reading failed. The figure leaves out page cache, tmpfs and

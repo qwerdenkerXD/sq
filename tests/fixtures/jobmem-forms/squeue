@@ -1,6 +1,7 @@
 # The units and the rounding of form b: an allocation below 1000 MiB is in M,
 # 1000M already in G, 2T in T, 1.50G with a fraction; 15.97 of 16G must not
-# read 16/16G, 16.2 of 16G may.
+# read 16/16G, 16.2 of 16G may.  15600M (15.23G) and 1280M (1.25G) are no whole
+# number of G: at 98.5, 99.9 and 100.5 % of the one and 99.2 % of the other.
 @include ../_common/squeue-defaults
 @defaults u=fsill; U=1041; R=fb2-bioinf
 i=5001; A=5001; j=mib;    M=1:00:00; m=512M
@@ -9,3 +10,7 @@ i=5003; A=5003; j=tib;    M=58:00;   m=2T
 i=5004; A=5004; j=almost; M=57:00;   m=16G
 i=5005; A=5005; j=over;   M=56:00;   m=16G
 i=5006; A=5006; j=frac;   M=55:00;   m=1536M
+i=5007; A=5007; j=dec985; M=54:00;   m=7800M
+i=5008; A=5008; j=dec999; M=53:00;   m=7800M
+i=5009; A=5009; j=small;  M=52:00;   m=1280M
+i=5010; A=5010; j=decover; M=51:00;  m=7800M

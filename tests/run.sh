@@ -2993,28 +2993,43 @@ c_jobmem_outcomes() {
 	done
 }
 c_jobmem_forms() {
-	T_TITLE="form b: units M, G, T, the rounding guard, a width set by the allocations; form a only on a screen with colour, a pipe or no colour stays b"
+	T_TITLE="form b: units M, G, T, decimal allocations, the guard, a width set by the allocations; on a screen whole numbers, then form a with colour; a pipe stays decimal"
 	local d head
 	mem_run jobmem-forms -- --color
 	need "rc 0, stderr empty" eval 'rc_is 0 && err_empty'
 	need "512M: in M, 200/512M" row_has 5001 "$ESC[32m  200/512M$ESC[0m"
-	need "1000M: in G already, 0.5/1G" row_has 5002 "$ESC[32m0.5/1G$ESC[0m"
+	need "1000M: in G already, cut to 0.9G, never rounded up" row_has 5002 "$ESC[32m 0.5/0.9G$ESC[0m"
 	need "2T: in T, 1.2/2T" row_has 5003 "$ESC[32m1.2/2T$ESC[0m"
-	need "15.97 of 16G: 15.9/16G, red, never 16/16G" row_has 5004 "$ESC[31m15.9/16G$ESC[0m"
+	need "15.97 of 16G: one step below, 15.9/16G, red, never 16/16G" row_has 5004 "$ESC[31m15.9/16G$ESC[0m"
 	need "16.2 of 16G: 16/16G, bold red" row_has 5005 "$ESC[1;31m  16/16G$ESC[0m"
-	need "1.50G: 0.6/1.5G" row_has 5006 "$ESC[32m  0.6/1.5G$ESC[0m"
+	need "1.50G: 0.6/1.5G" row_has 5006 "$ESC[32m 0.6/1.5G$ESC[0m"
+	need "98.5 % of 15600M: the allocation with its decimal, 15.0/15.2G" row_has 5007 "$ESC[31m 15.0/15.2G$ESC[0m"
+	need "99.9 % of 15600M: one step below the allocation, 15.1/15.2G" row_has 5008 "$ESC[31m 15.1/15.2G$ESC[0m"
+	need "99.2 % of 1280M: 1.25 cut to 1.2, the use one step below, 1.1/1.2G" row_has 5009 "$ESC[31m 1.1/1.2G$ESC[0m"
+	need "100.5 % of 15600M: 15.3/15.2G, bold red" row_has 5010 "$ESC[1;31m 15.3/15.2G$ESC[0m"
 	head=$(section queue | head -n 1)
-	d=$(mem_fixture jobmem-forms sstat '@defaults TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1,pages=0,vmem=0\nJobID=5001.batch\nJobID=5002.batch\nJobID=5003.batch\nJobID=5004.batch\nJobID=5005.batch\nJobID=5006.batch')
+	d=$(mem_fixture jobmem-forms sstat '@defaults TRESUsageInTot=cpu=00:01:00,energy=0,fs/disk=0,mem=1,pages=0,vmem=0\nJobID=5001.batch\nJobID=5002.batch\nJobID=5003.batch\nJobID=5004.batch\nJobID=5005.batch\nJobID=5006.batch\nJobID=5007.batch\nJobID=5008.batch\nJobID=5009.batch\nJobID=5010.batch')
 	mem_run "$d" -- --color
-	need "other readings, the same allocations: rc 0, the same column widths" eval 'rc_is 0 && [ "$(section queue | head -n 1)" = "$head" ] && row_has 5004 "$ESC[32m   0/16G$ESC[0m"'
-	mem_run jobmem-forms SQ_WIDTH=60 COLUMNS=60 LINES=30 -- --color
-	need "too narrow on a screen with colour: form a, the allocation as Slurm prints it" eval '
-		rc_is 0 && row_has 5006 "$ESC[32m1.50G$ESC[0m" && row_has 5001 "$ESC[32m512M$ESC[0m" && row_has 5004 "$ESC[31m16G$ESC[0m"'
+	need "other readings, the same allocations: rc 0, the same column widths" eval '
+		rc_is 0 && [ "$(section queue | head -n 1)" = "$head" ] && row_has 5004 "$ESC[32m   0/16G$ESC[0m" && row_has 5007 "$ESC[32m  0.0/15.2G$ESC[0m"'
+	mem_run jobmem-forms SQ_WIDTH=70 -- --color
+	need "70 columns in a pipe: still the decimal form, NODE/REASON shaved" eval 'rc_is 0 && row_has 5007 "$ESC[31m 15.0/15.2G$ESC[0m" && section queue | head -n 1 | grep -q "NODE/REASO$"'
+	mem_run jobmem-forms SQ_WIDTH=70 COLUMNS=70 LINES=30 -- --color
+	need "70 columns on a screen: whole numbers, cut, no guard: 15/15G at 98.5 and 99.9 %, nothing else changes" eval '
+		rc_is 0 && row_has 5007 "$ESC[31m  15/15G$ESC[0m" && row_has 5008 "$ESC[31m  15/15G$ESC[0m" && row_has 5010 "$ESC[1;31m  15/15G$ESC[0m" &&
+		row_has 5009 "$ESC[31m 1.1/1.2G$ESC[0m" && row_has 5004 "$ESC[31m15.9/16G$ESC[0m" && ! rows queue | grep -q "…"'
+	mem_run jobmem-forms SQ_WIDTH=70 COLUMNS=70 LINES=30 -- --no-color
+	need "70 columns on a screen without colour: whole numbers as well" eval 'rc_is 0 && [ "$(mem_of 5007)" = 15/15G ]'
+	mem_run jobmem-forms SQ_WIDTH=64 COLUMNS=64 LINES=30 -- --color
+	need "64 columns on a screen with colour, whole numbers still too wide: form a, the allocation as Slurm prints it" eval '
+		rc_is 0 && row_has 5006 "$ESC[32m1.50G$ESC[0m" && row_has 5001 "$ESC[32m512M$ESC[0m" && row_has 5004 "$ESC[31m16G$ESC[0m" && row_has 5007 "$ESC[31m15600M$ESC[0m"'
+	mem_run jobmem-forms SQ_WIDTH=64 COLUMNS=64 LINES=30 -- --no-color
+	need "64 columns on a screen without colour: whole numbers, others shaved" eval 'rc_is 0 && [ "$(mem_of 5007)" = 15/15G ] && rows queue | grep -q "…"'
 	mem_run jobmem SQ_WIDTH=80 -- --color --full
 	need "80 columns in a pipe, colour on: b, and the b cell whole while NODE/REASON is cut" eval '
-		rc_is 0 && row_has 11895 "$ESC[33m   83/100G$ESC[0m" && row_has 11903 "$ESC[32m 7.7/15G$ESC[0m" && rows queue | grep -q "…$"'
+		rc_is 0 && row_has 11895 "$ESC[33m   83/100G$ESC[0m" && row_has 11903 "$ESC[32m  7.7/15.2G$ESC[0m" && rows queue | grep -q "…$"'
 	mem_run jobmem SQ_WIDTH=80 COLUMNS=80 LINES=30 -- --no-color --full
-	need "80 columns on a screen, colour off: b" eval 'rc_is 0 && [ "$(mem_of 11895)" = 83/100G ] && [ "$(mem_of 11908)" = "?/4G" ]'
+	need "80 columns on a screen, colour off: b in whole numbers" eval 'rc_is 0 && [ "$(mem_of 11895)" = 83/100G ] && [ "$(mem_of 11903)" = 7.6/15G ] && [ "$(mem_of 11908)" = "?/4G" ]'
 	PTY=1 PTY_ROWS=30 PTY_COLS=80 mem_run jobmem TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT -- --full
 	need "an 80-column terminal: rc 0, coloured, form a" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ] && [ "$(mem_of 11895)" = 100G ] && [ "$(mem_of 11903)" = 15600M ]'
 }
