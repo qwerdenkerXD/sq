@@ -1219,11 +1219,12 @@ c_sacct_fallback() {
 	need "stubs: sacct, then the fallback" calls_are 1 1 1 1
 	need "every call has SLURM_TIME_FORMAT=standard" all_calls_env SLURM_TIME_FORMAT standard sinfo squeue sacct
 	need "fallback argv: squeue -t all -h" argv_has squeue -t all -h
+	# squeue's third call: the second is the mirror call MEM's totals come from
 	need "fallback uses SQUEUE_FORMAT2 and not SQUEUE_FORMAT" eval '
-		[ "$(env_of squeue 2 SQUEUE_FORMAT)" = "(unset)" ] && [ "$(env_of squeue 2 SQUEUE_FORMAT2)" != "(unset)" ]'
+		[ "$(env_of squeue 3 SQUEUE_FORMAT)" = "(unset)" ] && [ "$(env_of squeue 3 SQUEUE_FORMAT2)" != "(unset)" ]'
 	need "fallback -O list framed by SQ_NONCE" eval '
-		n=$(env_of squeue 2 SQ_NONCE)
-		[ "$(env_of squeue 2 SQUEUE_FORMAT2)" = "JobID:$n,StateCompact:$n,State:$n,exit_code:$n,TimeUsed:$n,EndTime:$n,ArrayJobID:$n,ArrayTaskID:$n,UserName:$n,Name:$n" ]'
+		n=$(env_of squeue 3 SQ_NONCE)
+		[ "$(env_of squeue 3 SQUEUE_FORMAT2)" = "JobID:$n,StateCompact:$n,State:$n,exit_code:$n,TimeUsed:$n,EndTime:$n,ArrayJobID:$n,ArrayTaskID:$n,UserName:$n,Name:$n" ]'
 	need "queue call uses SQUEUE_FORMAT and not SQUEUE_FORMAT2" eval '
 		[ "$(env_of squeue 1 SQUEUE_FORMAT2)" = "(unset)" ] && [ "$(env_of squeue 1 SQUEUE_FORMAT)" != "(unset)" ]'
 	need "caption names the cause"    eval 'section recent | head -1 | grep -qE "^ +recently finished · recent only \(no accounting\) · sacct: error: Problem"'
@@ -2860,15 +2861,17 @@ c_jobmem_gates() {
 	need "fsill pending only: rc 0, no allocation call, no sstat, the screen nobody gets" \
 		eval 'rc_is 0 && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && cmp -s "$base" <(without_clock "$OUT")'
 	need "... and no state written" eval '[ ! -e "$RUN/home/.cache" ]'
-	# the feature on: other users' rows and fsill's pending one keep MEM and its colours
-	local sgr=() id i=0
+	# the feature on: other users' rows and fsill's pending one keep their
+	# colours, and MEM is their total (MEMALLOC: no longer %m, which reads 2G for
+	# cellranger, --mem-per-cpu=2G -c 16), whoever is looking
+	local sgr=() id i=0 total=(48G 100G 32G)
 	mem_run jobmem SQSTUB_UID=4242 SQ_WIDTH=110 -- --color
 	for id in 11912 11880 11889; do sgr+=("$(row_sgr $id)"); done
 	mem_run jobmem SQ_WIDTH=110 -- --color
 	need "as fsill: rc 0, the allocation call and sstat once each" eval 'rc_is 0 && [ "$(calls alloc)" -eq 1 ] && [ "$(calls sstat)" -eq 1 ]'
 	for id in 11912 11880 11889; do
-		need "$id (not an own running job): MEM as %m prints it, the row coloured as without the feature" \
-			eval '[ "$(row_sgr '"$id"')" = "${sgr['"$i"']}" ] && [ "$(mem_of '"$id"')" = "$(grep -oE "^i='"$id"';.* m=[^;]+" "$fixtures/jobmem/squeue" | sed "s/.* m=//")" ]'
+		need "$id (not an own running job): MEM its total, ${total[$i]}, the row coloured as without the feature" \
+			eval '[ "$(row_sgr '"$id"')" = "${sgr['"$i"']}" ] && [ "$(mem_of '"$id"')" = "${total['"$i"']}" ]'
 		i=$((i + 1))
 	done
 }
@@ -3050,8 +3053,8 @@ c_jobmem_forms() {
 	mem_run jobmem-forms SQ_WIDTH=70 COLUMNS=70 LINES=30 -- --no-color
 	need "70 columns on a screen without colour: whole numbers as well" eval 'rc_is 0 && [ "$(mem_of 5007)" = 15/15G ]'
 	mem_run jobmem-forms SQ_WIDTH=64 COLUMNS=64 LINES=30 -- --color
-	need "64 columns on a screen with colour, whole numbers still too wide: form a, the allocation as Slurm prints it" eval '
-		rc_is 0 && row_has 5006 "$ESC[32m1.50G$ESC[0m" && row_has 5001 "$ESC[32m512M$ESC[0m" && row_has 5004 "$ESC[31m16G$ESC[0m" && row_has 5007 "$ESC[31m15600M$ESC[0m"'
+	need "64 columns on a screen with colour, whole numbers still too wide: form a, the allocation in the whole form of the unit rule" eval '
+		rc_is 0 && row_has 5006 "$ESC[32m1.5G$ESC[0m" && row_has 5001 "$ESC[32m512M$ESC[0m" && row_has 5004 "$ESC[31m16G$ESC[0m" && row_has 5007 "$ESC[31m15G$ESC[0m"'
 	mem_run jobmem-forms SQ_WIDTH=64 COLUMNS=64 LINES=30 -- --no-color
 	need "64 columns on a screen without colour: whole numbers, others shaved" eval 'rc_is 0 && [ "$(mem_of 5007)" = 15/15G ] && rows queue | grep -q "…"'
 	mem_run jobmem SQ_WIDTH=80 -- --color --full
@@ -3060,7 +3063,7 @@ c_jobmem_forms() {
 	mem_run jobmem SQ_WIDTH=80 COLUMNS=80 LINES=30 -- --no-color --full
 	need "80 columns on a screen, colour off: b in whole numbers" eval 'rc_is 0 && [ "$(mem_of 11895)" = 83/100G ] && [ "$(mem_of 11903)" = 7/15G ] && [ "$(mem_of 11902)" = 7/64G ] && [ "$(mem_of 11908)" = "?/4G" ]'
 	PTY=1 PTY_ROWS=30 PTY_COLS=80 mem_run jobmem TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT -- --full
-	need "an 80-column terminal: rc 0, coloured, form a" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ] && [ "$(mem_of 11895)" = 100G ] && [ "$(mem_of 11903)" = 15600M ]'
+	need "an 80-column terminal: rc 0, coloured, form a" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ] && [ "$(mem_of 11895)" = 100G ] && [ "$(mem_of 11903)" = 15G ]'
 }
 c_jobmem_compact_arrays() {
 	T_TITLE="COMPACT keeps own rows at risk (>= 90 %, then >= 70 %) in squeue's order; a folded own array sums its readings, coloured by its fullest task"

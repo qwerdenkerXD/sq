@@ -3,18 +3,18 @@
   [1mfb2-bioinf  [0m [32m█[32m█[32m█[32m█[32m█[32m█[2;32m▒[2m░[2m░[0m  75%  [1m96[0m/128 cpu   [32m█[32m█[32m█[2;32m▒[2m░[2m░[2m░[2m░[2m░[0m  31%  [1m320[0m/1007G mem  [2mmixed[0m
   [1mfb2-bioinf-0[0m [32m█[32m█[2;32m▒[2m░[2m░[2m░[2m░[2m░[2m░[0m  29%  [1m 7[0m/24  cpu   [32m█[32m█[2;32m▒[2m░[2m░[2m░[2m░[2m░[2m░[0m  26%  [1m 21[0m/78G   mem  [2mmixed[0m
 
-  [4mJOBID NAME       USER     STATE   TIME       LEFT       CPU MEM    NODE/REASON[0m
-  [33m11912[0m deseq2     fsill    [1;33mPENDING[0m       0:00 1-00:00:00   8    48G (Dependenc…
-  [32m11880[0m alphafold  schroder [1;32mRUNNING[0m 1-04:12:33 1-19:47:27  16   100G fb2-bioinf
-  [32m11889[0m cellranger hal      [1;32mRUNNING[0m    6:41:02   17:18:58  16     2G fb2-bioinf
-  [32m11895[0m flye       fsill    [1;32mRUNNING[0m    5:12:47 1-18:47:13  16   [33m100G[0m fb2-bioinf
-  [32m11898[0m kraken2    fsill    [1;32mRUNNING[0m    2:03:19    9:56:41   8    [31m32G[0m fb2-bioinf
-  [32m11902[0m bwa-mem2   fsill    [1;32mRUNNING[0m    1:20:55   10:39:05  16    [32m64G[0m fb2-bioinf
-  [32m11903[0m salmon     fsill    [1;32mRUNNING[0m      47:10    3:12:50   2 [32m15600M[0m fb2-bioinf…
-  [32m11904[0m megahit    fsill    [1;32mRUNNING[0m      38:02    7:21:58   8    [1;31m16G[0m fb2-bioinf
-  [32m11905[0m busco      fsill    [1;32mRUNNING[0m    1:02:44    4:57:16   4     [31m8G[0m fb2-bioinf…
-  [32m11906[0m trinity    fsill    [1;32mRUNNING[0m    3:40:12   20:19:48  16    [33m64G[0m fb2-bioinf
-  [32m11908[0m multiqc    fsill    [1;32mRUNNING[0m       0:04      59:56   1    [2m?[0m4G fb2-bioinf…
+  [4mJOBID  NAME       USER     STATE   TIME       LEFT       CPU MEM  NODE/REASON [0m
+  [33m11912[0m  deseq2     fsill    [1;33mPENDING[0m       0:00 1-00:00:00   8  48G (Dependency)
+  [32m11880[0m  alphafold  schroder [1;32mRUNNING[0m 1-04:12:33 1-19:47:27  16 100G fb2-bioinf
+  [32m11889[0m  cellranger hal      [1;32mRUNNING[0m    6:41:02   17:18:58  16  32G fb2-bioinf
+  [32m11895[0m  flye       fsill    [1;32mRUNNING[0m    5:12:47 1-18:47:13  16 [33m100G[0m fb2-bioinf
+  [32m11898[0m  kraken2    fsill    [1;32mRUNNING[0m    2:03:19    9:56:41   8  [31m32G[0m fb2-bioinf
+  [32m11902[0m  bwa-mem2   fsill    [1;32mRUNNING[0m    1:20:55   10:39:05  16  [32m64G[0m fb2-bioinf
+  [32m11903[0m  salmon     fsill    [1;32mRUNNING[0m      47:10    3:12:50   2  [32m15G[0m fb2-bioinf-0
+  [32m11904[0m  megahit    fsill    [1;32mRUNNING[0m      38:02    7:21:58   8  [1;31m16G[0m fb2-bioinf
+  [32m11905[0m  busco      fsill    [1;32mRUNNING[0m    1:02:44    4:57:16   4   [31m8G[0m fb2-bioinf-0
+  [32m11906[0m  trinity    fsill    [1;32mRUNNING[0m    3:40:12   20:19:48  16  [33m64G[0m fb2-bioinf
+  [32m11908[0m  multiqc    fsill    [1;32mRUNNING[0m       0:04      59:56   1  [2m?[0m4G fb2-bioinf-0
 
   [2mrecently finished · last 2h[0m
   [4mJOBID    NAME           STATE            EXIT     ELAPSED    AGO              [0m

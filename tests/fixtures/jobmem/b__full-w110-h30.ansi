@@ -6,7 +6,7 @@
   [4mJOBID  NAME        USER      STATE    TIME        LEFT        CPU  MEM          NODE/REASON [0m
   [33m11912[0m  deseq2      fsill     [1;33mPENDING[0m        0:00  1-00:00:00    8          48G  (Dependency)
   [32m11880[0m  alphafold   schroder  [1;32mRUNNING[0m  1-04:12:33  1-19:47:27   16         100G  fb2-bioinf
-  [32m11889[0m  cellranger  hal       [1;32mRUNNING[0m     6:41:02    17:18:58   16           2G  fb2-bioinf
+  [32m11889[0m  cellranger  hal       [1;32mRUNNING[0m     6:41:02    17:18:58   16          32G  fb2-bioinf
   [32m11895[0m  flye        fsill     [1;32mRUNNING[0m     5:12:47  1-18:47:13   16   [33m   83/100G[0m  fb2-bioinf
   [32m11898[0m  kraken2     fsill     [1;32mRUNNING[0m     2:03:19     9:56:41    8     [31m  31/32G[0m  fb2-bioinf
   [32m11902[0m  bwa-mem2    fsill     [1;32mRUNNING[0m     1:20:55    10:39:05   16     [32m 7.6/64G[0m  fb2-bioinf

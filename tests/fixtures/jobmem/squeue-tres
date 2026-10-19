@@ -1,0 +1,15 @@
+# sq's mirror call, squeue -h <the queue call's arguments> -O JobID,tres-alloc:
+# one record per record of the queue call, JobID = %A.  mem= is the job's
+# total: the allocation of a running job (cellranger, --mem-per-cpu=2G -c 16,
+# holds 32G where %m prints 2G), the request of a pending one (deseq2).
+JobID=11912; tres_alloc=cpu=8,mem=48G,node=1,billing=8
+JobID=11880; tres_alloc=cpu=16,mem=100G,node=1,billing=16
+JobID=11889; tres_alloc=cpu=16,mem=32G,node=1,billing=16
+JobID=11895; tres_alloc=cpu=16,mem=100G,node=1,billing=16
+JobID=11898; tres_alloc=cpu=8,mem=32G,node=1,billing=8
+JobID=11902; tres_alloc=cpu=16,mem=64G,node=1,billing=16
+JobID=11903; tres_alloc=cpu=2,mem=15600M,node=1,billing=2
+JobID=11904; tres_alloc=cpu=8,mem=16G,node=1,billing=8
+JobID=11905; tres_alloc=cpu=4,mem=8G,node=1,billing=4
+JobID=11906; tres_alloc=cpu=16,mem=64G,node=1,billing=16
+JobID=11908; tres_alloc=cpu=1,mem=4G,node=1,billing=1
