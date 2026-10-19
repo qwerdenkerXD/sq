@@ -3,7 +3,9 @@
 # array's two tasks (4005_1 is the last started, so its unique id is the
 # array's: sstat -j 4005 brings 4006's steps too), two nodes (not measured),
 # gone from the allocation call; and another user's row and an own pending
-# one, which keep MEM as it is.
+# one, which keep MEM as it is.  4011's row carries vmem= but no mem=.  Own is
+# the uid alone: 4012 is uid 1041's whatever %u says, 4013 is not though %u
+# says fsill.
 @include ../_common/squeue-defaults
 @defaults u=fsill; U=1041; R=fb2-bioinf; m=4G
 i=4001;   A=4001; j=ok;       M=1:00:00
@@ -16,3 +18,6 @@ i=4007;   A=4007; j=twonodes; M=54:00; m=8G
 i=4008;   A=4008; j=gone;     M=53:00
 i=4009;   A=4009; j=theirs;   M=52:00; u=schroder; U=1012
 i=4010;   A=4010; j=waiting;  M=0:00;  t=PD; T=PENDING; R=(Priority); r=Priority
+i=4011;   A=4011; j=vmemonly; M=50:00
+i=4012;   A=4012; j=loginother; M=49:00; u=schroder
+i=4013;   A=4013; j=uidother; M=48:00; U=1012
