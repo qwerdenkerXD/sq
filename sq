@@ -157,6 +157,7 @@ color=${SQ_COLOR:-auto}
 args=()
 seen=                            # the filters already set, for the repeat check
 modeflag=                        # --compact or --full, as given
+clustersel=0                     # --federation or --sibling given (-M is in $seen)
 reserve=0                        # lines COMPACT leaves alone, e.g. for watch's header
 
 # One example per option, because "sq -j NAME" would read wrong: a usage error
@@ -315,7 +316,8 @@ while [ $# -gt 0 ]; do
 						# the name is on the list, but none of them takes a
 						# value, and "--all=x" forwarded raw came back as a
 						# fake outage
-						[ "$1" = "$opt" ] || die "$opt takes no value; write it on its own, e.g. sq $opt" ;;
+						[ "$1" = "$opt" ] || die "$opt takes no value; write it on its own, e.g. sq $opt"
+						case $opt in --federation|--sibling) clustersel=1 ;; esac ;;
 					--*) die "$(printf '%s' "$opt" | scrub 40) is not one of the long options sq forwards; sq -h lists them" ;;
 				esac
 				args+=("$1"); shift; continue
@@ -437,7 +439,12 @@ squeue_letters=abcdefghijklmnopqrtuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
 
 # normalise "%.10i, j" -> "i j"
 fl=$(printf '%s' "$fields" | tr ',' ' ' | tr -s ' ')
-fmt="%i$nonce"; keys=""          # hidden leading field: the job id anchors a record
+# qfield appends one field to the queue format and counts it, so a hidden field
+# is found by the position recorded as it is added, never by arithmetic on
+# what came before it
+fmt= qfields=0
+qfield() { fmt="$fmt%$1$nonce"; qfields=$((qfields + 1)); }
+qfield i; keys=""                # hidden leading field: the job id anchors a record
 for f in $fl; do                 # start even when the user did not ask for it
 	k=$(printf '%s' "$f" | tr -cd 'A-Za-z' | cut -c1)
 	[ -n "$k" ] || continue
@@ -445,28 +452,29 @@ for f in $fl; do                 # start even when the user did not ask for it
 		*"$k"*) ;;
 		*) die "%$k is not a squeue field letter (in $fsrc '$fields')" ;;
 	esac
-	fmt="$fmt%$k$nonce"; keys="$keys$k,"
+	qfield "$k"; keys="$keys$k,"
 done
-fmt="$fmt%t$nonce%l$nonce%S$nonce"   # hidden trailing fields: state, limit, start;
+qfield t; qpos_state=$qfields        # hidden trailing fields: state, limit, start;
+qfield l; qfield S
 keys=${keys%,}                       # the last nonce leaves an empty field that only
                                      # squeue can emit, so a record ends unambiguously
 # COMPACT sorts jobs by their reason code and their elapsed time, which must not
 # depend on the columns shown, so it asks for both itself; FULL never reads them
-[ "$compact" = 0 ] || fmt="$fmt%r$nonce%M$nonce"
+[ "$compact" = 0 ] || { qfield r; qfield M; }
 # The caller's own running jobs show the memory they use in MEM (see "memory
 # use" below), which needs MEM on screen and no cluster selection: sstat has no
 # -M, so under one it would ask the local cluster about another's ids.  Then
 # the queue also brings each row's unique job id (%A, what the allocation call
 # and sstat name a job by, never 123_4) and numeric uid (%U, "own" is the uid
 # that `id -u` names, never a login compared as text), hidden and last.
-memon=0
+# SLURM_CLUSTERS counts even when empty: squeue then takes the first cluster
+# the database knows (slurmdb_get_info_cluster with no name), not the local one.
+memon=0 qpos_jobid= qpos_uid=
 case ",$keys," in *,m,*) memon=1 ;; esac
 case " $seen " in *" -M "*) memon=0 ;; esac
-for a in "${args[@]+"${args[@]}"}"; do
-	case $a in --federation|--sibling) memon=0 ;; esac
-done
+[ "$clustersel" = 0 ] || memon=0
 [ -z "${SLURM_CLUSTERS+set}" ] || memon=0
-[ "$memon" = 0 ] || fmt="$fmt%A$nonce%U$nonce"
+[ "$memon" = 0 ] || { qfield A; qpos_jobid=$qfields; qfield U; qpos_uid=$qfields; }
 
 cols=${SQ_WIDTH:-${COLUMNS:-}}
 lines=${SQ_HEIGHT:-${LINES:-}}
@@ -532,9 +540,11 @@ case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeou
 # Wrapped in 2>/dev/null, so bash prints no "Killed" or "Segmentation fault"
 # notice of its own on the screen.  Environment prefixes on the call reach the
 # client.
-collect() {   # collect NAME TOOL ARGS...: stdout into $tmp/NAME
-	local name=$1; shift
-	{ timeout $verbose -k 2 "$tmo" sh -c 'exec "$@" 2>&3 3>&-' "$1" "$@" \
+collect() {   # collect [-t SECONDS] NAME TOOL ARGS...: stdout into $tmp/NAME,
+	local limit=$tmo name        # bounded by SECONDS, SQ_TIMEOUT's by default
+	[ "$1" != -t ] || { limit=$2; shift 2; }
+	name=$1; shift
+	{ timeout $verbose -k 2 "$limit" sh -c 'exec "$@" 2>&3 3>&-' "$1" "$@" \
 		> "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo"; } 2>/dev/null
 }
 # --verbose makes timeout say "sending signal ..." before it signals; it exists
@@ -625,13 +635,12 @@ why_of jerr $? "$tmp/jobs" squeue
 memfail=0 myuid=
 : > "$tmp/memalloc"; : > "$tmp/memread"
 # is there a running row of uid $1 in the queue?  Its records end in the
-# nonce and a newline, which no name can hold, so they are read whole
+# nonce and a newline, which no name can hold, so they are read whole; the
+# state and the uid are where qfield put them
 mem_own_running() {
-	local nf
-	nf=$(printf '%s' "$fmt" | tr -cd % | wc -c)          # every field is one %
-	env LC_ALL=C gawk -v nf="$nf" -v tpos="$(( $(printf '%s' "$keys" | tr -cd , | wc -c) + 3 ))" -v uid="$1" '
+	env LC_ALL=C gawk -v nf="$qfields" -v pstate="$qpos_state" -v puid="$qpos_uid" -v uid="$1" '
 		BEGIN { RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"] }
-		NF == nf && $tpos == "R" && $NF == uid { found = 1; exit }
+		NF == nf && $pstate == "R" && $puid == uid { found = 1; exit }
 		END { exit !found }' "$tmp/jobs"
 }
 if [ "$memon" = 1 ] && [ -z "$jerr" ]; then
@@ -643,30 +652,34 @@ if [ -n "$myuid" ] && mem_own_running "$myuid"; then
 	# queue nonce never reaches a command line.  StateCompact is %t's letter
 	SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,tres-alloc:$nonce,NumNodes:$nonce" \
 		collect alloc squeue -h -u "$myuid"
-	if [ $? -ne 0 ]; then memfail=1
+	# mem= of tres-alloc is in MB, with an exact M/G/T/P suffix and maybe a
+	# fraction (1.50G); a job without one has no known allocation (0).  Output
+	# that is not every record whole fails the call as a non-zero exit does
+	if [ $? -ne 0 ] || ! env LC_ALL=C gawk 'BEGIN { RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"] }
+		NF != 4 || $1 !~ /^[0-9]+$/ || RT == "" { bad = 1; exit }
+		{	mb = 0; txt = ""
+			if (match($3, /(^|,)mem=[0-9]+([.][0-9]+)?[MGTP](,|$)/)) {
+				txt = substr($3, RSTART, RLENGTH); sub(/^,?mem=/, "", txt); sub(/,$/, "", txt)
+				u = substr(txt, length(txt))
+				mb = substr(txt, 1, length(txt) - 1) * (u == "G" ? 1024 : u == "T" ? 1048576 : u == "P" ? 1073741824 : 1)
+			}
+			printf "%s\t%s\t%.0f\t%s\t%s\n", $1, $2, mb, txt, $4
+		}
+		END { exit bad }' "$tmp/alloc" > "$tmp/memalloc"
+	then memfail=1; : > "$tmp/memalloc"
 	else
-		# mem= of tres-alloc is in MB, with an exact M/G/T/P suffix and maybe
-		# a fraction (1.50G); a job without one has no known allocation (0)
-		env LC_ALL=C gawk 'BEGIN { RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"] }
-			NF == 4 && $1 ~ /^[0-9]+$/ {
-				mb = 0; txt = ""
-				if (match($3, /(^|,)mem=[0-9]+([.][0-9]+)?[MGTP](,|$)/)) {
-					txt = substr($3, RSTART, RLENGTH); sub(/^,?mem=/, "", txt); sub(/,$/, "", txt)
-					u = substr(txt, length(txt))
-					mb = substr(txt, 1, length(txt) - 1) * (u == "G" ? 1024 : u == "T" ? 1048576 : u == "P" ? 1073741824 : 1)
-				}
-				printf "%s\t%s\t%.0f\t%s\t%s\n", $1, $2, mb, txt, $4
-			}' "$tmp/alloc" > "$tmp/memalloc"
 		memids=$(env LC_ALL=C gawk -F '\t' '$2 == "R" && $3 > 0 && $5 == "1" { printf "%s%s", (n++ ? "," : ""), $1 }' "$tmp/memalloc")
 		# XDG_CACHE_HOME counts only when absolute, as a relative one would
-		# put the snapshot wherever sq happens to run; no usable directory
-		# means a call on every run, silently
+		# put the snapshot wherever sq happens to run.  No usable directory,
+		# or a memuse there that is no regular file, means a call on every
+		# run, silently, and nothing written
 		memdir=
 		case ${XDG_CACHE_HOME:-} in
 			/*) memdir=$XDG_CACHE_HOME/sq ;;
 			*)  case ${HOME:-} in /*) memdir=$HOME/.cache/sq ;; esac ;;
 		esac
 		[ -z "$memdir" ] || mkdir -p "$memdir" 2>/dev/null || memdir=
+		[ -z "$memdir" ] || ! [ -e "$memdir/memuse" ] || [ -f "$memdir/memuse" ] || memdir=
 		printf -v memnow '%(%s)T' -1
 		# the snapshot in use: whole and well-formed, and taken in the last
 		# 30 s; anything else (missing, garbled, from the future) is a call
@@ -682,15 +695,16 @@ if [ -n "$myuid" ] && mem_own_running "$myuid"; then
 		if [ "$memfresh" = 0 ] && [ -n "$memids" ]; then
 			# its own budget, min(SQ_TIMEOUT, 2) s: a node that does not
 			# answer must not hold every refresh for the whole timeout
-			memtmo=$tmo; tmo=$(env LC_ALL=C gawk -v t="$tmo" 'BEGIN { print (t + 0 < 2) ? t : 2 }')
-			collect sstat sstat -n -p -a --noconvert -j "$memids" -o JobID,TRESUsageInTot
-			memrc=$?; tmo=$memtmo
+			sstat_limit=$(env LC_ALL=C gawk -v t="$tmo" 'BEGIN { print (t + 0 < 2) ? t : 2 }')
+			collect -t "$sstat_limit" sstat sstat -n -p -a --noconvert -j "$memids" -o JobID,TRESUsageInTot
+			memrc=$?
 			# A job reads "ok" with a complete row of its own (-p ends every
 			# row in "|"), each step once, as the id of an array's base task
 			# also returns its other tasks' steps; its bytes are the sum of
 			# mem= over them.  "failed" when the call failed, a stderr line
-			# names the job (bar "No steps running"), or its rows carry no
-			# mem= at all; "none" otherwise.  A line naming no job is ignored.
+			# names the job ("job N", "StepId=N.", bar "No steps running"), or
+			# its rows carry no mem= at all; "none" otherwise.  A line naming
+			# no job asked for is ignored.  Each stderr line is read once.
 			env LC_ALL=C gawk -v ids="$memids" -v rc="$memrc" '
 				BEGIN { n = split(ids, Q, ","); for (i = 1; i <= n; i++) REQ[Q[i]] = 1 }
 				ARGIND == 1 {
@@ -704,8 +718,13 @@ if [ -n "$myuid" ] && mem_own_running "$myuid"; then
 					next
 				}
 				/No steps running/ { next }
-				{ for (i = 1; i <= n; i++)
-					if ($0 ~ ("job " Q[i] "([^0-9]|$)") || index($0, "StepId=" Q[i] ".")) FAIL[Q[i]] = 1 }
+				{	rest = $0
+					while (match(rest, /job [0-9]+|StepId=[0-9]+[.]/)) {
+						id = substr(rest, RSTART, RLENGTH); gsub(/[^0-9]/, "", id)
+						if (id in REQ) FAIL[id] = 1
+						rest = substr(rest, RSTART + RLENGTH)
+					}
+				}
 				END {
 					for (i = 1; i <= n; i++) {
 						id = Q[i]
@@ -863,7 +882,8 @@ for v in $sqv; do export "SQV_$v=${!v}"; done
 env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \
                       -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
                       -v compact="$compact" -v reserve="$reserve" -v uidmap="$uidmap" -v sqv="$sqv" \
-                      -v screen="$screen" -v memon="$memon" -v myuid="$myuid" -v memfail="$memfail" '
+                      -v screen="$screen" -v memon="$memon" -v myuid="$myuid" -v memfail="$memfail" \
+                      -v qfields="$qfields" -v qpos_jobid="$qpos_jobid" -v qpos_uid="$qpos_uid" '
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
   m = split(list, a, ",")
@@ -1123,69 +1143,78 @@ function fid(g) {
 }
 function fexit(g, cap) { return exset(gex[g], cap) (gcxl[g] == "" ? "" : " by " gcxl[g]) }
 
-# ---- the MEM cell of the running jobs of the caller ---------------------------
-# Form b, the default: used/allocated, both in the unit of the allocation, binary: M
-# below 1000 MiB, T from 1 TiB, else G.  A number from 10 up prints whole, below
-# that with one decimal and no ".0".  The used part is padded to the width of
-# the allocated number + 2, so a cell is as wide as its allocation makes it,
-# whatever the reading, and nothing moves under watch.  MARK ("?" no reading,
-# "!" a failed one) stands in for the used part.
+# ---- the MEM cell of the running jobs of the caller -------------------------
+# Form b, the default: used/allocated, both in the unit of the allocation,
+# binary: M below 1000 MiB, T from 1 TiB, else G.  A number from 10 up prints
+# whole, below that with one decimal and no ".0".  The used part is padded to
+# the width of the allocated number + 2, so a cell is as wide as its allocation
+# makes it, whatever the reading, and nothing moves under watch.  MARK ("?" no
+# reading, "!" a failed one) stands in for the used part.
 function memnum(x,   s) {
   if (x >= 9.95) return sprintf("%d", int(x + 0.5))
   s = sprintf("%.1f", x); sub(/[.]0$/, "", s); return s
 }
-function memcell(ub, mb, mark,   u, div, an, un, uv, pct) {
-  u = (mb >= 1048576) ? "T" : (mb >= 1000) ? "G" : "M"
-  div = (u == "T") ? 1048576 : (u == "G") ? 1024 : 1
-  an = memnum(mb / div)
-  if (mark != "") un = mark
+function memcell(used_bytes, alloc_mb, mark,   unit, mb_per_unit, alloc_shown, used, pct) {
+  unit = (alloc_mb >= 1048576) ? "T" : (alloc_mb >= 1000) ? "G" : "M"
+  mb_per_unit = (unit == "T") ? 1048576 : (unit == "G") ? 1024 : 1
+  alloc_shown = memnum(alloc_mb / mb_per_unit)
+  if (mark != "") used = mark
   else {
-    uv = ub / 1048576 / div; un = memnum(uv); pct = ub / (mb * 1048576) * 100
+    used = used_bytes / 1048576 / mb_per_unit; pct = used_bytes / (alloc_mb * 1048576) * 100
     # the rounding never makes a job under its allocation read full, nor one
     # over it read under: 15.97 of 16G is 15.9/16G
-    if (pct < 100 && un + 0 >= an + 0) un = sprintf("%.1f", int(uv * 10) / 10)
-    else if (pct >= 100 && un + 0 < an + 0) un = an
+    if (pct < 100 && memnum(used) + 0 >= alloc_shown + 0) used = sprintf("%.1f", int(used * 10) / 10)
+    else if (pct >= 100 && memnum(used) + 0 < alloc_shown + 0) used = alloc_shown
+    else used = memnum(used)
   }
-  return sprintf("%*s", length(an) + 2, un) "/" an u
+  return sprintf("%*s", length(alloc_shown) + 2, used) "/" alloc_shown unit
 }
 function memcolour(p) { return (p >= 100) ? "1;31" : (p >= 90) ? "31" : (p >= 70) ? "33" : "32" }
 # COMPACT keeps own rows at risk longest: 0 from 90 %, 1 from 70 %, 2 the rest
-function memband(g) { return !(g in MGP) ? 2 : (MGP[g] >= 90) ? 0 : (MGP[g] >= 70) ? 1 : 2 }
+function memband(g) { return !(g in grp_worst_pct) ? 2 : (grp_worst_pct[g] >= 90) ? 0 : (grp_worst_pct[g] >= 70) ? 1 : 2 }
 # raw row r into its (folded) group g: readings add up, the colour is the
 # fullest task, a failed task counts only while no task has a reading
 function memadd(g, r,   p) {
-  if (!(r in MO)) return
-  MG[g] = 1
-  if (MAL[r] > 0) MGALL[g] += MAL[r]; else MGUNK[g] = 1
-  if (MGTXT[g] == "") MGTXT[g] = MTXT[r]
-  if (MO[r] == "failed") MGF[g] = 1
-  if (MO[r] == "ok") {
-    MGB[g] += MBY[r]; MGA[g] += MAL[r]
-    p = MBY[r] / (MAL[r] * 1048576) * 100
-    if (!(g in MGP) || p > MGP[g]) MGP[g] = p
+  if (!(r in row_outcome)) return
+  grp_own[g] = 1
+  if (row_alloc_mb[r] > 0) grp_alloc_mb[g] += row_alloc_mb[r]; else grp_alloc_unknown[g] = 1
+  if (grp_alloc_text[g] == "") grp_alloc_text[g] = row_alloc_text[r]
+  if (row_outcome[r] == "failed") grp_failed[g] = 1
+  if (row_outcome[r] == "ok") {
+    grp_read_bytes[g] += row_bytes[r]; grp_read_alloc_mb[g] += row_alloc_mb[r]
+    p = row_bytes[r] / (row_alloc_mb[r] * 1048576) * 100
+    if (!(g in grp_worst_pct) || p > grp_worst_pct[g]) grp_worst_pct[g] = p
   }
 }
-# the cells of group g in both forms, the text (its width) and the text
-# coloured: form b into v[g,mc] and MRICH[g], form a kept for memform_a
-function memcells(g,   m, mc0, x, cc) {
-  m = (g in MGP) ? "" : MGF[g] ? "!" : "?"
-  mc0 = (m == "!") ? "31" : "2"                 # a failure red, no reading yet dim
-  if (m == "") {
-    cc = memcolour(MGP[g]); MCOL[g] = cc       # a cut cell keeps it too
-    MBT[g] = memcell(MGB[g], MGA[g], ""); MBR[g] = e(cc) MBT[g] e("0")
-    MAT[g] = MGTXT[g];                    MAR[g] = e(cc) MAT[g] e("0")
-  } else if (!MGUNK[g] && MGALL[g] > 0) {      # the allocation is known: after the mark
-    MBT[g] = memcell(0, MGALL[g], m); x = index(MBT[g], m)
-    MBR[g] = substr(MBT[g], 1, x - 1) e(mc0) m e("0") substr(MBT[g], x + 1)
-    MAT[g] = m MGTXT[g]; MAR[g] = e(mc0) m e("0") MGTXT[g]
+# the text of group g in a form ("b" or "alloc", form a)
+# and the same text coloured: the number in its band, or the mark dim (no
+# reading) or red (failed) outside the escape of what follows it
+function memform_cell(g, form,   mark, markcolour, colour, text, at) {
+  mark = (g in grp_worst_pct) ? "" : grp_failed[g] ? "!" : "?"
+  markcolour = (mark == "!") ? "31" : "2"
+  if (mark == "") {
+    colour = memcolour(grp_worst_pct[g])
+    text = (form == "alloc") ? grp_alloc_text[g] \
+         : memcell(grp_read_bytes[g], grp_read_alloc_mb[g], "")
+    cell_text[g, form] = text; cell_coloured[g, form] = e(colour) text e("0")
+  } else if (!grp_alloc_unknown[g] && grp_alloc_mb[g] > 0) {   # known: after the mark
+    text = (form == "alloc") ? mark grp_alloc_text[g] : memcell(0, grp_alloc_mb[g], mark)
+    at = index(text, mark)
+    cell_text[g, form] = text
+    cell_coloured[g, form] = substr(text, 1, at - 1) e(markcolour) mark e("0") substr(text, at + 1)
   } else {                                      # unknown: the mark, then MEM as ever
-    MBT[g] = MAT[g] = m v[g,mc]; MBR[g] = MAR[g] = e(mc0) m e("0") v[g,mc]
+    cell_text[g, form] = mark mem_as_ever[g]
+    cell_coloured[g, form] = e(markcolour) mark e("0") mem_as_ever[g]
   }
-  v[g,mc] = MBT[g]; MRICH[g] = MBR[g]
 }
-function memform_a(   g, r) {   # every own cell to form a; MEM measured again
-  for (g in MG) { v[g,mc] = MAT[g]; MRICH[g] = MAR[g] }
-  formb = 0
+function memcells(g) {
+  if (g in grp_worst_pct) cell_colour[g] = memcolour(grp_worst_pct[g])   # a cut cell keeps it
+  mem_as_ever[g] = v[g,mc]
+  memform_cell(g, "b"); memform_cell(g, "alloc")
+  v[g,mc] = cell_text[g, "b"]; mem_coloured[g] = cell_coloured[g, "b"]
+}
+function memform(form,   g, r) {   # every own cell to FORM; MEM measured again
+  for (g in grp_own) { v[g,mc] = cell_text[g, form]; mem_coloured[g] = cell_coloured[g, form] }
   tabw -= w[mc]; w[mc] = length(hd[mc])
   for (r=1; r<=rows; r++) if (QSHOW[r] && length(v[r,mc]) > w[mc]) w[mc] = length(v[r,mc])
   tabw += w[mc]
@@ -1199,12 +1228,12 @@ function qrow(r,   js, jc, line, i, x, fw, cc) {         # one queue row, colour
     x = (i == idc) ? idfit(v[r,i], w[i]) : v[r,i]
     if (length(x) > w[i]) x = substr(x, 1, w[i]-1) "…"
     fw = RIGHT[k[i]] ? w[i] : (i==n ? -length(x) : -w[i])
-    if (i == mc && (r in MRICH) && x == v[r,i]) {   # an own MEM cell, whole: its
-      line = line sprintf("%*s%*s%s", gap[i], "", w[i] - length(x), "", MRICH[r])   # own
+    if (i == mc && (r in mem_coloured) && x == v[r,i]) {   # an own MEM cell, whole:
+      line = line sprintf("%*s%*s%s", gap[i], "", w[i] - length(x), "", mem_coloured[r])   # its own
       continue                                      # colours, right-aligned
     }
     cc = ""
-    if (i == mc && (r in MCOL))      cc = MCOL[r]
+    if (i == mc && (r in cell_colour)) cc = cell_colour[r]
     else if (i == idc)               cc = jc
     else if (k[i]=="t" || k[i]=="T") cc = "1;" jc
     else if (i == lc && x == "INVALID") cc = "1;31"    # past its limit, being killed
@@ -1239,8 +1268,8 @@ BEGIN{
   }
   BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4
   n = split(keys, k, ",")
-  FQ = n + (compact ? 7 : 5)    # %i, n displayed, %t %l %S (COMPACT: %r %M), the sentinel
-  if (memon) FQ += 2            # and %A %U before it
+  FQ = qfields + 1              # every field qfield added (%i, n displayed, %t %l %S,
+                                # COMPACT: %r %M, MEM: %A %U), and the empty sentinel
   FR = SACCT ? 9 : 11           # 8 sacct / 10 -O fields, and the empty sentinel
   FN = 10                       # the 9 sinfo -O fields, and the empty sentinel
   # every shape squeue prints for %i / JobID: plain, het component (10646+0),
@@ -1277,10 +1306,10 @@ BEGIN{
   # the jobs of the caller: allocation and nodes per unique id, and the readings
   # of the snapshot in use (the shell checked both)
   while ((getline ln < memallocf) > 0) {
-    split(ln, mf, "\t"); MAMB[mf[1]] = mf[3] + 0; MATXT[mf[1]] = mf[4]; MNOD[mf[1]] = mf[5]
+    split(ln, mf, "\t"); job_alloc_mb[mf[1]] = mf[3] + 0; job_alloc_text[mf[1]] = mf[4]; job_nodes[mf[1]] = mf[5]
   }
   close(memallocf)
-  while ((getline ln < memreadf) > 0) { split(ln, mf, "\t"); MOUT[mf[1]] = mf[2]; MBYT[mf[1]] = mf[3] + 0 }
+  while ((getline ln < memreadf) > 0) { split(ln, mf, "\t"); job_outcome[mf[1]] = mf[2]; job_bytes[mf[1]] = mf[3] + 0 }
   close(memreadf)
   split("CD F CA TO NF OOM DL PR BF RV SE", ts, " ")      # terminal states
   for (i in ts) DONE[ts[i]] = 1
@@ -1397,7 +1426,7 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     for (i=1; i<=n; i++) raw[q,i] = F[i+1]
     qstate[q] = F[n+2]; qlimit[q] = F[n+3]; qstart[q] = F[n+4]
     if (compact) { qwhy[q] = F[n+5]; qsec[q] = dur(F[n+6]) }
-    if (memon) { qA[q] = F[FQ-2]; qU[q] = F[FQ-1] }
+    if (memon) { row_jobid[q] = F[qpos_jobid]; row_uid[q] = F[qpos_uid] }
     qw[q] = tw; qjobs += tw                     # a pending bracket is many jobs in one
     cnt[F[n+2]] += tw                           # row; tw is read from the hidden %i, so
                                                 # it counts whatever columns are shown
@@ -1463,16 +1492,17 @@ END{
   if (rtrunc || rbad) dq = 0
 
   # ---- the running rows of the caller: what each one reads ----------------
-  # MO "ok", "none" or "failed"; MAL its allocation in MB (0: not known), MTXT
-  # as Slurm prints it, MBY the bytes in use.  Not measured (no allocation,
-  # several nodes) or not in the snapshot (started since): "none"
+  # row_outcome "ok", "none" or "failed"; row_alloc_mb its allocation (0: not
+  # known), row_alloc_text as Slurm prints it, row_bytes the bytes in use.  Not
+  # measured (no allocation, several nodes) or not in the snapshot (started
+  # since): "none"
   for (r=1; r<=q && memon && myuid != ""; r++) {
-    if (qU[r] != myuid || qstate[r] != "R") continue
-    a = qA[r]
-    if (memfail) { MO[r] = "failed"; continue }
-    MAL[r] = MAMB[a] + 0; MTXT[r] = MATXT[a]
-    MO[r] = (MAL[r] > 0 && MNOD[a] == "1" && (a in MOUT)) ? MOUT[a] : "none"
-    MBY[r] = MBYT[a]
+    if (row_uid[r] != myuid || qstate[r] != "R") continue
+    a = row_jobid[r]
+    if (memfail) { row_outcome[r] = "failed"; continue }
+    row_alloc_mb[r] = job_alloc_mb[a] + 0; row_alloc_text[r] = job_alloc_text[a]
+    row_outcome[r] = (row_alloc_mb[r] > 0 && job_nodes[a] == "1" && (a in job_outcome)) ? job_outcome[a] : "none"
+    row_bytes[r] = job_bytes[a]
   }
 
   # ---- pending start estimates, before folding so they stay per-task ---
@@ -1516,7 +1546,7 @@ END{
   for (r=1; r<=rows; r++)
     if (gn[r] > 1) v[r,idc] = sprintf("%s_[%s] ×%d", gbase[r], compress(gtask[r]), gn[r])
     else if (idc && gw[r] > 1) v[r,idc] = v[r,idc] " ×" gw[r]
-  if (mc) for (r in MG) memcells(r)
+  if (mc) for (r in grp_own) memcells(r)
 
   # ---- group finished jobs by array base, state and canceller ---------
   for (r=1; r<=dq; r++) {
@@ -1639,8 +1669,8 @@ END{
   # too wide for a screen that shows colour: then all of them are form a, the
   # allocation, which the colour alone qualifies.  Off a screen, or without
   # colour, always b.  A b cell is never cut: the other columns give more
-  formb = (mc && length(MG))
-  if (formb && screen && color && tabw > budget) memform_a()
+  formb = (mc && length(grp_own))
+  if (formb && screen && color && tabw > budget) { memform("alloc"); formb = 0 }
   while (tabw > budget) {                       # shave the widest flexible column
     big = 0
     for (i=1; i<=n; i++) if (FLEX[k[i]] && w[i] > 8 && w[i] > w[big]) big = i

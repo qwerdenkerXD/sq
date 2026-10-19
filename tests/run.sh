@@ -2840,6 +2840,9 @@ c_jobmem_gates() {
 		need "SLURM_CLUSTERS='$f', as fsill: rc 0, no allocation call, no sstat, the screen nobody gets" \
 			eval 'rc_is 0 && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && cmp -s "$base" <(without_clock "$OUT")'
 	done
+	# an option's value is no option: a job named --federation selects no cluster
+	mem_run jobmem SQ_WIDTH=110 -- --color -n --federation
+	need "-n --federation (a job name): rc 0, the allocation call and sstat once each" eval 'rc_is 0 && [ "$(calls alloc)" -eq 1 ] && [ "$(calls sstat)" -eq 1 ]'
 	# the screen's filters never reach the allocation call, nor narrow what sstat asks
 	mem_run jobmem SQ_WIDTH=110 -- --color -p main -j 11895 -u fsill -n flye
 	need "filters on the screen: the allocation call is still squeue -h -u 1041 and nothing else, sstat still asks for all 8" eval '
@@ -2868,7 +2871,7 @@ c_jobmem_gates() {
 	done
 }
 c_jobmem_throttle() {
-	T_TITLE="sstat at most every 30 s: a second run reuses the snapshot; one 30 s old, future, missing or garbled calls again; renamed into place; a job started since reads ?; no usable state dir calls every run"
+	T_TITLE="sstat at most every 30 s: a second run reuses the snapshot; one 30 s old, future, missing or garbled calls again; renamed into place; a job started since reads ?; no usable state dir (or memuse no file) calls every run"
 	local cache=$T_DIR/cache first want=$T_DIR/memuse.want snap now bad
 	snap=$cache/sq/memuse
 	printf '%s\t%s\t%s\n' 11895 ok 89335316480 11898 ok 33260224512 11902 ok 8123781120 11903 ok 8227962880 \
@@ -2920,7 +2923,14 @@ c_jobmem_throttle() {
 	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
 	need "a new snapshot is renamed into place: the old file, held by a hard link, is untouched, no temp is left" \
 		eval 'rc_is 0 && [ "$(calls sstat)" -eq 1 ] && cmp -s "$T_DIR/old" "$T_DIR/old.want" && ! [ "$snap" -ef "$T_DIR/old" ] && [ "$(ls -A "$cache/sq")" = memuse ]'
-	rm -f "$snap"
+	# memuse that is no regular file: unusable state, silently; nothing put into it
+	rm -f "$snap"; mkdir "$snap"
+	for f in 1 2; do
+		mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+		need "memuse a directory, run $f: rc 0, stderr empty, sstat called, the readings shown, nothing put into it or beside it" \
+			eval 'rc_is 0 && err_empty && [ "$(calls sstat)" -eq 1 ] && cmp -s "$first" <(without_clock "$OUT") && [ -z "$(ls -A "$snap")" ] && [ "$(ls -A "$cache/sq")" = memuse ]'
+	done
+	rmdir "$snap"
 	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
 	need "no snapshot: rc 0, sstat called" eval 'rc_is 0 && [ "$(calls sstat)" -eq 1 ]'
 	# no usable state dir: a call every run, silently, readings shown all the same
@@ -2934,7 +2944,7 @@ c_jobmem_throttle() {
 	need "a relative XDG_CACHE_HOME is not used: the snapshot under HOME/.cache" eval 'rc_is 0 && [ -s "$RUN/home/.cache/sq/memuse" ]'
 }
 c_jobmem_outcomes() {
-	T_TITLE="each outcome: ok, a step error, no steps, no mem= (vmem= alone too), array steps once, two nodes, gone, own by uid alone; sstat timing out, the allocation call failing; colour off"
+	T_TITLE="each outcome: ok, a step error, no steps, no mem= (vmem= alone too), array steps once, two nodes, gone, own by uid alone; sstat timing out, the allocation call failing or unreadable; colour off"
 	local d t0 ms id cache=$T_DIR/cache
 	mem_run jobmem-outcomes -- --color
 	need "rc 0, stderr empty, sstat asked for the eight measured jobs" eval 'rc_is 0 && err_empty && argv_has sstat -j 4001,4002,4003,4004,4005,4006,4011,4012'
@@ -2971,7 +2981,7 @@ c_jobmem_outcomes() {
 	need "the failure is kept: a run within 30 s shows it again without asking" eval 'rc_is 0 && [ "$(calls sstat)" -eq 0 ] && row_has 4002 "$ESC[31m!$ESC[0m/4G" && row_has 4001 "$ESC[31m!$ESC[0m/4G"'
 	# the allocation call failing, or answering what cannot be read: every own
 	# running row a red !, MEM as it was
-	for how in "exit 1"; do
+	for how in "exit 1" "unreadable, exit 0"; do
 		if [ "$how" = "exit 1" ]; then d=$(mem_fixture jobmem-outcomes squeue-alloc '@stderr squeue: error: Socket timed out on send/recv operation\n@exit 1')
 		else d=$(mem_fixture jobmem-outcomes squeue-alloc "@include $fixtures/jobmem-outcomes/squeue-alloc\n@raw not a record"); fi
 		mem_run "$d" -- --color

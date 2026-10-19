@@ -78,7 +78,8 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
 ## Requirements
 
 - Slurm client tools: `sinfo`, `squeue`, and `sacct` when accounting (slurmdbd) is set up;
-  without it the finished block falls back to `squeue -t all` and says so
+  without it the finished block falls back to `squeue -t all` and says so; `sstat` for the
+  memory your own running jobs use
 - **gawk** (GNU awk; plain awk and mawk won't do)
 - coreutils (`timeout`, `stty`) and `tput`
 - A UTF-8 terminal
@@ -169,10 +170,12 @@ sq -C                     # centred in both axes
 - **Your own running jobs show the memory they use** in MEM, as in use/allocated (`83/100G`),
   green below 70 %, yellow from 70 %, red from 90 %, bold red from 100 % (on a screen too narrow
   for that, with colour, the allocation alone, in the same colours). The reading comes from
-  `sstat` and refreshes at most every 30 s: it is kept in `~/.cache/sq/memuse`, which every sq of
-  yours shares. `?` means no reading yet, `!` that the reading failed. The figure leaves out
-  page cache, tmpfs and `/dev/shm`, which the job's out-of-memory limit counts, so a job can be
-  killed while it reads well below its allocation.
+  `sstat` and refreshes at most
+  every 30 s: it is kept in `~/.cache/sq/memuse`, which every sq of yours shares. `?` means no
+  reading: none yet, or a job sq does not measure (one on several nodes, or without a memory
+  allocation); `!` that the reading failed. The figure leaves out page cache, tmpfs and
+  `/dev/shm`, which the job's out-of-memory limit counts, so a job can be killed while it reads
+  well below its allocation.
 - An unreachable controller makes `sinfo` and `squeue` hang rather than fail, so every call is
   bounded by `SQ_TIMEOUT`. A full outage therefore delays a refresh by about twice that.
 - **Clock times are the server's,** in its time zone, which the title names (`UTC` on many
