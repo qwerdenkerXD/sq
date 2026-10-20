@@ -190,12 +190,14 @@ memtmp=                                         # the memuse snapshot being writ
 statetmp=                                       # the bell's state being written
 collect_pid= log_pids=                          # a client collect -w waits for; sq log's
                                                 # tail and its sentinel
+collect_pidfile= job_sentinel_pid=              # where collect -w names that client for
+                                                # a sentinel; sq job's sentinel
 # The processes first, by pid (each ended with TERM and waited for, so none
 # outlives sq), then the files
 cleanup() {
 	local pid
-	for pid in $collect_pid $log_pids; do kill "$pid" 2>/dev/null; done
-	for pid in $collect_pid $log_pids; do wait "$pid" 2>/dev/null; done
+	for pid in $collect_pid $log_pids $job_sentinel_pid; do kill "$pid" 2>/dev/null; done
+	for pid in $collect_pid $log_pids $job_sentinel_pid; do wait "$pid" 2>/dev/null; done
 	[ -z "$tmp" ] || rm -rf "$tmp"; rm -f ${statetmp:+"$statetmp"} ${memtmp:+"$memtmp"}
 }
 trap cleanup EXIT
@@ -217,7 +219,9 @@ case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeou
 # a trapped signal then acts at once instead of when the client is done, and
 # the EXIT cleanup can end the client through timeout, which sits in a process
 # group of its own that a Ctrl-C never reaches.  The dashboard does not use it,
-# as a Ctrl-C there is left to what bash makes of a foreground client.
+# as a Ctrl-C there is left to what bash makes of a foreground client.  With
+# collect_pidfile set, -w also writes that pid there while it waits (and
+# empties the file after), so a sentinel can end the client once sq is gone.
 collect() {   # collect [-t SECONDS] [-w] NAME TOOL ARGS...: stdout into $tmp/NAME,
 	local limit=$tmo name bg=0 rc   # bounded by SECONDS, SQ_TIMEOUT's by default
 	[ "$1" != -t ] || { limit=$2; shift 2; }
@@ -228,7 +232,9 @@ collect() {   # collect [-t SECONDS] [-w] NAME TOOL ARGS...: stdout into $tmp/NA
 		{ "$@" > "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo"; } 2>/dev/null
 	else
 		{ "$@" > "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo" &
-		  collect_pid=$!; wait "$collect_pid"; rc=$?; collect_pid=; return $rc; } 2>/dev/null
+		  collect_pid=$!; [ -z "$collect_pidfile" ] || printf '%s\n' "$collect_pid" > "$collect_pidfile"
+		  wait "$collect_pid"; rc=$?; collect_pid=
+		  [ -z "$collect_pidfile" ] || : > "$collect_pidfile"; return $rc; } 2>/dev/null
 	fi
 }
 # --verbose makes timeout say "sending signal ..." before it signals; it exists
@@ -1658,6 +1664,17 @@ sub_job() {
 	[ "$nonce" != "$nonce2" ] || die "two field separators collided"
 	export SQ_NONCE=$nonce SQ_NONCE2=$nonce2
 	make_tmp
+	# The sentinel, as sq log's: a process of its own that ticks once a
+	# second (a read on a FIFO nothing writes) while sq lives.  Killed
+	# outright, sq runs no EXIT cleanup, so within a tick the sentinel ends
+	# the call sq was waiting for (collect -w names it in $tmp/inflight) and
+	# removes $tmp; else the cleanup ends the sentinel
+	collect_pidfile=$tmp/inflight
+	mkfifo "$tmp/nap" && exec {job_nap}<> "$tmp/nap" || job_fail "cannot make a timer FIFO in $tmp"
+	{ while kill -0 $$ 2>/dev/null; do read -t 1 -u "$job_nap"; done
+	  read -r v < "$tmp/inflight" 2>/dev/null && [ -n "$v" ] && kill "$v" 2>/dev/null
+	  rm -rf "$tmp"; } &
+	job_sentinel_pid=$!
 	color_resolve
 	gawk_locale
 	myuid=$(id -u 2>/dev/null)

@@ -4145,6 +4145,19 @@ c_job_contract() {   # Q0
 		sq_finish "$RUN" 20
 		need "SIG${sig%:*} during squeue: rc ${sig#*:}, nothing left, the tmp dir gone" eval 'rc_is '"${sig#*:}"' && nothing_at_exit && waits_for 3 nothing_left && [ -z "$(ls -A "$RUN/tmp")" ]'
 	done
+	# killed outright, during squeue's call, sacct's, and JOBMEM's sstat: no
+	# EXIT cleanup, so the sentinel ends the call in flight within a tick (its
+	# budget, 25 s, is far off) and removes the tmp dir
+	local own=$T_DIR/fx-killown f9
+	mkdir -p "$own"; cp "$jfx/running-own"/* "$own/"; printf '@hang 30\n' > "$own/sstat"
+	for f9 in "$fx:squeue" "$(job_fx hangacct sacct <<<'@hang 30'):sacct" "$own:sstat"; do
+		sq_start "${f9%:*}" SQSTUB_UID=1041 SQ_TIMEOUT=25 -- job "$([ "${f9##*:}" = sstat ] && echo 11950 || echo 11912)"
+		waits_for 10 eval 'grep -q "^CALL	${f9##*:}" "$LOG"'
+		sleep 0.3; kill -KILL "$SQ_PID" 2>/dev/null
+		need "SIGKILL during ${f9##*:}: within 3 s the tmp dir gone and nothing left of the call" eval '
+			waits_for 3 eval "[ -z \"\$(ls -A \"\$RUN/tmp\")\" ]" && waits_for 3 nothing_left'
+		sq_finish "$RUN" 10
+	done
 }
 c_job_select() {   # Q1
 	T_TITLE="which job: a task by its array id, by its unique id, one still in a pending array, an array cancelled pending, het jobs, an unknown one, a one-task array; own by squeue's uid, else accounting's"
