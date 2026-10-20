@@ -349,7 +349,8 @@ log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, the record HOW names in
 	SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$log_fmt \
 		collect -w facts squeue -h --jobs="$1" -t all
 	local rc=$? kv k
-	for k in $log_keys; do printf -v "log_$k" ''; done
+	local -A said=()
+	log_verdict= log_why=
 	if [ $rc -ne 0 ]; then
 		# a job Slurm no longer knows is rc 1 and this text (23.11.4, measured)
 		if [ $rc = 1 ] && LC_ALL=C grep -q 'Invalid job id specified' "$tmp/facts.err" 2>/dev/null
@@ -358,11 +359,17 @@ log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, the record HOW names in
 		fi
 		return
 	fi
-	log_pick "$2" "$3" "${4-}" > "$tmp/pick" || { log_verdict=fail; log_why="squeue output unreadable"; return; }
+	log_pick "$2" "$3" "${4-}" > "$tmp/pick" &&
 	while IFS= read -r -d '' kv; do   # KEY=VALUE, the keys log_pick writes
-		case " $log_keys " in *" ${kv%%=*} "*) printf -v "log_${kv%%=*}" '%s' "${kv#*=}" ;; esac
+		case " $log_keys " in *" ${kv%%=*} "*) said[${kv%%=*}]=${kv#*=} ;; esac
 	done < "$tmp/pick"
-	[ -n "$log_verdict" ] && [ "$log_verdict" != bad ] || { log_verdict=fail; log_why="squeue output unreadable"; }
+	case ${said[verdict]-} in
+		''|bad) log_verdict=fail; log_why="squeue output unreadable"; return ;;
+	esac
+	# a readable answer replaces every field; a failed or unreadable one
+	# above changed only the verdict, so the last good record's host and
+	# paths still describe the job for the notes
+	for k in $log_keys; do printf -v "log_$k" '%s' "${said[$k]-}"; done
 }
 # What log_pick says, as KEY=VALUE, NUL-separated (no path holds a NUL):
 #   verdict  ok, array or tasks (the array's task ids), leader (a het
@@ -374,7 +381,9 @@ log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, the record HOW names in
 #            out and err, the two paths
 #   array, tasks: first (the smallest task id) and list (up to 10)
 #   leader:  leader and offset
-log_keys="verdict via jobid tid state restart batch host reason exit out err first list leader offset why"
+# log_keys are those keys, each kept in log_<key>; log_why, which log_ask
+# sets for a failed or unreadable answer, is not one of them
+log_keys="verdict via jobid tid state restart batch host reason exit out err first list leader offset"
 # HOW is job (a plain id: the job itself, the leader of its het job, or the
 # last task of an array, which carries the array's id), task (JOB_TASK),
 # het (the leader of het job JOB) or tasks (array JOB's task ids).

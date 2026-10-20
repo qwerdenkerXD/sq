@@ -3503,7 +3503,7 @@ wd() { printf '%s/wd/%s' "$RUN" "$1"; }            # wd FILE: FILE in the run's 
 
 c_log_follow() {   # L4, L5: each phase, polled, in parallel runs
 	T_TITLE="sq log follows: pending, the file late, -n, CG, a requeue, held, special exit, an outage, a job gone, a file never written, --err"
-	local late n cg rq rh se down gone0 gone1 never err
+	local late n cg rq rh se down gone0 gone1 never err bad r
 	sq_start "$(log_fx late <<'EOF'
 @step 1
 StateCompact=PD; Reason=Priority
@@ -3587,6 +3587,18 @@ StateCompact=R
 StateCompact=F; exit_code=1:0
 EOF
 )" -- log 500; never=$RUN
+	# a poll that fails, or answers what cannot be read, leaves the last good
+	# record's fields: the "waiting" note still names the host
+	local keep keepfail keepraw keepcut
+	for keep in fail raw cut; do
+		case $keep in
+			fail) bad=$'@stderr squeue: error: Unable to contact slurm controller (connect failure)\n@exit 1' ;;
+			raw)  bad='@raw not a record' ;;
+			cut)  bad=$'@cut\nStateCompact=R' ;;
+		esac
+		sq_start "$(log_fx "keep$keep" <<<$'@step 1\nStateCompact=R\n@step 2\n'"$bad"$'\n@step 4\nStateCompact=CD')" -- log 500
+		printf -v "keep$keep" '%s' "$RUN"
+	done
 	sq_start "$(log_fx err <<'EOF'
 @defaults STDERR=\{run}/wd/err_%j.log
 @step 1
@@ -3647,6 +3659,17 @@ sq log: job 500 ended: COMPLETED (exit code 0:0)" && [ "$(stub_calls)" = 4 ]'
 	sq_finish "$err"
 	need "--err: the stderr file" eval 'rc_is 0 && out_is "err
 "'
+	local why
+	for keep in fail raw cut; do
+		case $keep in
+			fail) why="squeue: error: Unable to contact slurm controller (connect failure)" ;;
+			*)    why="squeue output unreadable" ;;
+		esac
+		r=keep$keep; sq_finish "${!r}"
+		need "a poll that $keep: the note still names the host" eval 'rc_is 1 && err_is "sq log: slurm unreachable ($why); still following
+sq log: waiting for $(wd out_500.log) to appear (job 500 runs on node01.cluster)
+sq log: job 500 ended; $(wd out_500.log) was never written"'
+	done
 }
 
 c_log_now() {   # L2, L3's refusals, L4's --no-follow and the already-final job
