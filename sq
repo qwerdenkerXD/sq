@@ -147,6 +147,105 @@ scrub() (   # scrub [-f FILE] [MAX]: stdin, or the first line of FILE, onto stdo
 	}'
 )
 
+# The field separator is a nonce minted per run, never per session: a job name
+# is fixed at submit time and a node's drain reason when the admin sets it, so
+# neither can contain a separator minted afterwards.  That is what makes a record
+# boundary unforgeable - a field holding "|", a tab or a newline can then neither
+# inject a row nor steal a field.
+# A nonce is usable only if it is letter-led (squeue's -O grammar is
+# type[:[.][size][suffix]], so a suffix starting with digits is read as a FIELD
+# WIDTH: "JobID:1234567890" segfaults squeue, "JobID:0" drops the separator),
+# alphanumeric (no ERE metacharacter, so gawk takes it as FS verbatim) and long
+# enough that no name can hold it by chance.
+nonce_ok() {
+	case ${1:-} in
+		''|[!A-Za-z]*|*[!A-Za-z0-9]*) return 1 ;;
+	esac
+	[ "${#1}" -ge 17 ]
+}
+mint_nonce() {
+	local n=
+	[ -z "${SRANDOM:-}" ] ||                              # bash >= 5.1
+		printf -v n 'N%08x%08x%08x' "$SRANDOM" "$SRANDOM" "$SRANDOM" 2>/dev/null
+	nonce_ok "$n" ||                                      # never "tr -dc </dev/urandom":
+		n=N$(LC_ALL=C od -An -tx1 -N12 /dev/urandom 2>/dev/null | LC_ALL=C tr -d ' \n')
+	nonce_ok "$n" || return 1
+	printf '%s' "$n"
+}
+
+# The helpers from here to the dashboard are shared with the subcommands, so
+# they come before either.  The EXIT trap holds under set -u for a run that
+# never names the dashboard's files: a subcommand, a usage error, -h.
+tmp=$(mktemp -d) || exit 1
+memtmp=                                         # the memuse snapshot being written
+statetmp=                                       # the bell's state being written
+trap 'rm -rf "$tmp"; rm -f ${statetmp:+"$statetmp"} ${memtmp:+"$memtmp"}' EXIT
+
+# an unreachable controller makes sinfo/squeue block, not fail, so bound them.
+# timeout reads 0 as "no limit" and errors out on anything non-numeric, so both
+# fall back to the default; -k kills a client that ignores SIGTERM
+tmo=${SQ_TIMEOUT:-5}
+case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeout
+[ -n "$(printf '%s' "$tmo" | tr -d '0.')" ] || tmo=5    # 0, 0.0 mean "no limit"
+# Every collector runs through collect, so its own stderr (NAME.err) and
+# timeout's (NAME.tmo) land apart: the client's fd 3 becomes its stderr, and
+# timeout keeps fd 2.  sh -c exec keeps the pid, so TERM and KILL reach the
+# client itself, and passing the tool as $0 lets sh say "sinfo: ... not found".
+# Wrapped in 2>/dev/null, so bash prints no "Killed" or "Segmentation fault"
+# notice of its own on the screen.  Environment prefixes on the call reach the
+# client.
+collect() {   # collect [-t SECONDS] NAME TOOL ARGS...: stdout into $tmp/NAME,
+	local limit=$tmo name        # bounded by SECONDS, SQ_TIMEOUT's by default
+	[ "$1" != -t ] || { limit=$2; shift 2; }
+	name=$1; shift
+	{ timeout $verbose -k 2 "$limit" sh -c 'exec "$@" 2>&3 3>&-' "$1" "$@" \
+		> "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo"; } 2>/dev/null
+}
+# --verbose makes timeout say "sending signal ..." before it signals; it exists
+# since coreutils 8.29, and an older timeout refuses it (rc 125) without running
+# anything, so it is asked for only where a silent probe accepts it
+verbose=
+timeout --verbose 1 true > /dev/null 2>&1 && verbose=--verbose
+# Why a collector failed, into NAME (empty: it did not), and into NAME_real the
+# part of that which is real text: the timeout, or the first line of its
+# stderr, which can echo what the user typed and so loses its control
+# characters like every other outside text.  With nothing readable there (a
+# crash prints nothing) NAME is made up from the exit status, because an empty
+# reason reads as success: "queue is empty" and a footer of 0 jobs from a
+# squeue that never answered.
+# A client that ignores SIGTERM is killed 2s past the deadline, and timeout
+# then exits 137 like any SIGKILL; it is the timeout when timeout said it
+# signalled (NAME.tmo is not empty - only its existence is read, never its
+# translatable text), or when this timeout cannot say so (no --verbose).  That
+# also counts a rare start-up warning of timeout's, or timeout itself killed
+# from outside, as the timeout.  A 137 that timeout kept quiet about is a SIGKILL
+# from elsewhere: a crash.  Otherwise NAME.tmo is shown only for rc 125 with
+# an empty NAME.err, timeout's own failure (an unknown option, no fork); its
+# "dumped core" after a crash never is.
+why_of() {   # why_of NAME RC OUTPUT TOOL: OUTPUT as collect left it, e.g. $tmp/nodes
+	local rc=$2 real= why=
+	if [ "$rc" = 124 ] || { [ "$rc" = 137 ] && { [ -s "$3.tmo" ] || [ -z "$verbose" ]; }; }; then
+		real="no response after ${tmo}s"
+	elif [ "$rc" != 0 ]; then
+		real=$(scrub -f "$3.err")
+		[ -n "$real" ] || [ "$rc" != 125 ] || real=$(scrub -f "$3.tmo")
+	fi
+	if [ "$rc" != 0 ]; then
+		if   [ -n "$real" ];    then why=$real
+		elif [ "$rc" -gt 128 ]; then why="$4 crashed (signal $((rc - 128)))"
+		else                         why="$4 failed (exit $rc)"
+		fi
+	fi
+	printf -v "$1" '%s' "$why"; printf -v "$1_real" '%s' "$real"
+}
+# the reason a line names where several could: any real one beats one made up
+# from an exit status, and within each kind the first NAME given wins
+first_why() {   # first_why NAME... (each set like why_of sets it)
+	local v r
+	for v in "$@"; do r=${v}_real; [ -z "${!r}" ] || { printf '%s' "${!r}"; return; }; done
+	for v in "$@"; do [ -z "${!v}" ] || { printf '%s' "${!v}"; return; }; done
+}
+
 fields=${SQ_FMT:-i,j,u,T,M,L,C,m,R}
 fsrc=${SQ_FMT:+SQ_FMT}; fsrc=${fsrc:--o}         # which one to blame for a bad letter
 center=${SQ_CENTER:-0}
@@ -387,31 +486,6 @@ if [ "$color" = auto ]; then
 	fi
 fi
 
-# The field separator is a nonce minted per run, never per session: a job name
-# is fixed at submit time and a node's drain reason when the admin sets it, so
-# neither can contain a separator minted afterwards.  That is what makes a record
-# boundary unforgeable - a field holding "|", a tab or a newline can then neither
-# inject a row nor steal a field.
-# A nonce is usable only if it is letter-led (squeue's -O grammar is
-# type[:[.][size][suffix]], so a suffix starting with digits is read as a FIELD
-# WIDTH: "JobID:1234567890" segfaults squeue, "JobID:0" drops the separator),
-# alphanumeric (no ERE metacharacter, so gawk takes it as FS verbatim) and long
-# enough that no name can hold it by chance.
-nonce_ok() {
-	case ${1:-} in
-		''|[!A-Za-z]*|*[!A-Za-z0-9]*) return 1 ;;
-	esac
-	[ "${#1}" -ge 17 ]
-}
-mint_nonce() {
-	local n=
-	[ -z "${SRANDOM:-}" ] ||                              # bash >= 5.1
-		printf -v n 'N%08x%08x%08x' "$SRANDOM" "$SRANDOM" "$SRANDOM" 2>/dev/null
-	nonce_ok "$n" ||                                      # never "tr -dc </dev/urandom":
-		n=N$(LC_ALL=C od -An -tx1 -N12 /dev/urandom 2>/dev/null | LC_ALL=C tr -d ' \n')
-	nonce_ok "$n" || return 1
-	printf '%s' "$n"
-}
 nonce=$(mint_nonce)   || die "no usable random field separator"
 # Two of the three separators cannot travel in the environment, so they are
 # visible in /proc/<pid>/cmdline (mode 0444) and each gets its OWN nonce:
@@ -523,75 +597,6 @@ hastty=0
 # a cleared cache and a week of downtime behave sanely
 horizon=${SQ_BELL_HORIZON:-600}
 case $horizon in ''|*[!0-9]*) horizon=600 ;; esac
-
-tmp=$(mktemp -d) || exit 1
-memtmp=                                         # the memuse snapshot being written
-trap 'rm -rf "$tmp"; rm -f "$statetmp" ${memtmp:+"$memtmp"}' EXIT
-
-# an unreachable controller makes sinfo/squeue block, not fail, so bound them.
-# timeout reads 0 as "no limit" and errors out on anything non-numeric, so both
-# fall back to the default; -k kills a client that ignores SIGTERM
-tmo=${SQ_TIMEOUT:-5}
-case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeout
-[ -n "$(printf '%s' "$tmo" | tr -d '0.')" ] || tmo=5    # 0, 0.0 mean "no limit"
-# Every collector runs through collect, so its own stderr (NAME.err) and
-# timeout's (NAME.tmo) land apart: the client's fd 3 becomes its stderr, and
-# timeout keeps fd 2.  sh -c exec keeps the pid, so TERM and KILL reach the
-# client itself, and passing the tool as $0 lets sh say "sinfo: ... not found".
-# Wrapped in 2>/dev/null, so bash prints no "Killed" or "Segmentation fault"
-# notice of its own on the screen.  Environment prefixes on the call reach the
-# client.
-collect() {   # collect [-t SECONDS] NAME TOOL ARGS...: stdout into $tmp/NAME,
-	local limit=$tmo name        # bounded by SECONDS, SQ_TIMEOUT's by default
-	[ "$1" != -t ] || { limit=$2; shift 2; }
-	name=$1; shift
-	{ timeout $verbose -k 2 "$limit" sh -c 'exec "$@" 2>&3 3>&-' "$1" "$@" \
-		> "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo"; } 2>/dev/null
-}
-# --verbose makes timeout say "sending signal ..." before it signals; it exists
-# since coreutils 8.29, and an older timeout refuses it (rc 125) without running
-# anything, so it is asked for only where a silent probe accepts it
-verbose=
-timeout --verbose 1 true > /dev/null 2>&1 && verbose=--verbose
-# Why a collector failed, into NAME (empty: it did not), and into NAME_real the
-# part of that which is real text: the timeout, or the first line of its
-# stderr, which can echo what the user typed and so loses its control
-# characters like every other outside text.  With nothing readable there (a
-# crash prints nothing) NAME is made up from the exit status, because an empty
-# reason reads as success: "queue is empty" and a footer of 0 jobs from a
-# squeue that never answered.
-# A client that ignores SIGTERM is killed 2s past the deadline, and timeout
-# then exits 137 like any SIGKILL; it is the timeout when timeout said it
-# signalled (NAME.tmo is not empty - only its existence is read, never its
-# translatable text), or when this timeout cannot say so (no --verbose).  That
-# also counts a rare start-up warning of timeout's, or timeout itself killed
-# from outside, as the timeout.  A 137 that timeout kept quiet about is a SIGKILL
-# from elsewhere: a crash.  Otherwise NAME.tmo is shown only for rc 125 with
-# an empty NAME.err, timeout's own failure (an unknown option, no fork); its
-# "dumped core" after a crash never is.
-why_of() {   # why_of NAME RC OUTPUT TOOL: OUTPUT as collect left it, e.g. $tmp/nodes
-	local rc=$2 real= why=
-	if [ "$rc" = 124 ] || { [ "$rc" = 137 ] && { [ -s "$3.tmo" ] || [ -z "$verbose" ]; }; }; then
-		real="no response after ${tmo}s"
-	elif [ "$rc" != 0 ]; then
-		real=$(scrub -f "$3.err")
-		[ -n "$real" ] || [ "$rc" != 125 ] || real=$(scrub -f "$3.tmo")
-	fi
-	if [ "$rc" != 0 ]; then
-		if   [ -n "$real" ];    then why=$real
-		elif [ "$rc" -gt 128 ]; then why="$4 crashed (signal $((rc - 128)))"
-		else                         why="$4 failed (exit $rc)"
-		fi
-	fi
-	printf -v "$1" '%s' "$why"; printf -v "$1_real" '%s' "$real"
-}
-# the reason a line names where several could: any real one beats one made up
-# from an exit status, and within each kind the first NAME given wins
-first_why() {   # first_why NAME... (each set like why_of sets it)
-	local v r
-	for v in "$@"; do r=${v}_real; [ -z "${!r}" ] || { printf '%s' "${!r}"; return; }; done
-	for v in "$@"; do [ -z "${!v}" ] || { printf '%s' "${!v}"; return; }; done
-}
 
 # SLURM_TIME_FORMAT is pinned on every collector: "relative" or a custom
 # format turns a date into something epoch() cannot read, which silently kills
