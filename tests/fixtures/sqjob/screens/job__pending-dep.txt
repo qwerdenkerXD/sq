@@ -1,0 +1,14 @@
+▌ 11961  merge-counts · fsill
+state and times
+  state       PENDING (Dependency)
+  dependency  afterok:11950(unfulfilled)
+  start       no estimate yet
+  submitted   2026-10-20 15:56 (25m ago)
+resources
+  CPUs        4 requested
+  memory      30.4G requested
+  time limit  12h00m
+files
+  work dir    /media/BioNAS2/fsill/rnaseq
+  stdout      /media/BioNAS2/fsill/rnaseq/logs/merge-counts-11961.out
+  stderr      into stdout

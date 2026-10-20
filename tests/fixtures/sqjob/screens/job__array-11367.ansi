@@ -1,0 +1,6 @@
+[1;36m▌ [0m[1m11367[0m  sweep · hal · array of 197: 188 done · 3 failed · 1 cancelled · 3 running · 2 pending
+  CPU [32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[0m  49.6%  median · min 12.3% (11367_57) · max 50.0% · 2 CPUs per task (1 requested)
+  MEM [32m█[32m█[32m█[32m█[32m█[32m█[32m█[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[0m  45.0%  median · min 3.1% (11367_88) · max 97.4%
+  [2m↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%[0m
+  [2m↳ over the 188 completed tasks; the weakest: sq job 11367_57[0m
+  [2m↳ 75 tasks started before 2026-10-19 13:59 UTC (RSS accounting): shared memory counted once per process; their peaks may read high[0m

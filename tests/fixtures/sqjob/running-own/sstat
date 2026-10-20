@@ -1,0 +1,2 @@
+JobID=11950.batch; TRESUsageInTot=cpu=00:00:01,energy=0,fs/disk=1048576,mem=14888960,pages=0,vmem=23277568; TRESUsageInMax=cpu=00:00:01,energy=0,fs/disk=1048576,mem=20971520,pages=0,vmem=29360128
+JobID=11950.0; TRESUsageInTot=cpu=32:46:40,energy=0,fs/disk=1048576,mem=13194139648,pages=0,vmem=13202528256; TRESUsageInMax=cpu=32:46:40,energy=0,fs/disk=1048576,mem=15138816000,pages=0,vmem=15147204608

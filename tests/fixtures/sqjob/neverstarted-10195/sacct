@@ -1,0 +1,1 @@
+JobID=10195; JobIDRaw=10195; UID=1025; User=hal; State=FAILED; ExitCode=1:0; ElapsedRaw=0; AllocCPUS=0; ReqCPUS=1; ReqTRES=billing=1,cpu=1,mem=2048000M,node=1; AllocTRES=; TotalCPU=00:00:00; TRESUsageInTot=; TRESUsageInMax=; NTasks=; Submit=\{epoch-1334338s}; Start=\{epoch-1334338s}; End=\{epoch-1334338s}; NodeList=None assigned; Partition=LocalQ; WorkDir=/media/x; JobName=j

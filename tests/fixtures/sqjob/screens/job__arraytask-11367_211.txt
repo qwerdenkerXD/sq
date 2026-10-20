@@ -1,0 +1,15 @@
+▌ 11367_211 (unique id 11559)  sweep · hal
+state and times
+  state     COMPLETED · exit 0
+  ran       1h00m on fb2-bioinf (LocalQ)
+  ended     2026-10-20 13:24 (4h ago)
+resources
+  CPUs      2 allocated (1 requested)
+  memory    15.2G allocated (7.6G requested)
+files
+  work dir  /media/BioNAS2/hal/sweep
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+efficiency
+  CPU ████████▒▒▒▒▒▒▒▒  50.0%  1h00m of 2h00m
+  MEM ████████▒▒▒▒▒▒▒▒  53.0%  8.1/15.2G peak (the batch script)
+  ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%

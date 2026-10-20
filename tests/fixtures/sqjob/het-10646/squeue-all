@@ -1,0 +1,2 @@
+@stderr slurm_load_jobs error: Invalid job id specified
+@exit 1

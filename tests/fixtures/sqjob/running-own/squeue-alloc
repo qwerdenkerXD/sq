@@ -1,0 +1,3 @@
+# JOBMEM's allocation call: fsill's jobs
+JobID=11950; StateCompact=R; tres_alloc=cpu=16,mem=64G,node=1,billing=16; NumNodes=1
+JobID=11961; StateCompact=PD; tres_alloc=cpu=4,mem=31200M,node=1,billing=4; NumNodes=1

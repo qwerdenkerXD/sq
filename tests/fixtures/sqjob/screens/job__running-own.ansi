@@ -1,0 +1,15 @@
+[1;36m▌ [0m[1m11950[0m  bwa-align · fsill
+[2mstate and times[0m
+  state     [32mRUNNING[0m on fb2-bioinf (LocalQ)
+  time      2h13m elapsed · 21h46m left of 1d00h
+  started   2026-10-20 15:41 (2h ago)
+[2mresources[0m
+  CPUs      16 allocated
+  memory    64G allocated
+[2mfiles[0m
+  work dir  /media/BioNAS2/fsill/wgs
+  stdout    /media/BioNAS2/fsill/wgs/logs/bwa-align-11950.out
+  stderr    /media/BioNAS2/fsill/wgs/logs/bwa-align-11950.err
+[2mefficiency[0m
+  MEM [32m█[32m█[32m█[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[0m  19.2%  12/64G now
+  [2m↳ CPU efficiency comes when the job ends[0m

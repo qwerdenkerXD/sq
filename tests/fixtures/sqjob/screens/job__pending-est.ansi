@@ -1,0 +1,13 @@
+[1;36m▌ [0m[1m11962[0m  hifiasm · hal
+[2mstate and times[0m
+  state       [33mPENDING[0m (Priority)
+  start       2026-10-20 21:35 (in 3h), Slurm's estimate
+  submitted   2026-10-20 15:54 (2h ago)
+[2mresources[0m
+  CPUs        48 requested
+  memory      375G requested
+  time limit  2d00h
+[2mfiles[0m
+  work dir    /media/BioNAS2/hal/asm
+  stdout      /media/BioNAS2/hal/asm/slurm-11962.out
+  stderr      into stdout

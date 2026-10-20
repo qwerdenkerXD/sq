@@ -1,0 +1,12 @@
+▌ 11960  flye-asm · hal
+state and times
+  state     RUNNING on fb2-bioinf (LocalQ)
+  time      5h02m elapsed · no time limit
+  started   2026-10-20 12:52 (5h ago)
+resources
+  CPUs      32 allocated
+  memory    250G allocated · its use is shown to hal only
+files
+  work dir  /media/BioNAS2/hal/asm
+  stdout    /media/BioNAS2/hal/asm/flye.11960.log
+  stderr    /media/BioNAS2/hal/asm/flye.11960.err

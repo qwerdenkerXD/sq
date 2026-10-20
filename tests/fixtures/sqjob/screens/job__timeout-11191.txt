@@ -1,0 +1,16 @@
+▌ 11191  j · hal
+state and times
+  state     TIMEOUT · exit 0/sig15: signal 15 (SIGTERM)
+  ran       12h00m on fb2-bioinf (LocalQ)
+  ended     2026-10-08 01:48 (304h ago)
+resources
+  CPUs      32 allocated
+  memory    32G allocated
+files
+  work dir  /media/x
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+efficiency
+  CPU ███▒▒▒▒▒▒▒▒▒▒▒▒▒  17.6%  2d19h of 16d00h
+  MEM ████▒▒▒▒▒▒▒▒▒▒▒▒  26.4%  8.5/32G peak (the batch script)
+  ↳ CPU time includes processes Slurm killed or never waited for (polled between two samples, so still a lower bound)
+  ↳ the batch script started before 2026-10-19 13:59 UTC (RSS accounting): memory shared between processes counted once per process; the peak may read high

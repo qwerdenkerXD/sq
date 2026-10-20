@@ -3450,7 +3450,11 @@ c_sub_stray() {   # D3, D6
 	sub_refused "sq: 'help' is not a subcommand; sq -h lists them (did you mean sq -h?)" help
 	sub_refused "sq: 'me' is not a subcommand; sq -h lists them (did you mean sq --me?)" me
 	sub_refused "sq: 'no-recent' is not a subcommand; sq -h lists them (did you mean sq --no-recent?)" --full no-recent
-	sub_refused "sq: '123' is not a subcommand; sq -h lists them (did you mean sq -j 123?)" 123
+	# SQJOB-v3's D6 changes: a job id alone, and "jobs", now point at sq job
+	sub_refused "sq: '123' is not a subcommand; sq -h lists them (did you mean sq job 123?)" 123
+	sub_refused "sq: 'jobs' is not a subcommand; sq -h lists them (did you mean sq job?)" jobs 123
+	sub_refused "sq: 'JOB' is not a subcommand; sq -h lists them (did you mean sq job?)" JOB 123
+	sub_refused "sq: '123_4' is not a subcommand; sq -h lists them" 123_4
 	sub_refused "sq: '6' is not a subcommand; sq -h lists them (did you mean sq -j 5,6?)" -j 5 6
 	sub_refused "sq: '6' is not a subcommand; sq -h lists them (did you mean sq -j 5,6?)" --jobs=5 6
 	sub_refused "sq: cannot tell what 'i' belongs to after '-ao'; write the options apart, e.g. -a -o i" -ao i
@@ -3996,6 +4000,427 @@ l3
 }
 
 # ============================================================================
+# sq job JOBID (SQJOB-v3)
+# ============================================================================
+# Franz (2026-10-20): grouped sections, the efficiency as the compact bar
+# lines; peak memory "Largest step total"; arrays "One summary line" over
+# "COMPLETED tasks only"; running "Memory only, say so"; CPU "The larger of
+# both"; the RSS date "Setting, off by default"; r2's screens "Accept as
+# rendered"; v3: an own running job's memory is JOBMEM's reading (no "peak so
+# far"), no "(whole cores)", "between two samples".  The pinned screens are
+# r2's (and r1's pending dependency) with those three changes.  Fixtures date
+# everything relative to the run (\{epoch...}, every age shown mid-bucket),
+# the screens' dates are masked, and SQ_PSS_SINCE is the switch 27h56m before
+# the run, as r2 had it (2026-10-19 15:59 CEST, rendered 2026-10-20 17:55 UTC).
+jfx=$fixtures/sqjob
+pss_ago=100560
+job_run() {   # job_run FIXTURE [VAR=value | -VAR]... -- [sq args]: sq_run as fsill, the PSS switch set
+	local fx=$1; shift
+	[[ $fx == /* ]] || fx=$jfx/$fx
+	sq_run "$fx" SQSTUB_UID=1041 SQ_PSS_SINCE=@$(( $(epoch_now) - pss_ago )) "$@"
+}
+job_mask() { sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}/<date>/g' "$1"; }   # the dates, as without_clock the clock
+job_is() { cmp -s <(job_mask "$1") <(job_mask "$OUT"); }   # job_is FILE: stdout is FILE, dates aside
+# job_fx NAME FILE: fixture NAME's FILE is stdin, a squeue-all after
+# job-defaults, a sacct after job-sacct-defaults; until given, squeue-all
+# forgot the job and sacct answers nothing.  Prints its directory
+job_fx() {
+	local d=$T_DIR/fx-$1
+	mkdir -p "$d"
+	case $2 in
+		squeue-all) { printf '@include %s\n' "$fixtures/_common/job-defaults"; cat; } > "$d/$2" ;;
+		sacct)      { printf '@include %s\n' "$fixtures/_common/job-sacct-defaults"; cat; } > "$d/$2" ;;
+		*)          cat > "$d/$2" ;;
+	esac
+	[ -f "$d/squeue-all" ] || printf '@stderr slurm_load_jobs error: Invalid job id specified\n@exit 1\n' > "$d/squeue-all"
+	[ -f "$d/sacct" ] || : > "$d/sacct"
+	printf '%s' "$d"
+}
+kv_is() {     # kv_is KEY VALUE: a line of the report is KEY, then VALUE after the key column
+	plain | K=$1 V=$2 gawk '{ k = ENVIRON["K"]; if (index($0, "  " k "  ") != 1) next
+		v = substr($0, length(k) + 3); sub(/^ +/, "", v); if (v == ENVIRON["V"]) f = 1 } END { exit !f }'
+}
+title_is() { [ "$(plain | head -n 1)" = "$1" ]; }
+notes_raw() { plain | gawk '/^ *↳ / { sub(/^ *↳ /, ""); print }'; }   # every ↳ line, in order
+notes() { notes_raw | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}/<date>/g'; }   # the same, dates masked
+notes_are() { [ "$(notes)" = "$(printf '%s\n' "$@")" ]; }   # notes_are TEXT...: exactly these, in this order (dates <date>)
+alloc_calls() { gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) ~ / -u / { n++ } END { print n+0 }' "$LOG"; }   # JOBMEM's
+
+c_job_screens() {   # Q2, Q3, acceptance 1
+	T_TITLE="the accepted sq job screens byte for byte, dates aside: r2's 12 with v3's three changes and r1's pending dependency, colour on and off"
+	local c ext flag
+	local -A id=([pending-est]=11962 [pending-dep]=11961 [running-own]=11950 [running-other]=11960 [finished-11912]=11912
+		[oom-11818]=11818 [oom-11818-nopss]=11818 [twotask-11584]=11584 [idle-11898]=11898
+		[arraytask-11367_211]=11367_211 [array-11367]=11367 [timeout-11191]=11191 [exclusive-10866]=10866)
+	for c in finished-11912 twotask-11584 oom-11818 oom-11818-nopss idle-11898 running-own running-other pending-est \
+	         pending-dep arraytask-11367_211 array-11367 timeout-11191 exclusive-10866; do
+		for flag in --color --no-color; do
+			ext=ansi; [ $flag = --color ] || ext=txt
+			if [ $c = oom-11818-nopss ]; then job_run oom-11818 -SQ_PSS_SINCE -- $flag job "${id[$c]}"
+			else job_run $c -- $flag job "${id[$c]}"; fi
+			need "$c $flag: rc 0, stderr empty, the accepted screen" eval 'rc_is 0 && err_empty && job_is "$jfx/screens/job__$c.$ext"'
+		done
+	done
+	local cache=$T_DIR/cache; mkdir -p "$cache"
+	job_run running-own XDG_CACHE_HOME="$cache" -- --no-color job 11950
+	need "running-own: JOBMEM's allocation call and one sstat for fsill's running jobs, its snapshot written" eval '
+		rc_is 0 && [ "$(alloc_calls)" = 1 ] && argv_has squeue -h -u 1041 && [ "$(calls sstat)" = 1 ] &&
+		argv_has sstat -n -p -a --noconvert -j 11950 -o JobID,TRESUsageInTot && [ -s "$cache/sq/memuse" ]'
+	# dated 10 s back: WSL steps its clock back about 1.5 s every 30 s, and a
+	# snapshot a second "from the future" is a call
+	sed -i "1s/.*/$(( $(epoch_now) - 10 ))/" "$cache/sq/memuse" 2>/dev/null
+	job_run running-own XDG_CACHE_HOME="$cache" -- --no-color job 11950
+	need "running-own again within 30 s: the snapshot's reading, no JOBMEM call, the same screen" eval '
+		rc_is 0 && [ "$(alloc_calls)" = 0 ] && [ "$(calls sstat)" = 0 ] && job_is "$jfx/screens/job__running-own.txt"'
+}
+c_job_contract() {   # Q0
+	T_TITLE="sq job's calls: SQUEUE_*/SACCT_* unset, %s and 0 pinned, formats framed; cluster refusals; usage errors; het refused; a gone reader, a full disk, signals"
+	local n n2 want f sig rc fx
+	job_run finished-11912 -- --no-color job 11912
+	want=$T_DIR/want; cp "$OUT" "$want"
+	need "plain: rc 0, stderr empty" eval 'rc_is 0 && err_empty'
+	job_run finished-11912 SQUEUE_USERS=nobody SQUEUE_PARTITION=x SQUEUE_SORT=bogus SQUEUE_FORMAT=%i SQUEUE_STATES=PD \
+		SACCT_FORMAT=JobID SACCT_FEDERATION=1 SACCT_LOCAL=1 SLURM_TIME_FORMAT=relative SLURM_BITSTR_LEN=5 -- --no-color job 11912
+	need "inherited SQUEUE_*, SACCT_*, time and bitstring formats: rc 0, the same report" eval 'rc_is 0 && err_empty && cmp -s "$want" "$OUT"'
+	need "no call saw an SQUEUE_* but the SQUEUE_FORMAT2 sq set, nor any SACCT_*" eval 'only_format2 && ! grep "^CALL" "$LOG" | grep -q "SACCT_"'
+	need "every call: SLURM_TIME_FORMAT=%s, SLURM_BITSTR_LEN=0" eval 'all_calls_env SLURM_TIME_FORMAT %s squeue sacct && all_calls_env SLURM_BITSTR_LEN 0 squeue sacct'
+	n=$(env_of squeue 1 SQ_NONCE) n2=$(env_of sacct 1 SQ_NONCE2)
+	need "squeue -h --jobs=11912 -t all: sq log's 17 fields and 12 more in SQUEUE_FORMAT2, each ending in the queue nonce, which no command line carries" eval '
+		argv_has squeue -h --jobs=11912 -t all && [ "$(env_of squeue 1 SQUEUE_FORMAT)" = "(unset)" ] &&
+		[ "$(env_of squeue 1 SQUEUE_FORMAT2)" = "$(for f in JobID ArrayJobID ArrayTaskID HetJobID HetJobOffset StateCompact RestartCnt BatchFlag BatchHost WorkDir STDOUT STDERR UserName Name StartTime Reason exit_code Partition SubmitTime EndTime TimeLimit TimeLeft TimeUsed Dependency NumCPUs NumNodes tres-alloc NodeList UserID; do printf "%s:%s," "$f" "$n"; done | sed "s/,\$//")" ] &&
+		! grep "^CALL" "$LOG" | cut -f3 | grep -qF "$n"'
+	need "sacct -p --delimiter=<a nonce of its own> -n --noconvert -a -j 11912 -o the 22 fields, never -X or -D" eval '
+		argv_has sacct -p "--delimiter=$n2" -n --noconvert -a -j 11912 -o JobID,JobIDRaw,UID,User,State,ExitCode,ElapsedRaw,AllocCPUS,ReqCPUS,ReqTRES,AllocTRES,TotalCPU,TRESUsageInTot,TRESUsageInMax,NTasks,Submit,Start,End,NodeList,Partition,WorkDir,JobName &&
+		argv_lacks sacct -X && argv_lacks sacct -D && [ "$n2" != "$n" ]'
+	need "one squeue and one sacct call, no sstat (not a running job)" eval '[ "$(calls squeue)" = 1 ] && [ "$(calls sacct)" = 1 ] && [ "$(calls sstat)" = 0 ]'
+	job_run finished-11912 SQ_FMT=bogus%% SQ_CENTER=x SQ_COMPACT=7 SQ_RECENT_MAX=-1 -- --no-color job -- 11912
+	need "a dashboard setting neither applied nor validated; -- before the id: the same report" eval 'rc_is 0 && err_empty && cmp -s "$want" "$OUT"'
+	job_run finished-11912 -- --me --no-bell --full --no-color job 11912
+	need "valueless dashboard flags before job: the same report" eval 'rc_is 0 && cmp -s "$want" "$OUT"'
+	# refused before any call
+	sub_refused "sq job: sq job reads this cluster only; drop -M" -M other job 11912
+	sub_refused "sq job: sq job reads this cluster only; drop --clusters" --clusters=other job 11912
+	sub_refused "sq job: sq job reads this cluster only; drop --federation" --federation job 11912
+	sub_refused "sq job: sq job reads this cluster only; drop --sibling" --sibling -p main job 11912
+	for f in other ""; do
+		sq_run empty SLURM_CLUSTERS="$f" -- job 11912
+		need "SLURM_CLUSTERS='$f': rc 2, refused, no call" eval 'rc_is 2 && out_empty && no_slurm_call && err_is "sq job: sq job reads this cluster only; unset SLURM_CLUSTERS"'
+	done
+	sub_refused "sq: subcommands come first, before any option that takes a value: sq job …" -p main job 11912
+	sub_refused "sq job: which job? e.g. sq job 12345" job
+	sub_refused "sq job: one job at a time, not '1' and '2'; e.g. sq job 12345" job 1 2
+	sub_refused "sq job: '-x' is not an option of sq job (sq job -h); e.g. sq job 12345" job -x 1
+	sub_refused "sq job: --help takes no value; write it on its own, e.g. sq job --help" job --help=x
+	for f in abc 0 00 4294967294 1_99999999 1_4000001 1+ 12_3+1 '' -1; do
+		sub_refused "sq job: '$f' is not a job id; e.g. sq job 12345, an array task 12345_4 or an array 12345" job -- "$f"
+	done
+	sq_run empty -- job -h
+	need "sq job -h: rc 0, its help on stdout, no Slurm call" eval 'rc_is 0 && has "usage: sq job JOBID" && has "SQ_PSS_SINCE" && err_empty && no_slurm_call'
+	sq_run empty -- -h
+	need "sq -h names it" has "sq job JOBID"
+	sq_run empty -- job 10646+1
+	need "a het component typed: rc 1, refused, no call" eval 'rc_is 1 && out_empty && no_slurm_call && err_is "sq job: het jobs are not supported yet"'
+	# the report's reader gone before it is written: quietly 0; a full disk: 1
+	fx=$jfx/finished-11912
+	sq_env "$fx" SQSTUB_UID=1041 -- job 11912
+	env -i "${ENVLIST[@]}" "$bound" -k 2 30 "$sq" "${SQ_ARGV[@]}" 2> "$ERR" < /dev/null | true; RC=${PIPESTATUS[0]}; note_run
+	need "| true (its reader gone): rc 0, stderr empty" eval 'rc_is 0 && err_empty'
+	sq_env "$fx" SQSTUB_UID=1041 -- job 11912
+	env -i "${ENVLIST[@]}" "$bound" -k 2 30 "$sq" "${SQ_ARGV[@]}" > /dev/full 2> "$ERR" < /dev/null; RC=$?; note_run
+	need "> /dev/full: rc 1, says why" eval 'rc_is 1 && err_is "sq job: cannot write the report: No space left on device"'
+	# a signal while Slurm is asked: 128+N, nothing left
+	fx=$(job_fx hang squeue-all <<<'@hang 20')
+	for sig in INT:130 TERM:143 HUP:129; do
+		sq_start "$fx" SQSTUB_UID=1041 SQ_TIMEOUT=25 -- job 11912
+		waits_for 10 eval 'grep -q "^CALL	squeue" "$LOG"'
+		sleep 0.3; kill -"${sig%:*}" "$SQ_PID" 2>/dev/null
+		sq_finish "$RUN" 20
+		need "SIG${sig%:*} during squeue: rc ${sig#*:}, nothing left, the tmp dir gone" eval 'rc_is '"${sig#*:}"' && nothing_at_exit && waits_for 3 nothing_left && [ -z "$(ls -A "$RUN/tmp")" ]'
+	done
+}
+c_job_select() {   # Q1
+	T_TITLE="which job: a task by its array id, by its unique id, one still in a pending array, an array cancelled pending, het jobs, an unknown one, a one-task array; own by squeue's uid, else accounting's"
+	local d
+	d=$(job_fx task squeue-all <<'EOF'
+JobID=11955; ArrayJobID=11367; ArrayTaskID=212; StateCompact=R; UserName=hal; UserID=1033; Name=sweep; tres_alloc=cpu=2,mem=15600M,node=1,billing=2; TimeUsed=1:00:00; TimeLeft=UNLIMITED; TimeLimit=UNLIMITED; STDOUT=/w/sweep_%A_%a.out; STDERR=/w/sweep_%A_%a.out; EndTime=N/A
+EOF
+)
+	job_run "$d" -- --no-color job 11367_212
+	need "N_T running, from squeue alone: rc 0, its unique id in the title, %A_%a in its path, accounting's silence noted nowhere" eval '
+		rc_is 0 && err_empty && title_is "▌ 11367_212 (unique id 11955)  sweep · hal" && kv_is state "RUNNING on fb2-bioinf (LocalQ)" &&
+		kv_is stdout /w/sweep_11367_212.out && kv_is stderr "into stdout" && [ -z "$(notes)" ]'
+	need "... asked as --jobs=11367_212 and -j 11367_212" eval 'argv_has squeue -h --jobs=11367_212 -t all && argv_has sacct -j 11367_212'
+	job_run rawid-11559 -- --no-color job 11559
+	need "a task by its unique id (11559, real rows): rc 0, that task, the id in its title, no note about it" eval '
+		rc_is 0 && err_empty && title_is "▌ 11367_230 (unique id 11559)  j · hal" && kv_is state "COMPLETED · exit 0" && ! notes | grep -q 11559'
+	d=$(job_fx meta squeue-all <<'EOF'
+JobID=11367; ArrayJobID=11367; ArrayTaskID=215-216%5; StateCompact=PD; Reason=JobArrayTaskLimit; UserName=hal; UserID=1033; Name=sweep; NumCPUs=1; tres_alloc=cpu=1,mem=7800M,node=1,billing=1; TimeLimit=UNLIMITED; TimeLeft=UNLIMITED; TimeUsed=0:00; StartTime=N/A; EndTime=N/A; NodeList=; BatchHost=; STDOUT=/w/slurm-11367.out; STDERR=/w/slurm-11367.out
+EOF
+)
+	job_run "$d" -- --no-color job 11367_216
+	need "a task still in a pending array's record: rc 0, that task without a unique id, the record's reason, its own default path" eval '
+		rc_is 0 && err_empty && title_is "▌ 11367_216  sweep · hal" && kv_is state "PENDING (JobArrayTaskLimit)" &&
+		kv_is CPUs "1 requested" && kv_is memory "7.6G requested" && kv_is "time limit" none && kv_is stdout /w/slurm-11367_216.out'
+	job_run "$d" -- --no-color job 11367_217
+	need "a task outside that record: rc 1, unknown" eval 'rc_is 1 && out_empty && err_is "sq job: Slurm does not know job 11367_217 (neither the queue nor accounting has it)"'
+	job_run pdarray-10251 -- --no-color job 10251_2
+	need "a task of a pending array, cancelled and purged (10251, real rows): rc 1, as an unknown job" eval '
+		rc_is 1 && out_empty && err_is "sq job: Slurm does not know job 10251_2 (neither the queue nor accounting has it)"'
+	job_run pdarray-10251 -- --no-color job 10251
+	need "that array: its 4 tasks cancelled, not pending (the attack's 10251 finding)" eval '
+		rc_is 0 && title_is "▌ 10251  j · hal · array of 4: 4 cancelled" && notes_are "no task has completed yet"'
+	job_run het-10646 -- --no-color job 10646
+	need "a het job's leader (10646, real rows): rc 1, refused" eval 'rc_is 1 && out_empty && err_is "sq job: het jobs are not supported yet"'
+	d=$(job_fx hetq squeue-all <<<'JobID=901; ArrayJobID=901; HetJobID=900; HetJobOffset=1; StateCompact=R')
+	job_run "$d" -- --no-color job 901
+	need "a het component squeue knows: rc 1, refused" eval 'rc_is 1 && out_empty && err_is "sq job: het jobs are not supported yet"'
+	d=$(job_fx unknown sacct < /dev/null)
+	job_run "$d" -- --no-color job 99
+	need "known to neither: rc 1" eval 'rc_is 1 && out_empty && err_is "sq job: Slurm does not know job 99 (neither the queue nor accounting has it)"'
+	d=$(job_fx one sacct <<'EOF'
+JobID=600_0; JobIDRaw=600; TotalCPU=15:00.000
+JobID=600_0.batch; JobIDRaw=600.batch; UID=; User=; TotalCPU=15:00.000; TRESUsageInTot=cpu=00:15:00,mem=1073741824; TRESUsageInMax=cpu=00:15:00,mem=1073741824; NTasks=1
+EOF
+)
+	job_run "$d" -- --no-color job 600
+	need "an array of one task: the array view" eval '
+		rc_is 0 && title_is "▌ 600  job · alice · array of 1: 1 done" &&
+		has "  CPU ████▒▒▒▒▒▒▒▒▒▒▒▒  25.0%  median · min 25.0% (600_0) · max 25.0%" && notes_are "over the 1 completed task; the weakest: sq job 600_0"'
+	# own: squeue's uid, else accounting's
+	d=$jfx/running-own
+	job_run "$d" -- --no-color job 11950
+	need "squeue's UserID 1041 is fsill's: the MEM line" has "12/64G now"
+	mkdir -p "$T_DIR/fx-other"; cp "$d"/* "$T_DIR/fx-other/"; sed -i 's/UserID=1041/UserID=1033/' "$T_DIR/fx-other/squeue-all"
+	job_run "$T_DIR/fx-other" -- --no-color job 11950
+	need "squeue's UserID another's, accounting's fsill's: squeue wins, not own" eval 'rc_is 0 && lacks "efficiency" && kv_is memory "64G allocated · its use is shown to fsill only" && [ "$(calls sstat)" = 0 ]'
+	printf '@stderr slurm_load_jobs error: Unable to contact slurm controller (connect failure)\n@exit 1\n' > "$T_DIR/fx-other/squeue-all"
+	sed -i 's/UID=1041/UID=1033/' "$T_DIR/fx-other/sacct"
+	job_run "$T_DIR/fx-other" -- --no-color job 11950
+	need "squeue down, accounting's UID another's: not own" eval 'rc_is 0 && lacks "efficiency" && has "its use is shown to fsill only"'
+	sed -i 's/UID=1033/UID=1041/' "$T_DIR/fx-other/sacct"
+	job_run "$T_DIR/fx-other" -- --no-color job 11950
+	need "squeue down, accounting's UID fsill's: own, its MEM line (the allocation call answers apart)" has "12/64G now"
+}
+c_job_branches() {   # Q2, Q3
+	T_TITLE="the report's branches: over 100 %, never started (real rows and cancelled pending), squeue ended before accounting, interactive, no steps, the cap while running, an array with none completed"
+	local d
+	d=$(job_fx over sacct <<'EOF'
+JobID=800; TotalCPU=30:00.000
+JobID=800.batch; JobIDRaw=800.batch; UID=; User=; TotalCPU=30:00.000; TRESUsageInTot=cpu=00:30:00,mem=5368709120; TRESUsageInMax=cpu=00:30:00,mem=5368709120; NTasks=1
+EOF
+)
+	job_run "$d" -- --color job 800
+	need "over its allocation: 125.0 % as is, the bar full and bold red, the figure uncoloured" eval '
+		rc_is 0 && has "  MEM ████████████████ 125.0%  5/4G peak (the batch script)" &&
+		[ "$(LC_ALL=C grep -o "$ESC\[1;31m█" "$OUT" | wc -l)" = 16 ] && has "  CPU ████████▒▒▒▒▒▒▒▒  50.0%  30m00s of 1h00m"'
+	job_run neverstarted-10195 -- --no-color job 10195
+	need "never started (10195, real rows): no node, no ran line, the request, 'it never started', no bars" eval '
+		rc_is 0 && err_empty && kv_is state "FAILED · exit 1" && ! kv_is ran "0s on None assigned (LocalQ)" && lacks "  ran " &&
+		kv_is CPUs "1 requested" && kv_is memory "1.9T requested" && notes_are "it never started" && ! matches "^  (CPU|MEM) "'
+	d=$(job_fx cxl sacct <<<'JobID=800; State=CANCELLED by 1050; AllocCPUS=0; AllocTRES=; ElapsedRaw=0; Start=None; NodeList=None assigned')
+	job_run "$d" -- --no-color job 800
+	need "cancelled while pending (Start None): the same" eval '
+		rc_is 0 && kv_is state "CANCELLED · exit 0" && lacks "  ran " && kv_is CPUs "2 requested" && kv_is memory "4G requested" && notes_are "it never started"'
+	d=$(job_fx lag squeue-all <<<'JobID=800'); job_fx lag sacct <<<'JobID=800; State=RUNNING; End=Unknown; ElapsedRaw=1200' > /dev/null
+	job_run "$d" -- --no-color job 800
+	need "squeue says COMPLETED, accounting still RUNNING: squeue's state and times, efficiency only that accounting has no end yet" eval '
+		rc_is 0 && kv_is state "COMPLETED · exit 0" && kv_is ran "30m00s on fb2-bioinf (LocalQ)" && matches "^  ended +.* \(15m ago\)$" &&
+		notes_are "accounting has not recorded its end yet" && ! matches "^  (CPU|MEM) "'
+	d=$(job_fx interactive squeue-all <<<'JobID=800; BatchFlag=0'); job_fx interactive sacct <<<'JobID=800' > /dev/null
+	job_run "$d" -- --no-color job 800
+	need "an interactive job: its output went to its terminal" eval 'rc_is 0 && kv_is output "its terminal (an interactive job)" && lacks "stdout"'
+	d=$(job_fx nosteps sacct <<<'JobID=800; TotalCPU=30:00')
+	job_run "$d" -- --no-color job 800
+	need "no step rows: the job row's TotalCPU, no MEM line" eval '
+		rc_is 0 && has "  CPU ████████▒▒▒▒▒▒▒▒  50.0%  30m00s of 1h00m" && ! matches "^  MEM "'
+	d=$(job_fx capr squeue-all <<<'JobID=800; StateCompact=R; EndTime=N/A'); job_fx capr sacct <<<'JobID=800; State=RUNNING; ReqCPUS=1; End=Unknown' > /dev/null
+	job_run "$d" -- --no-color job 800
+	need "another's running job given more CPUs than asked: the cap note under resources, under the values; no efficiency" eval '
+		rc_is 0 && kv_is CPUs "2 allocated (1 requested)" && plain | grep -qxF "            ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%" &&
+		lacks efficiency && kv_is memory "4G allocated · its use is shown to alice only"'
+	d=$(job_fx nonedone squeue-all <<<'JobID=700; ArrayJobID=700; ArrayTaskID=0-3; StateCompact=PD; Reason=Dependency; NodeList=; EndTime=N/A')
+	job_fx nonedone sacct <<<'JobID=700_[0-3]; JobIDRaw=700; State=PENDING; AllocCPUS=0; ElapsedRaw=0; Start=Unknown; End=Unknown' > /dev/null
+	job_run "$d" -- --no-color job 700
+	need "an array with no task completed: the counts, the pending reason, no bars" eval '
+		rc_is 0 && title_is "▌ 700  job · alice · array of 4: 4 pending" && notes_are "no task has completed yet; pending (Dependency)" && ! matches "^  (CPU|MEM) "'
+}
+c_job_own() {   # Q2: an own running job's memory is JOBMEM's
+	T_TITLE="an own running job's MEM line is JOBMEM's reading: a fresh snapshot is used (no sstat, no allocation call), a stale one renewed for all own jobs in the dashboard's format; ? and !; the dashboard after sq job calls nothing"
+	local d=$T_DIR/fx-own f cache=$T_DIR/cacheA cache2=$T_DIR/cacheB first
+	mkdir -p "$d" "$cache/sq" "$cache2/sq"
+	for f in sinfo squeue squeue-alloc squeue-tres sstat; do printf '@include %s\n' "$fixtures/jobmem/$f" > "$d/$f"; done
+	{ printf '@include %s\n' "$fixtures/_common/job-defaults"
+	  echo 'JobID=11898; ArrayJobID=11898; StateCompact=R; UserName=fsill; UserID=1041; Name=kraken2; NumCPUs=8; tres_alloc=cpu=8,mem=32G,node=1,billing=8; TimeUsed=2:03:19; TimeLeft=9:56:41; TimeLimit=12:00:00; StartTime=\{epoch-2h03m30s}; EndTime=N/A'; } > "$d/squeue-all"
+	{ printf '@include %s\n' "$fixtures/_common/job-sacct-defaults"
+	  echo 'JobID=11898; JobIDRaw=11898; UID=1041; User=fsill; State=RUNNING; ElapsedRaw=7399; Elapsed=02:03:19; AllocCPUS=8; ReqCPUS=8; ReqTRES=billing=8,cpu=8,mem=32G,node=1; AllocTRES=billing=8,cpu=8,mem=32G,node=1; Start=\{epoch-2h03m30s}; End=Unknown; JobName=kraken2'; } > "$d/sacct"
+	snap_of() { printf '%s/sq/memuse' "$1"; }
+	# age CACHE SECONDS: the snapshot dated that far back.  A fresh one is
+	# dated 10 s back before it is relied on: WSL steps its clock back about
+	# 1.5 s every 30 s, and a snapshot a second "from the future" is a call
+	age() { sed -i "1s/.*/$(( $(epoch_now) - $2 ))/" "$(snap_of "$1")" 2>/dev/null; }
+	# the dashboard first, then sq job within 30 s, then the dashboard again
+	mem_run "$d" SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+	need "the dashboard: rc 0, one allocation call, one sstat, the snapshot written" eval 'rc_is 0 && [ "$(alloc_calls)" = 1 ] && [ "$(calls sstat)" = 1 ] && [ -s "$(snap_of "$cache")" ]'
+	first=$RUN/first; without_clock "$OUT" > "$first"; age "$cache" 10; cp "$(snap_of "$cache")" "$T_DIR/dash.memuse"
+	job_run "$d" XDG_CACHE_HOME="$cache" -- --color job 11898
+	need "sq job within 30 s: rc 0, no sstat, no allocation call, the snapshot's reading: 31/32G, red as JOBMEM colours 96.8 %" eval '
+		rc_is 0 && err_empty && [ "$(calls sstat)" = 0 ] && [ "$(alloc_calls)" = 0 ] &&
+		has "  MEM ███████████████▒  96.8%  31/32G now" && LC_ALL=C grep -q "$ESC\[31m█" "$OUT" && notes_are "CPU efficiency comes when the job ends"'
+	need "... and the snapshot left as the dashboard wrote it" cmp -s "$(snap_of "$cache")" "$T_DIR/dash.memuse"
+	age "$cache" 10
+	mem_run "$d" SQ_WIDTH=110 XDG_CACHE_HOME="$cache" -- --color
+	need "the dashboard after it: rc 0, no sstat, the same screen" eval 'rc_is 0 && [ "$(calls sstat)" = 0 ] && cmp -s "$first" <(without_clock "$OUT")'
+	# sq job first: it renews the snapshot for all of fsill's running jobs, as the dashboard would
+	job_run "$d" XDG_CACHE_HOME="$cache2" -- --color job 11898
+	need "sq job with no snapshot: the allocation call (squeue -h -u 1041), one sstat for all 8 running jobs, the reading shown" eval '
+		rc_is 0 && err_empty && [ "$(alloc_calls)" = 1 ] && argv_has squeue -h -u 1041 &&
+		[ "$(calls sstat)" = 1 ] && argv_has sstat -n -p -a --noconvert -j 11895,11898,11902,11903,11904,11905,11906,11908 -o JobID,TRESUsageInTot &&
+		has "96.8%  31/32G now"'
+	need "... the snapshot in the dashboard's format: an epoch, then the same job lines" eval '
+		head -n 1 "$(snap_of "$cache2")" 2>/dev/null | grep -qxE "[0-9]+" && cmp -s <(tail -n +2 "$(snap_of "$cache2")") <(tail -n +2 "$T_DIR/dash.memuse") &&
+		[ "$(ls -A "$cache2/sq")" = memuse ]'
+	age "$cache2" 10
+	mem_run "$d" SQ_WIDTH=110 XDG_CACHE_HOME="$cache2" -- --color
+	need "the dashboard within 30 s of that sq job: no sstat, the dashboard's screen" eval 'rc_is 0 && [ "$(calls sstat)" = 0 ] && cmp -s "$first" <(without_clock "$OUT")'
+	age "$cache2" 40
+	job_run "$d" XDG_CACHE_HOME="$cache2" -- --color job 11898
+	need "a snapshot 40 s old: renewed, one allocation call and one sstat" eval '
+		rc_is 0 && [ "$(alloc_calls)" = 1 ] && [ "$(calls sstat)" = 1 ] && [ "$(head -n 1 "$(snap_of "$cache2")" 2>/dev/null)" -ge "$(( $(epoch_now) - 10 ))" ] 2>/dev/null'
+	# ? and !, as JOBMEM marks them
+	grep -v '^11898	' "$T_DIR/dash.memuse" > "$(snap_of "$cache2")"; age "$cache2" 10
+	job_run "$d" XDG_CACHE_HOME="$cache2" -- --color job 11898
+	need "not in a fresh snapshot (started since): a dim ?, the use not known, no call" eval '
+		rc_is 0 && [ "$(calls sstat)" = 0 ] && has "  MEM ················         ?/32G now" && LC_ALL=C grep -qF "$ESC[2m?$ESC[0m/32G now" "$OUT"'
+	printf '@stderr slurm_load_jobs error: Socket timed out on send/recv operation\n@exit 1\n' > "$d/squeue-alloc"
+	age "$cache2" 40
+	job_run "$d" XDG_CACHE_HOME="$cache2" -- --color job 11898
+	need "the allocation call failing: a red !, no sstat" eval '
+		rc_is 0 && [ "$(alloc_calls)" = 1 ] && [ "$(calls sstat)" = 0 ] && has "  MEM ················         !/32G now" && LC_ALL=C grep -qF "$ESC[31m!$ESC[0m/32G now" "$OUT"'
+	printf '@include %s\n' "$fixtures/jobmem/squeue-alloc" > "$d/squeue-alloc"
+	{ grep -v '^JobID=11898' "$fixtures/jobmem/sstat"; echo '@stderr sstat: error: slurm_job_step_stat: there was an error with the request to fb2-bioinf rc = Invalid user id for StepId=11898.batch'; } > "$d/sstat"
+	rm -f "$(snap_of "$cache2")"
+	job_run "$d" XDG_CACHE_HOME="$cache2" -- --no-color job 11898
+	need "sstat failing for it: !" eval 'rc_is 0 && [ "$(calls sstat)" = 1 ] && has "  MEM ················         !/32G now"'
+}
+c_job_notes() {   # Q4
+	T_TITLE="the notes, each once and in order: single (cap, polled, OOM, RSS, multi-task), array (cap, polled tasks, pointer, RSS tasks, multi-task tasks); mixed CPUs: no cap"
+	local d
+	d=$(job_fx all sacct <<'EOF'
+JobID=800; State=OUT_OF_MEMORY; ExitCode=0:125; ReqCPUS=1; Start=\{epoch-30h}; Submit=\{epoch-30h}
+JobID=800.batch; JobIDRaw=800.batch; UID=; User=; State=OUT_OF_MEMORY; ExitCode=0:125; TotalCPU=00:01.000; TRESUsageInTot=cpu=00:00:01,mem=10485760; TRESUsageInMax=cpu=00:00:01,mem=10485760; NTasks=1; Start=\{epoch-30h}
+JobID=800.0; JobIDRaw=800.0; UID=; User=; State=OUT_OF_MEMORY; ExitCode=0:125; TotalCPU=00:10.000; TRESUsageInTot=cpu=00:00:05,mem=2147483648; TRESUsageInMax=cpu=00:20:00,mem=1073741824; NTasks=2; Start=\{epoch-30h}
+EOF
+)
+	job_run "$d" TZ=CEST-2 -- --no-color job 800
+	need "single, all five: cap, polled, OOM, RSS, multi-task, in that order" eval '
+		rc_is 0 && notes_are "1 requested CPU became 2: a program running 1 thread reaches at most 50%" \
+			"CPU time includes processes Slurm killed or never waited for (polled between two samples, so still a lower bound)" \
+			"OUT_OF_MEMORY: it hit its 4G limit between two samples; the peak shown is too low" \
+			"step 0 started before <date> CEST (RSS accounting): memory shared between processes counted once per process; the peak may read high" \
+			"step 0 ran 2 tasks: its peak adds up each task'"'"'s own peak, an upper bound"'
+	need "... CPU from the polled 20 min, memory from step 0's total" eval 'has "  CPU █████▒▒▒▒▒▒▒▒▒▒▒  33.4%  20m01s of 1h00m" && has "  MEM ████████▒▒▒▒▒▒▒▒  50.0%  2/4G peak (step 0)"'
+	job_run "$d" -SQ_PSS_SINCE -- --no-color job 800
+	need "SQ_PSS_SINCE unset: no RSS note" eval 'rc_is 0 && [ "$(notes | wc -l)" = 4 ] && ! notes | grep -q RSS'
+	d=$(job_fx arr sacct <<'EOF'
+JobID=700_1; JobIDRaw=701; ReqCPUS=1; TotalCPU=00:00.100
+JobID=700_1.batch; JobIDRaw=701.batch; UID=; User=; TotalCPU=00:00.100; TRESUsageInTot=cpu=00:00:00,mem=1073741824; TRESUsageInMax=cpu=00:45:00,mem=1073741824; NTasks=1
+JobID=700_2; JobIDRaw=702; ReqCPUS=1; TotalCPU=15:00.000; Start=\{epoch-30h}
+JobID=700_2.batch; JobIDRaw=702.batch; UID=; User=; TotalCPU=00:00.100; TRESUsageInTot=cpu=00:00:00,mem=10485760; TRESUsageInMax=cpu=00:00:00,mem=10485760; NTasks=1; Start=\{epoch-30h}
+JobID=700_2.0; JobIDRaw=702.0; UID=; User=; TotalCPU=15:00.000; TRESUsageInTot=cpu=00:15:00,mem=3221225472; TRESUsageInMax=cpu=00:07:30,mem=1610612736; NTasks=2; Start=\{epoch-30h}
+JobID=700_3; JobIDRaw=703; State=FAILED; ExitCode=1:0
+EOF
+)
+	job_run "$d" TZ=UTC -- --no-color job 700
+	need "array: counts, then cap, polled tasks, the pointer to the weakest, RSS tasks, multi-task tasks, in that order" eval '
+		rc_is 0 && title_is "▌ 700  job · alice · array of 3: 2 done · 1 failed" &&
+		has "  CPU ████████▒▒▒▒▒▒▒▒  50.0%  median · min 25.0% (700_2) · max 75.0% · 2 CPUs per task (1 requested)" &&
+		has "  MEM ████████▒▒▒▒▒▒▒▒  50.0%  median · min 25.0% (700_1) · max 75.0%" &&
+		notes_are "1 requested CPU became 2: a program running 1 thread reaches at most 50%" \
+			"1 task: CPU time includes processes Slurm killed or never waited for (polled between two samples, so still a lower bound)" \
+			"over the 2 completed tasks; the weakest: sq job 700_2" \
+			"1 task started before <date> UTC (RSS accounting): shared memory counted once per process; their peaks may read high" \
+			"1 task peaked in a step of several tasks: that peak adds up each task'"'"'s own, an upper bound"'
+	sed -i 's/^JobID=700_2; JobIDRaw=702; ReqCPUS=1;/JobID=700_2; JobIDRaw=702; ReqCPUS=1; AllocCPUS=4; AllocTRES=billing=4,cpu=4,mem=4G,node=1;/' "$d/sacct"
+	job_run "$d" -SQ_PSS_SINCE -- --no-color job 700
+	need "tasks given different CPUs: no cap note, no 'per task'" eval 'rc_is 0 && ! notes | grep -q "requested CPU" && lacks "per task"'
+}
+c_job_pss() {   # Q6
+	T_TITLE="SQ_PSS_SINCE: each accepted form, printed back in sq's zone to the minute; empty is unset; anything else rc 2; the dashboard and sq log ignore it"
+	local at v ep shown bad
+	# a minute two days back: after twotask-11584's step 0 started (128h
+	# before the run), before it ended (none: it ended 128h ago too), so the
+	# note is due for every form that reads as a date in between
+	ep=$(( ($(epoch_now) - 2 * 86400) / 60 * 60 ))
+	shown=$(TZ=CEST-2 date -d @$ep '+%Y-%m-%d %H:%M CEST')
+	for v in "$(TZ=CEST-2 date -d @$ep '+%Y-%m-%d %H:%M')" "$(TZ=CEST-2 date -d @$ep '+%Y-%m-%d %H:%M:%S')" \
+	         "$(date -u -d @$ep '+%Y-%m-%d %H:%M UTC')" "$(TZ=CEST-2 date -d @$ep '+%Y-%m-%d %H:%M +0200')" \
+	         "$(TZ=CEST-2 date -d @$ep '+%Y-%m-%d %H:%M CEST')" "$(date -u -d @$ep '+%Y-%m-%dT%H:%MZ')" \
+	         "$(date -u -d @$ep '+%Y-%m-%dT%H:%M:%SZ')" "@$ep"; do
+		job_run twotask-11584 TZ=CEST-2 SQ_PSS_SINCE="$v" -- --no-color job 11584
+		need "SQ_PSS_SINCE='$v': rc 0, the RSS note at $shown" eval 'rc_is 0 && err_empty && notes_raw | grep -qF "step 0 started before $shown (RSS accounting)"'
+	done
+	v=$(TZ=CEST-2 date -d @$ep '+%Y-%m-%d')
+	job_run twotask-11584 TZ=CEST-2 SQ_PSS_SINCE="$v" -- --no-color job 11584
+	need "SQ_PSS_SINCE='$v' (a day): its midnight in sq's zone" eval 'rc_is 0 && notes_raw | grep -qF "step 0 started before $v 00:00 CEST (RSS accounting)"'
+	job_run twotask-11584 SQ_PSS_SINCE= -- --no-color job 11584
+	need "SQ_PSS_SINCE empty: unset, no RSS note" eval 'rc_is 0 && err_empty && ! notes | grep -q RSS'
+	for bad in yesterday 15:59 1 now-2hours 2026-13-40 "2026-10-19 25:00" "2026-10-19 15:59 XYZ" "2026-10-19  15:59" \
+	           2026-10-19T13:59 "2026-10-19T13:59 Z" @ @12x "@-5" "2026-10-19 15:59 CEST extra" "$(printf 'x\033[31my')"; do
+		job_run twotask-11584 SQ_PSS_SINCE="$bad" -- --no-color job 11584
+		need "SQ_PSS_SINCE='$bad': rc 2, no Slurm call, says so" eval '
+			rc_is 2 && out_empty && no_slurm_call &&
+			err_is "sq job: SQ_PSS_SINCE is no date sq job reads: '"'"'$(printf "%s" "$bad" | tr -d "\033")'"'"'; e.g. SQ_PSS_SINCE=\"2026-10-19 15:59 CEST\", 2026-10-19T13:59Z or @1792418340"'
+	done
+	sq_run empty SQ_PSS_SINCE=garbage --
+	need "the dashboard ignores it" eval 'rc_is 0 && err_empty && has "queue is empty"'
+	sq_run "$(log_fx pss <<<'StateCompact=CD
+@file create wd/out_500.log done\n')" SQ_PSS_SINCE=garbage -- log --no-follow 500
+	need "sq log ignores it" eval 'rc_is 0 && [ "$(cat "$OUT")" = done ]'
+}
+c_job_sources() {   # Q7
+	T_TITLE="one source down: the other's view and a dim line saying which (squeue down or unreadable, accounting down, hanging or unreadable, for an ended, a pending job and an array); both: rc 1"
+	local d
+	d=$(job_fx qdown squeue-all <<<'@stderr slurm_load_jobs error: Unable to contact slurm controller (connect failure)
+@exit 1'); cp "$jfx/finished-11912/sacct" "$d/sacct"
+	job_run "$d" -- --no-color job 11912
+	need "squeue down: rc 0, the view from accounting, the line under the title, the paths unknown for it, the efficiency" eval '
+		rc_is 0 && err_empty && [ "$(plain | sed -n 2p)" = "  ↳ squeue did not answer; shown from accounting" ] &&
+		kv_is output "unknown: squeue did not answer" && has "  CPU ████████▒▒▒▒▒▒▒▒  49.4%  8m14s of 16m40s" && kv_is ran "8m20s on fb2-bioinf (LocalQ)"'
+	printf '@raw garbage\n' > "$d/squeue-all"
+	job_run "$d" -- --no-color job 11912
+	need "squeue unreadable: the same, its own words" eval 'rc_is 0 && [ "$(plain | sed -n 2p)" = "  ↳ squeue answered what cannot be read; shown from accounting" ]'
+	d=$(job_fx adown sacct <<<'@stderr sacct: error: Problem talking to the database: Connection refused
+@exit 1'); cp "$jfx/finished-11912/squeue-all" "$d/squeue-all"
+	job_run "$d" -- --no-color job 11912
+	need "accounting down, an ended job: rc 0, squeue's view, the efficiency section saying why" eval '
+		rc_is 0 && err_empty && kv_is state "COMPLETED · exit 0" && kv_is ran "8m20s on fb2-bioinf (LocalQ)" && kv_is stdout /media/BioNAS2/fsill/rnaseq/logs/align-reads-11912.out &&
+		has "efficiency" && notes_are "accounting did not answer (sacct: error: Problem talking to the database: Connection refused)"'
+	printf '@hang 10\n' > "$d/sacct"
+	job_run "$d" -- --no-color job 11912
+	need "accounting hanging: within SQ_TIMEOUT (3 s)" eval 'rc_is 0 && notes_are "accounting did not answer within 3s"'
+	printf '@raw garbage\n' > "$d/sacct"
+	job_run "$d" -- --no-color job 11912
+	need "accounting unreadable: its own words" eval 'rc_is 0 && notes_are "accounting answered what cannot be read"'
+	cp "$jfx/pending-est/squeue-all" "$d/squeue-all"; printf '@hang 10\n' > "$d/sacct"
+	job_run "$d" -- --no-color job 11962
+	need "accounting hanging, a pending job: the line under the title" eval 'rc_is 0 && [ "$(plain | sed -n 2p)" = "  ↳ accounting did not answer within 3s" ] && lacks efficiency'
+	cp "$jfx/array-11367/squeue-all" "$d/squeue-all"
+	job_run "$d" -- --no-color job 11367
+	need "accounting hanging, an array: the counts squeue has, no bars, why" eval '
+		rc_is 0 && title_is "▌ 11367  sweep · hal · array of 5: 3 running · 2 pending" && notes_are "accounting did not answer within 3s" && ! matches "^  (CPU|MEM) "'
+	printf '@stderr slurm_load_jobs error: Unable to contact slurm controller (connect failure)\n@exit 1\n' > "$d/squeue-all"
+	printf '@stderr sacct: error: Problem talking to the database: Connection refused\n@exit 1\n' > "$d/sacct"
+	job_run "$d" -- --no-color job 11912
+	need "both down: rc 1, squeue's reason" eval 'rc_is 1 && out_empty && err_is "sq job: slurm unreachable · slurm_load_jobs error: Unable to contact slurm controller (connect failure)"'
+	printf '@stderr slurm_load_jobs error: Invalid job id specified\n@exit 1\n' > "$d/squeue-all"
+	job_run "$d" -- --no-color job 11912
+	need "squeue forgot it, accounting down: rc 1, accounting's reason" eval 'rc_is 1 && out_empty && err_is "sq job: slurm unreachable · sacct: error: Problem talking to the database: Connection refused"'
+	: > "$d/sacct"; printf '@stderr slurm_load_jobs error: Unable to contact slurm controller (connect failure)\n@exit 1\n' > "$d/squeue-all"
+	job_run "$d" -- --no-color job 11912
+	need "squeue down, accounting without it: rc 1, squeue's reason" eval 'rc_is 1 && err_is "sq job: slurm unreachable · slurm_load_jobs error: Unable to contact slurm controller (connect failure)"'
+}
+
+# ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
@@ -4030,6 +4455,7 @@ cases=(
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
 	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
 	sub_dispatch sub_stray log_follow log_now log_syntax log_paths log_stream
+	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

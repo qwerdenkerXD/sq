@@ -1,0 +1,14 @@
+[1;36m▌ [0m[1m11898[0m  fastqc-all · schroder
+[2mstate and times[0m
+  state     [32mCOMPLETED[0m · exit 0
+  ran       2h00m on fb2-bioinf (LocalQ)
+  ended     2026-10-19 18:20 (23h ago)
+[2mresources[0m
+  CPUs      32 allocated
+  memory    64G allocated
+[2mfiles[0m
+  work dir  /media/BioNAS2/schroder/qc
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+[2mefficiency[0m
+  CPU [2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[0m   0.0%  1s of 2d16h
+  MEM [2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[0m   0.3%  0.2/64G peak (the batch script)

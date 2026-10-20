@@ -1,0 +1,13 @@
+▌ 11962  hifiasm · hal
+state and times
+  state       PENDING (Priority)
+  start       2026-10-20 21:35 (in 3h), Slurm's estimate
+  submitted   2026-10-20 15:54 (2h ago)
+resources
+  CPUs        48 requested
+  memory      375G requested
+  time limit  2d00h
+files
+  work dir    /media/BioNAS2/hal/asm
+  stdout      /media/BioNAS2/hal/asm/slurm-11962.out
+  stderr      into stdout

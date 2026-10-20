@@ -1,0 +1,5 @@
+# sq job's squeue record (squeue -h --jobs=ID -t all -O sq log's fields and the
+# report's, SLURM_TIME_FORMAT=%s): job 800, alice's (uid 1050), COMPLETED a
+# quarter of an hour ago after 30 min on 2 CPUs, its output in /w; dates are
+# epochs (\{epoch...}), never near a bucket edge of an age
+@defaults JobID=800; ArrayJobID=800; ArrayTaskID=N/A; HetJobID=N/A; HetJobOffset=N/A; StateCompact=CD; RestartCnt=0; BatchFlag=1; BatchHost=fb2-bioinf.bioinf.local; WorkDir=/w; STDOUT=/w/out-%j.log; STDERR=/w/out-%j.log; UserName=alice; Name=job; StartTime=\{epoch-45m30s}; Reason=None; exit_code=0:0; Partition=LocalQ; SubmitTime=\{epoch-50m30s}; EndTime=\{epoch-15m30s}; TimeLimit=1:00:00; TimeLeft=30:00; TimeUsed=30:00; Dependency=(null); NumCPUs=2; NumNodes=1; tres_alloc=cpu=2,mem=4G,node=1,billing=2; NodeList=fb2-bioinf; UserID=1050

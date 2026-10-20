@@ -1,0 +1,16 @@
+▌ 11584  diamond-pair · hal
+state and times
+  state     COMPLETED · exit 0
+  ran       10m11s on fb2-bioinf (LocalQ)
+  ended     2026-10-15 09:20 (128h ago)
+resources
+  CPUs      2 allocated
+  memory    2G allocated
+files
+  work dir  /media/BioNAS2/hal/ortho
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+efficiency
+  CPU ████████████████  99.9%  20m21s of 20m22s
+  MEM ███████▒▒▒▒▒▒▒▒▒  44.2%  0.9/2G peak (step 0)
+  ↳ step 0 started before 2026-10-19 13:59 UTC (RSS accounting): memory shared between processes counted once per process; the peak may read high
+  ↳ step 0 ran 2 tasks: its peak adds up each task's own peak, an upper bound

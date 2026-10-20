@@ -1,0 +1,16 @@
+▌ 11912  align-reads · fsill
+state and times
+  state     COMPLETED · exit 0
+  ran       8m20s on fb2-bioinf (LocalQ)
+  ended     2026-10-20 17:52 (3m ago)
+resources
+  CPUs      2 allocated (1 requested)
+  memory    15.2G allocated (7.6G requested)
+files
+  work dir  /media/BioNAS2/fsill/rnaseq
+  stdout    /media/BioNAS2/fsill/rnaseq/logs/align-reads-11912.out
+  stderr    into stdout
+efficiency
+  CPU ████████▒▒▒▒▒▒▒▒  49.4%  8m14s of 16m40s
+  MEM █▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   7.9%  1.2/15.2G peak (step 0)
+  ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%

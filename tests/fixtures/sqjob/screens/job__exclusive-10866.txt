@@ -1,0 +1,15 @@
+▌ 10866  blastp-nr · schroder
+state and times
+  state     COMPLETED · exit 0
+  ran       1h00m on fb2-bioinf (LocalQ)
+  ended     2026-10-20 16:25 (1h ago)
+resources
+  CPUs      128 allocated (1 requested)
+  memory    976.5G allocated (7.6G requested)
+files
+  work dir  /media/BioNAS2/schroder/blast
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+efficiency
+  CPU ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   0.8%  59m01s of 5d08h
+  MEM ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   0.6%  6.0/976.5G peak (the batch script)
+  ↳ 1 requested CPU became 128: a program running 1 thread reaches at most 0.8%

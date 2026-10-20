@@ -1,0 +1,6 @@
+▌ 11367  sweep · hal · array of 197: 188 done · 3 failed · 1 cancelled · 3 running · 2 pending
+  CPU ████████▒▒▒▒▒▒▒▒  49.6%  median · min 12.3% (11367_57) · max 50.0% · 2 CPUs per task (1 requested)
+  MEM ███████▒▒▒▒▒▒▒▒▒  45.0%  median · min 3.1% (11367_88) · max 97.4%
+  ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%
+  ↳ over the 188 completed tasks; the weakest: sq job 11367_57
+  ↳ 75 tasks started before 2026-10-19 13:59 UTC (RSS accounting): shared memory counted once per process; their peaks may read high

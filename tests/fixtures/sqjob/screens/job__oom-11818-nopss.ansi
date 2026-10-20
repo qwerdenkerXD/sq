@@ -1,0 +1,16 @@
+[1;36m▌ [0m[1m11818[0m  kraken-build · schroder
+[2mstate and times[0m
+  state     [31mOUT_OF_MEMORY[0m · exit 0/oom
+  ran       34s on fb2-bioinf (LocalQ)
+  ended     2026-10-17 10:12 (79h ago)
+[2mresources[0m
+  CPUs      2 allocated (1 requested)
+  memory    500M allocated
+[2mfiles[0m
+  work dir  /media/BioNAS2/schroder/kraken
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+[2mefficiency[0m
+  CPU [2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[0m   1.5%  1s of 1m08s
+  MEM [2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[0m   0.6%  3/500M peak (the batch script)
+  [2m↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%[0m
+  [2m↳ OUT_OF_MEMORY: it hit its 500M limit between two samples; the peak shown is too low[0m
