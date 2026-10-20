@@ -273,6 +273,324 @@ first_why() {   # first_why NAME... (each set like why_of sets it)
 	for v in "$@"; do [ -z "${!v}" ] || { printf '%s' "${!v}"; return; }; done
 }
 
+# gawk functions shared by the programs below (the dashboard's, its memory
+# and allocation readers, sq job's), prepended to each
+shared_awk='
+# a size as Slurm prints it MB-based (%m, the mem= of tres-alloc), an exact
+# M/G/T/P suffix and maybe a fraction (1.50G), in MB; -1 for anything else
+# (%m prints 0 for --mem=0)
+function size_mb(x,   u) {
+  if (x !~ /^[0-9]+([.][0-9]+)?[MGTP]$/) return -1
+  u = substr(x, length(x))
+  return substr(x, 1, length(x) - 1) * (u == "G" ? 1024 : u == "T" ? 1048576 : u == "P" ? 1073741824 : 1)
+}
+# mem= of a tres-alloc text in MB, -1 when there is none
+function tres_mem(tres,   x) {
+  if (!match(tres, /(^|,)mem=[0-9]+([.][0-9]+)?[MGTP](,|$)/)) return -1
+  x = substr(tres, RSTART, RLENGTH); sub(/^,?mem=/, "", x); sub(/,$/, "", x)
+  return size_mb(x)
+}
+# Every shape squeue prints for %i / JobID, anchored at the start: plain, het
+# component (10646+0), array task (10646_3) and pending array
+# (10646_[0-9,12%2], 10646_[0-12:2]).  The bracket is the grammar Slurm prints
+# and nothing looser, because the anchor is what a forged record has to get
+# past: term ("," term)* ("%" N)?, term = N | N-N | N-N:N.  N is at most 7
+# digits (MaxArraySize cannot exceed 4000001), so no row can count 1e20 or
+# NaN, which passes every "< 1" test
+function id_anchor(   an, at) {
+  an = "[0-9]{1,7}"; at = an "(-" an "(:" an ")?)?"
+  return "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[" at "(," at ")*(%" an ")?\\]))?"
+}
+# How many jobs an id stands for: a Slurm bracket its tasks, any other id one.
+# 0 means it is no id, and the record gate skips it: the anchor cannot say
+# a<=b or step>0, and a bracket counted 0 or 1 would be a wrong number nobody
+# can see is wrong.  Each term is ONE anchored match, because a split on "-"
+# then ":" lets gawk read "12:2" as 12 and count 0-12:2 as 13.
+function ntasks(id, anchor,   br, t, nt, i, m, sum) {
+  if (id !~ anchor) return 0
+  if (!match(id, /_\[([^]]*)\]/, br)) return 1
+  sub(/%[0-9]+$/, "", br[1])              # a throttle limits concurrency, not membership
+  nt = split(br[1], t, ",")
+  for (i=1; i<=nt; i++) {
+    if (!match(t[i], /^([0-9]+)(-([0-9]+)(:([0-9]+))?)?$/, m)) return 0
+    if (m[2] == "") { sum++; continue }
+    if (m[3]+0 < m[1]+0 || (m[4] != "" && m[5]+0 < 1)) return 0
+    sum += int((m[3] - m[1]) / (m[4] != "" ? m[5] : 1)) + 1
+  }
+  return sum
+}
+# the colours: an SGR escape, or nothing when colour is off
+function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
+function ago(s) {
+  if (s < 0)    return "-"
+  if (s < 60)   return s "s"
+  if (s < 3600) return int(s/60) "m"
+  return int(s/3600) "h"
+}
+function dur(s,   a, b, m, sec) {                         # 3-12:04:05 -> seconds
+  if (s !~ /[0-9]/) return -1
+  sec = 0
+  if (match(s, /^([0-9]+)-(.*)$/, a)) { sec += a[1]*86400; s = a[2] }
+  m = split(s, b, ":")
+  if      (m == 3) sec += b[1]*3600 + b[2]*60 + b[3]
+  else if (m == 2) sec += b[1]*60 + b[2]
+  else if (m == 1) sec += b[1]
+  return sec
+}
+function elap(s) {                        # 3-12:04:05 -> 3d12h.  The zero-padded
+  if (s < 0)     return "-"               # HH:MM:SS the collectors print costs a
+  if (s < 60)    return s "s"             # folded range up to 11 columns, which is
+  if (s < 3600)  return int(s/60) "m" sprintf("%02ds", s % 60)     # what used to
+  if (s < 86400) return int(s/3600) "h" sprintf("%02dm", int(s % 3600 / 60))
+  return int(s/86400) "d" sprintf("%02dh", int(s % 86400 / 3600))   # overrun the edge
+}
+function exlabel(rc, sg) {                # the second field of an ExitCode is a
+  if (sg == 0)   return rc ""             # signal only up to 31: Slurm stores its
+  if (sg <= 31)  return rc "/sig" sg      # own errors (53 = task I/O setup failed)
+  if (sg == 125) return rc "/oom"         # and its OOM marker, 125, in that slot too
+  return rc "/err" sg
+}
+# one field of an ExitCode: sacct prints 0-127 and the squeue fallback up to
+# 255 in the first, so anything but 1-3 digits ("1e3", "53.9", "+inf", "-1",
+# empty) reads as 0 instead of leaking through
+function exfield(s) { return (s ~ /^[0-9]{1,3}$/) ? s+0 : 0 }
+# squeue decodes the raw exit_code of slurmctld, which sets 1 for a job it
+# ended itself (a deadline, a lost batch script, a node gone): squeue calls
+# that signal 1, so in the fallback (fb) 0:1 is read as 1:0, as slurmdbd stores it
+function xcm(id, x, fb,   a, rc, sg) {    # per job, over its allocation row and its
+  split(x, a, ":")                        # steps ("sacct -X" would say 0:0): the
+  rc = exfield(a[1]); sg = exfield(a[2])  # first non-zero return code and the first
+  if (fb && rc == 0 && sg == 1) { rc = 1; sg = 0 }
+  if (JRC[id] == 0 && rc != 0) JRC[id] = rc               # non-zero second field,
+  if (JSG[id] == 0 && sg != 0 || sg == 125) JSG[id] = sg  # but an OOM always wins,
+}                                         # never hidden behind an earlier 15
+# one node bar of wd cells: a allocated and u in use, of tot.  █ in use within
+# the allocation (hue), ▒ allocated but idle (dim hue), ▓ in use beyond the
+# allocation (magenta), ░ free (dim), or · when the use is not known (u < 0).
+# Both counts round to the nearest cell; a load above the core count simply
+# fills the bar.  No cells, no escapes either
+function cells(a, u, tot, wd, hue,   na, nu, i, x) {
+  if (wd <= 0) return ""
+  na = tot ? int(a*wd/tot + 0.5) : 0
+  nu = (u < 0) ? -1 : tot ? int(u*wd/tot + 0.5) : 0
+  for (i=0; i<wd; i++)
+    if      (i < na && i < nu) x = x e(hue) "█"
+    else if (i < na)           x = x e("2;" hue) "▒"
+    else if (i < nu)           x = x e("35") "▓"
+    else                       x = x e("2") (nu < 0 ? "·" : "░")
+  return x e("0")
+}
+# ---- the MEM cell of the running jobs of the caller -------------------------
+# Form b, the default: used/allocated, both in the unit of the allocation,
+# binary: M below 1000 MiB, T from 1 TiB, else G.  A whole allocation prints
+# whole and its use as ever: from 10 up whole, below that with one decimal and
+# no ".0".  An allocation that is not whole prints with one decimal, cut, never
+# rounded up (15600M is 15.2G), and its use with one decimal too.  Within that
+# decimal form a job under its allocation never reads as much (one step, 0.1,
+# below it), nor one at or over it less.  The used part is padded to the
+# allocated figure + 2 (+ 1 with a decimal: either way a use up to ten times the
+# allocation), so a cell is as wide as its allocation makes it, whatever the
+# reading, and nothing moves under watch.  WHOLE is the narrower fallback for a
+# screen: an allocation from 10 up that is not whole is cut to a whole number
+# (one below 10 keeps its decimal), and every use is cut to a whole number,
+# with no guard: 7.66 of 15.23 is 7/15G, 7.7 of 16 is 7/16G, under 1G is 0,
+# and 15/15G at 99 % leaves the rest to the colour.  MARK ("?" no reading,
+# "!" a failed one) stands in for the use.
+function memnum(x,   s) {
+  if (x >= 9.95) return sprintf("%d", int(x + 0.5))
+  s = sprintf("%.1f", x); sub(/[.]0$/, "", s); return s
+}
+function memunit(mb) { return (mb >= 1048576) ? "T" : (mb >= 1000) ? "G" : "M" }
+function mb_per(unit) { return (unit == "T") ? 1048576 : (unit == "G") ? 1024 : 1 }
+# MB in that unit rule, as form b prints an allocation: whole, or one
+# decimal, cut (15600M is 15.2G); WHOLE cuts one from 10 up to a whole number
+function memsize(mb, whole,   unit, tenths) {
+  unit = memunit(mb)
+  tenths = int(mb * 10 / mb_per(unit))         # in tenths, cut
+  if (mb % mb_per(unit) == 0)      return sprintf("%d", mb / mb_per(unit)) unit
+  if (whole && tenths >= 100)      return sprintf("%d", int(tenths / 10)) unit
+  return sprintf("%.1f", tenths / 10) unit
+}
+function memcell(used_bytes, alloc_mb, mark, whole,   unit, mb_per_unit, alloc_shown, decimal, used, pct, pad) {
+  unit = memunit(alloc_mb); mb_per_unit = mb_per(unit)
+  alloc_shown = memsize(alloc_mb, whole); sub(/[MGT]$/, "", alloc_shown)
+  decimal = (index(alloc_shown, ".") > 0)
+  pad = length(alloc_shown) + (decimal ? 1 : 2)
+  if (mark != "") used = mark
+  else {
+    used = used_bytes / 1048576 / mb_per_unit; pct = used_bytes / (alloc_mb * 1048576) * 100
+    if (whole) used = sprintf("%d", int(used))
+    else {
+      used = decimal ? sprintf("%.1f", used) : memnum(used)
+      if (pct < 100 && used + 0 >= alloc_shown + 0) used = sprintf("%.1f", alloc_shown - 0.1)
+      else if (pct >= 100 && used + 0 < alloc_shown + 0) used = alloc_shown
+    }
+  }
+  return sprintf("%*s", pad, used) "/" alloc_shown unit
+}
+function memcolour(p) { return (p >= 100) ? "1;31" : (p >= 90) ? "31" : (p >= 70) ? "33" : "32" }
+# JOBMEM readings: the snapshot lines, "<id> TAB ok|none|failed TAB
+# <bytes>", into job_outcome and job_bytes, by unique job id
+function mem_load(file,   ln, mf) {
+  while ((getline ln < file) > 0) { split(ln, mf, "\t"); job_outcome[mf[1]] = mf[2]; job_bytes[mf[1]] = mf[3] + 0 }
+  close(file)
+}
+# what a running job of the caller reads, by its unique id, its allocation in
+# MB and its node count: "failed" when the allocation call failed, else the
+# snapshot outcome where it is measured (an allocation, one node) and in
+# the snapshot (not started since), else "none"
+function mem_outcome(id, alloc_mb, nodes) {
+  if (memfail) return "failed"
+  return (alloc_mb > 0 && nodes == "1" && (id in job_outcome)) ? job_outcome[id] : "none"
+}
+'
+# colour: honour NO_COLOR, else auto-detect.  A pipe with COLUMNS set is
+# watch, which wants the escapes; a bare pipe or redirect does not.  For the
+# dashboard and sq job, from --color/--no-color and SQ_COLOR
+color_resolve() {
+	[ "$color" = auto ] || return 0
+	if   [ -n "${NO_COLOR:-}" ]; then color=0
+	elif [ -t 1 ];               then color=1
+	elif [ -n "${COLUMNS:-}" ];  then color=1
+	else color=0
+	fi
+}
+
+# gawk measures every width with length(), which counts characters only under
+# a UTF-8 locale: under LC_ALL=C (cron, systemd, containers) it counts bytes,
+# and the whole layout changes meaning.  So gawk runs under the caller's locale
+# if that is UTF-8, else C.UTF-8, else the first UTF-8 locale installed; with
+# none at all, under the caller's as before.  A locale is UTF-8 when its
+# charmap says so (ja_JP.eucJP counts "…" as one character too, but "█" as
+# two) and gawk, which does the counting, agrees.
+# Set through env, never as "LC_ALL=x cmd": bash applies that to itself too,
+# and restoring a caller's LC_ALL that names no installed locale puts a
+# setlocale warning on the screen each time.
+utf8_ok() {
+	[ "$(env LC_ALL="$1" locale charmap 2>/dev/null)" = UTF-8 ] &&
+	env LC_ALL="$1" gawk 'BEGIN { exit length("…") != 1 }' 2>/dev/null
+}
+gawk_locale() {   # the locale gawk runs in, into gloc
+	gloc=${LC_ALL:-}                 # empty: gawk reads LC_CTYPE and LANG as before
+	if ! utf8_ok "$gloc"; then
+		gloc=C.UTF-8
+		utf8_ok "$gloc" || gloc=$(locale -a 2>/dev/null | LC_ALL=C grep -i '\.utf-\{0,1\}8' |
+			while read -r l; do utf8_ok "$l" && { printf '%s' "$l"; break; }; done)
+		[ -n "$gloc" ] || gloc=${LC_ALL:-}
+	fi
+}
+
+# ---- memory use of the caller's own running jobs (JOBMEM) ------------------
+# The dashboard asks only when the queue holds one: a running row whose %U is
+# `id -u`; sq job when the job it shows is one.  Then the allocation of every
+# job of the caller's, unfiltered by the screen's filters, on every refresh
+# (cheap, and it must match this refresh), and sstat's reading of the running
+# ones that have an allocation and one node (sstat answers only a job's owner,
+# and a multi-node reading is not measured): one call for all of them, at most
+# every 30 s, whatever the filters, so every sq of a user's shares it, sq job
+# too.  The last call's result is a snapshot in memuse beside the bell's
+# state: the epoch of the call, then "<id> TAB ok|none|failed TAB <bytes>".
+# For gawk: $tmp/memalloc "<id> TAB <state> TAB <MB> TAB <nodes>",
+# $tmp/memread the snapshot's job lines, memfail=1 when the allocation call
+# failed (every own running row then reads "!").  myuid is the caller's uid,
+# set by whoever calls these.
+memfail=0 myuid=
+# the snapshot in use: whole and well-formed, and taken in the last 30 s, its
+# job lines into memread (rc 0); anything else (missing, garbled, from the
+# future) empties memread (rc 1), and is a call.  memdir is the snapshot's
+# directory, empty when there is none to use, memnow the epoch it is judged by
+jobmem_snapshot() {
+	# XDG_CACHE_HOME counts only when absolute, as a relative one would
+	# put the snapshot wherever sq happens to run.  No usable directory,
+	# or a memuse there that is no regular file, means a call on every
+	# run, silently, and nothing written
+	memdir=
+	case ${XDG_CACHE_HOME:-} in
+		/*) memdir=$XDG_CACHE_HOME/sq ;;
+		*)  case ${HOME:-} in /*) memdir=$HOME/.cache/sq ;; esac ;;
+	esac
+	[ -z "$memdir" ] || mkdir -p "$memdir" 2>/dev/null || memdir=
+	[ -z "$memdir" ] || ! [ -e "$memdir/memuse" ] || [ -f "$memdir/memuse" ] || memdir=
+	printf -v memnow '%(%s)T' -1
+	if [ -n "$memdir" ] && env LC_ALL=C gawk -v now="$memnow" '
+		NR == 1 { if ($0 !~ /^[0-9]+$/ || now - $0 < 0 || now - $0 >= 30) bad = 1; next }
+		$0 !~ /^[0-9]+\t(ok|none|failed)\t[0-9]+$/ { bad = 1 }
+		{ print }
+		END { exit (NR == 0 || bad) }' "$memdir/memuse" > "$tmp/memread" 2>/dev/null
+	then return 0
+	fi
+	: > "$tmp/memread"; return 1
+}
+# The allocation call, then the snapshot if it is fresh, else sstat's reading,
+# written as the new snapshot.  -w: every call through collect -w, as a
+# subcommand makes them
+jobmem_collect() {   # jobmem_collect [-w]
+	local w=${1-} memids memrc sstat_limit
+	: > "$tmp/memalloc"; : > "$tmp/memread"
+	# framed like the fallback's call: the format in SQUEUE_FORMAT2, so the
+	# queue nonce never reaches a command line.  StateCompact is %t's letter
+	SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,tres-alloc:$nonce,NumNodes:$nonce" \
+		collect $w alloc squeue -h -u "$myuid"
+	# a job without mem= has no known allocation (0).  Output that is not
+	# every record whole fails the call as a non-zero exit does
+	if [ $? -ne 0 ] || ! env LC_ALL=C gawk "$shared_awk"'
+		BEGIN { RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"] }
+		NF != 4 || $1 !~ /^[0-9]+$/ || RT == "" { bad = 1; exit }
+		{ mb = tres_mem($3); printf "%s\t%s\t%.0f\t%s\n", $1, $2, (mb < 0) ? 0 : mb, $4 }
+		END { exit bad }' "$tmp/alloc" > "$tmp/memalloc"
+	then memfail=1; : > "$tmp/memalloc"; return
+	fi
+	memids=$(env LC_ALL=C gawk -F '\t' '$2 == "R" && $3 > 0 && $4 == "1" { printf "%s%s", (n++ ? "," : ""), $1 }' "$tmp/memalloc")
+	jobmem_snapshot && return
+	[ -n "$memids" ] || return 0
+	# its own budget, min(SQ_TIMEOUT, 2) s: a node that does not
+	# answer must not hold every refresh for the whole timeout
+	sstat_limit=$(env LC_ALL=C gawk -v t="$tmo" 'BEGIN { print (t + 0 < 2) ? t : 2 }')
+	collect -t "$sstat_limit" $w sstat sstat -n -p -a --noconvert -j "$memids" -o JobID,TRESUsageInTot
+	memrc=$?
+	# A job reads "ok" with a complete row of its own (-p ends every
+	# row in "|"), each step once, as the id of an array's base task
+	# also returns its other tasks' steps; its bytes are the sum of
+	# mem= over them.  "failed" when the call failed, a stderr line
+	# names the job ("job N", "StepId=N.", bar "No steps running"), or
+	# its rows carry no mem= at all; "none" otherwise.  A line naming
+	# no job asked for is ignored.  Each stderr line is read once.
+	env LC_ALL=C gawk -v ids="$memids" -v rc="$memrc" '
+		BEGIN { n = split(ids, Q, ","); for (i = 1; i <= n; i++) REQ[Q[i]] = 1 }
+		ARGIND == 1 {
+			if (!match($0, /^([0-9]+)[.][A-Za-z0-9_+]+[|]([^|]*)[|]$/, m) || !(m[1] in REQ)) next
+			if ((sid = substr($0, 1, index($0, "|") - 1)) in SEEN) next
+			SEEN[sid] = 1; ROWS[m[1]] = 1
+			if (match(m[2], /(^|,)mem=[0-9]+(,|$)/)) {
+				b = substr(m[2], RSTART, RLENGTH); gsub(/[^0-9]/, "", b)
+				BYTES[m[1]] += b; HASMEM[m[1]] = 1
+			}
+			next
+		}
+		/No steps running/ { next }
+		{	rest = $0
+			while (match(rest, /job [0-9]+|StepId=[0-9]+[.]/)) {
+				id = substr(rest, RSTART, RLENGTH); gsub(/[^0-9]/, "", id)
+				if (id in REQ) FAIL[id] = 1
+				rest = substr(rest, RSTART + RLENGTH)
+			}
+		}
+		END {
+			for (i = 1; i <= n; i++) {
+				id = Q[i]
+				o = (rc != 0 || (id in FAIL) || ((id in ROWS) && !(id in HASMEM))) ? "failed" \
+				  : (id in ROWS) ? "ok" : "none"
+				printf "%s\t%s\t%.0f\n", id, o, (o == "ok") ? BYTES[id] : 0
+			}
+		}' "$tmp/sstat" "$tmp/sstat.err" > "$tmp/memread"
+	# renamed into place, so a reader never meets half a snapshot
+	if [ -n "$memdir" ] && memtmp=$(mktemp "$memdir/memuse.XXXXXX" 2>/dev/null); then
+		{ printf '%s\n' "$memnow"; cat "$tmp/memread"; } > "$memtmp" 2>/dev/null &&
+			mv -f "$memtmp" "$memdir/memuse" 2>/dev/null
+		rm -f "$memtmp"; memtmp=
+	fi
+}
+
 # ============================================================================
 # sq log JOBID: a job's output file, followed while the job runs
 # ============================================================================
@@ -371,6 +689,74 @@ log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, the record HOW names in
 	# paths still describe the job for the notes
 	for k in $log_keys; do printf -v "log_$k" '%s' "${said[$k]-}"; done
 }
+# A job's output paths, from the raw -o/-e patterns squeue prints, the way its
+# slurmstepd computes them: gawk functions over R[record, squeue -O field
+# name] (JobID ArrayJobID ArrayTaskID BatchHost UserName Name WorkDir STDOUT
+# STDERR), shared by sq log and sq job
+fname_awk='
+function onetask(r) { return R[r, "ArrayTaskID"] ~ /^[0-9]+$/ }   # one task, numbered
+# slurmstepd, src/slurmd/common/fname.c (23.11.4): remove_path_slashes()
+# drops each backslash and keeps the second of two, and any backslash at
+# all means no expansion
+function unslash(f,   out, i, c) {
+	for (i = 1; i <= length(f); i++) {
+		c = substr(f, i, 1)
+		if (c == "\\" && substr(f, i + 1, 1) == "\\") { out = out c; i++ }
+		else if (c != "\\") out = out c
+	}
+	return out
+}
+function pad(v, wid) { return wid ? sprintf("%0" wid "d", v) : v }
+# _create_batch_fname(): %% is %, a width (10 at most) zero-pads the
+# numbers, %N is the batch host short name, %s "batch", %n %t 0; after a
+# width an unknown letter keeps only the width last digit, and an unknown
+# letter without one stays as written, "%" and all
+function expand(f, r,   out, p, q, n, c, wid, host, v) {
+	n = length(f); p = q = 1
+	host = R[r, "BatchHost"]; sub(/[.].*/, "", host)
+	while (p <= n) {
+		if (substr(f, p, 1) != "%") { p++; continue }
+		if (substr(f, p + 1, 1) == "%") { out = out substr(f, q, p + 1 - q); p += 2; q = p; continue }
+		p++; wid = 0
+		if (substr(f, p, 1) ~ /[0-9]/) {
+			out = out substr(f, q, p - 1 - q)
+			match(substr(f, p), /^[0-9]+/)
+			wid = substr(f, p, RLENGTH) + 0; if (wid > 10) wid = 10
+			p += RLENGTH; q = p - 1
+			if (p > n) break
+		}
+		c = substr(f, p, 1)
+		if      (c == "a") v = pad(onetask(r) ? R[r, "ArrayTaskID"] : 4294967294, wid)   # NO_VAL
+		else if (c == "A") v = pad(R[r, "ArrayJobID"], wid)
+		else if (c == "j" || c == "J") v = pad(R[r, "JobID"], wid)
+		else if (c == "n" || c == "t") v = pad(0, wid)
+		else if (c == "N") v = host
+		else if (c == "s") v = "batch"
+		else if (c == "u") v = R[r, "UserName"]
+		else if (c == "x") v = R[r, "Name"]
+		else continue
+		out = out substr(f, q, p - 1 - q) v; p++; q = p
+	}
+	return out substr(f, q)
+}
+# fname_create(): a relative pattern is joined to the work dir, and one
+# with a backslash is appended to it as it is, without a "/" (sic)
+function fullpath(f, r,   dir) {
+	if (substr(f, 1, 1) == "/") return index(f, "\\") ? unslash(f) : expand(f, r)
+	dir = R[r, "WorkDir"]
+	if (index(f, "\\")) return dir unslash(f)
+	return dir (dir ~ /\/$/ ? "" : "/") expand(f, r)
+}
+# squeue prints a job without -o as WorkDir/slurm-JOBID.out, also for an
+# array task, whose slurmstepd writes slurm-%A_%a.out; without -e it
+# prints STDOUT for STDERR (src/squeue/print.c, 23.11.4), and slurmstepd
+# then writes stderr where stdout goes
+function outpat(r) {
+	if (R[r, "STDOUT"] != R[r, "WorkDir"] "/slurm-" R[r, "JobID"] ".out") return R[r, "STDOUT"]
+	return onetask(r) ? "slurm-%A_%a.out" : "slurm-%J.out"
+}
+function errpat(r) { return (R[r, "STDERR"] == R[r, "STDOUT"]) ? outpat(r) : R[r, "STDERR"] }
+'
 # What log_pick says, as KEY=VALUE, NUL-separated (no path holds a NUL):
 #   verdict  ok, array or tasks (the array's task ids), leader (a het
 #            component without its leader in the answer), none, notask,
@@ -388,7 +774,7 @@ log_keys="verdict via jobid tid state restart batch host reason exit out err fir
 # last task of an array, which carries the array's id), task (JOB_TASK),
 # het (the leader of het job JOB) or tasks (array JOB's task ids).
 log_pick() {   # log_pick HOW JOB [TASK]
-	env LC_ALL=C gawk -v how="$1" -v job="$2" -v task="${3-}" -v fields="$log_fields" '
+	env LC_ALL=C gawk -v how="$1" -v job="$2" -v task="${3-}" -v fields="$log_fields" "$fname_awk"'
 	BEGIN {
 		RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"]
 		nf = split(fields, NAME, /[ \t\n]+/)        # R[record, field name], in this order
@@ -397,68 +783,6 @@ log_pick() {   # log_pick HOW JOB [TASK]
 	NF != nf || RT == "" || $1 !~ /^[0-9]+$/ { bad = 1; exit }
 	{ nrec++; for (i = 1; i <= NF; i++) R[nrec, NAME[i]] = $i }
 	function put(key, value) { printf "%s=%s%c", key, value, 0 }
-	function onetask(r) { return R[r, "ArrayTaskID"] ~ /^[0-9]+$/ }   # one task, numbered
-	# slurmstepd, src/slurmd/common/fname.c (23.11.4): remove_path_slashes()
-	# drops each backslash and keeps the second of two, and any backslash at
-	# all means no expansion
-	function unslash(f,   out, i, c) {
-		for (i = 1; i <= length(f); i++) {
-			c = substr(f, i, 1)
-			if (c == "\\" && substr(f, i + 1, 1) == "\\") { out = out c; i++ }
-			else if (c != "\\") out = out c
-		}
-		return out
-	}
-	function pad(v, wid) { return wid ? sprintf("%0" wid "d", v) : v }
-	# _create_batch_fname(): %% is %, a width (10 at most) zero-pads the
-	# numbers, %N is the batch host short name, %s "batch", %n %t 0; after a
-	# width an unknown letter keeps only the width last digit, and an unknown
-	# letter without one stays as written, "%" and all
-	function expand(f, r,   out, p, q, n, c, wid, host, v) {
-		n = length(f); p = q = 1
-		host = R[r, "BatchHost"]; sub(/[.].*/, "", host)
-		while (p <= n) {
-			if (substr(f, p, 1) != "%") { p++; continue }
-			if (substr(f, p + 1, 1) == "%") { out = out substr(f, q, p + 1 - q); p += 2; q = p; continue }
-			p++; wid = 0
-			if (substr(f, p, 1) ~ /[0-9]/) {
-				out = out substr(f, q, p - 1 - q)
-				match(substr(f, p), /^[0-9]+/)
-				wid = substr(f, p, RLENGTH) + 0; if (wid > 10) wid = 10
-				p += RLENGTH; q = p - 1
-				if (p > n) break
-			}
-			c = substr(f, p, 1)
-			if      (c == "a") v = pad(onetask(r) ? R[r, "ArrayTaskID"] : 4294967294, wid)   # NO_VAL
-			else if (c == "A") v = pad(R[r, "ArrayJobID"], wid)
-			else if (c == "j" || c == "J") v = pad(R[r, "JobID"], wid)
-			else if (c == "n" || c == "t") v = pad(0, wid)
-			else if (c == "N") v = host
-			else if (c == "s") v = "batch"
-			else if (c == "u") v = R[r, "UserName"]
-			else if (c == "x") v = R[r, "Name"]
-			else continue
-			out = out substr(f, q, p - 1 - q) v; p++; q = p
-		}
-		return out substr(f, q)
-	}
-	# fname_create(): a relative pattern is joined to the work dir, and one
-	# with a backslash is appended to it as it is, without a "/" (sic)
-	function fullpath(f, r,   dir) {
-		if (substr(f, 1, 1) == "/") return index(f, "\\") ? unslash(f) : expand(f, r)
-		dir = R[r, "WorkDir"]
-		if (index(f, "\\")) return dir unslash(f)
-		return dir (dir ~ /\/$/ ? "" : "/") expand(f, r)
-	}
-	# squeue prints a job without -o as WorkDir/slurm-JOBID.out, also for an
-	# array task, whose slurmstepd writes slurm-%A_%a.out; without -e it
-	# prints STDOUT for STDERR (src/squeue/print.c, 23.11.4), and slurmstepd
-	# then writes stderr where stdout goes
-	function outpat(r) {
-		if (R[r, "STDOUT"] != R[r, "WorkDir"] "/slurm-" R[r, "JobID"] ".out") return R[r, "STDOUT"]
-		return onetask(r) ? "slurm-%A_%a.out" : "slurm-%J.out"
-	}
-	function errpat(r) { return (R[r, "STDERR"] == R[r, "STDOUT"]) ? outpat(r) : R[r, "STDERR"] }
 	function ok(r, via) {
 		put("verdict", "ok"); put("via", via)
 		put("jobid", R[r, "JobID"]); put("tid", R[r, "ArrayTaskID"]); put("state", R[r, "StateCompact"])
@@ -1069,15 +1393,7 @@ case $compact in 0|1) ;; *) compact=$screen ;; esac
 # height to centre in, only blank lines above the dashboard
 [ "$center" != 2 ] || [ "$screen" = 1 ] || center=1
 
-# colour: honour NO_COLOR, else auto-detect.  A pipe with COLUMNS set is
-# watch, which wants the escapes; a bare pipe or redirect does not.
-if [ "$color" = auto ]; then
-	if   [ -n "${NO_COLOR:-}" ]; then color=0
-	elif [ -t 1 ];               then color=1
-	elif [ -n "${COLUMNS:-}" ];  then color=1
-	else color=0
-	fi
-fi
+color_resolve
 
 nonce=$(mint_nonce)   || die "no usable random field separator"
 # Two of the three separators cannot travel in the environment, so they are
@@ -1221,66 +1537,7 @@ why_of nerr $? "$tmp/nodes" sinfo
 SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT=$fmt collect jobs squeue -h -S t,i "${args[@]+"${args[@]}"}"
 why_of jerr $? "$tmp/jobs" squeue
 
-# gawk functions shared by the programs below, prepended to each
-shared_awk='
-# a size as Slurm prints it MB-based (%m, the mem= of tres-alloc), an exact
-# M/G/T/P suffix and maybe a fraction (1.50G), in MB; -1 for anything else
-# (%m prints 0 for --mem=0)
-function size_mb(x,   u) {
-  if (x !~ /^[0-9]+([.][0-9]+)?[MGTP]$/) return -1
-  u = substr(x, length(x))
-  return substr(x, 1, length(x) - 1) * (u == "G" ? 1024 : u == "T" ? 1048576 : u == "P" ? 1073741824 : 1)
-}
-# mem= of a tres-alloc text in MB, -1 when there is none
-function tres_mem(tres,   x) {
-  if (!match(tres, /(^|,)mem=[0-9]+([.][0-9]+)?[MGTP](,|$)/)) return -1
-  x = substr(tres, RSTART, RLENGTH); sub(/^,?mem=/, "", x); sub(/,$/, "", x)
-  return size_mb(x)
-}
-# Every shape squeue prints for %i / JobID, anchored at the start: plain, het
-# component (10646+0), array task (10646_3) and pending array
-# (10646_[0-9,12%2], 10646_[0-12:2]).  The bracket is the grammar Slurm prints
-# and nothing looser, because the anchor is what a forged record has to get
-# past: term ("," term)* ("%" N)?, term = N | N-N | N-N:N.  N is at most 7
-# digits (MaxArraySize cannot exceed 4000001), so no row can count 1e20 or
-# NaN, which passes every "< 1" test
-function id_anchor(   an, at) {
-  an = "[0-9]{1,7}"; at = an "(-" an "(:" an ")?)?"
-  return "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[" at "(," at ")*(%" an ")?\\]))?"
-}
-# How many jobs an id stands for: a Slurm bracket its tasks, any other id one.
-# 0 means it is no id, and the record gate skips it: the anchor cannot say
-# a<=b or step>0, and a bracket counted 0 or 1 would be a wrong number nobody
-# can see is wrong.  Each term is ONE anchored match, because a split on "-"
-# then ":" lets gawk read "12:2" as 12 and count 0-12:2 as 13.
-function ntasks(id, anchor,   br, t, nt, i, m, sum) {
-  if (id !~ anchor) return 0
-  if (!match(id, /_\[([^]]*)\]/, br)) return 1
-  sub(/%[0-9]+$/, "", br[1])              # a throttle limits concurrency, not membership
-  nt = split(br[1], t, ",")
-  for (i=1; i<=nt; i++) {
-    if (!match(t[i], /^([0-9]+)(-([0-9]+)(:([0-9]+))?)?$/, m)) return 0
-    if (m[2] == "") { sum++; continue }
-    if (m[3]+0 < m[1]+0 || (m[4] != "" && m[5]+0 < 1)) return 0
-    sum += int((m[3] - m[1]) / (m[4] != "" ? m[5] : 1)) + 1
-  }
-  return sum
-}
-'
-
-# ---- memory use of the caller's own running jobs ---------------------------
-# Only when the queue holds one: a running row whose %U is `id -u`.  Then the
-# allocation of every job of the caller's, unfiltered by the screen's filters,
-# on every refresh (cheap, and it must match this refresh), and sstat's reading
-# of the running ones that have an allocation and one node (sstat answers only
-# a job's owner, and a multi-node reading is not measured): one call for all of
-# them, at most every 30 s, whatever the filters, so every sq of a user's
-# shares it.  The last call's result is a snapshot in memuse beside the bell's
-# state: the epoch of the call, then "<id> TAB ok|none|failed TAB <bytes>".
-# For gawk: $tmp/memalloc "<id> TAB <state> TAB <MB> TAB <nodes>",
-# $tmp/memread the snapshot's job lines, memfail=1 when the allocation call
-# failed (every own running row then reads "!").
-memfail=0 myuid=
+# ---- memory use of the caller's own running jobs: JOBMEM, above -----------
 : > "$tmp/memalloc"; : > "$tmp/memread"
 # does the queue stream read whole, and hold a whole record, or with UID a
 # running one of that uid?  Whole as the table reads it below: lines put back
@@ -1306,94 +1563,7 @@ if [ "$memon" = 1 ] && [ -z "$jerr" ]; then
 	myuid=$(id -u 2>/dev/null)
 	case $myuid in ''|*[!0-9]*) myuid= ;; esac
 fi
-if [ -n "$myuid" ] && queue_has "$myuid"; then
-	# framed like the fallback's call: the format in SQUEUE_FORMAT2, so the
-	# queue nonce never reaches a command line.  StateCompact is %t's letter
-	SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,tres-alloc:$nonce,NumNodes:$nonce" \
-		collect alloc squeue -h -u "$myuid"
-	# a job without mem= has no known allocation (0).  Output that is not
-	# every record whole fails the call as a non-zero exit does
-	if [ $? -ne 0 ] || ! env LC_ALL=C gawk "$shared_awk"'
-		BEGIN { RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"] }
-		NF != 4 || $1 !~ /^[0-9]+$/ || RT == "" { bad = 1; exit }
-		{ mb = tres_mem($3); printf "%s\t%s\t%.0f\t%s\n", $1, $2, (mb < 0) ? 0 : mb, $4 }
-		END { exit bad }' "$tmp/alloc" > "$tmp/memalloc"
-	then memfail=1; : > "$tmp/memalloc"
-	else
-		memids=$(env LC_ALL=C gawk -F '\t' '$2 == "R" && $3 > 0 && $4 == "1" { printf "%s%s", (n++ ? "," : ""), $1 }' "$tmp/memalloc")
-		# XDG_CACHE_HOME counts only when absolute, as a relative one would
-		# put the snapshot wherever sq happens to run.  No usable directory,
-		# or a memuse there that is no regular file, means a call on every
-		# run, silently, and nothing written
-		memdir=
-		case ${XDG_CACHE_HOME:-} in
-			/*) memdir=$XDG_CACHE_HOME/sq ;;
-			*)  case ${HOME:-} in /*) memdir=$HOME/.cache/sq ;; esac ;;
-		esac
-		[ -z "$memdir" ] || mkdir -p "$memdir" 2>/dev/null || memdir=
-		[ -z "$memdir" ] || ! [ -e "$memdir/memuse" ] || [ -f "$memdir/memuse" ] || memdir=
-		printf -v memnow '%(%s)T' -1
-		# the snapshot in use: whole and well-formed, and taken in the last
-		# 30 s; anything else (missing, garbled, from the future) is a call
-		memfresh=0
-		if [ -n "$memdir" ] && env LC_ALL=C gawk -v now="$memnow" '
-			NR == 1 { if ($0 !~ /^[0-9]+$/ || now - $0 < 0 || now - $0 >= 30) bad = 1; next }
-			$0 !~ /^[0-9]+\t(ok|none|failed)\t[0-9]+$/ { bad = 1 }
-			{ print }
-			END { exit (NR == 0 || bad) }' "$memdir/memuse" > "$tmp/memread" 2>/dev/null
-		then memfresh=1
-		else : > "$tmp/memread"
-		fi
-		if [ "$memfresh" = 0 ] && [ -n "$memids" ]; then
-			# its own budget, min(SQ_TIMEOUT, 2) s: a node that does not
-			# answer must not hold every refresh for the whole timeout
-			sstat_limit=$(env LC_ALL=C gawk -v t="$tmo" 'BEGIN { print (t + 0 < 2) ? t : 2 }')
-			collect -t "$sstat_limit" sstat sstat -n -p -a --noconvert -j "$memids" -o JobID,TRESUsageInTot
-			memrc=$?
-			# A job reads "ok" with a complete row of its own (-p ends every
-			# row in "|"), each step once, as the id of an array's base task
-			# also returns its other tasks' steps; its bytes are the sum of
-			# mem= over them.  "failed" when the call failed, a stderr line
-			# names the job ("job N", "StepId=N.", bar "No steps running"), or
-			# its rows carry no mem= at all; "none" otherwise.  A line naming
-			# no job asked for is ignored.  Each stderr line is read once.
-			env LC_ALL=C gawk -v ids="$memids" -v rc="$memrc" '
-				BEGIN { n = split(ids, Q, ","); for (i = 1; i <= n; i++) REQ[Q[i]] = 1 }
-				ARGIND == 1 {
-					if (!match($0, /^([0-9]+)[.][A-Za-z0-9_+]+[|]([^|]*)[|]$/, m) || !(m[1] in REQ)) next
-					if ((sid = substr($0, 1, index($0, "|") - 1)) in SEEN) next
-					SEEN[sid] = 1; ROWS[m[1]] = 1
-					if (match(m[2], /(^|,)mem=[0-9]+(,|$)/)) {
-						b = substr(m[2], RSTART, RLENGTH); gsub(/[^0-9]/, "", b)
-						BYTES[m[1]] += b; HASMEM[m[1]] = 1
-					}
-					next
-				}
-				/No steps running/ { next }
-				{	rest = $0
-					while (match(rest, /job [0-9]+|StepId=[0-9]+[.]/)) {
-						id = substr(rest, RSTART, RLENGTH); gsub(/[^0-9]/, "", id)
-						if (id in REQ) FAIL[id] = 1
-						rest = substr(rest, RSTART + RLENGTH)
-					}
-				}
-				END {
-					for (i = 1; i <= n; i++) {
-						id = Q[i]
-						o = (rc != 0 || (id in FAIL) || ((id in ROWS) && !(id in HASMEM))) ? "failed" \
-						  : (id in ROWS) ? "ok" : "none"
-						printf "%s\t%s\t%.0f\n", id, o, (o == "ok") ? BYTES[id] : 0
-					}
-				}' "$tmp/sstat" "$tmp/sstat.err" > "$tmp/memread"
-			# renamed into place, so a reader never meets half a snapshot
-			if [ -n "$memdir" ] && memtmp=$(mktemp "$memdir/memuse.XXXXXX" 2>/dev/null); then
-				{ printf '%s\n' "$memnow"; cat "$tmp/memread"; } > "$memtmp" 2>/dev/null &&
-					mv -f "$memtmp" "$memdir/memuse" 2>/dev/null
-				rm -f "$memtmp"; memtmp=
-			fi
-		fi
-	fi
-fi
+if [ -n "$myuid" ] && queue_has "$myuid"; then jobmem_collect; fi
 
 # ---- every job's total memory ----------------------------------------------
 # MEM shows each job's total: what a running job holds, what a pending one asks
@@ -1523,27 +1693,7 @@ if [ "$rsrc" = sacct ]; then
 	done
 fi
 
-# gawk measures every width with length(), which counts characters only under
-# a UTF-8 locale: under LC_ALL=C (cron, systemd, containers) it counts bytes,
-# and the whole layout changes meaning.  So gawk runs under the caller's locale
-# if that is UTF-8, else C.UTF-8, else the first UTF-8 locale installed; with
-# none at all, under the caller's as before.  A locale is UTF-8 when its
-# charmap says so (ja_JP.eucJP counts "…" as one character too, but "█" as
-# two) and gawk, which does the counting, agrees.
-# Set through env, never as "LC_ALL=x cmd": bash applies that to itself too,
-# and restoring a caller's LC_ALL that names no installed locale puts a
-# setlocale warning on the screen each time.
-utf8_ok() {
-	[ "$(env LC_ALL="$1" locale charmap 2>/dev/null)" = UTF-8 ] &&
-	env LC_ALL="$1" gawk 'BEGIN { exit length("…") != 1 }' 2>/dev/null
-}
-gloc=${LC_ALL:-}                 # empty: gawk reads LC_CTYPE and LANG as before
-if ! utf8_ok "$gloc"; then
-	gloc=C.UTF-8
-	utf8_ok "$gloc" || gloc=$(locale -a 2>/dev/null | LC_ALL=C grep -i '\.utf-\{0,1\}8' |
-		while read -r l; do utf8_ok "$l" && { printf '%s' "$l"; break; }; done)
-	[ -n "$gloc" ] || gloc=${LC_ALL:-}
-fi
+gawk_locale
 
 # Every value that can carry outside text - a setting, a filter, a path, the
 # host name, a collector's stderr - reaches gawk through ENVIRON, which it takes
@@ -1565,7 +1715,6 @@ env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v has
                       -v compact="$compact" -v reserve="$reserve" -v uidmap="$uidmap" -v sqv="$sqv" \
                       -v screen="$screen" -v memon="$memon" -v myuid="$myuid" -v memfail="$memfail" -v totfail="$totfail" \
                       -v qfields="$qfields" -v qpos_jobid="$qpos_jobid" -v qpos_uid="$qpos_uid" "$shared_awk"'
-function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
   m = split(list, a, ",")
   for (i=1; i<=m; i++) a[i] = a[i]+0
@@ -1595,33 +1744,10 @@ function idfit(x, wd,   b, keep) {
   sub(/[^,]*$/, "", keep)
   return b[1] keep "…" b[3]
 }
-function ago(s) {
-  if (s < 0)    return "-"
-  if (s < 60)   return s "s"
-  if (s < 3600) return int(s/60) "m"
-  return int(s/3600) "h"
-}
 function epoch(t,   d) {                                  # 2026-08-13T10:59:35 -> epoch
   if (t !~ /^[0-9]{4}-/) return 0
   d = t; gsub(/[-T:]/, " ", d)
   return mktime(d)
-}
-function dur(s,   a, b, m, sec) {                         # 3-12:04:05 -> seconds
-  if (s !~ /[0-9]/) return -1
-  sec = 0
-  if (match(s, /^([0-9]+)-(.*)$/, a)) { sec += a[1]*86400; s = a[2] }
-  m = split(s, b, ":")
-  if      (m == 3) sec += b[1]*3600 + b[2]*60 + b[3]
-  else if (m == 2) sec += b[1]*60 + b[2]
-  else if (m == 1) sec += b[1]
-  return sec
-}
-function elap(s) {                        # 3-12:04:05 -> 3d12h.  The zero-padded
-  if (s < 0)     return "-"               # HH:MM:SS the collectors print costs a
-  if (s < 60)    return s "s"             # folded range up to 11 columns, which is
-  if (s < 3600)  return int(s/60) "m" sprintf("%02ds", s % 60)     # what used to
-  if (s < 86400) return int(s/3600) "h" sprintf("%02dm", int(s % 3600 / 60))
-  return int(s/86400) "d" sprintf("%02dh", int(s % 86400 / 3600))   # overrun the edge
 }
 function exset(list, cap,   a, m, i, seen, sk, idx, o, c, nd, x) {
   m = split(list, a, ",")                 # distinct exits, WORST FIRST, then capped:
@@ -1635,26 +1761,6 @@ function exset(list, cap,   a, m, i, seen, sk, idx, o, c, nd, x) {
   for (i=1; i<=nd; i++) if (++c <= cap) o = o (o?",":"") sk[idx[i]]
   return (nd > cap) ? o ",…" : o
 }
-function exlabel(rc, sg) {                # the second field of an ExitCode is a
-  if (sg == 0)   return rc ""             # signal only up to 31: Slurm stores its
-  if (sg <= 31)  return rc "/sig" sg      # own errors (53 = task I/O setup failed)
-  if (sg == 125) return rc "/oom"         # and its OOM marker, 125, in that slot too
-  return rc "/err" sg
-}
-# one field of an ExitCode: sacct prints 0-127 and the squeue fallback up to
-# 255 in the first, so anything but 1-3 digits ("1e3", "53.9", "+inf", "-1",
-# empty) reads as 0 instead of leaking through
-function exfield(s) { return (s ~ /^[0-9]{1,3}$/) ? s+0 : 0 }
-# squeue decodes the raw exit_code of slurmctld, which sets 1 for a job it
-# ended itself (a deadline, a lost batch script, a node gone): squeue calls
-# that signal 1, so in the fallback (fb) 0:1 is read as 1:0, as slurmdbd stores it
-function xcm(id, x, fb,   a, rc, sg) {    # per job, over its allocation row and its
-  split(x, a, ":")                        # steps ("sacct -X" would say 0:0): the
-  rc = exfield(a[1]); sg = exfield(a[2])  # first non-zero return code and the first
-  if (fb && rc == 0 && sg == 1) { rc = 1; sg = 0 }
-  if (JRC[id] == 0 && rc != 0) JRC[id] = rc               # non-zero second field,
-  if (JSG[id] == 0 && sg != 0 || sg == 125) JSG[id] = sg  # but an OOM always wins,
-}                                         # never hidden behind an earlier 15
 function fcol(code) {                     # one table drives finished-ness, the bell
   if (code == "") return "36"             # and the colour, so PREEMPTED and REVOKED
   if (code == "CD") return "32"           # stop reading as failures and an unknown
@@ -1783,22 +1889,6 @@ function digest(   r, s, nc, nord, ns, u, t, x, i) {   # nodes: 1 allocated, 1 d
   return "nodes: " x " · " u+0 "/" t+0 " cpu"
 }
 function clip(x, wd) { return (length(x) > wd) ? substr(x, 1, wd-1) "…" : x }
-# one node bar of wd cells: a allocated and u in use, of tot.  █ in use within
-# the allocation (hue), ▒ allocated but idle (dim hue), ▓ in use beyond the
-# allocation (magenta), ░ free (dim), or · when the use is not known (u < 0).
-# Both counts round to the nearest cell; a load above the core count simply
-# fills the bar.  No cells, no escapes either
-function cells(a, u, tot, wd, hue,   na, nu, i, x) {
-  if (wd <= 0) return ""
-  na = tot ? int(a*wd/tot + 0.5) : 0
-  nu = (u < 0) ? -1 : tot ? int(u*wd/tot + 0.5) : 0
-  for (i=0; i<wd; i++)
-    if      (i < na && i < nu) x = x e(hue) "█"
-    else if (i < na)           x = x e("2;" hue) "▒"
-    else if (i < nu)           x = x e("35") "▓"
-    else                       x = x e("2") (nu < 0 ? "·" : "░")
-  return x e("0")
-}
 # the JOBID and EXIT cells of a finished group, for its row and for the one-line form
 function fid(g) {
   return (gcnt[g] > 1) ? sprintf("%s_[%s] ×%d", gbase2[g], compress(gtsk[g]), gcnt[g]) \
@@ -1806,55 +1896,6 @@ function fid(g) {
 }
 function fexit(g, cap) { return exset(gex[g], cap) (gcxl[g] == "" ? "" : " by " gcxl[g]) }
 
-# ---- the MEM cell of the running jobs of the caller -------------------------
-# Form b, the default: used/allocated, both in the unit of the allocation,
-# binary: M below 1000 MiB, T from 1 TiB, else G.  A whole allocation prints
-# whole and its use as ever: from 10 up whole, below that with one decimal and
-# no ".0".  An allocation that is not whole prints with one decimal, cut, never
-# rounded up (15600M is 15.2G), and its use with one decimal too.  Within that
-# decimal form a job under its allocation never reads as much (one step, 0.1,
-# below it), nor one at or over it less.  The used part is padded to the
-# allocated figure + 2 (+ 1 with a decimal: either way a use up to ten times the
-# allocation), so a cell is as wide as its allocation makes it, whatever the
-# reading, and nothing moves under watch.  WHOLE is the narrower fallback for a
-# screen: an allocation from 10 up that is not whole is cut to a whole number
-# (one below 10 keeps its decimal), and every use is cut to a whole number,
-# with no guard: 7.66 of 15.23 is 7/15G, 7.7 of 16 is 7/16G, under 1G is 0,
-# and 15/15G at 99 % leaves the rest to the colour.  MARK ("?" no reading,
-# "!" a failed one) stands in for the use.
-function memnum(x,   s) {
-  if (x >= 9.95) return sprintf("%d", int(x + 0.5))
-  s = sprintf("%.1f", x); sub(/[.]0$/, "", s); return s
-}
-function memunit(mb) { return (mb >= 1048576) ? "T" : (mb >= 1000) ? "G" : "M" }
-function mb_per(unit) { return (unit == "T") ? 1048576 : (unit == "G") ? 1024 : 1 }
-# MB in that unit rule, as form b prints an allocation: whole, or one
-# decimal, cut (15600M is 15.2G); WHOLE cuts one from 10 up to a whole number
-function memsize(mb, whole,   unit, tenths) {
-  unit = memunit(mb)
-  tenths = int(mb * 10 / mb_per(unit))         # in tenths, cut
-  if (mb % mb_per(unit) == 0)      return sprintf("%d", mb / mb_per(unit)) unit
-  if (whole && tenths >= 100)      return sprintf("%d", int(tenths / 10)) unit
-  return sprintf("%.1f", tenths / 10) unit
-}
-function memcell(used_bytes, alloc_mb, mark, whole,   unit, mb_per_unit, alloc_shown, decimal, used, pct, pad) {
-  unit = memunit(alloc_mb); mb_per_unit = mb_per(unit)
-  alloc_shown = memsize(alloc_mb, whole); sub(/[MGT]$/, "", alloc_shown)
-  decimal = (index(alloc_shown, ".") > 0)
-  pad = length(alloc_shown) + (decimal ? 1 : 2)
-  if (mark != "") used = mark
-  else {
-    used = used_bytes / 1048576 / mb_per_unit; pct = used_bytes / (alloc_mb * 1048576) * 100
-    if (whole) used = sprintf("%d", int(used))
-    else {
-      used = decimal ? sprintf("%.1f", used) : memnum(used)
-      if (pct < 100 && used + 0 >= alloc_shown + 0) used = sprintf("%.1f", alloc_shown - 0.1)
-      else if (pct >= 100 && used + 0 < alloc_shown + 0) used = alloc_shown
-    }
-  }
-  return sprintf("%*s", pad, used) "/" alloc_shown unit
-}
-function memcolour(p) { return (p >= 100) ? "1;31" : (p >= 90) ? "31" : (p >= 70) ? "33" : "32" }
 # COMPACT keeps own rows at risk longest: 0 from 90 %, 1 from 70 %, 2 the rest
 function memband(g) { return !(g in grp_worst_pct) ? 2 : (grp_worst_pct[g] >= 90) ? 0 : (grp_worst_pct[g] >= 70) ? 1 : 2 }
 # raw row r into its (folded) group g: readings add up, the colour is the
@@ -2029,8 +2070,7 @@ BEGIN{
     split(ln, mf, "\t"); job_alloc_mb[mf[1]] = mf[3] + 0; job_nodes[mf[1]] = mf[4]
   }
   close(memallocf)
-  while ((getline ln < memreadf) > 0) { split(ln, mf, "\t"); job_outcome[mf[1]] = mf[2]; job_bytes[mf[1]] = mf[3] + 0 }
-  close(memreadf)
+  mem_load(memreadf)
   while ((getline ln < memtotalf) > 0) { split(ln, mf, "\t"); job_total_mb[mf[1]] = mf[2] + 0 }
   close(memtotalf)
   split("CD F CA TO NF OOM DL PR BF RV SE", ts, " ")      # terminal states
@@ -2222,7 +2262,7 @@ END{
     a = row_jobid[r]
     if (memfail) { row_outcome[r] = "failed"; continue }
     row_alloc_mb[r] = job_alloc_mb[a] + 0
-    row_outcome[r] = (row_alloc_mb[r] > 0 && job_nodes[a] == "1" && (a in job_outcome)) ? job_outcome[a] : "none"
+    row_outcome[r] = mem_outcome(a, row_alloc_mb[r], job_nodes[a])
     row_bytes[r] = job_bytes[a]
   }
 
