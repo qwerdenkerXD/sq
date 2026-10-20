@@ -83,10 +83,13 @@ watch -tc -n 1 'sq -C'
   empty screen that looks like an empty queue.
 - **Colour where it belongs:** on in a terminal and under `watch`, off when piped or redirected,
   off with [`NO_COLOR`](https://no-color.org).
+- **One job in full, and its efficiency** as `seff` reports it (CPU time and peak memory against
+  what the job was given): see [`sq job`](#sq-job).
 
 ## Requirements
 
-- Slurm client tools: `sinfo`, `squeue`, and `sacct` when accounting (slurmdbd) is set up;
+- Slurm client tools: `sinfo`, `squeue`, and `sacct` when accounting (slurmdbd) is set up (for
+  `sq job`'s efficiency too);
   without it the finished block falls back to `squeue -t all` and says so; `sstat` for the
   memory your own running jobs use
 - **gawk** (GNU awk; plain awk and mawk won't do)
@@ -117,6 +120,7 @@ sq -u "$USER" -p gpu      # squeue's filters are passed on, by full long name fr
                           #  too, where they would replace the output sq parses
 sq -C                     # centred in both axes
 sq log 12345              # a job's output file, followed while it runs (below)
+sq job 12345              # one job, and its efficiency once it ended (below)
 ```
 
 | Flag | Effect |
@@ -146,6 +150,7 @@ sq log 12345              # a job's output file, followed while it runs (below)
 | `SQ_COMPACT` | `1` always COMPACT, `0` always FULL; anything else, or unset, decides by where the output goes. The flags beat it. |
 | `SQ_BELL_HORIZON` | A failure only rings while it is this fresh (default 600 s; `0` mutes). |
 | `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size. They never choose the mode. |
+| `SQ_PSS_SINCE` | `sq job` only: when this cluster's accounting moved from RSS to PSS (`JobAcctGatherParams=UsePss`), as `2026-10-19 15:59 CEST`, `2026-10-19T13:59Z` or `@EPOCH`. A peak memory measured in a step that started before it gets a note. Unset by default: no such note. |
 
 ## sq log
 
@@ -178,6 +183,58 @@ watch -n 5 'sq log --no-follow -n 20 12345'
 - It reads the file on this machine, so `-M`, `--federation`, `--sibling` and `SLURM_CLUSTERS`
   are refused. A subcommand comes first: only options that take no value (`--me`, `-c`, …) may
   stand before it, so `alias sq='sq --me'` still works with it.
+
+## sq job
+
+`sq job JOBID` shows one job: its state and times, the CPUs and memory it asked for and was
+given, its work directory and output files, and once it ended how well it used them, the way
+`seff` reports it:
+
+```
+▌ 4120  align-reads · alice
+state and times
+  state     COMPLETED · exit 0
+  ran       8m20s on node01 (batch)
+  ended     2026-10-20 17:52 (3m ago)
+resources
+  CPUs      2 allocated (1 requested)
+  memory    15.2G allocated (7.6G requested)
+files
+  work dir  /home/alice/rnaseq
+  stdout    /home/alice/rnaseq/logs/align-reads-4120.out
+  stderr    into stdout
+efficiency
+  CPU ████████▒▒▒▒▒▒▒▒  49.4%  8m14s of 16m40s
+  MEM █▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   7.9%  1.2/15.2G peak (step 0)
+  ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%
+```
+
+- **CPU** is the steps' CPU time against CPUs × elapsed. Per step it is the larger of what the
+  step's processes reported and what Slurm's sampling saw, so processes Slurm killed or never
+  waited for still count (a note says when the sampling decided it); sampled, it stays a lower
+  bound. When Slurm gave more CPUs than were asked for, a note says how far a program running
+  one thread per requested CPU can get at most. Green from 70 % of that, yellow from 30 %, red
+  below.
+- **MEM** is the largest step's peak against the allocation, coloured as the dashboard's MEM.
+  A step of several tasks adds up each task's own peak, an upper bound, and a note says so.
+  The peak is sampled, so a job killed for its memory can read far below its limit; an
+  `OUT_OF_MEMORY` job gets a note saying that. On a cluster whose accounting moved from RSS to
+  PSS, set [`SQ_PSS_SINCE`](#usage) to when: a peak measured before it gets a note, as RSS
+  counts memory shared between processes once per process.
+- **While your own job runs**, the memory it uses now, as the dashboard's MEM reads it, from
+  the same reading (`?` none yet, `!` it failed); the CPU efficiency comes when it ends.
+  Another user's running job and a pending job have no efficiency section: `sstat` answers
+  only a job's owner.
+- **An array**, `sq job 12345`, gets one summary: its tasks counted by state, and over the
+  completed ones the median, the weakest task and the best, so `sq job 12345_7` can look at the
+  weakest. A task is `12345_7`, or its own job id.
+- The efficiency comes from accounting (`sacct`), so it shows once accounting has recorded the
+  job's end, a moment after squeue says it ended. A job squeue has forgotten (about 5 minutes
+  after it ends) is still shown from accounting, without its output paths.
+- When one of squeue and sacct does not answer, the report shows what the other knows and a dim
+  line says which. Exit 0 when shown, 1 when Slurm does not know the job or cannot be asked, 2
+  for a usage error. Het jobs are not supported yet. `-M`, `--federation`, `--sibling` and
+  `SLURM_CLUSTERS` are refused, as `sq log` refuses them.
 
 ## Good to know
 
