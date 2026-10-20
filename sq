@@ -805,7 +805,7 @@ fi
 # (memon), and only after the queue call answered with a record.  For gawk:
 # $tmp/memtotal "<id> TAB <MB>" for each record with a mem= (the first of a
 # repeated id stands: -P prints a job once per partition; a record without
-# one leaves its row's MEM as %m prints it), and totfail=1 when the call
+# one leaves its row's MEM at %m), and totfail=1 when the call
 # failed or answered what cannot be read, every record whole: then every cell
 # it would have filled reads "!" and %m.
 totfail=0
@@ -1286,9 +1286,10 @@ function memform_cell(g, form,   mark, markcolour, colour, text, at) {
     at = index(text, mark)
     cell_text[g, form] = text
     cell_coloured[g, form] = substr(text, 1, at - 1) e(markcolour) mark e("0") substr(text, at + 1)
-  } else {                                      # unknown: the mark, then MEM as ever
-    cell_text[g, form] = mark mem_as_ever[g]
-    cell_coloured[g, form] = e(markcolour) mark e("0") mem_as_ever[g]
+  } else {                                      # unknown: the mark, then %m
+    text = memtext(mem_as_ever[g], form != "decimal")
+    cell_text[g, form] = mark text
+    cell_coloured[g, form] = e(markcolour) mark e("0") text
   }
 }
 function memcells(g) {
@@ -1297,9 +1298,13 @@ function memcells(g) {
   memform_cell(g, "decimal"); memform_cell(g, "whole"); memform_cell(g, "alloc")
   v[g,mc] = cell_text[g, "decimal"]; mem_coloured[g] = cell_coloured[g, "decimal"]
 }
-function memform(form,   g, r) {   # every MEM cell to FORM; MEM measured again
+function memform(form,   g, r, f) {   # every MEM cell to FORM; MEM measured again
   for (g in grp_own) { v[g,mc] = cell_text[g, form]; mem_coloured[g] = cell_coloured[g, form] }
-  for (g in grp_tot) v[g,mc] = tot_text[g, (form == "alloc") ? "whole" : form]
+  f = (form == "alloc") ? "whole" : form
+  for (g in grp_other) {
+    v[g,mc] = other_text[g, f]
+    if ((g, f) in other_coloured) mem_coloured[g] = other_coloured[g, f]
+  }
   tabw -= w[mc]; w[mc] = length(hd[mc])
   for (r=1; r<=rows; r++) if (QSHOW[r] && length(v[r,mc]) > w[mc]) w[mc] = length(v[r,mc])
   tabw += w[mc]
@@ -1311,26 +1316,34 @@ function memform(form,   g, r) {   # every MEM cell to FORM; MEM measured again
 # or whole where own cells go whole.  A folded group shows the sum of the
 # totals of its tasks, and a pending bracket its per-task request times its ×N
 # (a throttle %n does not reduce it), so the same jobs read the same with and
-# without -r.  A task without a total (none in the answer, no mem=, N/A)
-# leaves its group MEM as %m prints it; after a failed call every such cell is
-# a red "!" before its %m, as own cells are when the allocation call fails.
+# without -r.  A task without a total (none in the answer, no mem=, N/A, or
+# no call: a cluster selection) leaves its group %m, per node or per CPU as
+# squeue means it, but printed in the same unit rule (memtext); after a failed
+# call every such cell is a red "!" before its %m, as own cells are when the
+# allocation call fails.
+# %m in the unit rule of a total, WHOLE as the whole form; 0 (--mem=0) and
+# anything that is no size as squeue printed it
+function memtext(raw, whole,   mb) {
+  mb = size_mb(raw)
+  return (mb > 0) ? memsize(mb, whole) : raw
+}
 function totadd(g, r,   id) {     # raw row r into its (folded) group g
-  if (!memon || (r in row_outcome)) return
-  grp_tot[g] = 1
+  if (!mc || (r in row_outcome)) return
+  grp_other[g] = 1
   if (totfail) return
   id = row_jobid[r]
-  if (id in job_total_mb) tot_mb[g] += job_total_mb[id] * qw[r]; else tot_missing[g] = 1
+  if (memon && (id in job_total_mb)) tot_mb[g] += job_total_mb[id] * qw[r]; else tot_missing[g] = 1
 }
-function totcells(g) {           # its text in each form, once the group is whole
-  if (totfail) {
-    tot_text[g, "decimal"] = tot_text[g, "whole"] = "!" v[g,mc]
-    mem_coloured[g] = e("31") "!" e("0") v[g,mc]
-  } else if (g in tot_missing) {
-    delete grp_tot[g]; return
-  } else {
-    tot_text[g, "decimal"] = memsize(tot_mb[g], 0); tot_text[g, "whole"] = memsize(tot_mb[g], 1)
+function othercells(g,   f, text) {   # its text in each form, once the group is whole
+  for (f in MEMFORMS) {
+    if (totfail) {
+      text = memtext(v[g,mc], f == "whole")
+      other_text[g, f] = "!" text; other_coloured[g, f] = e("31") "!" e("0") text
+    } else if (g in tot_missing) other_text[g, f] = memtext(v[g,mc], f == "whole")
+    else                         other_text[g, f] = memsize(tot_mb[g], f == "whole")
   }
-  v[g,mc] = tot_text[g, "decimal"]
+  if (totfail) mem_coloured[g] = other_coloured[g, "decimal"]
+  v[g,mc] = other_text[g, "decimal"]
 }
 
 function qrow(r,   js, jc, line, i, x, fw, cc) {         # one queue row, coloured
@@ -1654,7 +1667,8 @@ END{
     if (gn[r] > 1) v[r,idc] = sprintf("%s_[%s] ×%d", gbase[r], compress(gtask[r]), gn[r])
     else if (idc && gw[r] > 1) v[r,idc] = v[r,idc] " ×" gw[r]
   if (mc) for (r in grp_own) memcells(r)
-  if (mc) for (r in grp_tot) totcells(r)
+  MEMFORMS["decimal"] = MEMFORMS["whole"] = 1
+  if (mc) for (r in grp_other) othercells(r)
 
   # ---- group finished jobs by array base, state and canceller ---------
   for (r=1; r<=dq; r++) {
@@ -1781,7 +1795,7 @@ END{
   # ("1006.…") loses its unit: only once every other column is down to its
   # floor, so a screen too narrow even for that still gets its height
   formb = (mc && length(grp_own))
-  if (screen && tabw > budget && (formb || length(grp_tot))) memform("whole")
+  if (screen && tabw > budget && (formb || length(grp_other))) memform("whole")
   if (formb && screen && color && tabw > budget) memform("alloc")
   while (tabw > budget) {                       # shave the widest flexible column
     big = 0

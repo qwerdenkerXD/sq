@@ -3124,7 +3124,7 @@ c_memalloc_screens() {
 		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_[0-2…" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
 }
 c_memalloc_narrow() {
-	T_TITLE="MEM is cut last: whole while any other column can give, so COMPACT keeps its height on a screen just wide enough, with failure cells and with MEMALLOC off (-M)"
+	T_TITLE="MEM is cut last: whole while any other column can give, so COMPACT keeps its height on a screen just wide enough, with failure cells and with MEMALLOC off (-M); %m in the unit rule, decimal or whole"
 	local d1 d2 q
 	d1=$(mem_fixture memalloc-tresfail sinfo "@include $fixtures/_common/sinfo-two-idle")
 	# busco's %m as if it were per node: 124800M, wider than any other MEM cell
@@ -3137,9 +3137,19 @@ c_memalloc_narrow() {
 	mem_run "$d2" SQ_WIDTH=53 SQ_HEIGHT=16 COLUMNS=53 LINES=16 -- --color --compact -M bioinf
 	need "-M (no mirror call), COMPACT 53x16 on a screen: rc 0, at most 16 lines, none wider than 53" eval '
 		rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(wc -l < "$OUT")" -le 16 ] && [ "$(width)" -le 53 ]'
+	# MEMALLOC off: %m keeps its meaning but takes the unit rule; 0 and what is
+	# no size (cactus' 12345, no suffix) as squeue printed them
+	q=$(printf '%s\n' "$q" | sed 's/^\(i=11947;.*\) m=7800M;/\1 m=12345;/')
+	printf '%s\n' "$q" > "$d2/squeue"
+	mem_run "$d2" SQ_WIDTH=110 -- --full --no-recent -M bioinf
+	need "-M in a pipe: rc 0, %m in the unit rule: 124800M 121.8G, 7800M 7.6G, 3200M 3.1G, 1000M 0.9G, 100G 100G; 0 and 12345 as printed" eval '
+		rc_is 0 && [ "$(mem_of 11890) $(mem_of 11945) $(mem_of 11911) $(mem_of 11926) $(mem_of 11880) $(mem_of 11948) $(mem_of 11947)" = "121.8G 7.6G 3.1G 0.9G 100G 0 12345" ]'
+	mem_run "$d2" SQ_WIDTH=72 SQ_HEIGHT=30 COLUMNS=72 LINES=30 -- --full --no-recent -M bioinf
+	need "-M on a 72-column screen: rc 0, the whole form for %m too: 121G, 7.6G and 0.9G keep their decimal" eval '
+		rc_is 0 && [ "$(mem_of 11890) $(mem_of 11945) $(mem_of 11926)" = "121G 7.6G 0.9G" ]'
 	mem_run "$d2" SQ_WIDTH=60 -- --full --no-recent -M bioinf
-	need "-M at 60 in a pipe: rc 0, busco MEM whole while other columns are cut" eval '
-		rc_is 0 && [ "$(mem_of 11890)" = 124800M ] && ! rows queue | gawk "{ print \$(NF-1) }" | grep -q "…" && rows queue | grep -q "…"'
+	need "-M at 60 in a pipe: rc 0, busco MEM whole (124800M in the unit rule) while other columns are cut" eval '
+		rc_is 0 && [ "$(mem_of 11890)" = 121.8G ] && ! rows queue | gawk "{ print \$(NF-1) }" | grep -q "…" && rows queue | grep -q "…"'
 }
 c_memalloc_call() {
 	T_TITLE="the mirror call: the queue call's arguments and env pins without its sort, framed by the queue nonce; none with MEM hidden, a cluster selection, a queue call failed (also after whole records), cut off or unreadable, or no row; nor JOBMEM's calls on a queue cut off"
@@ -3157,15 +3167,15 @@ c_memalloc_call() {
 	need "its format in SQUEUE_FORMAT2, JobID and tres-alloc framed by the queue nonce, which stays off every command line" eval '
 		[ "$(env_of squeue "$at" SQUEUE_FORMAT2)" = "JobID:$n,tres-alloc:$n" ] && [ "$(env_of squeue "$at" SQUEUE_FORMAT)" = "(unset)" ] &&
 		! grep "^CALL" "$LOG" | cut -f3 | grep -qF "$n"'
-	# no call, MEM as %m prints it (a cluster selection) or not shown at all
+	# no call: MEM %m, in the unit rule (a cluster selection), or not shown at all
 	for args in "-M bioinf" "--clusters=bioinf" "--federation" "--sibling"; do
 		mem_run memalloc SQ_WIDTH=110 -- --color $args
-		need "$args: rc 0, no mirror call, busco and hal's ×4 as %m prints them" eval '
-			rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7800M ] && [ "$(mem_of "11920_[0-3]")" = 7800M ]'
+		need "$args: rc 0, no mirror call, busco and hal's ×4 their %m (7800M per CPU), in the unit rule: 7.6G" eval '
+			rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7.6G ] && [ "$(mem_of "11920_[0-3]")" = 7.6G ]'
 	done
 	for f in bioinf ""; do
 		mem_run memalloc SQ_WIDTH=110 SLURM_CLUSTERS="$f" -- --color
-		need "SLURM_CLUSTERS='$f': rc 0, no mirror call, busco as %m prints it" eval 'rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7800M ]'
+		need "SLURM_CLUSTERS='$f': rc 0, no mirror call, busco its %m in the unit rule" eval 'rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7.6G ]'
 	done
 	mem_run memalloc SQ_WIDTH=110 -- --color -o i,j,u,T,M,L,C,R
 	need "MEM not shown (-o without m): rc 0, no mirror call" eval 'rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(calls queue)" -eq 1 ]'
@@ -3214,7 +3224,7 @@ c_memalloc_call() {
 	done
 }
 c_memalloc_fail() {
-	T_TITLE="the mirror call failing (exit 1, a timeout, unreadable, its last record cut off): a red ! before %m on every cell it would fill, own cells as JOBMEM draws them; no answer for a job, no mem= or N/A: %m, silently; a repeated id: the first stands"
+	T_TITLE="the mirror call failing (exit 1, a timeout, unreadable, its last record cut off): a red ! before %m (in the unit rule) on every cell it would fill, own cells as JOBMEM draws them; no answer for a job, no mem= or N/A: %m, silently; a repeated id: the first stands"
 	local how d id cell
 	for how in "exit 1" "timeout" "unreadable" "cut off"; do
 		case $how in
@@ -3226,24 +3236,24 @@ c_memalloc_fail() {
 		esac
 		mem_run "$d" SQ_WIDTH=110 -- --color --full
 		need "mirror call $how: rc 0, stderr empty, no banner, one mirror call" eval 'rc_is 0 && err_empty && lacks unreachable && [ "$(calls mirror)" -eq 1 ]'
-		for cell in "11912 48G" "11920_[4-19%4] 7800M" "11948 0" "11880 100G" "11890 7800M" "11920_[0-3] 7800M" "11926 1000M"; do
+		for cell in "11912 48G" "11920_[4-19%4] 7.6G" "11948 0" "11880 100G" "11890 7.6G" "11920_[0-3] 7.6G" "11926 0.9G"; do
 			id=${cell% *}
-			need "mirror call $how: $id a red ! before ${cell#* }" row_has "$id" "$ESC[31m!$ESC[0m${cell#* } "
+			need "mirror call $how: $id a red ! before its %m in the unit rule, ${cell#* }" row_has "$id" "$ESC[31m!$ESC[0m${cell#* } "
 		done
 		need "mirror call $how: own running rows as JOBMEM draws them" eval '
 			row_has 11895 "$ESC[33m   83/100G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m/4G" && row_has "11930_[0-2]" "$ESC[31m4.8/8G$ESC[0m"'
 	done
 	mem_run memalloc-tresfail SQ_WIDTH=110 -- --no-color --full
-	need "colour off: rc 0, no escapes, a plain ! before %m" eval '
-		rc_is 0 && [ "$(escapes)" -eq 0 ] && [ "$(mem_of 11890) $(mem_of 11948) $(mem_of 11912) $(mem_of 11895)" = "!7800M !0 !48G 83/100G" ]'
+	need "colour off: rc 0, no escapes, a plain ! before %m in the unit rule, 0 as printed" eval '
+		rc_is 0 && [ "$(escapes)" -eq 0 ] && [ "$(mem_of 11890) $(mem_of 11948) $(mem_of 11912) $(mem_of 11895)" = "!7.6G !0 !48G 83/100G" ]'
 	# a race (busco not in the answer), a running job without mem=, a pending
 	# one with N/A, and alphafold a second time (-P), smaller: the first stands
 	d=$(mem_fixture memalloc squeue-tres "$(grep -v '^JobID=11890;' "$fixtures/memalloc/squeue-tres" |
 		sed -e 's/^JobID=11909;.*/JobID=11909; tres_alloc=cpu=2,node=1,billing=2/' -e 's|^JobID=11945;.*|JobID=11945; tres_alloc=N/A|')
 JobID=11880; tres_alloc=cpu=1,mem=1G,node=1,billing=1")
 	mem_run "$d" SQ_WIDTH=110 -- --color --full
-	need "no answer for busco, none with mem= for 11909, N/A for 11945: rc 0, stderr empty, %m uncoloured" eval '
-		rc_is 0 && err_empty && row_has 11890 "  7800M fb2" && row_has 11909 "  7800M fb2" && row_has 11945 "  7800M (Priority)"'
+	need "no answer for busco, none with mem= for 11909, N/A for 11945: rc 0, stderr empty, %m in the unit rule, uncoloured" eval '
+		rc_is 0 && err_empty && row_has 11890 "  7.6G fb2" && row_has 11909 "  7.6G fb2" && row_has 11945 "  7.6G (Priority)"'
 	need "... and the others totals, alphafold the first of its two records" eval '
 		[ "$(mem_of 11880)" = 100G ] && [ "$(mem_of 11926)" = 0.9G ] && [ "$(mem_of 11947)" = 7.6G ]'
 }
@@ -3267,8 +3277,8 @@ c_memalloc_fold() {
 		rc_is 0 && [ "$(mem_of 11920_4) $(mem_of 11920_19) $(mem_of 11920_0) $(mem_of 11930_1)" = "7.6G 7.6G 15.2G 4G" ]'
 	d=$(mem_fixture memalloc squeue-tres "$(grep -v '^JobID=11942;' "$fixtures/memalloc/squeue-tres")")
 	mem_run "$d" SQSTUB_UID=4242 SQ_WIDTH=110 -- --color --full
-	need "one of hal's running tasks without a total: rc 0, its group %m, uncoloured; the bracket still 121.8G" eval '
-		rc_is 0 && row_has "11920_[0-3]" "  7800M fb2" && [ "$(mem_of "11920_[4-19%4]")" = 121.8G ]'
+	need "one of hal's running tasks without a total: rc 0, its group %m in the unit rule, uncoloured; the bracket still 121.8G" eval '
+		rc_is 0 && row_has "11920_[0-3]" "  7.6G fb2" && [ "$(mem_of "11920_[4-19%4]")" = 121.8G ]'
 }
 
 # ============================================================================
