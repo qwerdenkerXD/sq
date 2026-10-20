@@ -91,6 +91,8 @@ watch -tc -n 1 'sq -C'
   memory your own running jobs use
 - **gawk** (GNU awk; plain awk and mawk won't do)
 - coreutils (`timeout`, `stty`) and `tput`
+- GNU `tail` 8.28 or newer, only for [`sq log`](#sq-log) to follow a file (`--no-follow` does
+  without)
 - A UTF-8 terminal
 
 ## Install
@@ -114,6 +116,7 @@ sq -u "$USER" -p gpu      # squeue's filters are passed on, by full long name fr
                           #  -i and "--forma=%i" as -o.  Some full names are refused
                           #  too, where they would replace the output sq parses
 sq -C                     # centred in both axes
+sq log 12345              # a job's output file, followed while it runs (below)
 ```
 
 | Flag | Effect |
@@ -143,6 +146,38 @@ sq -C                     # centred in both axes
 | `SQ_COMPACT` | `1` always COMPACT, `0` always FULL; anything else, or unset, decides by where the output goes. The flags beat it. |
 | `SQ_BELL_HORIZON` | A failure only rings while it is this fresh (default 600 s; `0` mutes). |
 | `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size. They never choose the mode. |
+
+## sq log
+
+`sq log JOBID` prints a batch job's output file from its start, follows it while the job runs,
+and ends shortly (within about 10 s) after the job ends, so it pipes like any stream:
+
+```sh
+sq log 12345                     # the stdout file, whole, then live, until the job ends
+sq log --err 12345               # its stderr file instead
+sq log -n 50 12345 | grep -i err # the last 50 lines, then live
+sq log 12345_4                   # an array task (a bare array id asks for one)
+sq log --no-follow 12345         # what is there now, then stop
+watch -n 5 'sq log --no-follow -n 20 12345'
+```
+
+- A pending job is waited for until it runs and its file is there. sq computes the path from
+  the job's `-o`/`-e` the way Slurm's job does (`%j`, `%A_%a`, `%N`, `%x`, widths, `%%`, and a
+  backslash, which turns expansion off), so a file name that is reused (no `%j` in it) may first
+  show an earlier run's text. A het job's output is its leader's.
+- The file's bytes are passed on as they are; notes (`sq log: …`) go to stderr, also into a
+  pipe: the job is pending, the file has not appeared yet, Slurm does not answer, and how the
+  job ended (`sq log: job 12345 ended: FAILED (exit code 1:0)`). The exit code is 0 whatever
+  the job's own outcome, 1 when the file cannot be shown (Slurm forgets a job about 5 minutes
+  after it ends, and its path with it; an interactive job; output to `/dev/null`; a file not
+  readable), 2 for a usage error, 128+N when stopped by signal N.
+- A requeued job ends the stream with a note; run `sq log` again for its new run.
+- It follows for as long as Slurm cannot tell it the job ended, and asks Slurm every 5 s.
+  "Live" can lag: a job on another node writes through NFS, and many programs buffer their
+  output into a file (`python -u` or `stdbuf -oL` help).
+- It reads the file on this machine, so `-M`, `--federation`, `--sibling` and `SLURM_CLUSTERS`
+  are refused. A subcommand comes first: only options that take no value (`--me`, `-c`, …) may
+  stand before it, so `alias sq='sq --me'` still works with it.
 
 ## Good to know
 
