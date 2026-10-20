@@ -3384,6 +3384,561 @@ c_memalloc_fold() {
 }
 
 # ============================================================================
+# subcommands: where one stands, and the words sq cannot place (SUBCMD-v3)
+# ============================================================================
+# Franz (2026-10-20): "the subcommand is a good idea"; an alias with a value
+# option before a subcommand is an error: "OK".  D1-D6 of sqlog-v3.md.
+sub_refused() {   # sub_refused TEXT SQ-ARGS...: a usage error with exactly TEXT on stderr
+	local text=$1; shift
+	sq_run empty -- "$@"
+	need "sq $*: rc 2, nothing on stdout, no Slurm call" eval 'rc_is 2 && out_empty && no_slurm_call'
+	need "sq $*: says '$text'" eval '[ "$(cat "$ERR")" = "$text" ]'
+}
+c_sub_dispatch() {   # D1, D2, D4
+	T_TITLE="a subcommand stands after valueless options only (an alias's --me too, one --), matched exactly; SQ_FMT is not the log's"
+	local fx; fx=$(log_fx done <<'EOF'
+StateCompact=CD
+@file create wd/out_500.log done\n
+EOF
+)
+	local -a flags=(-c -C -x --center --centre --center-all --centre-all --expand --no-recent --color --colour
+	                --no-color --no-colour --compact --me --all --hide --array --noconvert --noheader --priority --local)
+	sq_run "$fx" -- "${flags[@]}" log --no-follow 500
+	need "every valueless flag before log (and the --no-bell sq_run adds): rc 0, the file" eval 'rc_is 0 && [ "$(cat "$OUT")" = done ]'
+	need "... one squeue call, sq log's" eval '[ "$(calls squeue)" = 1 ] && argv_has squeue -h --jobs=500 -t all'
+	sq_run "$fx" -- --full log --no-follow 500
+	need "--full before log: dispatched" eval 'rc_is 0 && [ "$(cat "$OUT")" = done ]'
+	sq_run "$fx" -- --me -- log --no-follow 500
+	need "--me -- log: dispatched" eval 'rc_is 0 && [ "$(cat "$OUT")" = done ]'
+	sq_run "$fx" SQ_FMT=bogus%% SQ_CENTER=x SQ_RECENT_MAX=-1 SQ_COMPACT=7 -- log --no-follow 500
+	need "D4: a dashboard setting is neither applied nor validated" eval 'rc_is 0 && [ "$(cat "$OUT")" = done ] && err_is "sq log: job 500 ended: COMPLETED (exit code 0:0)"'
+	sq_run "$fx" -- log -h
+	need "sq log -h: rc 0, its help on stdout, no Slurm call" eval 'rc_is 0 && has "usage: sq log" && no_slurm_call'
+	sq_run empty -- -h
+	need "sq -h names the subcommand" has "sq log JOBID"
+	sub_refused "sq: 'Log' is not a subcommand; sq -h lists them (did you mean sq log?)" Log 500
+}
+c_sub_stray() {   # D3, D6
+	T_TITLE="a word sq cannot place is rc 2 with the hint that fits: subcommands first, the table's hints, clusters, empty words, -j N M"
+	sub_refused "sq: subcommands come first, before any option that takes a value: sq log …" -p main log 500
+	sub_refused "sq: subcommands come first, before any option that takes a value: sq log …" -u alice --all log 500
+	sub_refused "sq: subcommands come first, before any option that takes a value: sq log …" -o i,j log 500
+	sub_refused "sq: subcommands come first, before any option that takes a value: sq log …" --reserve 2 log 500
+	sub_refused "sq: subcommands come first, before any option that takes a value: sq log …" -Z log 500
+	sub_refused "sq: subcommands come first, before any option that takes a value: sq log …" -p main -- log 500
+	sub_refused "sq: sq log reads output files on this machine; drop -M" -M other log 500
+	sub_refused "sq: sq log reads output files on this machine; drop --clusters" --clusters=other log 500
+	sub_refused "sq: sq log reads output files on this machine; drop --federation" --federation log 500
+	sub_refused "sq: sq log reads output files on this machine; drop --sibling" --sibling -p main log 500
+	sub_refused "sq: 'foo' is not a subcommand; sq -h lists them" foo
+	sub_refused "sq: 'LOG' is not a subcommand; sq -h lists them (did you mean sq log?)" LOG 500
+	sub_refused "sq: 'logs' is not a subcommand; sq -h lists them (did you mean sq log?)" logs 500
+	sub_refused "sq: 'help' is not a subcommand; sq -h lists them (did you mean sq -h?)" help
+	sub_refused "sq: 'me' is not a subcommand; sq -h lists them (did you mean sq --me?)" me
+	sub_refused "sq: 'no-recent' is not a subcommand; sq -h lists them (did you mean sq --no-recent?)" --full no-recent
+	sub_refused "sq: '123' is not a subcommand; sq -h lists them (did you mean sq -j 123?)" 123
+	sub_refused "sq: '6' is not a subcommand; sq -h lists them (did you mean sq -j 5,6?)" -j 5 6
+	sub_refused "sq: '6' is not a subcommand; sq -h lists them (did you mean sq -j 5,6?)" --jobs=5 6
+	sub_refused "sq: cannot tell what 'i' belongs to after '-ao'; write the options apart, e.g. -a -o i" -ao i
+	sub_refused "sq: cannot tell what '5' belongs to after '-aj'; write the options apart, e.g. -a -j 5" -aj 5
+	sub_refused "sq: cannot tell what 'log' belongs to after '-xn'; write the options apart, e.g. -x -n log" -xn log
+	sub_refused "sq: an empty argument (an unset variable?)" ''
+	sub_refused "sq: an empty argument (an unset variable?)" -p main ' '
+	sub_refused "sq: '-' is not a subcommand; sq -h lists them" -
+	sub_refused "sq: 'x' is not a subcommand; sq -h lists them" -- x
+	sub_refused "sq: '--' is not a subcommand; sq -h lists them" -- --
+	sub_refused "sq: '-u' is not a subcommand; sq -h lists them" -- -u alice
+	# D6: what the dashboard did with these before
+	sub_refused "sq: 'foo' is not a subcommand; sq -h lists them" -p main foo
+	sub_refused "sq: 'foo' is not a subcommand; sq -h lists them" foo -h
+	# every echoed word scrubbed and cut to 40 characters
+	sub_refused "sq: 'abc[31mdefghijklmnopqrstuvwxyzabcdefghij' is not a subcommand; sq -h lists them" \
+		"$(printf 'abc\033[31mdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz')"
+	# what still is the dashboard
+	sq_run empty -- --
+	need "a bare -- is still swallowed: the dashboard" eval 'rc_is 0 && has "queue is empty"'
+	sq_run empty -- -h foo
+	need "-h before a stray word: the help, as before" eval 'rc_is 0 && has "auto-fitting Slurm dashboard"'
+	sq_run empty -- -n log
+	need "-n log: a job named log, the dashboard" eval 'rc_is 0 && argv_has squeue -n log'
+}
+
+# ============================================================================
+# sq log JOBID (SQLOG-v3)
+# ============================================================================
+# Franz (2026-10-20): "out; --err for err"; "All, follow, stop at end"; purged
+# jobs "Refuse"; arrays "Ask for a task"; job failed "0, plus an end note";
+# notes when piped "Always"; SLURM_CLUSTERS "Refuse"; the log text "Raw".
+# The stub answers each poll from its @step (tests/lib/stub.sh), and @file
+# writes the job's file in the run's directory as a step is served; sq polls
+# every 5 s, so a call number is a moment in the follow.
+log_fx() {   # log_fx NAME: a fixture whose squeue-all is stdin after log-defaults; prints its dir
+	local d=$T_DIR/fx-$1; mkdir -p "$d"
+	{ printf '@include %s\n' "$fixtures/_common/log-defaults"; cat; } > "$d/squeue-all"
+	printf '%s' "$d"
+}
+err_is() { [ "$(cat "$ERR")" = "$1" ]; }
+# no call saw an SQUEUE_* setting but the SQUEUE_FORMAT2 sq set (stub.sh logs all)
+only_format2() {
+	gawk -F'\t' '$1 == "CALL" { n++; for (i = 4; i <= NF; i++)
+		if ($i ~ /^SQUEUE_/ && $i !~ /^SQUEUE_FORMAT2=/ && $i !~ /[(]unset[)]$/) bad = 1 }
+		END { exit !(n && !bad) }' "$LOG"
+}           # err_is TEXT: stderr is exactly TEXT
+out_is() { [ "$(cat "$OUT"; echo .)" = "$1." ]; }  # out_is TEXT: stdout byte for byte, last newline too
+wd() { printf '%s/wd/%s' "$RUN" "$1"; }            # wd FILE: FILE in the run's work dir
+
+c_log_follow() {   # L4, L5: each phase, polled, in parallel runs
+	T_TITLE="sq log follows: pending, the file late, -n, CG, a requeue, held, special exit, an outage, a job gone, a file never written, --err"
+	local late n cg rq rh se down gone0 gone1 never err
+	sq_start "$(log_fx late <<'EOF'
+@step 1
+StateCompact=PD; Reason=Priority
+@step 2
+StateCompact=R
+@step 4
+StateCompact=R
+@file create wd/out_500.log one\ntwo\n
+@step 5
+StateCompact=R
+@file append wd/out_500.log three\n
+@step 6
+StateCompact=CD; exit_code=0:0
+EOF
+)" -- log 500; late=$RUN
+	sq_start "$(log_fx n <<'EOF'
+@step 1
+StateCompact=R
+@file create wd/out_500.log a\nb\nc\nd\n
+@step 2
+StateCompact=R
+@file append wd/out_500.log e\n
+@step 3
+StateCompact=CD
+EOF
+)" -- log -n 2 500; n=$RUN
+	sq_start "$(log_fx cg <<'EOF'
+@step 1
+StateCompact=R
+@file create wd/out_500.log start\n
+@step 2
+StateCompact=CG
+@file append wd/out_500.log cg1\n
+@step 3
+StateCompact=CG
+@file append wd/out_500.log cg2\n
+@step 4
+StateCompact=TO; exit_code=0:15
+@file append wd/out_500.log last
+EOF
+)" -- log 500; cg=$RUN
+	local held_body='@step 1
+StateCompact=R
+@file create wd/out_500.log run0\n
+@step 2'
+	sq_start "$(log_fx rq <<<"$held_body"$'\nStateCompact=CG; RestartCnt=1')" -- log 500; rq=$RUN
+	sq_start "$(log_fx rh <<<"$held_body"$'\nStateCompact=RH; RestartCnt=1; Reason=launch failed requeued held')" -- log 500; rh=$RUN
+	sq_start "$(log_fx se <<<"$held_body"$'\nStateCompact=SE; RestartCnt=1')" -- log 500; se=$RUN
+	sq_start "$(log_fx down <<'EOF'
+@step 1
+StateCompact=R
+@file create wd/out_500.log x\n
+@step 2
+@stderr squeue: error: Unable to contact slurm controller (connect failure)
+@exit 1
+@step 4
+StateCompact=CD
+EOF
+)" -- log 500; down=$RUN
+	sq_start "$(log_fx gone0 <<'EOF'
+@step 1
+StateCompact=R
+@file create wd/out_500.log x\n
+@step 2
+# Slurm no longer has the record: nothing
+EOF
+)" -- log 500; gone0=$RUN
+	sq_start "$(log_fx gone1 <<'EOF'
+@step 1
+StateCompact=R
+@file create wd/out_500.log x\n
+@step 2
+@stderr slurm_load_jobs error: Invalid job id specified
+@exit 1
+EOF
+)" -- log 500; gone1=$RUN
+	sq_start "$(log_fx never <<'EOF'
+@step 1
+StateCompact=R
+@step 2
+StateCompact=F; exit_code=1:0
+EOF
+)" -- log 500; never=$RUN
+	sq_start "$(log_fx err <<'EOF'
+@defaults STDERR=\{run}/wd/err_%j.log
+@step 1
+StateCompact=R
+@file create wd/out_500.log out\n
+@file create wd/err_500.log err\n
+@step 2
+StateCompact=CD
+EOF
+)" -- log --err 500; err=$RUN
+
+	sq_finish "$late"
+	need "late: rc 0, the whole file as it grew" eval 'rc_is 0 && out_is "one
+two
+three
+"'
+	need "late: the notes, once each: pending, waiting for the file (after ~10 s), the end" eval 'err_is "sq log: job 500 is pending (Priority); waiting for it to start
+sq log: waiting for $(wd out_500.log) to appear (job 500 runs on node01.cluster)
+sq log: job 500 ended: COMPLETED (exit code 0:0)"'
+	need "late: Slurm asked every poll until the end: 6 calls" eval '[ "$(stub_calls)" = 6 ]'
+	need "late: L0's environment on every call" eval 'all_calls_env SLURM_TIME_FORMAT %s squeue && all_calls_env SLURM_BITSTR_LEN 0 squeue && only_format2'
+	sq_finish "$n"
+	need "-n 2: the last 2 lines, then what came" eval 'rc_is 0 && out_is "c
+d
+e
+" && err_is "sq log: job 500 ended: COMPLETED (exit code 0:0)"'
+	sq_finish "$cg"
+	need "CG: followed through two CG polls, with what was written then and at the end" eval 'rc_is 0 && out_is "start
+cg1
+cg2
+last" && err_is "sq log: job 500 ended: TIMEOUT (exit code 0:15)" && [ "$(stub_calls)" = 4 ]'
+	sq_finish "$rq"
+	need "requeue: RestartCnt 0 -> 1 (in CG) ends with the note, rc 0" eval 'rc_is 0 && out_is "run0
+" && err_is "sq log: job 500 was requeued (restart 1); run sq log 500 again for its new run" && [ "$(stub_calls)" = 2 ]'
+	sq_finish "$rh"
+	need "RH: the held note" eval 'rc_is 0 && err_is "sq log: job 500 was requeued (restart 1) and is held; run sq log 500 again for its new run"'
+	sq_finish "$se"
+	need "SE: the special-exit note" eval 'rc_is 0 && err_is "sq log: job 500 was requeued (restart 1) and is in special exit; run sq log 500 again for its new run"'
+	sq_finish "$down"
+	need "outage: noted once over two failed polls, followed on, then the end" eval 'rc_is 0 && out_is "x
+" && err_is "sq log: slurm unreachable (squeue: error: Unable to contact slurm controller (connect failure)); still following
+sq log: job 500 ended: COMPLETED (exit code 0:0)" && [ "$(stub_calls)" = 4 ]'
+	sq_finish "$gone0"
+	need "gone (no record): rc 0, the note" eval 'rc_is 0 && out_is "x
+" && err_is "sq log: job 500 is gone from Slurm; stopping"'
+	sq_finish "$gone1"
+	need "gone (Invalid job id): rc 0, the note" eval 'rc_is 0 && out_is "x
+" && err_is "sq log: job 500 is gone from Slurm; stopping"'
+	sq_finish "$never"
+	need "ended, the file never written: rc 1" eval 'rc_is 1 && out_empty && err_is "sq log: job 500 ended; $(wd out_500.log) was never written"'
+	sq_finish "$err"
+	need "--err: the stderr file" eval 'rc_is 0 && out_is "err
+"'
+}
+
+c_log_now() {   # L2, L3's refusals, L4's --no-follow and the already-final job
+	T_TITLE="sq log on the first answer: --no-follow, an ended job, unreadable, purged, unknown task, arrays, het jobs, interactive, /dev/null, --err, refusals"
+	local fx
+	fx=$(log_fx run <<'EOF'
+StateCompact=R
+@file create wd/out_500.log a\nb\n
+EOF
+)
+	sq_run "$fx" -- log --no-follow 500
+	need "--no-follow, running: what is there, rc 0, no note" eval 'rc_is 0 && out_is "a
+b
+" && err_empty && [ "$(stub_calls)" = 1 ]'
+	sq_run "$fx" -- log --no-follow -n1 500
+	need "--no-follow -n1: the last line" eval 'rc_is 0 && out_is "b
+"'
+	sq_run "$fx" -- log 500 -n 1 --no-follow
+	need "options after the id, -n 1 apart: the same" eval 'rc_is 0 && out_is "b
+"'
+	sq_run "$(log_fx pend <<<'StateCompact=PD; Reason=Resources')" -- log --no-follow 500
+	need "--no-follow, pending: rc 1" eval 'rc_is 1 && out_empty && err_is "sq log: job 500 has not started yet"'
+	sq_run "$(log_fx nofile <<<'StateCompact=R')" -- log --no-follow 500
+	need "--no-follow, no file yet: rc 1" eval 'rc_is 1 && err_is "sq log: $(wd out_500.log) was not written yet (job 500 runs on node01.cluster)"'
+	fx=$(log_fx ended <<'EOF'
+StateCompact=F; exit_code=2:0
+@file create wd/out_500.log done\n
+EOF
+)
+	sq_run "$fx" -- log 500
+	need "already ended: the file, no follow, the end note, rc 0, one call" eval 'rc_is 0 && out_is "done
+" && err_is "sq log: job 500 ended: FAILED (exit code 2:0)" && [ "$(stub_calls)" = 1 ]'
+	sq_run "$fx" -- log --no-follow 000500
+	need "--no-follow on an ended job: the same; leading zeros dropped" eval 'rc_is 0 && out_is "done
+" && argv_has squeue --jobs=500'
+	sq_run "$(log_fx endnofile <<<'StateCompact=CA; exit_code=0:0')" -- log 500
+	need "already ended, never written: rc 1" eval 'rc_is 1 && err_is "sq log: job 500 ended; $(wd out_500.log) was never written"'
+	sq_run "$(log_fx locked <<'EOF'
+StateCompact=R
+@file create wd/out_500.log secret\n
+@file chmod wd/out_500.log 000
+EOF
+)" -- log 500
+	need "unreadable: rc 1" eval 'rc_is 1 && out_empty && err_is "sq log: cannot read $(wd out_500.log): Permission denied"'
+	local purged="sq log: Slurm does not know job 500 (it ended more than about 5 minutes ago, or never existed), so its output path is unknown"
+	sq_run "$(log_fx purged1 <<<$'@stderr slurm_load_jobs error: Invalid job id specified\n@exit 1')" -- log 500
+	need "purged (Invalid job id): rc 1, the refusal" eval 'rc_is 1 && err_is "$purged"'
+	sq_run "$(log_fx purged0 <<<'# nothing')" -- log 500
+	need "purged (no record): rc 1, the refusal" eval 'rc_is 1 && err_is "$purged"'
+	sq_run "$(log_fx down <<<$'@stderr squeue: error: Unable to contact slurm controller (connect failure)\n@exit 1')" -- log 500
+	need "unreachable at once: rc 1" eval 'rc_is 1 && err_is "sq log: slurm unreachable · squeue: error: Unable to contact slurm controller (connect failure)"'
+	sq_run "$(log_fx hang <<<'@hang 10')" SQ_TIMEOUT=1 -- log 500
+	need "SQ_TIMEOUT bounds it: rc 1" eval 'rc_is 1 && err_is "sq log: slurm unreachable · no response after 1s"'
+	sq_run "$(log_fx garbage <<<'@raw not a record')" -- log 500
+	need "an answer sq cannot read: rc 1" eval 'rc_is 1 && err_is "sq log: slurm unreachable · squeue output unreadable"'
+
+	local tasks='JobID=601; ArrayJobID=600; ArrayTaskID=1; StateCompact=R
+JobID=602; ArrayJobID=600; ArrayTaskID=2; StateCompact=R
+JobID=600; ArrayJobID=600; ArrayTaskID=4-5,9%2; StateCompact=PD'
+	sq_run "$(log_fx notask <<<$'@step 1\n# no task 7\n@step 2\n'"$tasks")" -- log 600_7
+	need "unknown task: rc 1 with the tasks the array has, from a second call on the array" eval 'rc_is 1 && err_is "sq log: Slurm does not know task 600_7; array 600 has tasks 1,2,4,5,9" && argv_has squeue --jobs=600_7 && argv_has squeue --jobs=600'
+	sq_run "$(log_fx array <<<"$tasks")" -- log 600
+	need "an array named bare: rc 2, a task to name" eval 'rc_is 2 && err_is "sq log: 600 is an array; name a task, e.g. sq log 600_1 (its tasks: 1,2,4,5,9)"'
+	sq_run "$(log_fx bigarray <<<'JobID=600; ArrayJobID=600; ArrayTaskID=0-99:3%4; StateCompact=PD')" -- log 600
+	need "a pending array: 10 tasks at most" eval 'rc_is 2 && err_is "sq log: 600 is an array; name a task, e.g. sq log 600_0 (its tasks: 0,3,6,9,12,15,18,21,24,27,…)"'
+	sq_run "$(log_fx lasttask <<'EOF'
+JobID=600; ArrayJobID=600; ArrayTaskID=9; StateCompact=CD; STDOUT=\{run}/wd/slurm-600.out; STDERR=\{run}/wd/slurm-600.out
+@file create wd/slurm-600_9.out task 9\n
+EOF
+)" -- log --no-follow 600
+	need "the array's last task by the array id: named, followed, slurm-%A_%a.out" eval 'rc_is 0 && out_is "task 9
+" && err_is "sq log: job 600 is task 600_9 of an array; following it
+sq log: job 600 ended: COMPLETED (exit code 0:0)"'
+	sq_run "$(log_fx task <<'EOF'
+JobID=602; ArrayJobID=600; ArrayTaskID=2; StateCompact=CD; STDOUT=\{run}/wd/slurm-602.out; STDERR=\{run}/wd/slurm-602.out
+@file create wd/slurm-600_2.out task 2\n
+EOF
+)" -- log --no-follow 600_2
+	need "a task by N_T: its own record, slurm-%A_%a.out" eval 'rc_is 0 && out_is "task 2
+" && argv_has squeue --jobs=600_2'
+
+	local het='JobID=700; ArrayJobID=700; HetJobID=700; HetJobOffset=0; StateCompact=CD; STDOUT=\{run}/wd/het_%j.out; STDERR=\{run}/wd/het_%j.out
+JobID=701; ArrayJobID=701; HetJobID=700; HetJobOffset=1; StateCompact=CD; STDOUT=\{run}/wd/het_%j.out; STDERR=\{run}/wd/het_%j.out
+@file create wd/het_700.out leader\n'
+	local hetnote="sq log: job %s belongs to het job 700, whose leader 700+0 writes its output; following that
+sq log: job %s ended: COMPLETED (exit code 0:0)"
+	sq_run "$(log_fx het1 <<<"$het")" -- log --no-follow 700+1
+	need "N+K: the leader's file, one note" eval 'rc_is 0 && out_is "leader
+" && err_is "$(printf "$hetnote" 700+1 700+1)" && argv_has squeue --jobs=700+1'
+	sq_run "$(log_fx het0 <<<"$het")" -- log --no-follow 700
+	need "the leader by its id: no note" eval 'rc_is 0 && out_is "leader
+" && err_is "sq log: job 700 ended: COMPLETED (exit code 0:0)"'
+	sq_run "$(log_fx hetboth <<<"$het")" -- log --no-follow 701
+	need "a component by its own id, its leader in the answer: the leader" eval 'rc_is 0 && out_is "leader
+" && err_is "$(printf "$hetnote" 701 701)"'
+	sq_run "$(log_fx hetalone <<<$'@step 1\nJobID=701; ArrayJobID=701; HetJobID=700; HetJobOffset=1; StateCompact=CD\n@step 2\n'"$het")" -- log --no-follow 701
+	need "a component alone in the answer: asked again by its het job's id" eval 'rc_is 0 && out_is "leader
+" && err_is "$(printf "$hetnote" 701 701)" && argv_has squeue --jobs=701 && argv_has squeue --jobs=700'
+	sq_run "$(log_fx nothet <<<'StateCompact=R')" -- log 500+1
+	need "N+K on a job that is no het job: rc 2" eval 'rc_is 2 && err_is "sq log: 500 is not a het job, so 500+1 names no component of one; e.g. sq log 500"'
+
+	sq_run "$(log_fx interactive <<<'BatchFlag=0; STDOUT=N/A; STDERR=N/A')" -- log 500
+	need "an interactive job: rc 1" eval 'rc_is 1 && err_is "sq log: job 500 is an interactive job; its output went to its terminal"'
+	sq_run "$(log_fx null <<<'STDOUT=/dev/null; STDERR=/dev/null')" -- log 500
+	need "-o none: rc 1" eval 'rc_is 1 && err_is "sq log: job 500'"'"'s output is discarded (it goes to /dev/null)"'
+	sq_run "$(log_fx nullout <<<'STDOUT=/dev/null; STDERR=\{run}/wd/e.log')" -- log 500
+	need "-o none -e FILE: rc 1, pointing at --err" eval 'rc_is 1 && err_is "sq log: job 500'"'"'s output is discarded (it goes to /dev/null); its stderr has a file of its own: sq log --err 500"'
+	sq_run "$(log_fx nullerr <<<'STDERR=/dev/null')" -- log --err 500
+	need "--err with -e none: rc 1, drop --err" eval 'rc_is 1 && err_is "sq log: job 500'"'"'s stderr is discarded (it goes to /dev/null); drop --err"'
+	fx=$(log_fx same <<'EOF'
+StateCompact=CD
+@file create wd/out_500.log both\n
+EOF
+)
+	sq_run "$fx" -- log --err --no-follow 500
+	need "--err without -e: the stdout file, one note" eval 'rc_is 0 && out_is "both
+" && err_is "sq log: job 500 writes its stderr into its stdout file; following that
+sq log: job 500 ended: COMPLETED (exit code 0:0)"'
+
+	# L0: the environment
+	sq_run "$fx" SQUEUE_USERS=nobody SQUEUE_PARTITION=x SQUEUE_SORT=bogus SQUEUE_FORMAT=%i SQUEUE_STATES=PD SLURM_TIME_FORMAT=relative SLURM_BITSTR_LEN=5 -- log --no-follow 500
+	need "inherited SQUEUE_* unset, SQUEUE_FORMAT2 framed, %s and 0 pinned" eval 'rc_is 0 && out_is "both
+" && only_format2 && [ "$(env_of squeue 1 SLURM_TIME_FORMAT)" = %s ] && [ "$(env_of squeue 1 SLURM_BITSTR_LEN)" = 0 ]'
+	need "the format: the 17 fields, each ending in the nonce" eval 'n=$(env_of squeue 1 SQ_NONCE); [ "$(env_of squeue 1 SQUEUE_FORMAT2)" = "$(for f in JobID ArrayJobID ArrayTaskID HetJobID HetJobOffset StateCompact RestartCnt BatchFlag BatchHost WorkDir STDOUT STDERR UserName Name StartTime Reason exit_code; do printf "%s:%s," "$f" "$n"; done | sed "s/,\$//")" ]'
+	sq_run "$fx" SLURM_CLUSTERS=other -- log 500
+	need "SLURM_CLUSTERS: refused" eval 'rc_is 2 && no_slurm_call && err_is "sq: sq log reads output files on this machine; unset SLURM_CLUSTERS"'
+	sq_run "$fx" SLURM_CLUSTERS= -- log 500
+	need "SLURM_CLUSTERS empty: refused too" eval 'rc_is 2 && no_slurm_call && err_is "sq: sq log reads output files on this machine; unset SLURM_CLUSTERS"'
+	# L5: following needs GNU tail >= 8.28; showing what is there does not
+	local tailpath="$here/lib/tail-as:$here/bin:$PATH"
+	sq_run "$fx" PATH="$tailpath" SQSTUB_TAIL=busybox -- log 500
+	need "BusyBox tail: rc 1 before any Slurm call" eval 'rc_is 1 && no_slurm_call && err_is "sq log: following needs GNU tail; use --no-follow"'
+	sq_run "$fx" PATH="$tailpath" SQSTUB_TAIL=old -- log 500
+	need "GNU tail 8.22: rc 1" eval 'rc_is 1 && no_slurm_call && err_is "sq log: following needs GNU tail; use --no-follow"'
+	sq_run "$fx" PATH="$tailpath" SQSTUB_TAIL=busybox -- log --no-follow 500
+	need "--no-follow needs no GNU tail" eval 'rc_is 0 && out_is "both
+"'
+}
+
+c_log_syntax() {   # L1
+	T_TITLE="sq log's command line: options before or after the id, -n N, repeats, --, every refusal with an example"
+	local example="e.g. sq log 12345, an array task 12345_4 or a het job's component 12345+1" w
+	local fx; fx=$(log_fx done <<'EOF'
+StateCompact=CD
+@file create wd/out_500.log a\nb\nc\n
+EOF
+)
+	sq_run "$fx" -- log -e --err --no-follow --no-follow -n 1 -n5 500
+	need "repeats are harmless, the last -n counts" eval 'rc_is 0 && out_is "a
+b
+c
+"'
+	sq_run "$fx" -- log --no-follow -- 500
+	need "-- before the id" eval 'rc_is 0 && argv_has squeue --jobs=500'
+	sq_run "$fx" -- log --no-follow 4294967293
+	need "the highest job id is asked about" argv_has squeue --jobs=4294967293
+	sq_run "$fx" -- log --no-follow 0000600_0009
+	need "leading zeros dropped in a task id" argv_has squeue --jobs=600_9
+	log_refused() {   # log_refused TEXT ARGS...
+		local text=$1; shift
+		sq_run "$fx" -- log "$@"
+		need "sq log $*: rc 2, no Slurm call, '$text'" eval 'rc_is 2 && out_empty && no_slurm_call && err_is "sq log: $text"'
+	}
+	log_refused "which job? e.g. sq log 12345"
+	log_refused "which job? e.g. sq log 12345" --no-follow --
+	log_refused "-n needs a number of lines, e.g. sq log -n 20 12345" 500 -n
+	log_refused "-n needs a number of lines, not 'x'; e.g. sq log -n 20 12345" -n x 500
+	log_refused "-n needs a number of lines, not 'x'; e.g. sq log -n 20 12345" -nx 500
+	log_refused "-n needs a number of lines, not '-5'; e.g. sq log -n 20 12345" -n -5 500
+	log_refused "-n needs a number of lines, not '1234567890'; e.g. sq log -n 20 12345" -n 1234567890 500
+	log_refused "-n needs a number of lines, not '=5'; e.g. sq log -n 20 12345" -n=5 500
+	log_refused "--err takes no value; write it on its own, e.g. sq log --err 12345" --err=x 500
+	log_refused "--no-follow takes no value; write it on its own, e.g. sq log --no-follow 12345" --no-follow=1 500
+	log_refused "--help takes no value; write it on its own, e.g. sq log --help 12345" --help=x
+	log_refused "'-x' is not an option of sq log (sq log -h lists them); e.g. sq log -n 20 --err 12345" -x 500
+	log_refused "'--follow' is not an option of sq log (sq log -h lists them); e.g. sq log -n 20 --err 12345" --follow 500
+	log_refused "'-en' is not an option of sq log (sq log -h lists them); e.g. sq log -n 20 --err 12345" -en 5 500
+	log_refused "one job at a time, not '500' and '501'; e.g. sq log 12345" 500 501
+	log_refused "one job at a time, not '500' and '--no-follow'; e.g. sq log 12345" -- 500 --no-follow
+	for w in 0 '' abc 5_ '5_[1-3]' 12345678901 4294967294 5_4000001 5_12345678 5+12345 5+ +1 _1 '0_1' ' 5'; do
+		log_refused "'$w' is not a job id; $example" "$w"
+	done
+	log_refused "'-5' is not a job id; $example" -- -5
+	sq_run "$fx" -- log 5_4000000 --no-follow
+	need "task 4000000 is still a task" argv_has squeue --jobs=5_4000000
+	sq_run "$fx" -- log --help
+	need "the help: rc 0, the five things L8 says" eval 'rc_is 0 && no_slurm_call && has "ends shortly" && has "reused" && has "cannot tell it the job ended" && has "python -u" && has "stdbuf -oL" && has "--no-follow -n N"'
+}
+
+c_log_paths() {   # L3: the path the job's slurmstepd computes
+	T_TITLE="sq log's path: slurmstepd's expansion (fname_port.py's table), the NULL defaults, -e, relative patterns, backslashes"
+	# The table of ~/.claude-scratch/sq/attack-sqlog-slurm/fname_port.py, a port of
+	# Slurm 23.11.4 fname.c (job 11875, no array, user schroder, name nc, batch
+	# host fb2-bioinf), pattern -> what slurmstepd writes.  Each case reads the
+	# path back from the "never written" refusal of an ended job.
+	local -a table=(
+		'o_%j.out'          'o_11875.out'
+		'o_%5j.out'         'o_11875.out'
+		'o_%05j.out'        'o_11875.out'
+		'o_%010j.out'       'o_0000011875.out'
+		'o_%100j.out'       'o_0000011875.out'
+		'o_%%N.out'         'o_%N.out'
+		'o_%%%j.out'        'o_%11875.out'
+		'o_%N_%j.out'       'o_fb2-bioinf_11875.out'
+		'o_%5N.out'         'o_fb2-bioinf.out'
+		'o_%J_%s_%t_%n.out' 'o_11875_batch_0_0.out'
+		'o_%05Z.out'        'o_5Z.out'
+		'o_%a.out'          'o_4294967294.out'
+		'o\_%j.out'         'o_%j.out'
+		'o_\\%j.out'        'o_\%j.out'
+		'o_%%j\x.out'       'o_%%jx.out'
+		'o_%5'              'o_5'
+		'o_%u_%x_%A.out'    'o_schroder_nc_11875.out'
+		'o_%3t_%2n.out'     'o_000_00.out'
+		'o_%Z_%.out'        'o_%Z_%.out'
+		'o_%'               'o_%'
+	)
+	local i pat want rec
+	rec='JobID=11875; ArrayJobID=11875; ArrayTaskID=N/A; UserName=schroder; Name=nc; BatchHost=fb2-bioinf.bioinf.local; WorkDir=/data/wd; StateCompact=CD'
+	path_is() {   # path_is NAME RECORD-FIELDS WANT [sq log args]: the refusal names WANT
+		local name=$1 fields=$2 want=$3; shift 3
+		local -a args=("$@"); [ $# -gt 0 ] || args=(11875)
+		sq_run "$(printf '@defaults %s\n%s\n' "$rec" "$fields" | log_fx "$name")" -- log --no-follow "${args[@]}"
+		need "$name: $want" eval 'rc_is 1 && tail -n 1 "$ERR" | grep -qxF "sq log: job ${args[-1]} ended; $want was never written"'
+	}
+	for ((i = 0; i < ${#table[@]}; i += 2)); do
+		pat=$(printf '%s' "${table[i]}" | sed 's/\\/\\\\/g')   # a fixture writes \ as \\
+		want=${table[i+1]}
+		path_is "t$i" "STDOUT=/data/wd/$pat; STDERR=/data/wd/$pat" "/data/wd/$want"
+	done
+	# NULL: squeue prints WorkDir/slurm-JOBID.out, slurmstepd writes slurm-%J.out,
+	# for an array task slurm-%A_%a.out; without -e, stderr goes where stdout does
+	path_is null "STDOUT=/data/wd/slurm-11875.out; STDERR=/data/wd/slurm-11875.out" /data/wd/slurm-11875.out
+	path_is nullarray "JobID=11880; ArrayJobID=11875; ArrayTaskID=5; STDOUT=/data/wd/slurm-11880.out; STDERR=/data/wd/slurm-11880.out" \
+		/data/wd/slurm-11875_5.out 11875_5
+	path_is nullerr "JobID=11880; ArrayJobID=11875; ArrayTaskID=5; STDOUT=/data/wd/slurm-11880.out; STDERR=/data/wd/slurm-11880.out" \
+		/data/wd/slurm-11875_5.out --err 11875_5
+	need "nullerr: the same-file note first" eval 'head -n 1 "$ERR" | grep -qxF "sq log: job 11875_5 writes its stderr into its stdout file; following that"'
+	path_is erronly "JobID=11880; ArrayJobID=11875; ArrayTaskID=5; STDOUT=/data/wd/slurm-11880.out; STDERR=/data/wd/e_%A_%a.err" \
+		/data/wd/e_11875_5.err --err 11875_5
+	path_is outonly "STDOUT=/data/o/%x.log; STDERR=/data/o/%x.log" /data/o/nc.log --err 11875
+	path_is notnull "STDOUT=/data/wd/slurm-11875.log; STDERR=/data/wd/slurm-11875.log" /data/wd/slurm-11875.log
+	# relative (scontrol update can leave one): joined to WorkDir; with a
+	# backslash appended as it is, as fname_create() does
+	path_is rel "STDOUT=r_%j.out; STDERR=r_%j.out" /data/wd/r_11875.out
+	path_is relslash "WorkDir=/data/wd/; STDOUT=r.out; STDERR=r.out" /data/wd/r.out
+	path_is relbackslash "STDOUT=r\\\\_%j.out; STDERR=r\\\\_%j.out" /data/wdr_%j.out
+	path_is spaces "WorkDir=/data/my wd; STDOUT=/data/my wd/a b %j.out; STDERR=/data/my wd/a b %j.out" "/data/my wd/a b 11875.out"
+}
+
+c_log_stream() {   # L5, L7: a gone reader, a full disk, signals, SIGKILL
+	T_TITLE="sq log's processes: | head -n 3 and > /dev/full end it, INT/TERM/HUP give 128+N, also during a poll, SIGKILL leaves nothing within a poll"
+	local fx slow head full fullnow int term hup intpoll termpoll kill9 killpend
+	fx=$(log_fx forever <<'EOF'
+StateCompact=R
+@file create wd/out_500.log l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n
+EOF
+)
+	slow=$(log_fx slow <<'EOF'
+StateCompact=R
+@file create wd/out_500.log l1\n
+@step 2
+@hang 30
+EOF
+)
+	SQOUT=head3 sq_start "$fx" -- log 500; head=$RUN
+	SQOUT=full sq_start "$fx" -- log 500; full=$RUN
+	SQOUT=full sq_start "$fx" -- log --no-follow 500; fullnow=$RUN
+	sq_start "$fx" -- log 500; int=$RUN
+	sq_start "$fx" -- log 500; term=$RUN
+	sq_start "$fx" -- log 500; hup=$RUN
+	sq_start "$slow" SQ_TIMEOUT=10 -- log 500; intpoll=$RUN
+	sq_start "$slow" SQ_TIMEOUT=10 -- log 500; termpoll=$RUN
+	sq_start "$fx" -- log 500; kill9=$RUN
+	sq_start "$(log_fx pend <<<'StateCompact=PD; Reason=Priority')" -- log 500; killpend=$RUN
+
+	streaming() { use_run "$1"; waits_for 20 grep -q l1 "$OUT"; }
+	streaming "$int"  && kill -INT -- "-$SQ_PID"
+	streaming "$term" && kill -TERM "$SQ_PID"
+	streaming "$hup"  && kill -HUP "$SQ_PID"
+	# the second call hangs: sq is waiting for its client when the signal comes
+	# and it ends at once, not when the client is done or timed out (10 s)
+	local prompt=
+	use_run "$intpoll";  waits_for 20 eval '[ "$(stub_calls)" -ge 2 ]' && sleep 0.5 && kill -INT -- "-$SQ_PID" 2>/dev/null
+	waits_for 3 eval '[ -s "$RUN/rc" ]' && prompt="$prompt int"
+	use_run "$termpoll"; waits_for 20 eval '[ "$(stub_calls)" -ge 2 ]' && sleep 0.5 && kill -TERM "$SQ_PID" 2>/dev/null
+	waits_for 3 eval '[ -s "$RUN/rc" ]' && prompt="$prompt term"
+	streaming "$kill9" && kill -KILL "$SQ_PID"
+	use_run "$killpend"; waits_for 20 eval '[ -s "$ERR" ]' && kill -KILL "$SQ_PID"
+
+	sq_finish "$head" 20
+	need "| head -n 3: rc 0, three lines, nothing left" eval 'rc_is 0 && out_is "l1
+l2
+l3
+" && err_empty && nothing_left'
+	sq_finish "$full" 20
+	need "> /dev/full: rc 1, tail's write error" eval 'rc_is 1 && err_is "sq log: tail: write error: No space left on device" && nothing_left'
+	sq_finish "$fullnow" 20
+	need "--no-follow > /dev/full: rc 1 too" eval 'rc_is 1 && err_is "sq log: tail: write error: No space left on device"'
+	local r sig
+	for r in int:130 term:143 hup:129 intpoll:130 termpoll:143; do
+		sig=${r%%:*}; sq_finish "${!sig}" 20
+		need "$sig: rc ${r#*:}, nothing left, nothing more said, its tmp gone" eval 'rc_is ${r#*:} && nothing_left && [ -z "$(ls -A "$RUN/tmp")" ]'
+	done
+	need "intpoll/termpoll: sq ended within 3 s of the signal" eval '[ "$prompt" = " int term" ]'
+	need "intpoll/termpoll: the hanging client was ended too" eval 'use_run "$intpoll"; nothing_left && use_run "$termpoll" && nothing_left'
+	for r in kill9 killpend; do
+		sq_finish "${!r}" 20
+		need "$r: SIGKILL, rc 137, nothing left within a poll and tmp removed by the sentinel" eval 'rc_is 137 && waits_for 6 nothing_left && waits_for 6 eval "[ -z \"\$(ls -A \"\$RUN/tmp\")\" ]"'
+	done
+}
+
+# ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
@@ -3417,6 +3972,7 @@ cases=(
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
 	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
+	sub_dispatch sub_stray log_follow log_now log_syntax log_paths log_stream
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

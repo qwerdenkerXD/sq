@@ -22,6 +22,9 @@
 #   sq --reserve N          COMPACT leaves N lines of the screen unused
 #   watch -tc -n 5 sq       live dashboard; keep -t, or watch's own header
 #                           pushes the footer off screen (or --reserve 2)
+#   sq log JOBID            a job's output file, followed while the job runs
+#                           (sq log -h).  A subcommand comes first: only options
+#                           that take no value may stand before it
 #
 # Two modes.  FULL shows every job.  COMPACT fits the screen's height: rows
 # that do not fit collapse into lines like "… 42 jobs running".  Stuck jobs
@@ -179,7 +182,17 @@ mint_nonce() {
 tmp=$(mktemp -d) || exit 1
 memtmp=                                         # the memuse snapshot being written
 statetmp=                                       # the bell's state being written
-trap 'rm -rf "$tmp"; rm -f ${statetmp:+"$statetmp"} ${memtmp:+"$memtmp"}' EXIT
+collect_pid= log_pids=                          # a client collect -w waits for; sq log's
+                                                # tail and its sentinel
+# The processes first, by pid (each ended with TERM and waited for, so none
+# outlives sq), then the files
+cleanup() {
+	local pid
+	for pid in $collect_pid $log_pids; do kill "$pid" 2>/dev/null; done
+	for pid in $collect_pid $log_pids; do wait "$pid" 2>/dev/null; done
+	rm -rf "$tmp"; rm -f ${statetmp:+"$statetmp"} ${memtmp:+"$memtmp"}
+}
+trap cleanup EXIT
 
 # an unreachable controller makes sinfo/squeue block, not fail, so bound them.
 # timeout reads 0 as "no limit" and errors out on anything non-numeric, so both
@@ -194,12 +207,23 @@ case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeou
 # Wrapped in 2>/dev/null, so bash prints no "Killed" or "Segmentation fault"
 # notice of its own on the screen.  Environment prefixes on the call reach the
 # client.
-collect() {   # collect [-t SECONDS] NAME TOOL ARGS...: stdout into $tmp/NAME,
-	local limit=$tmo name        # bounded by SECONDS, SQ_TIMEOUT's by default
+# -w runs timeout in the background and waits for it, its pid in collect_pid:
+# a trapped signal then acts at once instead of when the client is done, and
+# the EXIT cleanup can end the client through timeout, which sits in a process
+# group of its own that a Ctrl-C never reaches.  The dashboard does not use it,
+# as a Ctrl-C there is left to what bash makes of a foreground client.
+collect() {   # collect [-t SECONDS] [-w] NAME TOOL ARGS...: stdout into $tmp/NAME,
+	local limit=$tmo name bg=0 rc   # bounded by SECONDS, SQ_TIMEOUT's by default
 	[ "$1" != -t ] || { limit=$2; shift 2; }
+	[ "$1" != -w ] || { bg=1; shift; }
 	name=$1; shift
-	{ timeout $verbose -k 2 "$limit" sh -c 'exec "$@" 2>&3 3>&-' "$1" "$@" \
-		> "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo"; } 2>/dev/null
+	set -- timeout $verbose -k 2 "$limit" sh -c 'exec "$@" 2>&3 3>&-' "$1" "$@"
+	if [ $bg = 0 ]; then
+		{ "$@" > "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo"; } 2>/dev/null
+	else
+		{ "$@" > "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo" &
+		  collect_pid=$!; wait "$collect_pid"; rc=$?; collect_pid=; return $rc; } 2>/dev/null
+	fi
 }
 # --verbose makes timeout say "sending signal ..." before it signals; it exists
 # since coreutils 8.29, and an older timeout refuses it (rc 125) without running
@@ -244,6 +268,479 @@ first_why() {   # first_why NAME... (each set like why_of sets it)
 	local v r
 	for v in "$@"; do r=${v}_real; [ -z "${!r}" ] || { printf '%s' "${!r}"; return; }; done
 	for v in "$@"; do [ -z "${!v}" ] || { printf '%s' "${!v}"; return; }; done
+}
+
+# ============================================================================
+# sq log JOBID: a job's output file, followed while the job runs
+# ============================================================================
+# Franz's decisions (2026-10-20): the whole file, live, ending shortly after
+# the job ends, raw, to be piped or followed; stdout, --err for stderr; a job
+# Slurm forgot is refused, an array asks for a task, a requeue ends the stream
+# with a note, notes go to stderr also into a pipe, and a cluster selection is
+# refused, as the file is read on this machine.
+# sq computes the path the way the job's slurmstepd does, from the raw -o/-e
+# pattern squeue prints (scontrol expands only some letters), and polls Slurm
+# every 5 s in every phase: waiting for the job to start, for the file to
+# appear, and while tail streams it.  The stream ends only at a final state
+# (never during CG, when a job may still write), after a 3 s grace.
+log_help() {
+	cat <<'EOF'
+usage: sq log [-e|--err] [-n N] [--no-follow] JOBID
+
+Prints a batch job's output file from its start, then follows it while the
+job runs, and ends shortly (within about 10 s) after the job ends: pipe it
+to less or grep, or watch it as it comes.  JOBID is 12345, an array task
+12345_4, or a het job 12345+1 (its leader writes the output).  A pending job
+is waited for until it runs and its file is there.
+
+  -e, --err      the job's stderr file instead of its stdout file
+  -n N           only the last N lines, then follow
+  --no-follow    print what is there now and stop
+  -h, --help     this help
+
+Notes ("sq log: ...") go to stderr, also into a pipe; the file's own bytes
+are passed on as they are.  Exit 0 when done, whatever the job's own outcome
+(a note names it), 1 when the file cannot be shown, 2 for a usage error,
+128+N when stopped by signal N.
+
+Good to know:
+- The path is computed from -o/-e the way Slurm's job does.  A file name that
+  is reused (no %j in it) may first show an earlier run's text.
+- sq log follows for as long as Slurm cannot tell it the job ended: while
+  Slurm does not answer, it keeps following.
+- "Live" can lag: a job on another node writes through NFS, and a program
+  buffers its output into a file (python -u, or stdbuf -oL, helps).
+- A requeued job ends the stream with a note; run sq log again for its new run.
+- Under watch, use --no-follow -n N:  watch -n 5 sq log --no-follow -n 20 12345
+- Slurm forgets a job about 5 minutes after it ends; its path is then unknown.
+EOF
+}
+
+# every message names sq log and is scrubbed whole: it carries paths, names
+# and reasons, all of them outside text
+log_say()   { printf 'sq log: %s\n' "$(printf '%s' "$1" | scrub)" >&2; }
+log_usage() { log_say "$*"; exit 2; }          # the command line is wrong
+log_fail()  { log_say "$*"; exit 1; }          # the file cannot be shown
+log_noted=
+log_note() {   # log_note KIND TEXT: TEXT, the first time KIND has something to say
+	case " $log_noted " in *" $1 "*) return ;; esac
+	log_noted="$log_noted $1"; log_say "$2"
+}
+# SLURM_CLUSTERS, -M/--cluster(s), --federation and --sibling would ask another
+# cluster about the job, while its file is read here: one text per cause
+log_refuse_cluster() {
+	case $1 in
+		SLURM_CLUSTERS) die "sq log reads output files on this machine; unset SLURM_CLUSTERS" ;;
+		*) die "sq log reads output files on this machine; drop $1" ;;
+	esac
+}
+
+# The facts, one squeue call: every SQUEUE_* variable unset, as SQUEUE_USERS,
+# _PARTITION, _NAMES ... filter even under --jobs and SQUEUE_SORT can fail the
+# call, the format in SQUEUE_FORMAT2, framed by the nonce like the dashboard's
+# calls (-O reads Field:suffix as size 0, the field whole), and the time and
+# bitstring formats pinned
+log_fields="JobID ArrayJobID ArrayTaskID HetJobID HetJobOffset StateCompact RestartCnt
+	BatchFlag BatchHost WorkDir STDOUT STDERR UserName Name StartTime Reason exit_code"
+log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, pick the record HOW names
+	SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$log_fmt \
+		collect -w facts squeue -h --jobs="$1" -t all
+	local rc=$?
+	log_verdict= log_why=
+	if [ $rc -ne 0 ]; then
+		# a job Slurm no longer knows is rc 1 and this text (23.11.4, measured)
+		if [ $rc = 1 ] && LC_ALL=C grep -q 'Invalid job id specified' "$tmp/facts.err" 2>/dev/null
+		then log_verdict=none
+		else log_verdict=fail; why_of log_why $rc "$tmp/facts" squeue
+		fi
+		return
+	fi
+	log_pick "$2" "$3" "${4-}" > "$tmp/pick" || { log_verdict=fail; log_why="squeue output unreadable"; return; }
+	mapfile -d '' -t REC < "$tmp/pick"
+	log_verdict=${REC[0]-fail}
+	[ "$log_verdict" != bad ] || { log_verdict=fail; log_why="squeue output unreadable"; }
+}
+# From $tmp/facts, the record HOW names, NUL-separated (no path holds a NUL):
+#   ok NOTE JobID ArrayTaskID State RestartCnt BatchFlag BatchHost Reason
+#      exit_code OUTPATH ERRPATH         NOTE: "", "last" or "het LEADER OFFSET"
+#   array FIRST LIST | tasks FIRST LIST  the array's task ids, up to 10
+#   leader LEADER OFFSET                 a het component; its leader is not here
+#   none | notask | nothet | bad
+# HOW is job (a plain id: the job itself, the leader of its het job, or the
+# last task of an array, which carries the array's id), task (JOB_TASK),
+# het (the leader of het job JOB) or tasks (array JOB's task ids).
+log_pick() {   # log_pick HOW JOB [TASK]
+	env LC_ALL=C gawk -v how="$1" -v job="$2" -v task="${3-}" '
+	BEGIN { RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"] }
+	# every record whole, its job id a number, or nothing is read at all
+	NF != 17 || RT == "" || $1 !~ /^[0-9]+$/ { bad = 1; exit }
+	{ nrec++; for (i = 1; i <= NF; i++) R[nrec, i] = $i }
+	function put(x) { printf "%s%c", x, 0 }
+	# slurmstepd, src/slurmd/common/fname.c (23.11.4): remove_path_slashes()
+	# drops each backslash and keeps the second of two, and any backslash at
+	# all means no expansion
+	function unslash(f,   out, i, c) {
+		for (i = 1; i <= length(f); i++) {
+			c = substr(f, i, 1)
+			if (c == "\\" && substr(f, i + 1, 1) == "\\") { out = out c; i++ }
+			else if (c != "\\") out = out c
+		}
+		return out
+	}
+	function pad(v, wid) { return wid ? sprintf("%0" wid "d", v) : v }
+	# _create_batch_fname(): %% is %, a width (10 at most) zero-pads the
+	# numbers, %N is the batch host short name, %s "batch", %n %t 0; after a
+	# width an unknown letter keeps only the width last digit, and an unknown
+	# letter without one stays as written, "%" and all
+	function expand(f, r,   out, p, q, n, c, wid, host, v) {
+		n = length(f); p = q = 1
+		host = R[r, 9]; sub(/[.].*/, "", host)
+		while (p <= n) {
+			if (substr(f, p, 1) != "%") { p++; continue }
+			if (substr(f, p + 1, 1) == "%") { out = out substr(f, q, p + 1 - q); p += 2; q = p; continue }
+			p++; wid = 0
+			if (substr(f, p, 1) ~ /[0-9]/) {
+				out = out substr(f, q, p - 1 - q)
+				match(substr(f, p), /^[0-9]+/)
+				wid = substr(f, p, RLENGTH) + 0; if (wid > 10) wid = 10
+				p += RLENGTH; q = p - 1
+				if (p > n) break
+			}
+			c = substr(f, p, 1)
+			if      (c == "a") v = pad(R[r, 3] ~ /^[0-9]+$/ ? R[r, 3] : 4294967294, wid)   # NO_VAL
+			else if (c == "A") v = pad(R[r, 2], wid)
+			else if (c == "j" || c == "J") v = pad(R[r, 1], wid)
+			else if (c == "n" || c == "t") v = pad(0, wid)
+			else if (c == "N") v = host
+			else if (c == "s") v = "batch"
+			else if (c == "u") v = R[r, 13]
+			else if (c == "x") v = R[r, 14]
+			else continue
+			out = out substr(f, q, p - 1 - q) v; p++; q = p
+		}
+		return out substr(f, q)
+	}
+	# fname_create(): a relative pattern is joined to the work dir, and one
+	# with a backslash is appended to it as it is, without a "/" (sic)
+	function fullpath(f, r,   dir) {
+		if (substr(f, 1, 1) == "/") return index(f, "\\") ? unslash(f) : expand(f, r)
+		dir = R[r, 10]
+		if (index(f, "\\")) return dir unslash(f)
+		return dir (dir ~ /\/$/ ? "" : "/") expand(f, r)
+	}
+	# squeue prints a job without -o as WorkDir/slurm-JOBID.out, also for an
+	# array task, whose slurmstepd writes slurm-%A_%a.out; without -e it
+	# prints STDOUT for STDERR (src/squeue/print.c, 23.11.4), and slurmstepd
+	# then writes stderr where stdout goes
+	function outpat(r) {
+		if (R[r, 11] != R[r, 10] "/slurm-" R[r, 1] ".out") return R[r, 11]
+		return (R[r, 3] ~ /^[0-9]+$/) ? "slurm-%A_%a.out" : "slurm-%J.out"
+	}
+	function errpat(r) { return (R[r, 12] == R[r, 11]) ? outpat(r) : R[r, 12] }
+	function ok(r, note,   i) {
+		put("ok"); put(note)
+		split("1 3 6 7 8 9 16 17", I, " "); for (i = 1; i <= 8; i++) put(R[r, I[i]])
+		put(fullpath(outpat(r), r)); put(fullpath(errpat(r), r))
+	}
+	# the task ids of array job, smallest first, at most 10 of them; a
+	# pending part is a bracket expression: a, a-b, a-b:step, %throttle
+	function tasks(verdict,   r, x, t, nt, i, m, a, b, s, k, cnt, ids, sorted, nid, list) {
+		for (r = 1; r <= nrec; r++) {
+			if (R[r, 2] != job || R[r, 3] == "N/A") continue
+			x = R[r, 3]; sub(/%[0-9]+$/, "", x)
+			nt = split(x, t, ",")
+			for (i = 1; i <= nt; i++) {
+				if (!match(t[i], /^([0-9]+)(-([0-9]+)(:([0-9]+))?)?$/, m)) continue
+				a = m[1] + 0; b = (m[3] != "") ? m[3] + 0 : a; s = (m[5] != "") ? m[5] + 0 : 1
+				if (s < 1 || b < a) continue
+				cnt += int((b - a) / s) + 1
+				for (k = a; k <= b && k < a + 10 * s; k += s) ids[k] = 1
+			}
+		}
+		if (!cnt) { put("none"); return }
+		nid = asorti(ids, sorted, "@ind_num_asc")
+		for (i = 1; i <= nid && i <= 10; i++) list = list (i > 1 ? "," : "") sorted[i]
+		put(verdict); put(sorted[1]); put(list (cnt > 10 ? ",…" : ""))
+	}
+	END {
+		if (bad) { put("bad"); exit }
+		if (how == "tasks") { tasks("tasks"); exit }
+		if (how == "task") {
+			for (r = 1; r <= nrec; r++) if (R[r, 2] == job && R[r, 3] == task) { ok(r, ""); exit }
+			put("notask"); exit
+		}
+		if (how == "het") {
+			for (r = 1; r <= nrec; r++) if (R[r, 4] == job && R[r, 5] == "0") { ok(r, ""); exit }
+			for (r = 1; r <= nrec; r++) if (R[r, 1] == job) { put("nothet"); exit }
+			put("none"); exit
+		}
+		for (me = 1; me <= nrec; me++) if (R[me, 1] == job) break
+		if (me <= nrec && R[me, 4] != "N/A") {        # a het job: its leader writes
+			if (R[me, 5] == "0") { ok(me, ""); exit }
+			for (r = 1; r <= nrec; r++)
+				if (R[r, 4] == R[me, 4] && R[r, 5] == "0") { ok(r, "het " R[me, 4] " " R[me, 5]); exit }
+			put("leader"); put(R[me, 4]); put(R[me, 5]); exit
+		}
+		for (r = 1; r <= nrec; r++) if (R[r, 2] == job && R[r, 3] != "N/A") { na++; last = r }
+		if (na == 1 && R[last, 1] == job && R[last, 3] ~ /^[0-9]+$/) { ok(last, "last"); exit }
+		if (na) { tasks("array"); exit }
+		if (me <= nrec) { ok(me, ""); exit }
+		put("none")
+	}' "$tmp/facts"
+}
+log_take() {   # the picked record into log_*
+	log_jobid=${REC[2]} log_tid=${REC[3]} log_state=${REC[4]} log_restart=${REC[5]}
+	log_batch=${REC[6]} log_host=${REC[7]} log_reason=${REC[8]} log_exit=${REC[9]}
+	log_out=${REC[10]} log_err=${REC[11]}
+}
+# the file to read, from the record just taken: refused where it is /dev/null,
+# noted where --err names the stdout file
+log_resolve() {
+	[ "$log_batch" != 0 ] || log_fail "job $log_label is an interactive job; its output went to its terminal"
+	if [ $log_want = err ]; then
+		[ "$log_err" != /dev/null ] || log_fail "job $log_label's stderr is discarded (it goes to /dev/null); drop --err"
+		[ "$log_err" != "$log_out" ] ||
+			log_note same "job $log_label writes its stderr into its stdout file; following that"
+		log_path=$log_err
+	else
+		if [ "$log_out" = /dev/null ]; then
+			[ "$log_err" = /dev/null ] && log_fail "job $log_label's output is discarded (it goes to /dev/null)"
+			log_fail "job $log_label's output is discarded (it goes to /dev/null); its stderr has a file of its own: sq log --err $log_label"
+		fi
+		log_path=$log_out
+	fi
+}
+# what a state means here: the job has not started (wait), runs or may still
+# write (run: R, CG, a suspended job, any state sq does not know), ended
+# (final), or was requeued (requeue: RQ RF; held: RH SE)
+log_classify() {
+	case $1 in
+		PD|CF|RD) log_kind=wait ;;
+		CD|F|CA|TO|OOM|NF|PR|BF|DL) log_kind=final ;;
+		RQ|RF) log_kind=requeue ;;
+		RH|SE) log_kind=held ;;
+		*) log_kind=run ;;
+	esac
+}
+log_readable() {   # is the file there to be read?  Not yet: 1.  Unreadable: rc 1 for sq
+	{ : < "$log_path"; } 2>/dev/null && return 0
+	[ -e "$log_path" ] || return 1
+	local why; why=$({ : < "$log_path"; } 2>&1)
+	log_fail "cannot read $log_path: ${why##*: }"
+}
+# tail's verdict once it ended: 0, its stderr ignored; its reader gone (141,
+# or 1 with nothing said, where SIGPIPE was ignored) ends sq quietly with 0;
+# a failure is its first line, rc 1, but for the "file truncated" and "has
+# appeared" that -F reports and survives
+log_tail_verdict() {   # log_tail_verdict RC
+	[ "$1" != 0 ] || return 0
+	[ "$1" != 141 ] || exit 0
+	[ -s "$tmp/tail.err" ] || [ "$1" != 1 ] || exit 0
+	local line
+	line=$(env LC_ALL=C gawk '!/file truncated|has appeared/ { print; exit }' "$tmp/tail.err" 2>/dev/null)
+	[ -n "$line" ] || [ ! -s "$tmp/tail.err" ] || return 0
+	line=${line#tail: }
+	log_fail "tail: ${line:-exit $1}"
+}
+log_dump() {   # what the file holds now, whole or its last N lines
+	tail "${log_lines[@]}" -- "$log_path" 2> "$tmp/tail.err"
+	log_tail_verdict $?
+}
+log_state_name() {   # the final state, as sacct and squeue -l spell it
+	case $1 in
+		CD) log_sname=COMPLETED ;; F) log_sname=FAILED ;; CA) log_sname=CANCELLED ;;
+		TO) log_sname=TIMEOUT ;; OOM) log_sname=OUT_OF_MEMORY ;; NF) log_sname=NODE_FAIL ;;
+		PR) log_sname=PREEMPTED ;; BF) log_sname=BOOT_FAIL ;; DL) log_sname=DEADLINE ;;
+		*) log_sname=$1 ;;
+	esac
+}
+# The end: the stream stopped (its sentinel killed, so tail reads once more
+# and exits), else the file shown as it is now, then why it ended.  ENDING:
+# final (the job ended), gone (Slurm forgot it), requeue or held
+log_finish() {   # log_finish ENDING
+	if [ -n "$log_tail_pid" ]; then
+		kill "$log_sentinel_pid" 2>/dev/null
+		{ wait "$log_tail_pid"; } 2>/dev/null; local rc=$?
+		log_pids=$log_sentinel_pid log_tail_pid=
+		log_tail_verdict $rc
+	else
+		case $1 in
+			final|gone)
+				log_readable || log_fail "job $log_label ended; $log_path was never written"
+				log_dump ;;
+		esac
+	fi
+	case $1 in
+		final) log_state_name "$log_state"
+		       log_say "job $log_label ended: $log_sname${log_exit:+ (exit code $log_exit)}" ;;
+		gone)  log_say "job $log_label is gone from Slurm; stopping" ;;
+		requeue) log_say "job $log_label was requeued (restart $log_restart); run sq log $log_label again for its new run" ;;
+		held)  local now="is held"; [ "$log_state" != SE ] || now="is in special exit"
+		       log_say "job $log_label was requeued (restart $log_restart) and $now; run sq log $log_label again for its new run" ;;
+	esac
+	exit 0
+}
+
+sub_log() {
+	local a v positional=0 idraw= idset=0 job task= off=
+	log_want=out log_follow=1 log_lines=(-n +1)
+	while [ $# -gt 0 ]; do
+		a=$1; shift
+		if [ $positional = 0 ]; then
+			case $a in
+				-e|--err)    log_want=err; continue ;;
+				--no-follow) log_follow=0; continue ;;
+				-h|--help)   log_help; exit 0 ;;
+				--)          positional=1; continue ;;
+				-n|-n*)
+					if [ "$a" = -n ]; then
+						[ $# -gt 0 ] || log_usage "-n needs a number of lines, e.g. sq log -n 20 12345"
+						a=$1; shift
+					else a=${a#-n}; fi
+					case $a in
+						''|*[!0-9]*|??????????*)
+							log_usage "-n needs a number of lines, not '$(printf '%s' "$a" | scrub 40)'; e.g. sq log -n 20 12345" ;;
+					esac
+					log_lines=(-n $((10#$a))); continue ;;
+				--err=*|--no-follow=*|--help=*)
+					log_usage "${a%%=*} takes no value; write it on its own, e.g. sq log ${a%%=*} 12345" ;;
+				-?*) log_usage "'$(printf '%s' "$a" | scrub 40)' is not an option of sq log (sq log -h lists them); e.g. sq log -n 20 --err 12345" ;;
+			esac
+		fi
+		[ $idset = 0 ] || log_usage "one job at a time, not '$(printf '%s' "$idraw" | scrub 40)' and '$(printf '%s' "$a" | scrub 40)'; e.g. sq log 12345"
+		idraw=$a idset=1
+	done
+	[ $idset = 1 ] || log_usage "which job? e.g. sq log 12345"
+	# 12345, an array task 12345_4 or a het component 12345+1, base 10; 0 and
+	# the empty id are refused, as squeue would answer them with every job
+	if [[ $idraw =~ ^([0-9]{1,10})(_([0-9]{1,7}))?$ ]]; then
+		job=$((10#${BASH_REMATCH[1]})); [ -z "${BASH_REMATCH[3]}" ] || task=$((10#${BASH_REMATCH[3]}))
+	elif [[ $idraw =~ ^([0-9]{1,10})[+]([0-9]{1,4})$ ]]; then
+		job=$((10#${BASH_REMATCH[1]})) off=$((10#${BASH_REMATCH[2]}))
+	else job=0
+	fi
+	if [ "$job" -lt 1 ] || [ "$job" -gt 4294967293 ] || { [ -n "$task" ] && [ "$task" -gt 4000000 ]; }; then
+		log_usage "'$(printf '%s' "$idraw" | scrub 40)' is not a job id; e.g. sq log 12345, an array task 12345_4 or a het job's component 12345+1"
+	fi
+	log_label=$job${task:+_$task}${off:++$off}
+	[ -z "${SLURM_CLUSTERS+set}" ] || log_refuse_cluster SLURM_CLUSTERS
+	# following needs GNU tail: -F to wait out a file that is replaced,
+	# --pid and --max-unchanged-stats (8.28 or newer)
+	if [ $log_follow = 1 ]; then
+		v=$(env LC_ALL=C tail --version 2>/dev/null); v=${v%%$'\n'*}
+		[[ $v =~ ^tail\ \(GNU\ coreutils\)\ ([0-9]+)\.([0-9]+) ]] &&
+			{ [ "${BASH_REMATCH[1]}" -gt 8 ] || { [ "${BASH_REMATCH[1]}" = 8 ] && [ "${BASH_REMATCH[2]}" -ge 28 ]; }; } ||
+			log_fail "following needs GNU tail; use --no-follow"
+	fi
+	trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
+	for v in $(compgen -e); do case $v in SQUEUE_*) unset "$v" ;; esac; done
+	nonce=$(mint_nonce) || die "no usable random field separator"
+	export SQ_NONCE=$nonce
+	log_fmt=
+	for v in $log_fields; do log_fmt="$log_fmt${log_fmt:+,}$v:$nonce"; done
+
+	# the first answer: the record to follow, or why there is none.  A het
+	# job's output is its leader's (offset 0), the only component that runs
+	# the script; a component named by its own id is asked about again by
+	# its het job's id, as only that brings the leader along
+	local asked=$job qid=$log_label how=job het=
+	[ -z "$task" ] || how=task
+	[ -z "$off" ] || { how=het; [ "$off" = 0 ] || het=$job; }
+	log_ask "$qid" $how "$job" "$task"
+	if [ "$log_verdict" = leader ]; then
+		het=${REC[1]} qid=${REC[1]} how=het job=${REC[1]}
+		log_ask "$qid" het "$job"
+	fi
+	case $log_verdict in
+		fail) log_fail "slurm unreachable · $log_why" ;;
+		notask)   # its array may be known: then which tasks it has
+			log_ask "$asked" tasks "$asked"
+			[ "$log_verdict" != tasks ] ||
+				log_fail "Slurm does not know task $log_label; array $asked has tasks ${REC[2]}"
+			log_verdict=none ;;
+		array)  log_usage "$asked is an array; name a task, e.g. sq log ${asked}_${REC[1]} (its tasks: ${REC[2]})" ;;
+		nothet) log_usage "$asked is not a het job, so $log_label names no component of one; e.g. sq log $asked" ;;
+	esac
+	[ "$log_verdict" = ok ] ||
+		log_fail "Slurm does not know job $log_label (it ended more than about 5 minutes ago, or never existed), so its output path is unknown"
+	case ${REC[1]} in
+		last)   log_note last "job $log_label is task ${asked}_${REC[3]} of an array; following it" ;;
+		het\ *) set -- ${REC[1]}; het=$2 qid=$2 how=het job=$2 ;;
+	esac
+	[ -z "$het" ] ||
+		log_note het "job $log_label belongs to het job $het, whose leader $het+0 writes its output; following that"
+	log_take; log_resolve
+	log_classify "$log_state"
+	local baseline=$log_restart
+
+	if [ $log_follow = 0 ]; then
+		case $log_kind in
+			wait|requeue|held) log_fail "job $log_label has not started yet" ;;
+		esac
+		if ! log_readable; then
+			[ $log_kind = final ] && log_fail "job $log_label ended; $log_path was never written"
+			log_fail "$log_path was not written yet (job $log_label runs on $log_host)"
+		fi
+		log_dump
+		[ $log_kind != final ] || { log_state_name "$log_state"
+			log_say "job $log_label ended: $log_sname${log_exit:+ (exit code $log_exit)}"; }
+		exit 0
+	fi
+	log_tail_pid= log_sentinel_pid=
+	[ $log_kind != final ] || log_finish final    # already over: shown as it is
+
+	# The loop: a tick a second (a read on a FIFO of its own, which nothing
+	# writes, so no process sleeps), Slurm asked every 5th tick.  The sentinel
+	# is what tail's --pid watches: killing it ends the stream, and it ends
+	# itself, removing $tmp, within a second of sq being killed outright.
+	mkfifo "$tmp/nap" && exec {log_nap}<> "$tmp/nap" || log_fail "cannot make a timer FIFO in $tmp"
+	{ while kill -0 $$ 2>/dev/null; do read -t 1 -u "$log_nap"; done; rm -rf "$tmp"; } &
+	log_sentinel_pid=$!; log_pids=$log_sentinel_pid
+	local tick=0 started=0 waited=0 grace=-1 ending=
+	while :; do
+		if [ -z "$ending" ] && [ $tick -gt 0 ] && [ $((tick % 5)) = 0 ]; then
+			log_ask "$qid" $how "$job" "$task"
+			case $log_verdict in
+				ok)   log_take; log_classify "$log_state"
+				      # a requeue counts once the job has run in this follow, or
+				      # when RestartCnt rose; seen pending, it is still waiting
+				      if [ $log_kind = held ] && [ $started = 1 ]; then ending=held
+				      elif [ "$log_restart" -gt "$baseline" ] 2>/dev/null; then ending=requeue
+				      elif [ $log_kind = requeue ] && [ $started = 1 ]; then ending=requeue
+				      elif [ $log_kind = final ]; then ending=final
+				      fi ;;
+				fail) log_note unreachable "slurm unreachable ($log_why); still following" ;;
+				*)    ending=gone ;;
+			esac
+			[ -z "$ending" ] || grace=3
+		fi
+		if [ -z "$ending" ]; then
+			case $log_kind in
+				wait|requeue|held) log_note pending "job $log_label is pending (${log_reason:-no reason given}); waiting for it to start" ;;
+				run)  if [ $started = 0 ]; then         # the path as the job computed it
+				          started=1; log_resolve
+				      fi
+				      if [ -z "$log_tail_pid" ]; then
+				          if log_readable; then
+				              { tail "${log_lines[@]}" -F -s 1 --max-unchanged-stats=1 --pid="$log_sentinel_pid" \
+				                  -- "$log_path" 2> "$tmp/tail.err" & } 2>/dev/null
+				              log_tail_pid=$!; log_pids="$log_tail_pid $log_sentinel_pid"
+				          elif [ $((waited += 1)) -ge 10 ]; then
+				              log_note appear "waiting for $log_path to appear (job $log_label runs on $log_host)"
+				          fi
+				      fi ;;
+			esac
+		fi
+		# tail gone on its own: a reader gone, a write error, a failure
+		if [ -n "$log_tail_pid" ] && ! kill -0 "$log_tail_pid" 2>/dev/null; then
+			{ wait "$log_tail_pid"; } 2>/dev/null; local rc=$?
+			log_tail_verdict $rc; exit 0
+		fi
+		[ $grace != 0 ] || log_finish "$ending"
+		[ $grace -lt 0 ] || grace=$((grace - 1))
+		read -t 1 -u "$log_nap"
+		tick=$((tick + 1))
+	done
 }
 
 fields=${SQ_FMT:-i,j,u,T,M,L,C,m,R}
@@ -313,10 +810,64 @@ mark_filter() {                  # $1 the filter's own spelling, $2 as written
 	seen="$seen $1"
 }
 
+# ---- where a subcommand stands, and words sq cannot place ------------------
+# A subcommand is the first word after nothing but options that take no value
+# and at most one "--", so `alias sq='sq --me'` still reaches `sq log 123`,
+# while in `sq -n log` the word is a job name: the next word after an option
+# that takes a value is that value, whatever it looks like (ROLE, below).  Its
+# name is matched exactly as written, never abbreviated or case-folded.
+# Every other bare word is a usage error: squeue takes none, and used to answer
+# one with a fake "slurm unreachable".  The loop below keeps what this needs:
+# subpos stays 1 while a subcommand may still stand at the next word, and
+# after_j / after_cluster hold the word before it when that was a -j value or
+# an unparsed short-option cluster (-ao); clustercause the first -M, --cluster(s),
+# --federation or --sibling, which sq log refuses.
+subcommands=log
+is_subcommand() { case " $subcommands " in *" $1 "*) return 0 ;; esac; return 1; }
+subpos=1 after_j= after_cluster= j_seen= cluster_seen= clustercause=
+# the hint for a word that is no subcommand: a fixed table, never a guess
+# from edit distance.  The long options sq knows, for one written without "--"
+long_names=" me all hide array noconvert noheader priority local federation sibling
+	expand no-recent no-bell color colour no-color no-colour compact full center centre
+	center-all centre-all reserve format help user users partition partitions account
+	accounts qos job jobs cluster clusters name state states node nodes nodelist
+	license licenses reservation sort "
+long_names=${long_names//[$'\t\n']/ }
+stray() {   # stray WORD: a word sq cannot place, refused with the hint that fits
+	local w=$1 shown low hint= ex= i
+	case $w in *[![:space:]]*) ;; *) die "an empty argument (an unset variable?)" ;; esac
+	shown=$(printf '%s' "$w" | scrub 40)
+	if [ -n "$after_cluster" ]; then   # -ao i: is i -o's value, or -a's?
+		for ((i = 1; i < ${#after_cluster}; i++)); do ex="$ex -${after_cluster:i:1}"; done
+		die "cannot tell what '$shown' belongs to after '$after_cluster'; write the options apart, e.g.$ex $shown"
+	fi
+	low=${w,,}
+	if is_subcommand "$low"; then hint="sq $low"
+	elif is_subcommand "${low%s}"; then hint="sq ${low%s}"
+	elif [ "$low" = help ]; then hint="sq -h"
+	elif case $long_names in *" $low "*) true ;; *) false ;; esac; then hint="sq --$low"
+	elif [ -n "$after_j" ] && [[ $w =~ ^[0-9]+([_+][0-9]+)?$ ]]; then hint="sq -j $after_j,$w"
+	elif [[ $w =~ ^[0-9]+$ ]]; then hint="sq -j $w"
+	fi
+	die "'$shown' is not a subcommand; sq -h lists them${hint:+ (did you mean $hint?)}"
+}
+place_word() {   # place_word WORD REST...: run the subcommand WORD names, else refuse it
+	if [ -z "$after_cluster" ] && is_subcommand "$1"; then
+		# sq log, the only subcommand, refuses a cluster selection, also where
+		# it would otherwise only be told to come first
+		[ -z "$clustercause" ] || log_refuse_cluster "$clustercause"
+		[ "$subpos" = 1 ] || die "subcommands come first, before any option that takes a value: sq $1 …"
+		local sub=$1; shift
+		"sub_$sub" "$@"; exit
+	fi
+	stray "$1"
+}
+
 while [ $# -gt 0 ]; do
+	after_j=$j_seen after_cluster=$cluster_seen; j_seen= cluster_seen=
 	case $1 in
 		-o|--format) [ $# -ge 2 ] || die "$1 needs a column list, e.g. -o i,j,u"
-			fields=$2; fsrc=-o; shift 2 ;;
+			fields=$2; fsrc=-o; subpos=0; shift 2 ;;
 		-c|--center|--centre) center=1; shift ;;
 		-C|--center-all|--centre-all) center=2; shift ;;
 		-x|--expand) fold=0; shift ;;
@@ -329,6 +880,7 @@ while [ $# -gt 0 ]; do
 				|| die "--compact and --full contradict each other; give one of them"
 			modeflag=$1; shift ;;
 		--reserve|--reserve=*)  # the value attached, or the next word
+			subpos=0
 			case $1 in
 				--reserve=*) reserve=${1#*=}; shift ;;
 				*) [ $# -ge 2 ] || die "--reserve needs a number of lines, e.g. sq --reserve 2"
@@ -371,15 +923,17 @@ while [ $# -gt 0 ]; do
 		# so the "=" spelling has to be here too, exactly as for --steps=
 		--json|--json=*|--yaml|--yaml=*)
 			die "${1%%=*} asks squeue for a machine-readable document, which sq cannot render; run 'squeue ${1%%=*}' for that" ;;
-		# squeue has no positional arguments at all: it answers "Unrecognized
-		# option: -o" to anything after a "--", so "--" can neither carry a value
-		# nor smuggle an option past the guards above.  The filters whose value may
-		# legitimately begin with "-" (-n -t -w -L -R -S) already accept one.
-		--)	# a wrapper writing `sq -- "$@"` with nothing to pass produces a bare
-			# "--", so swallow that; squeue takes no positional argument, so
-			# anything after it could never have been delivered
-			[ $# -eq 1 ] || die "-- cannot pass anything on; squeue takes no positional argument"
-			shift ;;
+		# "--" ends sq's options: what follows is a subcommand or nothing, so it
+		# can neither carry a value nor smuggle an option past the guards above.
+		# The filters whose value may legitimately begin with "-" (-n -t -w -L
+		# -R -S) already accept one.
+		--)	shift
+			# a wrapper writing `sq -- "$@"` with nothing to pass produces a
+			# bare "--", so swallow that
+			[ $# -gt 0 ] || break
+			after_j= after_cluster=; place_word "$@" ;;
+		''|-|[!-]*)   # a bare word: a subcommand where one may stand, else refused
+			place_word "$@" ;;
 		--me)   # a user filter carrying its own value, so it collides with -u
 			mark_filter -u "$1"; args+=("$1"); shift ;;
 		*)
@@ -417,11 +971,18 @@ while [ $# -gt 0 ]; do
 						# value, and "--all=x" forwarded raw came back as a
 						# fake outage
 						[ "$1" = "$opt" ] || die "$opt takes no value; write it on its own, e.g. sq $opt"
-						case $opt in --federation|--sibling) clustersel=1 ;; esac ;;
+						case $opt in --federation|--sibling) clustersel=1; clustercause=${clustercause:-$opt} ;; esac ;;
 					--*) die "$(printf '%s' "$opt" | scrub 40) is not one of the long options sq forwards; sq -h lists them" ;;
+					# a short option squeue may know, forwarded as written: no
+					# subcommand after it, and after letters run together (-ao)
+					# sq cannot tell whose value the next word is
+					*)  subpos=0
+					    case $1 in -[A-Za-z][A-Za-z]*) cluster_seen=$1 ;; esac ;;
 				esac
 				args+=("$1"); shift; continue
 			fi
+			subpos=0
+			case $kopt in -M) clustercause=${clustercause:-$opt} ;; esac
 			[ $have -eq 1 ] || [ $# -ge 2 ] || { opt_hint "$kopt"
 				die "$opt needs $vnoun, e.g. sq $opt $vex"; }
 			[ $have -eq 1 ] || val=$2
@@ -457,6 +1018,7 @@ while [ $# -gt 0 ]; do
 			# "0 running" with four jobs running.  -S is excluded: a second sort
 			# key refines the order, it does not contradict a filter.
 			case $kopt in -S) ;; *) mark_filter "$kopt" "$opt" ;; esac
+			case $kopt in -j) j_seen=$val ;; esac   # `sq -j 5 6` means -j 5,6
 			if [ $have -eq 1 ]; then args+=("$1"); shift
 			else args+=("$1" "$2"); shift 2; fi ;;
 	esac
