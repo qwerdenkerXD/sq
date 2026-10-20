@@ -3113,6 +3113,11 @@ c_memalloc_screens() {
 	need "S3 as nobody at 80 on a screen: rc 0, stderr empty, the accepted screen, every total whole" eval '
 		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/nobody__full-w80-h30.ansi") <(without_clock "$OUT") &&
 		[ "$(mem_of 11948)" = 1006G ] && [ "$(mem_of 11890)" = 121G ] && [ "$(mem_of 11926)" = 0.9G ]'
+	# no screen, so no whole form: the other columns give way, MEM never
+	mem_run memalloc SQSTUB_UID=4242 SQ_WIDTH=60 -- --full --no-recent
+	need "nobody at 60 in a pipe: rc 0, every MEM cell whole and decimal (1006.8G, not 1006.…), the line within 60, others shaved" eval '
+		rc_is 0 && [ "$(mem_of 11948) $(mem_of 11890) $(mem_of 11926)" = "1006.8G 121.8G 0.9G" ] &&
+		! rows queue | gawk "{ print \$(NF-1) }" | grep -q "…" && [ "$(width)" -le 60 ] && rows queue | grep -q "…"'
 	mem_run memalloc SQ_WIDTH=80 SQ_HEIGHT=30 COLUMNS=80 LINES=30 -- --color --full
 	need "S4 as fsill at 80 on a screen: rc 0, stderr empty, the accepted screen; own form a in the unit rule (salmon 15G, fastqc 8G, multiqc ?4G) beside whole totals" eval '
 		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/fsill__full-w80-h30.ansi") <(without_clock "$OUT") &&
