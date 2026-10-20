@@ -177,9 +177,12 @@ mint_nonce() {
 }
 
 # The helpers from here to the dashboard are shared with the subcommands, so
-# they come before either.  The EXIT trap holds under set -u for a run that
-# never names the dashboard's files: a subcommand, a usage error, -h.
-tmp=$(mktemp -d) || exit 1
+# they come before either.  The tmp dir is made only once the command line
+# has been read (make_tmp), so -h and a usage error behave the same with an
+# unusable TMPDIR; the EXIT trap holds under set -u for a run that never named
+# the dashboard's files or the tmp dir.
+tmp=
+make_tmp() { tmp=$(mktemp -d) || exit 1; }
 memtmp=                                         # the memuse snapshot being written
 statetmp=                                       # the bell's state being written
 collect_pid= log_pids=                          # a client collect -w waits for; sq log's
@@ -190,7 +193,7 @@ cleanup() {
 	local pid
 	for pid in $collect_pid $log_pids; do kill "$pid" 2>/dev/null; done
 	for pid in $collect_pid $log_pids; do wait "$pid" 2>/dev/null; done
-	rm -rf "$tmp"; rm -f ${statetmp:+"$statetmp"} ${memtmp:+"$memtmp"}
+	[ -z "$tmp" ] || rm -rf "$tmp"; rm -f ${statetmp:+"$statetmp"} ${memtmp:+"$memtmp"}
 }
 trap cleanup EXIT
 
@@ -633,6 +636,7 @@ sub_log() {
 			log_fail "following needs GNU tail; use --no-follow"
 	fi
 	trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
+	make_tmp
 	for v in $(compgen -e); do case $v in SQUEUE_*) unset "$v" ;; esac; done
 	nonce=$(mint_nonce) || die "no usable random field separator"
 	export SQ_NONCE=$nonce
@@ -1159,6 +1163,8 @@ hastty=0
 # a cleared cache and a week of downtime behave sanely
 horizon=${SQ_BELL_HORIZON:-600}
 case $horizon in ''|*[!0-9]*) horizon=600 ;; esac
+
+make_tmp
 
 # SLURM_TIME_FORMAT is pinned on every collector: "relative" or a custom
 # format turns a date into something epoch() cannot read, which silently kills

@@ -107,7 +107,7 @@ sq_env() {
 	ENVLIST=(); local k
 	# sq's own mktemp -d lands under the run, so a sq killed before its EXIT trap
 	# (the 30s bound below) leaves nothing behind once $work is removed
-	mkdir -p "$RUN/tmp"; env[TMPDIR]=$RUN/tmp
+	mkdir -p "$RUN/tmp"; [ -n "${env[TMPDIR]+set}" ] || env[TMPDIR]=$RUN/tmp
 	for k in "${!env[@]}"; do ENVLIST+=("$k=${env[$k]}"); done
 	SQ_ARGV=("$@")
 	[ -n "${BELL:-}" ] || SQ_ARGV=(--no-bell "${SQ_ARGV[@]}")
@@ -3417,6 +3417,15 @@ EOF
 	sq_run empty -- -h
 	need "sq -h names the subcommand" has "sq log JOBID"
 	sub_refused "sq: 'Log' is not a subcommand; sq -h lists them (did you mean sq log?)" Log 500
+	# -h and a usage error need no tmp dir: an unusable TMPDIR changes nothing
+	sq_run empty TMPDIR=/nonexistent/x -- -h
+	need "TMPDIR unusable: sq -h, rc 0, the help" eval 'rc_is 0 && has "auto-fitting Slurm dashboard" && err_empty'
+	sq_run empty TMPDIR=/nonexistent/x -- --bogus
+	need "TMPDIR unusable: sq --bogus, rc 2, its own words" eval 'rc_is 2 && out_empty && err_is "sq: --bogus is not one of the long options sq forwards; sq -h lists them"'
+	sq_run empty TMPDIR=/nonexistent/x -- log -h
+	need "TMPDIR unusable: sq log -h, rc 0" eval 'rc_is 0 && has "usage: sq log" && err_empty'
+	sq_run empty TMPDIR=/nonexistent/x -- log
+	need "TMPDIR unusable: sq log, rc 2, its own words" eval 'rc_is 2 && out_empty && err_is "sq log: which job? e.g. sq log 12345"'
 }
 c_sub_stray() {   # D3, D6
 	T_TITLE="a word sq cannot place is rc 2 with the hint that fits: subcommands first, the table's hints, clusters, empty words, -j N M"
