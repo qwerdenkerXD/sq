@@ -7,26 +7,26 @@ watch -tc -n 1 'sq -C'
 ```
 
 ```
-▌ SLURM node01  11:26:56 UTC
+  ▌ SLURM node01  11:26:56 UTC
 
-node01   ████▒░░░░░░░░░░░  28%  36/128 cpu   ████████▓▓▓▓▓▓▓▓  98%  991/1007G mem  mixed
-node02   ░░░░░░░░░░░░░░░░   0%   0/24  cpu   ················   -%    -/79G   mem  down*
-         ↳ Not responding · since 2025-10-19
+  node01 ████▒░░░░░░░░░░░░░░  25%  32/128 cpu   ████▓░░░░░░░░░░░░░░░  24%  250/1007G mem  mixed
+  node02 ···················   0%   0/24  cpu   ····················   -%    -/79G   mem  down*
+         ↳ Not responding · since 2026-10-19
 
-JOBID          NAME          USER   STATE    TIME     LEFT          CPU  MEM NODE/REASON
-4108_[0-3] ×4  align_reads   alice  RUNNING  2:26:58  1-21:33:02      4  32G node01
-4135           assemble      bob    RUNNING     2:54     0:05:06     16  64G node01
-4140           call_variants alice  PENDING     0:00     4:00:00      8  16G (Resources) → 14:32
+  JOBID         NAME          USER  STATE   TIME    LEFT       CPU MEM      NODE/REASON        
+  4140          call_variants alice PENDING    0:00    4:00:00   8      16G (Resources) → 14:32
+  4108_[0-3] ×4 align_reads   bob   RUNNING 2:26:58 1-21:33:02   4     128G node01
+  4135          assemble      alice RUNNING    2:54       5:06  16   41/64G node01
 
-recently finished · last 2h
-JOBID            NAME         STATE        EXIT    ELAPSED      AGO
-4120_[0-3] ×4    qc_report    COMPLETED       0    0:01-0:03    10s
-4120_[4-5] ×2    qc_report    FAILED          7         0:00    13s
+  recently finished · last 2h
+  JOBID            NAME         STATE        EXIT    ELAPSED    AGO                            
+  4120_[0-3] ×4    qc_report    COMPLETED       0      1s-3s    10s-12s
+  4120_[4-5] ×2    qc_report    FAILED          7         0s        13s
 
-6 jobs   5 running   1 pending   0 other
+  6 jobs   5 running   1 pending   0 other
 ```
 
-*(Sample output with made-up names; the real thing is coloured.)*
+*(Sample output with made-up names, as alice sees it; the real thing is coloured.)*
 
 ## What it does
 
@@ -34,10 +34,11 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
   COMPACT screen fitted to the terminal's height: what does not fit collapses into lines like
   `… 42 jobs running`. Stuck jobs (pending for a reason other than plain waiting), jobs blocked
   by a node or partition fault and jobs held by an admin keep their rows longest, within half the
-  table while running jobs are hidden; running jobs come next, the longest-running first; ordinary
-  pending jobs last. The finished block shrinks to one line naming the newest failure, else the
-  newest job, and on the smallest screens the nodes become one summary line. Piped or redirected,
-  sq draws the FULL screen, every job. `--compact`, `--full` or `SQ_COMPACT` choose instead.
+  table while running jobs are hidden; running jobs come next, your own near their memory limit
+  first (from 90 %, then from 70 %), then the longest-running; ordinary pending jobs last. The
+  finished block shrinks to one line naming the newest failure, else the newest job, and on the
+  smallest screens the nodes become one summary line. Piped or redirected, sq draws the FULL
+  screen, every job. `--compact`, `--full` or `SQ_COMPACT` choose instead.
   The width has a floor: the node lines and the job table cannot shrink below about 60 columns
   (it depends on the node names and the columns shown), and on a narrower terminal those lines
   wrap, so COMPACT can then run over the screen's height.
@@ -57,10 +58,18 @@ JOBID            NAME         STATE        EXIT    ELAPSED      AGO
   slurmctld's node pings, so it trails the node by minutes, and it counts processes outside Slurm
   too. Memory in use is RealMemory − FreeMem, and FreeMem follows the kernel's `MemFree`, so page
   cache and the OS count as used: use beyond the allocation is not necessarily jobs.
-- **Array jobs fold.** Tasks that agree on every displayed column collapse to one row,
-  `4108_[0-3] ×4`. A pending array Slurm prints as one bracket reads `4109_[1,4,7-20%2] ×16`,
-  and the counts include every task in it, not the row. When the id column is too narrow it
-  shrinks inside the brackets, `4109_[1,4,…] ×16`, so the count is never the part that gets cut.
+- **MEM is each job's total memory,** what a running job holds and what a pending one asks for,
+  not squeue's `%m`, which is per node or per CPU: a `--mem-per-cpu=8G -c 4` job reads `32G`,
+  not `8G`, and a folded row the sum over its jobs. Details under [Good to know](#good-to-know).
+- **Your own running jobs show the memory they use,** as in use/allocated, `41/64G`: green below
+  70 %, yellow from 70 %, red from 90 %, bold red from 100 %; `?` means no reading, `!` that the
+  reading failed. Read with `sstat`, at most every 30 s; what the figure leaves out is under
+  [Good to know](#good-to-know).
+- **Array jobs fold.** Tasks that agree on every displayed column, as squeue prints it, collapse
+  to one row, `4108_[0-3] ×4`, and its MEM adds up theirs. A pending array Slurm prints as one
+  bracket reads `4109_[1,4,7-20%2] ×16`, and the counts include every task in it, not the row.
+  When the id column is too narrow it shrinks inside the brackets, `4109_[1,4,…] ×16`, so the
+  count is never the part that gets cut.
   Finished tasks fold by array and by outcome, so failures never hide inside a
   count of successes; values that differ are shown as ranges.
 - **Recently finished jobs**, with state, exit code (and signal, out of memory or Slurm error,
@@ -193,7 +202,10 @@ sq -C                     # centred in both axes
   `/dev/shm`, which the job's out-of-memory limit counts, so a job can be killed while it reads
   well below its allocation.
 - An unreachable controller makes `sinfo` and `squeue` hang rather than fail, so every call is
-  bounded by `SQ_TIMEOUT`. A full outage therefore delays a refresh by about twice that.
+  bounded by `SQ_TIMEOUT` (`sstat` by at most 2 s). The calls that need the job list (the memory
+  ones, the `squeue -t all` fallback) are skipped when it does not come, so an outage of the
+  controller delays a refresh by about twice that, three times when accounting (`sacct`) does
+  not answer either.
 - **Clock times are the server's,** in its time zone, which the title names (`UTC` on many
   clusters). Set `TZ`, e.g. `TZ=Europe/Berlin sq`, to read the title and the start estimates
   in your own.
@@ -210,9 +222,9 @@ sq -C                     # centred in both axes
 tests/run.sh              # ~2 min, no cluster needed
 ```
 
-The suite puts stand-ins for `squeue`, `sinfo` and `sacct` first on `PATH` and feeds sq the
-shapes that are hard to get from a live cluster: large arrays, hostile job names, array ids
-Slurm truncates, a controller that hangs. Most cases assert properties of the screen
+The suite puts stand-ins for `squeue`, `sinfo`, `sacct` and `sstat` first on `PATH` and feeds
+sq the shapes that are hard to get from a live cluster: large arrays, hostile job names, array
+ids Slurm truncates, a controller that hangs. Most cases assert properties of the screen
 (counts, which rows appear, that nothing is forged), not a snapshot; the node bars are compared
 byte for byte with the screens they were designed from. Known defects are listed
 as expected failures, so a fix shows up as one. `tests/faithfulness.sh <host>` compares the
