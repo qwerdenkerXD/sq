@@ -1777,8 +1777,9 @@ END{
   # decimal total; on a screen where the table with them is too wide, all of
   # them take whole numbers, and if that is still too wide and the screen shows
   # colour, own cells form a, the allocation, which the colour alone
-  # qualifies.  Off a screen always decimal.  No MEM cell is ever cut, as a cut
-  # one ("1006.…") loses its unit: the other columns give more
+  # qualifies.  Off a screen always decimal.  MEM is cut last, as a cut cell
+  # ("1006.…") loses its unit: only once every other column is down to its
+  # floor, so a screen too narrow even for that still gets its height
   formb = (mc && length(grp_own))
   if (screen && tabw > budget && (formb || length(grp_tot))) memform("whole")
   if (formb && screen && color && tabw > budget) memform("alloc")
@@ -1791,6 +1792,7 @@ END{
   while (tabw > budget) {                       # still over: any column, floor 5
     big = 0
     for (i=1; i<=n; i++) if (w[i] > 5 && w[i] > w[big] && i != mc) big = i
+    if (!big && mc && w[mc] > 5) big = mc        # MEM last
     if (!big) break
     w[big]--; tabw--
   }

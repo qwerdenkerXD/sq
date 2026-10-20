@@ -3123,6 +3123,24 @@ c_memalloc_screens() {
 		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/fsill__full-w80-h30.ansi") <(without_clock "$OUT") &&
 		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_[0-2…" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
 }
+c_memalloc_narrow() {
+	T_TITLE="MEM is cut last: whole while any other column can give, so COMPACT keeps its height on a screen just wide enough, with failure cells and with MEMALLOC off (-M)"
+	local d1 d2 q
+	d1=$(mem_fixture memalloc-tresfail sinfo "@include $fixtures/_common/sinfo-two-idle")
+	# busco's %m as if it were per node: 124800M, wider than any other MEM cell
+	q=$(sed 's/^\(i=11890;.*\) m=7800M;/\1 m=124800M;/' "$fixtures/memalloc/squeue" | sed "s|^@include \.\./|@include $fixtures/|")
+	d2=$(mem_fixture memalloc sinfo "@include $fixtures/_common/sinfo-two-idle")
+	printf '%s\n' "$q" > "$d2/squeue"
+	mem_run "$d1" SQ_WIDTH=53 SQ_HEIGHT=16 COLUMNS=53 LINES=16 -- --color --compact
+	need "the mirror call failing, COMPACT 53x16 on a screen: rc 0, at most 16 lines, none wider than 53" eval '
+		rc_is 0 && [ "$(wc -l < "$OUT")" -le 16 ] && [ "$(width)" -le 53 ]'
+	mem_run "$d2" SQ_WIDTH=53 SQ_HEIGHT=16 COLUMNS=53 LINES=16 -- --color --compact -M bioinf
+	need "-M (no mirror call), COMPACT 53x16 on a screen: rc 0, at most 16 lines, none wider than 53" eval '
+		rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(wc -l < "$OUT")" -le 16 ] && [ "$(width)" -le 53 ]'
+	mem_run "$d2" SQ_WIDTH=60 -- --full --no-recent -M bioinf
+	need "-M at 60 in a pipe: rc 0, busco MEM whole while other columns are cut" eval '
+		rc_is 0 && [ "$(mem_of 11890)" = 124800M ] && ! rows queue | gawk "{ print \$(NF-1) }" | grep -q "…" && rows queue | grep -q "…"'
+}
 c_memalloc_call() {
 	T_TITLE="the mirror call: the queue call's arguments and env pins without its sort, framed by the queue nonce; none with MEM hidden, a cluster selection, a queue call failed (also after whole records), cut off or unreadable, or no row; nor JOBMEM's calls on a queue cut off"
 	local main mirror at n args f d how
@@ -3286,7 +3304,7 @@ cases=(
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
-	memalloc_screens memalloc_call memalloc_fail memalloc_fold
+	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do
