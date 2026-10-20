@@ -83,8 +83,8 @@ watch -tc -n 1 'sq -C'
   empty screen that looks like an empty queue.
 - **Colour where it belongs:** on in a terminal and under `watch`, off when piped or redirected,
   off with [`NO_COLOR`](https://no-color.org).
-- **One job in full, and its efficiency** as `seff` reports it (CPU time and peak memory against
-  what the job was given): see [`sq job`](#sq-job).
+- **One job in full, and its efficiency** (CPU time and peak memory against what the job was
+  given), for `seff` users too: see [`sq job`](#sq-job).
 
 ## Requirements
 
@@ -187,8 +187,7 @@ watch -n 5 'sq log --no-follow -n 20 12345'
 ## sq job
 
 `sq job JOBID` shows one job: its state and times, the CPUs and memory it asked for and was
-given, its work directory and output files, and once it ended how well it used them, the way
-`seff` reports it:
+given, its work directory and output files, and once it ended how well it used them:
 
 ```
 ▌ 4120  align-reads · alice
@@ -209,6 +208,10 @@ efficiency
   ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%
 ```
 
+- **Where it differs from `seff`:** its CPU time includes what Slurm's sampling saw of processes
+  it killed or never waited for, which `seff` leaves out (a job killed at its time limit can read
+  near 0 % there), and its peak memory is the largest step's total, each task's own peak added
+  up, where `seff` multiplies the largest single task's peak by that step's task count.
 - **CPU** is the steps' CPU time against CPUs × elapsed. Per step it is the larger of what the
   step's processes reported and what Slurm's sampling saw, so processes Slurm killed or never
   waited for still count (a note says when the sampling decided it); sampled, it stays a lower
