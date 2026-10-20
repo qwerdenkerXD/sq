@@ -1297,7 +1297,7 @@ function totadd(g, r,   id) {     # raw row r into its (folded) group g
   grp_tot[g] = 1
   if (totfail) return
   id = row_jobid[r]
-  if (id in TOTAL_MB) tot_mb[g] += TOTAL_MB[id] * qw[r]; else tot_missing[g] = 1
+  if (id in job_total_mb) tot_mb[g] += job_total_mb[id] * qw[r]; else tot_missing[g] = 1
 }
 function totcells(g) {           # its text in each form, once the group is whole
   if (totfail) {
@@ -1402,7 +1402,7 @@ BEGIN{
   close(memallocf)
   while ((getline ln < memreadf) > 0) { split(ln, mf, "\t"); job_outcome[mf[1]] = mf[2]; job_bytes[mf[1]] = mf[3] + 0 }
   close(memreadf)
-  while ((getline ln < memtotalf) > 0) { split(ln, mf, "\t"); TOTAL_MB[mf[1]] = mf[2] + 0 }
+  while ((getline ln < memtotalf) > 0) { split(ln, mf, "\t"); job_total_mb[mf[1]] = mf[2] + 0 }
   close(memtotalf)
   split("CD F CA TO NF OOM DL PR BF RV SE", ts, " ")      # terminal states
   for (i in ts) DONE[ts[i]] = 1
