@@ -4081,7 +4081,7 @@ c_job_contract() {   # Q0
 	need "plain: rc 0, stderr empty" eval 'rc_is 0 && err_empty'
 	job_run finished-11912 SQUEUE_USERS=nobody SQUEUE_PARTITION=x SQUEUE_SORT=bogus SQUEUE_FORMAT=%i SQUEUE_STATES=PD \
 		SACCT_FORMAT=JobID SACCT_FEDERATION=1 SACCT_LOCAL=1 SLURM_TIME_FORMAT=relative SLURM_BITSTR_LEN=5 -- --no-color job 11912
-	need "inherited SQUEUE_*, SACCT_*, time and bitstring formats: rc 0, the same report" eval 'rc_is 0 && err_empty && cmp -s "$want" "$OUT"'
+	need "inherited SQUEUE_*, SACCT_*, time and bitstring formats: rc 0, the same report" eval 'rc_is 0 && err_empty && job_is "$want"'
 	need "no call saw an SQUEUE_* but the SQUEUE_FORMAT2 sq set, nor any SACCT_*" eval 'only_format2 && ! grep "^CALL" "$LOG" | grep -q "SACCT_"'
 	need "every call: SLURM_TIME_FORMAT=%s, SLURM_BITSTR_LEN=0" eval 'all_calls_env SLURM_TIME_FORMAT %s squeue sacct && all_calls_env SLURM_BITSTR_LEN 0 squeue sacct'
 	n=$(env_of squeue 1 SQ_NONCE) n2=$(env_of sacct 1 SQ_NONCE2)
@@ -4094,9 +4094,9 @@ c_job_contract() {   # Q0
 		argv_lacks sacct -X && argv_lacks sacct -D && [ "$n2" != "$n" ]'
 	need "one squeue and one sacct call, no sstat (not a running job)" eval '[ "$(calls squeue)" = 1 ] && [ "$(calls sacct)" = 1 ] && [ "$(calls sstat)" = 0 ]'
 	job_run finished-11912 SQ_FMT=bogus%% SQ_CENTER=x SQ_COMPACT=7 SQ_RECENT_MAX=-1 -- --no-color job -- 11912
-	need "a dashboard setting neither applied nor validated; -- before the id: the same report" eval 'rc_is 0 && err_empty && cmp -s "$want" "$OUT"'
+	need "a dashboard setting neither applied nor validated; -- before the id: the same report" eval 'rc_is 0 && err_empty && job_is "$want"'
 	job_run finished-11912 -- --me --no-bell --full --no-color job 11912
-	need "valueless dashboard flags before job: the same report" eval 'rc_is 0 && cmp -s "$want" "$OUT"'
+	need "valueless dashboard flags before job: the same report" eval 'rc_is 0 && job_is "$want"'
 	# refused before any call
 	sub_refused "sq job: sq job reads this cluster only; drop -M" -M other job 11912
 	sub_refused "sq job: sq job reads this cluster only; drop --clusters" --clusters=other job 11912
