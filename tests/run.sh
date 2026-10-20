@@ -3120,7 +3120,7 @@ c_memalloc_screens() {
 }
 c_memalloc_call() {
 	T_TITLE="the mirror call: the queue call's arguments and env pins without its sort, framed by the queue nonce; none with MEM hidden, a cluster selection, a failed or unreadable queue call, or no row"
-	local main mirror at n args f
+	local main mirror at n args f d how
 	mem_run memalloc SQ_WIDTH=110 -- --color -p main -n blastp,prokka --all -S i
 	main=$(gawk -F'\t' '$1 == "CALL" && $2 == "squeue" { print $3; exit }' "$LOG")
 	mirror=$(gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && /tres-alloc/ && !/StateCompact/ { print $3 }' "$LOG")
@@ -3153,6 +3153,16 @@ c_memalloc_call() {
 	for f in squeue-fails squeue-garbage empty; do
 		mem_run "$f" -- --color
 		need "$f (the queue call failed, unreadable, or no row): rc 0, no mirror call" eval 'rc_is 0 && [ "$(calls queue)" -eq 1 ] && [ "$(calls mirror)" -eq 0 ]'
+	done
+	# a queue call that fails after printing whole records: they are no answer
+	for how in "exit 1" "hang"; do
+		case $how in
+			exit*) d=$(mem_fixture memalloc squeue "@include $fixtures/memalloc/squeue\n@stderr squeue: error: Socket timed out on send/recv operation\n@exit 1") ;;
+			hang)  d=$(mem_fixture memalloc squeue "@include $fixtures/memalloc/squeue\n@hang 8") ;;
+		esac
+		mem_run "$d" -- --color
+		need "the queue call printing whole records, then $how: rc 0, the banner, no allocation call, no mirror call" \
+			eval 'rc_is 0 && has "slurm unreachable" && [ "$(calls queue)" -eq 1 ] && [ "$(calls alloc)" -eq 0 ] && [ "$(calls mirror)" -eq 0 ]'
 	done
 }
 c_memalloc_fail() {
