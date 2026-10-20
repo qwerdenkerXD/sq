@@ -3124,7 +3124,7 @@ c_memalloc_screens() {
 		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_[0-2…" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
 }
 c_memalloc_narrow() {
-	T_TITLE="MEM is cut last: whole while any other column can give, so COMPACT keeps its height on a screen just wide enough, with failure cells and with MEMALLOC off (-M); %m in the unit rule, decimal or whole"
+	T_TITLE="MEM is cut last, down to 5: whole while any other column can give, also under -M where it is the widest, so COMPACT keeps its height on a screen just wide enough; %m in the unit rule, decimal or whole, own ?%m and !%m cells too"
 	local d1 d2 q
 	d1=$(mem_fixture memalloc-tresfail sinfo "@include $fixtures/_common/sinfo-two-idle")
 	# busco's %m as if it were per node: 124800M, wider than any other MEM cell
@@ -3150,6 +3150,39 @@ c_memalloc_narrow() {
 	mem_run "$d2" SQ_WIDTH=60 -- --full --no-recent -M bioinf
 	need "-M at 60 in a pipe: rc 0, busco MEM whole (124800M in the unit rule) while other columns are cut" eval '
 		rc_is 0 && [ "$(mem_of 11890)" = 121.8G ] && ! rows queue | gawk "{ print \$(NF-1) }" | grep -q "…" && rows queue | grep -q "…"'
+	# busco at 1048575M, 1023.9G: MEM the widest column, which under -M would
+	# be shaved first if MEM competed like any other
+	q=$(printf '%s\n' "$q" | sed 's/^\(i=11890;.*\) m=124800M;/\1 m=1048575M;/')
+	printf '%s\n' "$q" > "$d2/squeue"
+	for w in 58 62; do
+		mem_run "$d2" SQ_WIDTH=$w -- --full --no-recent -M bioinf
+		need "-M at $w in a pipe, MEM the widest column: rc 0, busco 1023.9G whole, others cut" eval '
+			rc_is 0 && [ "$(mem_of 11890)" = 1023.9G ] && rows queue | grep -q "…"'
+	done
+	# own b cells without colour in a pipe: no whole form, no form a, so once
+	# every other column is down to 5, MEM is cut, and only to 5
+	d1=$(mem_fixture jobmem sinfo "@include $fixtures/_common/sinfo-two-idle")
+	mem_run "$d1" SQ_WIDTH=55 -- --full --no-recent --no-color
+	need "own b cells, no colour, 55 in a pipe: rc 0, every column at 5 but MEM, MEM cut to fit (7.7/…), nothing wider than 55" eval '
+		rc_is 0 && [ "$(width)" -le 55 ] && [ "$(section queue | head -n 1)" = "  JOBID NAME  USER  STATE TIME  LEFT  CPU MEM     NODE/" ] &&
+		[ "$(mem_of 11903)" = "7.7/…" ]'
+	mem_run "$d1" SQ_WIDTH=21 -- --full --no-recent --no-color
+	need "own b cells, no colour, 21 in a pipe: rc 0, every column at its floor of 5, MEM too, never below" eval '
+		rc_is 0 && [ "$(section queue | head -n 1)" = "  JOBID NAME  USER  STATE TIME  LEFT  CPU MEM   NODE/" ] && [ "$(mem_of 11903)" = "7.…" ]'
+	# own cells with no allocation known: the mark before %m, in the unit rule
+	# and in the whole form like every other MEM cell.  gone (4008) is out of
+	# the allocation call; at 124800M its %m reads 121.8G, whole 121G
+	d1=$(mem_fixture jobmem-outcomes squeue "$(sed 's/^\(i=4008; .*M=53:00\)$/\1; m=124800M/' "$fixtures/jobmem-outcomes/squeue" | sed "s|^@include \.\./|@include $fixtures/|")")
+	mem_run "$d1" -- --color --full --no-recent
+	need "an own job gone from the allocation call: rc 0, a dim ? before its %m in the unit rule, 121.8G" row_has 4008 "$ESC[2m?$ESC[0m121.8G "
+	mem_run "$d1" SQ_WIDTH=70 SQ_HEIGHT=40 COLUMNS=70 LINES=40 -- --no-color --full --no-recent
+	need "... on a 70-column screen without colour: rc 0, the whole form, ?121G" eval 'rc_is 0 && [ "$(mem_of 4008)" = "?121G" ] && [ "$(mem_of 4001)" = 1/4G ]'
+	printf '%b\n' '@stderr squeue: error: Socket timed out on send/recv operation\n@exit 1' > "$d1/squeue-alloc"
+	mem_run "$d1" -- --color --full --no-recent
+	need "the allocation call failing: rc 0, a red ! before each own %m in the unit rule, 121.8G and 4G" eval '
+		rc_is 0 && row_has 4008 "$ESC[31m!$ESC[0m121.8G " && row_has 4001 "$ESC[31m!$ESC[0m4G "'
+	mem_run "$d1" SQ_WIDTH=70 SQ_HEIGHT=40 COLUMNS=70 LINES=40 -- --no-color --full --no-recent
+	need "... on a 70-column screen without colour: rc 0, the whole form, !121G" eval 'rc_is 0 && [ "$(mem_of 4008)" = "!121G" ]'
 }
 c_memalloc_call() {
 	T_TITLE="the mirror call: the queue call's arguments and env pins without its sort, framed by the queue nonce; none with MEM hidden, a cluster selection, a queue call failed (also after whole records), cut off or unreadable, or no row; nor JOBMEM's calls on a queue cut off"
