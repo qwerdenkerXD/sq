@@ -171,8 +171,10 @@ sq -C                     # centred in both axes
   as Slurm's `tres-alloc` reports it, not per node or per CPU as squeue's own `%m` prints it: a
   `--mem-per-cpu=7800M -c 2` job reads `15.2G`, not `7800M`. Binary units, `M` below 1000 MiB,
   `T` from 1 TiB, else `G`, with one decimal, cut, where it is not whole; on a screen too narrow
-  for the decimals, whole numbers (`15G`). A folded array row adds up its tasks, and a pending
-  bracket `×16` is sixteen times the request of one task. A pending job's request is what it
+  for the decimals, whole numbers from 10 up (`15G`; `7.6G` and `0.9G` keep their decimal). A
+  folded row's MEM is the sum over the jobs it stands for: a folded array row adds up its tasks,
+  and a pending bracket `×16` is sixteen times the request of one task, also with no JOBID column
+  to show the `×16` (without one, tasks do not fold). A pending job's request is what it
   asked for, not always what it will get: an `--exclusive` job is given the whole node, and a
   `--mem=0` job the memory of the node it lands on. A red `!` before the value means sq could
   not get the totals, and the value is squeue's `%m`; a job Slurm reports no total for shows
@@ -181,8 +183,9 @@ sq -C                     # centred in both axes
   `%m` as squeue prints it, per node, or per CPU for a `--mem-per-cpu` job.
 - **Your own running jobs show the memory they use** in MEM, as in use/allocated (`83/100G`,
   `7.7/15.2G`), green below 70 %, yellow from 70 %, red from 90 %, bold red from 100 % (on a
-  screen too narrow for that, whole numbers, `7/15G`; still too narrow, with colour, the
-  allocation alone, `15G`, in the same colours). The reading comes from `sstat` and refreshes at most
+  screen too narrow for that, whole numbers, `7/15G`, but an allocation below 10 keeps its
+  decimal, `1/1.2G`; still too narrow, with colour, the allocation alone, `15G`, in the same
+  colours). The reading comes from `sstat` and refreshes at most
   every 30 s: it is kept in `~/.cache/sq/memuse`, which every sq of yours shares. `?` means no
   reading: none yet, or a job sq does not measure (one on several nodes, or without a memory
   allocation); `!` that the reading failed. The figure leaves out page cache, tmpfs and
