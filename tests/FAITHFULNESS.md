@@ -186,6 +186,16 @@ Premises never seen on the cluster are taken from the Slurm 23.11.4 source (tag
   call comes from `squeue-tres`; a fixture without one answers it from the queue's
   own file, its records alone, with JobID from each record's `A` and tres-alloc
   from its `tres_alloc`, else `N/A`, so every older fixture keeps MEM as `%m`.
+- **sq job's calls** (2026-10-20): `squeue -h --jobs=<id> -t all` with its fields
+  in `SQUEUE_FORMAT2` and `SLURM_TIME_FORMAT=%s`, and `sacct -p --delimiter=<N> -n
+  --noconvert -a -j <id> -o <fields>` without `-X`, are not in `faithfulness.sh`
+  either. The stub answers `-t all` from `squeue-all` whatever the format asks
+  for (sq job's asks for tres-alloc, which would otherwise pick `squeue-alloc`),
+  and takes sacct's `--noconvert` with the fixture written in its units (bytes
+  for usage, M for TRES); dates as `%s` prints them come from `\{epoch…}`. The
+  shapes rest on the live rows of the efficiency research (real rows of 11191,
+  10195, 10646, 10251 and 11559 in `tests/fixtures/sqjob-*`) and its 23.11.4
+  source reading.
 
 Other limits:
 

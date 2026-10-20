@@ -51,10 +51,12 @@ function parse_format(   i, c, d, m, items, p, name, spec) {
 }
 
 # \{now-1h30m}: the time that far from the moment the stub runs, printed the way
-# SLURM_TIME_FORMAT=standard prints one.  A fixture says how long ago a job
-# ended, never when, so the ages sq renders from it cannot change with the date
-# the suite runs on.  OFF is "", or a sign and d/h/m/s terms: "-1h30m", "+2d"
-function reltime(off,   sign, sec, u) {
+# SLURM_TIME_FORMAT=standard prints one; \{epoch-1h30m} the same moment as an
+# integer epoch, the way SLURM_TIME_FORMAT=%s prints one.  A fixture says how
+# long ago a job ended, never when, so the ages sq renders from it cannot
+# change with the date the suite runs on.  OFF is "", or a sign and d/h/m/s
+# terms: "-1h30m", "+2d"
+function offset(off,   sign, sec, u) {      # OFF in seconds, signed
   sign = (substr(off, 1, 1) == "+") ? 1 : -1
   sec = 0; off = substr(off, 2)
   while (match(off, /^[0-9]+[dhms]/)) {
@@ -62,8 +64,10 @@ function reltime(off,   sign, sec, u) {
     sec += substr(off, 1, RLENGTH - 1) * (u == "d" ? 86400 : u == "h" ? 3600 : u == "m" ? 60 : 1)
     off = substr(off, RLENGTH + 1)
   }
-  return strftime("%Y-%m-%dT%H:%M:%S", systime() + sign * sec)
+  return sign * sec
 }
+function reltime(off) { return strftime("%Y-%m-%dT%H:%M:%S", systime() + offset(off)) }
+function relepoch(off) { return sprintf("%d", systime() + offset(off)) }
 
 function decode(s,   out, i, c, d, n) {
   out = ""
@@ -85,6 +89,9 @@ function decode(s,   out, i, c, d, n) {
     else if (d == "{" && substr(s, i+1, 4) == "run}") { out = out ENVIRON["STUB_RUN"]; i += 4 }
     else if (d == "{" && match(substr(s, i+1), /^now([-+]([0-9]+[dhms])+)?}/)) {
       n = RLENGTH; out = out reltime(substr(s, i+4, n-4)); i += n
+    }
+    else if (d == "{" && match(substr(s, i+1), /^epoch([-+]([0-9]+[dhms])+)?}/)) {
+      n = RLENGTH; out = out relepoch(substr(s, i+6, n-6)); i += n
     }
     else refuse(where() ": unknown escape \\" d)
   }

@@ -8,7 +8,7 @@
 # can never be mistaken for Slurm):
 #   SQSTUB_FIXTURE  fixture directory; the stub reads <dir>/sinfo, <dir>/sacct,
 #                   <dir>/sstat, <dir>/squeue, or <dir>/squeue-all when squeue
-#                   gets "-t all", or <dir>/squeue-alloc when its format asks for
+#                   gets "-t all" (whatever its format), or <dir>/squeue-alloc when its format asks for
 #                   StateCompact and tres-alloc (sq's allocation call, so it can
 #                   fail on its own), or <dir>/squeue-tres when it asks for
 #                   tres-alloc alone (sq's mirror call, ditto).  A fixture
@@ -20,8 +20,8 @@
 #                   TRES and sq reads as no total
 #   SQSTUB_LOG      file every invocation is appended to, one line per call:
 #                   CALL <tool> <argv, %q-quoted> <VAR=%q value | VAR(unset)>...
-#                   (the fixed list below, then every other SQUEUE_* that is
-#                   set), and a STUBERROR line for every refusal of the stub
+#                   (the fixed list below, then every other SQUEUE_* and SACCT_*
+#                   that is set), and a STUBERROR line for every refusal of the stub
 #                   itself.  Its directory is the run's own (tests/run.sh makes
 #                   one per run): the call counter of @step and the files of
 #                   @file live there, and \{run} in a value names it
@@ -51,6 +51,8 @@
 #                    (\{now}, \{now+2d}; d h m s), as SLURM_TIME_FORMAT=standard
 #                    prints it: write every time sq reads an age from this way,
 #                    so the screen does not change with the date of the run
+#                    \{epoch-1h30m} the same, as an integer epoch, as
+#                    SLURM_TIME_FORMAT=%s prints it (sq job asks for that)
 # Lines starting with "#" and blank lines are ignored.  Directives, run in order:
 #   @defaults k=v; ...  fields every later record has unless it sets them
 #   @include FILE       read FILE (relative to this file, or absolute) here
@@ -104,8 +106,8 @@ refuse() {
 		if [ -n "${!v+set}" ]; then printf '\t%s=%q' "$v" "${!v}"
 		else printf '\t%s(unset)' "$v"; fi
 	done
-	for v in $(compgen -e); do      # any other squeue setting that reached it
-		case $v in SQUEUE_FORMAT|SQUEUE_FORMAT2) ;; SQUEUE_*) printf '\t%s=%q' "$v" "${!v}" ;; esac
+	for v in $(compgen -e); do      # any other squeue or sacct setting that reached it
+		case $v in SQUEUE_FORMAT|SQUEUE_FORMAT2) ;; SQUEUE_*|SACCT_*) printf '\t%s=%q' "$v" "${!v}" ;; esac
 	done
 	printf '\n'
 } >> "$SQSTUB_LOG"
@@ -154,6 +156,9 @@ while [ $# -gt 0 ]; do
 		sacct:-P|sacct:--parsable2)  parsable=1; trail=0; shift_n=1 ;;
 		sacct:-n|sacct:--noheader)   noheader=1; shift_n=1 ;;
 		sacct:-a|sacct:--allusers) shift_n=1 ;;
+		# sq job asks for unconverted sizes (bytes for usage, M for TRES), and a
+		# fixture writes them that way
+		sacct:--noconvert)         shift_n=1 ;;
 		# refused like any option the stub does not render: --array and --noconvert
 		# change what squeue prints (one row per task; unconverted sizes), and sacct
 		# -X drops the step rows, the only ones carrying a signal (seen live)
@@ -207,7 +212,9 @@ case $tool in
 		# question (finished jobs too), not a narrower one
 		case $states in [Aa][Ll][Ll]) file=squeue-all ;; *) file=squeue ;; esac
 		# sq's allocation call and its mirror call are questions of their own
-		# too, answered apart, so a case can fail either alone
+		# too, answered apart, so a case can fail either alone; but "-t all"
+		# first, whatever the format holds (sq job asks for tres-alloc with it)
+		[ "$file" = squeue-all ] ||
 		case $mode:$fmt in
 			long:*[Ss][Tt][Aa][Tt][Ee][Cc][Oo][Mm][Pp][Aa][Cc][Tt]*[Tt][Rr][Ee][Ss]-[Aa][Ll][Ll][Oo][Cc]*) file=squeue-alloc ;;
 			long:*[Tt][Rr][Ee][Ss]-[Aa][Ll][Ll][Oo][Cc]*)
