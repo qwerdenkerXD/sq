@@ -634,14 +634,23 @@ why_of jerr $? "$tmp/jobs" squeue
 # failed (every own running row then reads "!").
 memfail=0 myuid=
 : > "$tmp/memalloc"; : > "$tmp/memread"
-# is there a whole record in the queue, or with UID a running one of that
-# uid?  Its records end in the nonce and a newline, which no name can hold, so
-# they are read whole; the state and the uid are where qfield put them
+# does the queue stream read whole, and hold a whole record, or with UID a
+# running one of that uid?  Whole as the table reads it below: lines put back
+# together into records of every field and the empty sentinel, none left half
+# assembled at the end, where the table would give way to "queue output
+# incomplete" (or "unreadable") and no answer to another call would be shown.
+# The nonce, which no name can hold, ends every field; the state and the uid
+# are where qfield put them
 queue_has() {   # queue_has [UID]
-	env LC_ALL=C gawk -v nf="$qfields" -v pstate="$qpos_state" -v puid="$qpos_uid" -v uid="${1-}" '
-		BEGIN { RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"] }
-		NF == nf && (uid == "" || ($pstate == "R" && $puid == uid)) { found = 1; exit }
-		END { exit !found }' "$tmp/jobs"
+	env LC_ALL=C gawk -v need="$((qfields + 1))" -v pstate="$qpos_state" -v puid="$qpos_uid" -v uid="${1-}" '
+		BEGIN { FS = ENVIRON["SQ_NONCE"] }
+		{	if (!n) { n = NF ? NF : 1; for (i = 1; i <= n; i++) F[i] = $i }
+			else { F[n] = F[n] "\n" $1; for (i = 2; i <= NF; i++) F[++n] = $i }
+			if (n < need) next
+			if (n == need && F[need] == "" && (uid == "" || (F[pstate] == "R" && F[puid] == uid))) found = 1
+			n = 0; delete F
+		}
+		END { exit !(found && !n) }' "$tmp/jobs"
 }
 # mem= of a tres-alloc text in MB: Slurm prints it MB-based with an exact
 # M/G/T/P suffix and maybe a fraction (1.50G); -1 when there is none.  For the

@@ -3119,7 +3119,7 @@ c_memalloc_screens() {
 		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_[0-2…" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
 }
 c_memalloc_call() {
-	T_TITLE="the mirror call: the queue call's arguments and env pins without its sort, framed by the queue nonce; none with MEM hidden, a cluster selection, a failed or unreadable queue call, or no row"
+	T_TITLE="the mirror call: the queue call's arguments and env pins without its sort, framed by the queue nonce; none with MEM hidden, a cluster selection, a queue call failed (also after whole records), cut off or unreadable, or no row; nor JOBMEM's calls on a queue cut off"
 	local main mirror at n args f d how
 	mem_run memalloc SQ_WIDTH=110 -- --color -p main -n blastp,prokka --all -S i
 	main=$(gawk -F'\t' '$1 == "CALL" && $2 == "squeue" { print $3; exit }' "$LOG")
@@ -3154,6 +3154,25 @@ c_memalloc_call() {
 		mem_run "$f" -- --color
 		need "$f (the queue call failed, unreadable, or no row): rc 0, no mirror call" eval 'rc_is 0 && [ "$(calls queue)" -eq 1 ] && [ "$(calls mirror)" -eq 0 ]'
 	done
+	# a queue stream that does not read whole: the table gives way to a
+	# caption, so neither JOBMEM's calls nor the mirror call are made
+	mem_run queue-cut -- --color
+	need "queue-cut, its stream ending inside a record: rc 0, the caption, no mirror call" eval '
+		rc_is 0 && has "queue output incomplete" && [ "$(calls queue)" -eq 1 ] && [ "$(calls mirror)" -eq 0 ]'
+	for how in "a garbage line" "a record cut off"; do
+		case $how in
+			garbage*) d=$(mem_fixture jobmem squeue "@include $fixtures/jobmem/squeue\n@raw not a record") ;;
+			*)        d=$(mem_fixture jobmem squeue "@include $fixtures/jobmem/squeue\n@cut\ni=11999; A=11999; j=extra") ;;
+		esac
+		mem_run "$d" -- --color
+		need "fsill's queue, whole records, then $how: rc 0, the caption, no allocation call, no sstat, no mirror call" eval '
+			rc_is 0 && has "queue output incomplete" && [ "$(calls queue)" -eq 1 ] && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && [ "$(calls mirror)" -eq 0 ]'
+	done
+	# a garbage line between records costs the record it runs into, not the table
+	d=$(mem_fixture jobmem squeue "@include $fixtures/jobmem/squeue\n@raw not a record\ni=11999; A=11999; j=extra")
+	mem_run "$d" -- --color
+	need "a garbage line, then a record: rc 0, that record skipped, the table and every call as ever" eval '
+		rc_is 0 && has "1 unreadable queue row skipped" && [ "$(mem_of 11889)" = 32G ] && [ "$(calls alloc)" -eq 1 ] && [ "$(calls sstat)" -eq 1 ] && [ "$(calls mirror)" -eq 1 ]'
 	# a queue call that fails after printing whole records: they are no answer
 	for how in "exit 1" "hang"; do
 		case $how in
