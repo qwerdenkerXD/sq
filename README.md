@@ -150,7 +150,7 @@ sq job 12345              # one job, and its efficiency once it ended (below)
 | `SQ_COMPACT` | `1` always COMPACT, `0` always FULL; anything else, or unset, decides by where the output goes. The flags beat it. |
 | `SQ_BELL_HORIZON` | A failure only rings while it is this fresh (default 600 s; `0` mutes). |
 | `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size. They never choose the mode. |
-| `SQ_PSS_SINCE` | `sq job` only: when this cluster's accounting moved from RSS to PSS (`JobAcctGatherParams=UsePss`), as `2026-10-19 15:59 CEST`, `2026-10-19T13:59Z` or `@EPOCH`. A peak memory measured in a step that started before it gets a note. Unset by default: no such note. |
+| `SQ_PSS_SINCE` | `sq job` only: when this cluster's accounting moved from RSS to PSS (`JobAcctGatherParams=UsePss`). It only dates that switch, it turns nothing on; Slurm keeps no record of which jobs were measured which way. Written as `2026-10-19 15:59 CEST`, `2026-10-19T13:59Z` or `@EPOCH`. A peak memory measured in a step that started before it gets a note. Unset by default: no such note. |
 
 ## sq log
 
