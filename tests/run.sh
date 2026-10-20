@@ -6,7 +6,9 @@
 #   tests/run.sh [-k|--keep] [NAME...]     NAME: run only the case of that name
 #
 # Needs bash, gawk, coreutils, util-linux `script` and `setsid` for the
-# terminal cases, and glibc's localedef with its locale sources for one case.
+# terminal cases, and glibc's localedef with its locale sources for one case;
+# util-linux `flock` (the stub's call counter) and procps `ps` (sq log's
+# leftover processes, found by session id) for the sq log cases.
 # The stubs in tests/bin stand in for squeue/sinfo/sacct (tests/lib/stub.sh
 # says how, tests/FAITHFULNESS.md how they were checked against the real
 # ones); tests/bin/stty only logs and runs the real stty.
@@ -45,7 +47,14 @@ done
 
 # TMPDIR is honoured; with -k the evidence stays there, under a recognisable name
 work=$(mktemp -d "${TMPDIR:-/tmp}/sq-tests.XXXXXX") || exit 2
-if [ $keep = 1 ]; then echo "evidence kept in $work"; else trap 'rm -rf "$work"' EXIT; fi
+[ $keep = 0 ] || echo "evidence kept in $work"
+# every session a background sq ran in (sq_start) is emptied on the way out too
+all_sids=
+suite_exit() {
+	local sid; for sid in $all_sids; do session_kill "$sid"; done
+	[ $keep = 1 ] || rm -rf "$work"
+}
+trap suite_exit EXIT
 # a killed run still runs the EXIT trap, so its work dir goes too
 trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
 
@@ -65,8 +74,21 @@ bound=$(command -v timeout) || { echo "run.sh: no timeout on PATH" >&2; exit 2; 
 # adds or overrides a variable, -VAR removes one.  --no-bell is passed unless
 # BELL=1, which only rings with a terminal (PTY=1, below).
 # NOTTY=1 runs sq in a new session (setsid), so it has no controlling terminal.
+# BOUND=SECONDS raises the 30 s sq may take (sq log follows a job for a while).
 # Leaves OUT, ERR, LOG (the stub log) and RC for the assertions below.
 sq_run() {
+	sq_env "$@"
+	if [ -n "${PTY:-}" ]; then pty_exec "${ENVLIST[@]}" -- "${SQ_ARGV[@]}"
+	else  # bounded, so a hanging sq fails its case instead of hanging the suite;
+		# setsid outside timeout, so a hanging sq stays timeout's own child
+		env -i "${ENVLIST[@]}" ${NOTTY:+setsid -w} "$bound" -k 2 "${BOUND:-30}" "$sq" "${SQ_ARGV[@]}" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
+		[ $RC -ne 124 ] || T_FAIL+=("sq did not finish within ${BOUND:-30}s")
+	fi
+	note_run
+}
+# sq_env FIXTURE [VAR=value | -VAR]... -- [sq args...]: a fresh run (RUN, OUT,
+# ERR, LOG), its environment in ENVLIST and sq's arguments in SQ_ARGV
+sq_env() {
 	local fixture=$1; shift
 	# TZ=UTC: a fixture's \{now-2h} is printed in local time and sq reads it back
 	# with mktime, which cannot tell the two passes of a repeated DST hour apart
@@ -82,20 +104,67 @@ sq_run() {
 	RUN=$T_DIR/run$run_n; mkdir -p "$RUN/home"
 	OUT=$RUN/out ERR=$RUN/err LOG=$RUN/log; : > "$LOG"
 	env[HOME]=$RUN/home; env[SQSTUB_LOG]=$LOG
-	local -a envlist=(); local k
+	ENVLIST=(); local k
 	# sq's own mktemp -d lands under the run, so a sq killed before its EXIT trap
 	# (the 30s bound below) leaves nothing behind once $work is removed
 	mkdir -p "$RUN/tmp"; env[TMPDIR]=$RUN/tmp
-	for k in "${!env[@]}"; do envlist+=("$k=${env[$k]}"); done
-	[ -n "${BELL:-}" ] || set -- --no-bell "$@"
-	if [ -n "${PTY:-}" ]; then pty_exec "${envlist[@]}" -- "$@"
-	else  # bounded, so a hanging sq fails its case instead of hanging the suite;
-		# setsid outside timeout, so a hanging sq stays timeout's own child
-		env -i "${envlist[@]}" ${NOTTY:+setsid -w} "$bound" -k 2 30 "$sq" "$@" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
-		[ $RC -ne 124 ] || T_FAIL+=("sq did not finish within 30s")
+	for k in "${!env[@]}"; do ENVLIST+=("$k=${env[$k]}"); done
+	SQ_ARGV=("$@")
+	[ -n "${BELL:-}" ] || SQ_ARGV=(--no-bell "${SQ_ARGV[@]}")
+}
+
+# ---- sq in the background: signals, a gone reader, leftover processes ------
+# sq_start FIXTURE [VAR=value | -VAR]... -- [sq args...]: sq_run's run, but in
+# the background, in a session of its own whose id is sq's pid, SQ_PID; RUN
+# names the run for sq_finish.  Its stdout goes to OUT, or with SQOUT=head3
+# through `| head -n 3` into OUT, or with SQOUT=full into /dev/full.  The
+# session is how its processes are found again: `ps -s`, never by pattern.
+sq_start() {
+	sq_env "$@"
+	: > "$RUN/pid"
+	# sh writes its pid and execs setsid, which (sh leading no process group)
+	# makes it a session leader and execs sq: one pid all along
+	local launch='printf "%s\n" "$$" > "$0"; exec setsid "$@"'
+	local -a cmd=(sh -c "$launch" "$RUN/pid" env -i "${ENVLIST[@]}" "$sq" "${SQ_ARGV[@]}")
+	# (bash's own "Killed" notice for a sq a case killed goes nowhere)
+	case ${SQOUT:-file} in
+		file)  { "${cmd[@]}" > "$OUT" 2> "$ERR" < /dev/null; echo $? > "$RUN/rc"; } 2>/dev/null & ;;
+		head3) { "${cmd[@]}" 2> "$ERR" < /dev/null; echo $? > "$RUN/rc"; } 2>/dev/null | head -n 3 > "$OUT" & ;;
+		full)  : > "$OUT"; { "${cmd[@]}" > /dev/full 2> "$ERR" < /dev/null; echo $? > "$RUN/rc"; } 2>/dev/null & ;;
+	esac
+	echo $! > "$RUN/job"
+	waits_for 5 eval '[ -s "$RUN/pid" ]' || T_FAIL+=("sq did not start")
+	SQ_PID=$(cat "$RUN/pid"); T_SIDS="$T_SIDS $SQ_PID" all_sids="$all_sids $SQ_PID"
+}
+use_run() {   # use_run RUN: make that run the current one (OUT, ERR, LOG, SQ_PID)
+	RUN=$1; OUT=$RUN/out ERR=$RUN/err LOG=$RUN/log; SQ_PID=$(cat "$RUN/pid")
+}
+# sq_finish RUN [SECONDS]: wait for that run's sq, 60 s at most, then its RC
+sq_finish() {
+	use_run "$1"
+	if ! waits_for "${2:-60}" eval '[ -s "$RUN/rc" ]'; then
+		T_FAIL+=("sq did not finish within ${2:-60}s"); session_kill "$SQ_PID"
 	fi
+	wait "$(cat "$RUN/job")" 2>/dev/null
+	RC=$(cat "$RUN/rc" 2>/dev/null); RC=${RC:-124}
 	note_run
 }
+# waits_for SECONDS CMD...: until CMD holds, polling every 0.1 s; counted, not
+# timed, as WSL steps its clock back now and then
+waits_for() {
+	local n=0 limit=$(( $1 * 10 )); shift
+	until "$@"; do
+		[ $n -lt $limit ] || return 1
+		sleep 0.1; n=$((n + 1))
+	done
+}
+leftovers() { ps -s "$1" -o pid=,args= 2>/dev/null; }    # leftovers SID: what still runs in it
+nothing_left() { [ -z "$(leftovers "$SQ_PID")" ]; }       # in the current run's session
+session_kill() {   # session_kill SID: every process still in it, by pid
+	local pid
+	for pid in $(ps -s "$1" -o pid= 2>/dev/null); do kill -KILL "$pid" 2>/dev/null; done
+}
+stub_calls() { grep -c '^CALL' "$LOG"; }                   # how often a stub was asked
 
 # The pty variant: sq on a pseudo-terminal of PTY_ROWS x PTY_COLS made by
 # util-linux script, so [ -t 1 ] and tput see a terminal.  stdout of script is
@@ -3355,9 +3424,13 @@ for c in "${cases[@]}"; do
 		hit=0; for o in "${only[@]}"; do [ "$c" = "$o" ] && hit=1; done
 		[ $hit = 1 ] || continue
 	fi
-	T_NAME=$c T_TITLE= T_XFAIL= T_CALLS=0 T_FAIL=() T_WANT=() T_TODAY=() run_n=0
+	T_NAME=$c T_TITLE= T_XFAIL= T_CALLS=0 T_FAIL=() T_WANT=() T_TODAY=() run_n=0 T_SIDS=
 	T_DIR=$work/$c; mkdir -p "$T_DIR"
 	"c_$c"
+	# whatever a background sq of this case left running is a FAIL, and goes
+	for sid in $T_SIDS; do
+		[ -z "$(leftovers "$sid")" ] || { T_FAIL+=("left running: $(leftovers "$sid" | paste -sd';')"); session_kill "$sid"; }
+	done
 	verdict
 done
 ms=$(( ($(date +%s%N) - start) / 1000000 ))

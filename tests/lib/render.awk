@@ -1,8 +1,9 @@
 # Renders a fixture in the format a Slurm client was asked for; driven by
 # tests/lib/stub.sh, which documents the fixture format.  Input comes from the
 # environment: STUB_TOOL, STUB_MODE (pct | long | sacct), STUB_FMT, STUB_DELIM,
-# STUB_TRAIL, STUB_FILE, SQSTUB_LOG, and STUB_MIRROR=1 when the queue's own file
-# answers sq's mirror call (stub.sh says how).
+# STUB_TRAIL, STUB_FILE, SQSTUB_LOG, STUB_MIRROR=1 when the queue's own file
+# answers sq's mirror call (stub.sh says how), STUB_CALL (which call of this
+# tool and format this is in the run) and STUB_RUN (the run's directory).
 
 function refuse(msg) {
   printf "stub %s: %s\n", tool, msg > "/dev/stderr"
@@ -81,6 +82,7 @@ function decode(s,   out, i, c, d, n) {
     else if (d == "x" && substr(s, i+1, 2) ~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) {
       out = out sprintf("%c", strtonum("0x" substr(s, i+1, 2))); i += 2
     }
+    else if (d == "{" && substr(s, i+1, 4) == "run}") { out = out ENVIRON["STUB_RUN"]; i += 4 }
     else if (d == "{" && match(substr(s, i+1), /^now([-+]([0-9]+[dhms])+)?}/)) {
       n = RLENGTH; out = out reltime(substr(s, i+4, n-4)); i += n
     }
@@ -185,21 +187,56 @@ function render(   rec, i, out, k, src) {
   printf "%s%s%s", out, trail_next, cut_next ? "" : "\n"; trail_next = ""; cut_next = 0
 }
 
-function run_file(path,   line, rc, saved_file, saved_line, dir, d, arg, tmp, k) {
+# ---- @step: which part of the file answers this call -------------------------
+# served: the highest step number not above the call; 0 while the call comes
+# before every step (or the file has none)
+function steps_of(path,   line, rc, n) {
+  while ((rc = (getline line < path)) > 0)
+    if (line ~ /^@step[ \t]/) {
+      n = line; sub(/^@step[ \t]+/, "", n); n = trim(n)
+      if (n !~ /^[0-9]+$/ || n + 0 < 1) refuse(path ": @step needs a call number from 1")
+      if (n + 0 <= call && n + 0 > served) served = n + 0
+    }
+  close(path)
+}
+# ---- @file: a side effect in the run's directory, as a step is served -----
+function shq(x) { gsub(/'/, "'\\''", x); return "'" x "'" }
+function file_op(arg,   m, op, rel, rest, full, dir) {
+  if (!match(arg, /^([a-z]+)[ \t]+([^ \t]+)([ \t](.*))?$/, m)) refuse(where() ": @file needs OP PATH [ARG]")
+  op = m[1]; rel = decode(m[2]); rest = m[4]
+  if (rel == "" || rel ~ /^\// || ("/" rel "/") ~ /\/[.][.]\//) refuse(where() ": @file needs a path inside the run's directory, not '" rel "'")
+  full = ENVIRON["STUB_RUN"] "/" rel
+  dir = full; sub(/\/[^\/]*$/, "", dir)
+  if (system("mkdir -p -- " shq(dir)) != 0) refuse(where() ": @file cannot make " dir)
+  if      (op == "create")   { printf "%s", decode(rest) > full; close(full) }
+  else if (op == "append")   { printf "%s", decode(rest) >> full; close(full) }
+  else if (op == "truncate") { printf "" > full; close(full) }
+  else if (op == "chmod")    { if (rest !~ /^[0-7]+$/ || system("chmod " rest " -- " shq(full)) != 0) refuse(where() ": @file chmod " rest " failed") }
+  else if (op == "touch")    { if (system("touch -d " shq(decode(rest)) " -- " shq(full)) != 0) refuse(where() ": @file touch failed") }
+  else refuse(where() ": @file knows create, append, truncate, chmod and touch, not '" op "'")
+}
+
+function run_file(path, depth,   line, rc, saved_file, saved_line, dir, d, arg, tmp, k, step, on) {
   saved_file = cur_file; saved_line = cur_line
-  cur_file = path; cur_line = 0
+  cur_file = path; cur_line = 0; on = 1
   while ((rc = (getline line < path)) > 0) {
     cur_line++
     if (line ~ /^[ \t]*(#|$)/) continue
+    if (line ~ /^@step[ \t]/) {
+      if (depth) refuse(where() ": @step only in the tool's own file, never in an @include")
+      step = trim(substr(line, 6)) + 0; on = (step == served); continue
+    }
+    if (!on) continue                                    # another step's part
     if (line !~ /^@/) { cur_text = line; render(); continue }
     d = line; sub(/[ \t].*$/, "", d)
     arg = substr(line, length(d) + 1); sub(/^[ \t]/, "", arg)
     if (mirror && d != "@defaults" && d != "@include") continue   # the records alone
+    if (d == "@file") { if (!step || step == call) file_op(arg); continue }
     if (d == "@defaults")     { delete tmp; parse_fields(arg, tmp); for (k in tmp) DEF[k] = tmp[k] }
     else if (d == "@include") {
       dir = path; if (!sub(/\/[^\/]*$/, "", dir)) dir = "."
       arg = trim(arg)
-      run_file(arg ~ /^\// ? arg : dir "/" arg)
+      run_file(arg ~ /^\// ? arg : dir "/" arg, depth + 1)
     }
     else if (d == "@trail")   trail_next = decode(arg)
     else if (d == "@cut")     cut_next = 1
@@ -225,7 +262,9 @@ BEGIN {
   tool = ENVIRON["STUB_TOOL"]; mode = ENVIRON["STUB_MODE"]; fmt = ENVIRON["STUB_FMT"]
   mirror = (ENVIRON["STUB_MIRROR"] == "1")
   logf = ENVIRON["SQSTUB_LOG"]
+  call = ENVIRON["STUB_CALL"] + 0
   parse_format()
-  run_file(ENVIRON["STUB_FILE"])
+  steps_of(ENVIRON["STUB_FILE"])
+  run_file(ENVIRON["STUB_FILE"], 0)
   exit 0
 }

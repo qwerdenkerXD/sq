@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# not a stub: the real tail, except for what it says about itself, for the
+# cases that put this directory first on PATH.  SQSTUB_TAIL says which tail
+# it claims to be when asked --version:
+#   busybox  BusyBox's, which knows no --version (rc 1, its usage on stderr)
+#   old      GNU coreutils 8.22 (RHEL 7), older than the 8.28 sq log follows with
+# Any other call is the real tail's.
+real=
+IFS=: read -ra dirs <<< "$PATH"
+for dir in "${dirs[@]}"; do
+	[ -x "$dir/tail" ] && ! [ "$dir/tail" -ef "${BASH_SOURCE[0]}" ] && { real=$dir/tail; break; }
+done
+[ -n "$real" ] || { echo "tests/lib/tail-as/tail: no real tail on PATH" >&2; exit 127; }
+for a in "$@"; do
+	[ "$a" = --version ] || continue
+	case ${SQSTUB_TAIL:-} in
+		busybox) printf "tail: unrecognized option '--version'\nBusyBox v1.36.1 (2024-01-01) multi-call binary.\n" >&2; exit 1 ;;
+		old)     printf 'tail (GNU coreutils) 8.22\nCopyright (C) 2013 Free Software Foundation, Inc.\n'; exit 0 ;;
+		*)       echo "tests/lib/tail-as/tail: SQSTUB_TAIL is not busybox or old" >&2; exit 125 ;;
+	esac
+done
+exec "$real" "$@"

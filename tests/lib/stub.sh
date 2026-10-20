@@ -20,7 +20,11 @@
 #                   TRES and sq reads as no total
 #   SQSTUB_LOG      file every invocation is appended to, one line per call:
 #                   CALL <tool> <argv, %q-quoted> <VAR=%q value | VAR(unset)>...
-#                   and a STUBERROR line for every refusal of the stub itself
+#                   (the fixed list below, then every other SQUEUE_* that is
+#                   set), and a STUBERROR line for every refusal of the stub
+#                   itself.  Its directory is the run's own (tests/run.sh makes
+#                   one per run): the call counter of @step and the files of
+#                   @file live there, and \{run} in a value names it
 #   SQSTUB_IGNORE_TERM  a tool name: that tool ignores SIGTERM, so sq's timeout
 #                   has to kill it, and timeout then exits 137, not 124
 #
@@ -42,6 +46,7 @@
 # Fields are separated by ";", spaces around names and values are ignored.
 # Escapes in values: \n newline  \t tab  \r CR  \e ESC  \a BEL  \s space
 #                    \xHH any byte  \; semicolon  \\ backslash
+#                    \{run} the run's directory (see SQSTUB_LOG)
 #                    \{now-1h30m} the time that long before the stub runs
 #                    (\{now}, \{now+2d}; d h m s), as SLURM_TIME_FORMAT=standard
 #                    prints it: write every time sq reads an age from this way,
@@ -57,6 +62,18 @@
 #   @stderr TEXT        print TEXT (escapes decoded) on stderr
 #   @exit N             stop here with exit code N
 #   @hang [SECONDS]     block for SECONDS (default 30): exercises sq's timeout
+#   @step N             what follows, up to the next @step, answers the N-th
+#                       call of this tool with this format in this run, and
+#                       every later one until a higher @step takes over; what
+#                       comes before the first @step answers every call.  A
+#                       call before the first step gets only that part.  Only
+#                       in the tool's own file, never in an @include (and an
+#                       @signal, read before any step is, fires on every call)
+#   @file OP PATH [ARG] a side effect on PATH, relative to the run's directory
+#                       (escapes decoded; no "..", never absolute), when the
+#                       call is served: in a step only on the call that starts
+#                       it.  OP: create (a new file holding ARG), append ARG,
+#                       truncate, chmod MODE, touch DATE (touch -d DATE)
 #   @signal N           die by signal N before printing anything, as a crash
 #                       does (no core is dumped).  Read by this script, not
 #                       the renderer, whose gawk would catch a SIGSEGV itself,
@@ -83,9 +100,12 @@ refuse() {
 	printf 'CALL\t%s\t' "$tool"
 	[ $# -gt 0 ] && printf '%q ' "$@"
 	for v in SQUEUE_FORMAT SQUEUE_FORMAT2 SLURM_TIME_FORMAT SLURM_BITSTR_LEN \
-	         SQ_NONCE SQ_NONCE2 SQ_NONCE3; do
+	         SQ_NONCE SQ_NONCE2 SQ_NONCE3 SLURM_CLUSTERS; do
 		if [ -n "${!v+set}" ]; then printf '\t%s=%q' "$v" "${!v}"
 		else printf '\t%s(unset)' "$v"; fi
+	done
+	for v in $(compgen -e); do      # any other squeue setting that reached it
+		case $v in SQUEUE_FORMAT|SQUEUE_FORMAT2) ;; SQUEUE_*) printf '\t%s=%q' "$v" "${!v}" ;; esac
 	done
 	printf '\n'
 } >> "$SQSTUB_LOG"
@@ -211,6 +231,16 @@ esac
 path=$SQSTUB_FIXTURE/$file
 [ -f "$path" ] || refuse "fixture $path does not exist (an unexpected call?)"
 
+# which call of this tool with this format this is, counted per run (two
+# processes may ask at once, hence the lock)
+rundir=${SQSTUB_LOG%/*}
+counter=$rundir/.stubcalls.$tool.$(printf '%s' "$fmt" | cksum | cut -d' ' -f1)
+{
+	flock 9 || refuse "cannot lock $counter"
+	call=$(cat "$counter" 2>/dev/null); call=$(( ${call:-0} + 1 ))
+	printf '%s\n' "$call" > "$counter"
+} 9>> "$counter.lock"
+
 # an ignored signal stays ignored across exec, and in the sleep of an @hang
 [ "${SQSTUB_IGNORE_TERM:-}" != "$tool" ] || trap '' TERM
 # a core limit of exactly 1 byte dumps nothing, even where cores go to a pipe
@@ -223,4 +253,4 @@ if [ -n "$sig" ]; then
 	kill -"$sig" $$; refuse "still alive after @signal $sig"
 fi
 STUB_TOOL=$tool STUB_MODE=$mode STUB_FMT=$fmt STUB_DELIM=$delim STUB_TRAIL=$trail \
-STUB_FILE=$path STUB_MIRROR=$mirror LC_ALL=C exec gawk -f "$stubdir/render.awk"
+STUB_FILE=$path STUB_MIRROR=$mirror STUB_CALL=$call STUB_RUN=$rundir LC_ALL=C exec gawk -f "$stubdir/render.awk"
