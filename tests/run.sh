@@ -4110,12 +4110,20 @@ c_job_contract() {   # Q0
 	sub_refused "sq job: which job? e.g. sq job 12345" job
 	sub_refused "sq job: one job at a time, not '1' and '2'; e.g. sq job 12345" job 1 2
 	sub_refused "sq job: '-x' is not an option of sq job (sq job -h); e.g. sq job 12345" job -x 1
-	sub_refused "sq job: --help takes no value; write it on its own, e.g. sq job --help" job --help=x
+	sub_refused "sq job: --help takes no value; write it on its own, e.g. sq job --help 12345" job --help=x
+	sub_refused "sq job: --color takes no value; write it on its own, e.g. sq job --color 12345" job --color=always 11912
+	# --color and --no-color after job, as before it
+	job_run finished-11912 -- job --no-color 11912
+	need "sq job --no-color ID: the report sq --no-color job ID gives" eval 'rc_is 0 && err_empty && job_is "$want"'
+	job_run finished-11912 -- --no-color job 11912 --color
+	need "sq --no-color job ID --color: the last one wins, colour" eval 'rc_is 0 && job_is "$jfx/screens/job__finished-11912.ansi"'
+	job_run finished-11912 -- job --colour -- 11912
+	need "sq job --colour -- ID: colour" eval 'rc_is 0 && job_is "$jfx/screens/job__finished-11912.ansi"'
 	for f in abc 0 00 4294967294 1_99999999 1_4000001 1+ 12_3+1 '' -1; do
 		sub_refused "sq job: '$f' is not a job id; e.g. sq job 12345, an array task 12345_4 or an array 12345" job -- "$f"
 	done
 	sq_run empty -- job -h
-	need "sq job -h: rc 0, its help on stdout, no Slurm call" eval 'rc_is 0 && has "usage: sq job JOBID" && has "SQ_PSS_SINCE" && err_empty && no_slurm_call'
+	need "sq job -h: rc 0, its help on stdout, no Slurm call" eval 'rc_is 0 && has "usage: sq job [--color|--no-color] JOBID" && has "SQ_PSS_SINCE" && err_empty && no_slurm_call'
 	sq_run empty -- -h
 	need "sq -h names it" has "sq job JOBID"
 	sq_run empty -- job 10646+1

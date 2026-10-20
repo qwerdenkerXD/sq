@@ -1123,7 +1123,7 @@ sub_log() {
 # dim line saying which; both: rc 1.
 job_help() {
 	cat <<'EOF'
-usage: sq job JOBID
+usage: sq job [--color|--no-color] JOBID
 
 One job in one report: its state and times, the CPUs and memory it asked for
 and was given, its work directory and output files, and once it ended how
@@ -1620,7 +1620,11 @@ sub_job() {
 			case $a in
 				-h|--help) job_help; exit 0 ;;
 				--)        positional=1; continue ;;
-				--help=*)  job_usage "--help takes no value; write it on its own, e.g. sq job --help" ;;
+				# as before the subcommand: sq job --no-color 123 is sq --no-color job 123
+				--color|--colour)       color=1; continue ;;
+				--no-color|--no-colour) color=0; continue ;;
+				--help=*|--color=*|--colour=*|--no-color=*|--no-colour=*)
+					job_usage "${a%%=*} takes no value; write it on its own, e.g. sq job ${a%%=*} 12345" ;;
 				-?*) job_usage "'$(printf '%s' "$a" | scrub 40)' is not an option of sq job (sq job -h); e.g. sq job 12345" ;;
 			esac
 		fi
