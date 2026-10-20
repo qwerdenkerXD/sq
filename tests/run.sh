@@ -4213,6 +4213,18 @@ EOF
 	need "over its allocation: 125.0 % as is, the bar full and bold red, the figure uncoloured" eval '
 		rc_is 0 && has "  MEM ████████████████ 125.0%  5/4G peak (the batch script)" &&
 		[ "$(LC_ALL=C grep -o "$ESC\[1;31m█" "$OUT" | wc -l)" = 16 ] && has "  CPU ████████▒▒▒▒▒▒▒▒  50.0%  30m00s of 1h00m"'
+	# a killed srun step of two tasks: neither TotalCPU (its tasks never
+	# reaped) nor the busier task's polled cpu (TRESUsageInMax) holds the
+	# step's CPU time, only TRESUsageInTot's sum of both tasks does
+	d=$(job_fx totcpu sacct <<'EOF'
+JobID=800; State=CANCELLED by 1050; ExitCode=0:15
+JobID=800.batch; JobIDRaw=800.batch; UID=; User=; State=CANCELLED; ExitCode=0:15; TotalCPU=00:00.100; TRESUsageInTot=cpu=00:00:00,mem=10485760; TRESUsageInMax=cpu=00:00:00,mem=10485760; NTasks=1
+JobID=800.0; JobIDRaw=800.0; UID=; User=; State=CANCELLED; ExitCode=0:15; TotalCPU=00:00.010; TRESUsageInTot=cpu=00:30:00,mem=1073741824; TRESUsageInMax=cpu=00:15:00,mem=536870912; NTasks=2
+EOF
+)
+	job_run "$d" -- --no-color job 800
+	need "a killed two-task step: its CPU from TRESUsageInTot (30 min), which beats TotalCPU and TRESUsageInMax (15 min), and the polled note" eval '
+		rc_is 0 && has "  CPU ████████▒▒▒▒▒▒▒▒  50.0%  30m00s of 1h00m" && notes | grep -qxF "CPU time includes processes Slurm killed or never waited for (polled between two samples, so still a lower bound)"'
 	job_run neverstarted-10195 -- --no-color job 10195
 	need "never started (10195, real rows): no node, no ran line, the request, 'it never started', no bars" eval '
 		rc_is 0 && err_empty && kv_is state "FAILED · exit 1" && ! kv_is ran "0s on None assigned (LocalQ)" && lacks "  ran " &&
