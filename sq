@@ -1246,8 +1246,8 @@ function task_in(x, t,   p, np, i, m, a, b, s) {
 }
 
 # ---- which records: the job's, a task's, or an array's -----------------------
-# sacct: JR[id] its job rows, RAWR[unique id] the same, ST[id, k] / NST[id] the
-# steps of each, TR[k] / ntr the rows of array JOB's tasks; squeue: QT[k] / nqt
+# sacct: job_row[id] its job rows, row_by_unique_id[unique id] the same, step_row[id, k] / nsteps[id] the
+# steps of each, task_row[k] / ntask_rows the rows of array JOB's tasks; squeue: array_record[k] / narray_records
 # the records of array JOB.  The answer: het, array, none, or one (with qrow
 # and arow, the job's squeue record and sacct row, either may be 0; inmeta
 # when its record is a pending array's, which still holds the task)
@@ -1255,26 +1255,26 @@ function pick(   r, id, p, k) {
   for (r = 1; r <= na; r++) {
     id = A[r, "JobID"]
     if (index(id, "+")) het = 1
-    if ((p = index(id, ".")) > 0) { k = substr(id, 1, p - 1); ST[k, ++NST[k]] = r; continue }
-    if (!(id in JR)) JR[id] = r
-    if (!(A[r, "JobIDRaw"] in RAWR)) RAWR[A[r, "JobIDRaw"]] = r
-    if (task == "" && index(id, job "_") == 1) TR[++ntr] = r
+    if ((p = index(id, ".")) > 0) { k = substr(id, 1, p - 1); step_row[k, ++nsteps[k]] = r; continue }
+    if (!(id in job_row)) job_row[id] = r
+    if (!(A[r, "JobIDRaw"] in row_by_unique_id)) row_by_unique_id[A[r, "JobIDRaw"]] = r
+    if (task == "" && index(id, job "_") == 1) task_row[++ntask_rows] = r
   }
   for (r = 1; r <= nq; r++) {
     if (R[r, "HetJobID"] != "N/A") het = 1
-    if (R[r, "ArrayJobID"] == job && R[r, "ArrayTaskID"] != "N/A") QT[++nqt] = r
+    if (R[r, "ArrayJobID"] == job && R[r, "ArrayTaskID"] != "N/A") array_record[++narray_records] = r
   }
   if (het) return "het"
   if (task == "") {
-    if (ntr || nqt) return "array"
+    if (ntask_rows || narray_records) return "array"
     for (r = 1; r <= nq && !qrow; r++) if (R[r, "JobID"] == job) qrow = r
-    arow = (job in JR) ? JR[job] : (job in RAWR) ? RAWR[job] : 0
+    arow = (job in job_row) ? job_row[job] : (job in row_by_unique_id) ? row_by_unique_id[job] : 0
   } else {
     for (r = 1; r <= nq && !qrow; r++)
       if (R[r, "ArrayJobID"] == job && R[r, "ArrayTaskID"] == task) qrow = r
     for (r = 1; r <= nq && !qrow; r++)
       if (R[r, "ArrayJobID"] == job && task_in(R[r, "ArrayTaskID"], task)) { qrow = r; inmeta = 1 }
-    arow = ((job "_" task) in JR) ? JR[job "_" task] : 0
+    arow = ((job "_" task) in job_row) ? job_row[job "_" task] : 0
   }
   if (!qrow && !arow) return "none"
   # the job as the title names it, its unique id (none for a task still in a
@@ -1290,41 +1290,41 @@ function pick(   r, id, p, k) {
   return "one"
 }
 
-# ---- one job's efficiency, from its sacct row r and its steps, into F_* -------
+# ---- one job's efficiency, from its sacct row r and its steps, into eff_* -------
 # CPU seconds of a step: the larger of TotalCPU (what the tasks' wait() and
 # the last poll gave) and the polled TRESUsageInTot / TRESUsageInMax cpu=
 # (Franz: "The larger of both"): TotalCPU misses processes Slurm killed or
 # never waited for (11191: 0.008 s of a 12 h TIMEOUT, polled 2-19:40:01).
-# F_polled: a polled figure won somewhere
+# eff_polled: a polled figure won somewhere
 function stepcpu(s,   t, p) {
   t = dur(A[s, "TotalCPU"]); if (t < 0) t = 0
   p = trescpu(A[s, "TRESUsageInTot"]); if (trescpu(A[s, "TRESUsageInMax"]) > p) p = trescpu(A[s, "TRESUsageInMax"])
-  if (p > t) { F_polled = 1; return p }
+  if (p > t) { eff_polled = 1; return p }
   return t
 }
 # CPU efficiency = the steps' CPU seconds, summed and rounded to whole seconds
 # as seff does, / (ElapsedRaw x AllocCPUS); no step rows: the job row's
 # TotalCPU.  Memory efficiency = the largest step's TRESUsageInTot mem= (its
 # tasks' peaks, summed: Franz's "Largest step total") / AllocTRES mem=.
-# F_cap: the share of the CPUs a program running one thread per requested CPU
-# reaches, when more were allocated than requested; F_rss: the peak step
+# eff_cap: the share of the CPUs a program running one thread per requested CPU
+# reaches, when more were allocated than requested; eff_rss: the peak step
 # started before SQ_PSS_SINCE
 function effcalc(id, r,   k, s, b) {
-  F_el = A[r, "ElapsedRaw"] + 0; F_ncpu = A[r, "AllocCPUS"] + 0; F_req = A[r, "ReqCPUS"] + 0
-  F_polled = 0
-  if (NST[id]) { F_cpu = 0; for (k = 1; k <= NST[id]; k++) F_cpu += stepcpu(ST[id, k]); F_cpu = int(F_cpu + 0.5) }
-  else F_cpu = (dur(A[r, "TotalCPU"]) < 0) ? -1 : int(dur(A[r, "TotalCPU"]) + 0.5)
-  F_core = F_el * F_ncpu
-  F_cpueff = (F_core > 0 && F_cpu >= 0) ? F_cpu / F_core * 100 : -1
-  F_alloc = tres_mem(A[r, "AllocTRES"])
-  F_peak = -1; F_peakid = ""; F_peaktasks = 0; F_peakstart = ""
-  for (k = 1; k <= NST[id]; k++) {
-    s = ST[id, k]; b = tresnum(A[s, "TRESUsageInTot"], "mem")
-    if (b > F_peak) { F_peak = b; F_peakid = A[s, "JobID"]; F_peaktasks = A[s, "NTasks"] + 0; F_peakstart = A[s, "Start"] }
+  eff_elapsed = A[r, "ElapsedRaw"] + 0; eff_cpus = A[r, "AllocCPUS"] + 0; eff_req_cpus = A[r, "ReqCPUS"] + 0
+  eff_polled = 0
+  if (nsteps[id]) { eff_cpu_sec = 0; for (k = 1; k <= nsteps[id]; k++) eff_cpu_sec += stepcpu(step_row[id, k]); eff_cpu_sec = int(eff_cpu_sec + 0.5) }
+  else eff_cpu_sec = (dur(A[r, "TotalCPU"]) < 0) ? -1 : int(dur(A[r, "TotalCPU"]) + 0.5)
+  eff_core_sec = eff_elapsed * eff_cpus
+  eff_cpu_pct = (eff_core_sec > 0 && eff_cpu_sec >= 0) ? eff_cpu_sec / eff_core_sec * 100 : -1
+  eff_alloc_mb = tres_mem(A[r, "AllocTRES"])
+  eff_peak_bytes = -1; eff_peak_step = ""; eff_peak_tasks = 0; eff_peak_start = ""
+  for (k = 1; k <= nsteps[id]; k++) {
+    s = step_row[id, k]; b = tresnum(A[s, "TRESUsageInTot"], "mem")
+    if (b > eff_peak_bytes) { eff_peak_bytes = b; eff_peak_step = A[s, "JobID"]; eff_peak_tasks = A[s, "NTasks"] + 0; eff_peak_start = A[s, "Start"] }
   }
-  F_rss = (pss > 0 && F_peak >= 0 && isepoch(F_peakstart) && F_peakstart + 0 < pss)
-  F_memeff = (F_alloc > 0 && F_peak >= 0) ? F_peak / (F_alloc * 1048576) * 100 : -1
-  F_cap = (F_req > 0 && F_ncpu > F_req) ? F_req / F_ncpu * 100 : 0
+  eff_rss = (pss > 0 && eff_peak_bytes >= 0 && isepoch(eff_peak_start) && eff_peak_start + 0 < pss)
+  eff_mem_pct = (eff_alloc_mb > 0 && eff_peak_bytes >= 0) ? eff_peak_bytes / (eff_alloc_mb * 1048576) * 100 : -1
+  eff_cap = (eff_req_cpus > 0 && eff_cpus > eff_req_cpus) ? eff_req_cpus / eff_cpus * 100 : 0
 }
 function captext(req, ncpu, cap) {
   return plural(req, "requested CPU") " became " ncpu ": a program running " plural(req, "thread") \
@@ -1371,16 +1371,16 @@ function source_notes(final) {
 # None for a pending job; for a running one memory only, and only the caller's
 # own (JOBMEM's reading: sstat answers only a job's owner); once it ended, CPU
 # and memory from accounting, when accounting has recorded the end
-function eff_job(c, q, r,   x, p, mark, cell, at) {
+function eff_job(c, q, r,   reading, use_pct, mark, cell, at) {
   if (c == "PD") return
   if (!(c in DONE)) {
     if (!OWN || c != "R") return
-    x = mem_outcome(raw, ALLOC, NODES)
-    if (x == "ok") {
-      p = job_bytes[raw] / (ALLOC * 1048576) * 100
-      line("eff", memline(p, memcolour(p), trim(memcell(job_bytes[raw], ALLOC, "", 0)) " now"))
+    reading = mem_outcome(raw, ALLOC, NODES)
+    if (reading == "ok") {
+      use_pct = job_bytes[raw] / (ALLOC * 1048576) * 100
+      line("eff", memline(use_pct, memcolour(use_pct), trim(memcell(job_bytes[raw], ALLOC, "", 0)) " now"))
     } else {                                   # the mark, dim (no reading) or red (failed)
-      mark = (x == "failed") ? "!" : "?"
+      mark = (reading == "failed") ? "!" : "?"
       cell = (ALLOC > 0) ? trim(memcell(0, ALLOC, mark, 0)) : mark; at = index(cell, mark)
       cell = substr(cell, 1, at - 1) paint(mark == "!" ? "31" : "2", mark) substr(cell, at + 1)
       line("eff", "  MEM " cells(0, -1, 100, BARW, "") " " sprintf("%6s", "") "  " cell " now")
@@ -1392,15 +1392,15 @@ function eff_job(c, q, r,   x, p, mark, cell, at) {
   if (never_started(q, r)) { note("eff", "it never started"); return }
   if (!r || !(stcode(A[r, "State"]) in DONE)) { note("eff", "accounting has not recorded its end yet"); return }
   effcalc(jid, r)
-  if (F_cpueff >= 0) line("eff", cpuline(F_cpueff, F_cap, elap(F_cpu) " of " elap(F_core)))
-  if (F_memeff >= 0)
-    line("eff", memline(F_memeff, c == "OOM" ? "1;31" : memcolour(F_memeff), trim(memcell(F_peak, F_alloc, "", 0)) " peak (" stepname(F_peakid) ")"))
-  if (F_cap) note("eff", captext(F_req, F_ncpu, F_cap))
-  if (F_polled) note("eff", POLLED)
-  if (c == "OOM") note("eff", "OUT_OF_MEMORY: it hit its " memsize(F_alloc, 0) " limit between two samples; the peak shown is too low")
-  if (F_rss) note("eff", stepname(F_peakid) " started before " pss_text() \
+  if (eff_cpu_pct >= 0) line("eff", cpuline(eff_cpu_pct, eff_cap, elap(eff_cpu_sec) " of " elap(eff_core_sec)))
+  if (eff_mem_pct >= 0)
+    line("eff", memline(eff_mem_pct, c == "OOM" ? "1;31" : memcolour(eff_mem_pct), trim(memcell(eff_peak_bytes, eff_alloc_mb, "", 0)) " peak (" stepname(eff_peak_step) ")"))
+  if (eff_cap) note("eff", captext(eff_req_cpus, eff_cpus, eff_cap))
+  if (eff_polled) note("eff", POLLED)
+  if (c == "OOM") note("eff", "OUT_OF_MEMORY: it hit its " memsize(eff_alloc_mb, 0) " limit between two samples; the peak shown is too low")
+  if (eff_rss) note("eff", stepname(eff_peak_step) " started before " pss_text() \
                   " (RSS accounting): memory shared between processes counted once per process; the peak may read high")
-  if (F_peaktasks > 1) note("eff", stepname(F_peakid) " ran " F_peaktasks " tasks: its peak adds up each task's own peak, an upper bound")
+  if (eff_peak_tasks > 1) note("eff", stepname(eff_peak_step) " ran " eff_peak_tasks " tasks: its peak adds up each task's own peak, an upper bound")
 }
 # a job that ended without ever running: no CPUs, no start (cancelled or
 # failed while pending); with squeue alone, no node
@@ -1417,70 +1417,70 @@ function exit_text(c,   t, sg) {
   if (sg == 125) return t (c == "OOM" ? "" : ": out of memory")
   return t ": Slurm error" ((sg in SLERR) ? ", " SLERR[sg] : "")
 }
-function build_job(   q, r, c, final, never, x, name, user, s, alloc, req, rmb, out, err) {
+function build_job(   q, r, c, final, never, name, user, unique, state, reason, dependency, start, submit,
+                      left, ended, step, req_cpus, req_mb, req_text, alloc_cpus, limit, out, err) {
   q = qrow; r = arow; c = STATE
   final = (c in DONE); never = final && never_started(q, r)
   name = q ? R[q, "Name"] : A[r, "JobName"]; user = q ? R[q, "UserName"] : A[r, "User"]
-  x = (raw != "" && raw != jid) ? " " paint("2", "(unique id " raw ")") : ""
-  TITLE = paint("1;36", "▌ ") paint("1", jid) x "  " name " · " user
+  unique = (raw != "" && raw != jid) ? " " paint("2", "(unique id " raw ")") : ""
+  TITLE = paint("1;36", "▌ ") paint("1", jid) unique "  " name " · " user
   source_notes(final)
-  s = paint(stcolour(c), stname(c))
+  state = paint(stcolour(c), stname(c))
   if (c == "PD") {
-    x = q ? R[q, "Reason"] : ""
-    kv("state", "state", s (x != "" && x != "None" ? " (" x ")" : ""))
-    x = q ? R[q, "Dependency"] : ""
-    if (x != "" && x != "(null)") kv("state", "dependency", x)
-    x = q ? R[q, "StartTime"] : ""
-    kv("state", "start", (isepoch(x) && x + 0 > NOW) ? when(x) ", Slurm's estimate" : "no estimate yet")
-    x = q ? R[q, "SubmitTime"] : A[r, "Submit"]
-    if (isepoch(x)) kv("state", "submitted", when(x))
+    reason = q ? R[q, "Reason"] : ""
+    kv("state", "state", state (reason != "" && reason != "None" ? " (" reason ")" : ""))
+    dependency = q ? R[q, "Dependency"] : ""
+    if (dependency != "" && dependency != "(null)") kv("state", "dependency", dependency)
+    start = q ? R[q, "StartTime"] : ""             # a pending job's: Slurm's estimate
+    kv("state", "start", (isepoch(start) && start + 0 > NOW) ? when(start) ", Slurm's estimate" : "no estimate yet")
+    submit = q ? R[q, "SubmitTime"] : A[r, "Submit"]
+    if (isepoch(submit)) kv("state", "submitted", when(submit))
   } else if (!final) {
-    kv("state", "state", s " on " (q ? R[q, "NodeList"] : A[r, "NodeList"]) " (" (q ? R[q, "Partition"] : A[r, "Partition"]) ")")
+    kv("state", "state", state " on " (q ? R[q, "NodeList"] : A[r, "NodeList"]) " (" (q ? R[q, "Partition"] : A[r, "Partition"]) ")")
     if (q) {
-      x = R[q, "TimeLeft"]
-      x = (x == "UNLIMITED") ? "no time limit" : (x == "INVALID") ? "past its time limit" \
-        : elap(dur(x)) " left of " elap(dur(R[q, "TimeLimit"]))
-      kv("state", "time", elap(dur(R[q, "TimeUsed"])) " elapsed · " x)
+      left = R[q, "TimeLeft"]
+      left = (left == "UNLIMITED") ? "no time limit" : (left == "INVALID") ? "past its time limit" \
+           : elap(dur(left)) " left of " elap(dur(R[q, "TimeLimit"]))
+      kv("state", "time", elap(dur(R[q, "TimeUsed"])) " elapsed · " left)
     } else kv("state", "time", elap(A[r, "ElapsedRaw"] + 0) " elapsed")
-    x = q ? R[q, "StartTime"] : A[r, "Start"]
-    if (isepoch(x)) kv("state", "started", when(x))
+    start = q ? R[q, "StartTime"] : A[r, "Start"]
+    if (isepoch(start)) kv("state", "started", when(start))
   } else {
     # the exit over the job row and its steps, as the finished block reads
     # it, while accounting has the end; else squeue's
     if (r && (stcode(A[r, "State"]) in DONE)) {
-      xcm(jid, A[r, "ExitCode"]); for (x = 1; x <= NST[jid]; x++) xcm(jid, A[ST[jid, x], "ExitCode"])
-      kv("state", "state", s " · " exit_text(c))
+      xcm(jid, A[r, "ExitCode"]); for (step = 1; step <= nsteps[jid]; step++) xcm(jid, A[step_row[jid, step], "ExitCode"])
+      kv("state", "state", state " · " exit_text(c))
       if (!never) kv("state", "ran", elap(A[r, "ElapsedRaw"] + 0) " on " A[r, "NodeList"] " (" A[r, "Partition"] ")")
-      x = A[r, "End"]
+      ended = A[r, "End"]
     } else {
       xcm(jid, R[q, "exit_code"], 1)
-      kv("state", "state", s " · " exit_text(c))
+      kv("state", "state", state " · " exit_text(c))
       if (!never) kv("state", "ran", elap(dur(R[q, "TimeUsed"])) " on " R[q, "NodeList"] " (" R[q, "Partition"] ")")
-      x = R[q, "EndTime"]
+      ended = R[q, "EndTime"]
     }
-    if (isepoch(x)) kv("state", "ended", when(x))
+    if (isepoch(ended)) kv("state", "ended", when(ended))
   }
 
   # resources: a pending job's request (or one that never ran), else what it
   # was given and asked for.  The memory a running job uses is the
   # efficiency section's, not repeated here
   if (c == "PD" || never) {
-    x = q ? R[q, "NumCPUs"] : A[r, "ReqCPUS"]
-    if (r && never) x = A[r, "ReqCPUS"]
-    kv("res", "CPUs", x " requested")
-    x = (r && (never || !q)) ? tres_mem(A[r, "ReqTRES"]) : tres_mem(R[q, "tres-alloc"])
-    if (x > 0) kv("res", "memory", memsize(x, 0) " requested")
-    x = q ? R[q, "TimeLimit"] : ""
-    if (c == "PD" && x != "") kv("res", "time limit", (x == "UNLIMITED") ? "none" : elap(dur(x)))
+    req_cpus = (r && (never || !q)) ? A[r, "ReqCPUS"] : R[q, "NumCPUs"]   # squeue's NumCPUs: the request, while pending
+    kv("res", "CPUs", req_cpus " requested")
+    req_mb = (r && (never || !q)) ? tres_mem(A[r, "ReqTRES"]) : tres_mem(R[q, "tres-alloc"])
+    if (req_mb > 0) kv("res", "memory", memsize(req_mb, 0) " requested")
+    limit = q ? R[q, "TimeLimit"] : ""
+    if (c == "PD" && limit != "") kv("res", "time limit", (limit == "UNLIMITED") ? "none" : elap(dur(limit)))
   } else {
-    alloc = r ? A[r, "AllocCPUS"] + 0 : R[q, "NumCPUs"] + 0; req = r ? A[r, "ReqCPUS"] + 0 : 0
-    kv("res", "CPUs", alloc " allocated" ((req && req != alloc) ? " (" req " requested)" : ""))
+    alloc_cpus = r ? A[r, "AllocCPUS"] + 0 : R[q, "NumCPUs"] + 0; req_cpus = r ? A[r, "ReqCPUS"] + 0 : 0
+    kv("res", "CPUs", alloc_cpus " allocated" ((req_cpus && req_cpus != alloc_cpus) ? " (" req_cpus " requested)" : ""))
     # the cap note: the efficiency section says it once the job ended
-    if (req && alloc > req && !final) note("res", captext(req, alloc, req / alloc * 100))
-    rmb = r ? tres_mem(A[r, "ReqTRES"]) : -1
-    x = (rmb > 0 && rmb != ALLOC) ? " (" memsize(rmb, 0) " requested)" : ""
-    if (!final && !OWN && ALLOC > 0) kv("res", "memory", memsize(ALLOC, 0) " allocated" x " · its use is shown to " user " only")
-    else if (ALLOC > 0)              kv("res", "memory", memsize(ALLOC, 0) " allocated" x)
+    if (req_cpus && alloc_cpus > req_cpus && !final) note("res", captext(req_cpus, alloc_cpus, req_cpus / alloc_cpus * 100))
+    req_mb = r ? tres_mem(A[r, "ReqTRES"]) : -1
+    req_text = (req_mb > 0 && req_mb != ALLOC) ? " (" memsize(req_mb, 0) " requested)" : ""
+    if (!final && !OWN && ALLOC > 0) kv("res", "memory", memsize(ALLOC, 0) " allocated" req_text " · its use is shown to " user " only")
+    else if (ALLOC > 0)              kv("res", "memory", memsize(ALLOC, 0) " allocated" req_text)
   }
 
   # files: from squeue's record while Slurm has it, else the work dir alone
@@ -1514,9 +1514,9 @@ function count(c, k) {
 }
 function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax, cminid, mminid, rss, multi,
                         polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why) {
-  if (ntr) {                                       # accounting: every task, and the figures
-    for (i = 1; i <= ntr; i++) {
-      r = TR[i]; id = A[r, "JobID"]
+  if (ntask_rows) {                                       # accounting: every task, and the figures
+    for (i = 1; i <= ntask_rows; i++) {
+      r = task_row[i]; id = A[r, "JobID"]
       if (name == "") { name = A[r, "JobName"]; user = A[r, "User"] }
       c = stcode(A[r, "State"])
       if (id ~ /\[/) {                             # tasks still in a pending array's record
@@ -1525,29 +1525,29 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
       count(c, 1)
       if (c != "CD") continue                      # Franz: the statistics are the COMPLETED tasks'
       effcalc(id, r)
-      if (F_cpueff >= 0) {
-        CV[++ncv] = F_cpueff
-        if (cmin == "" || F_cpueff < cmin) { cmin = F_cpueff; cminid = id }
-        if (cmax == "" || F_cpueff > cmax) cmax = F_cpueff
+      if (eff_cpu_pct >= 0) {
+        CV[++ncv] = eff_cpu_pct
+        if (cmin == "" || eff_cpu_pct < cmin) { cmin = eff_cpu_pct; cminid = id }
+        if (cmax == "" || eff_cpu_pct > cmax) cmax = eff_cpu_pct
       }
-      if (F_memeff >= 0) {
-        MV[++nmv] = F_memeff
-        if (mmin == "" || F_memeff < mmin) { mmin = F_memeff; mminid = id }
-        if (mmax == "" || F_memeff > mmax) mmax = F_memeff
+      if (eff_mem_pct >= 0) {
+        MV[++nmv] = eff_mem_pct
+        if (mmin == "" || eff_mem_pct < mmin) { mmin = eff_mem_pct; mminid = id }
+        if (mmax == "" || eff_mem_pct > mmax) mmax = eff_mem_pct
       }
-      rss += F_rss; polled += F_polled; multi += (F_peaktasks > 1)
-      if (ncpu == "") { ncpu = F_ncpu; req = F_req; cap = F_cap }
-      else if (ncpu != F_ncpu || req != F_req) mixed = 1
+      rss += eff_rss; polled += eff_polled; multi += (eff_peak_tasks > 1)
+      if (ncpu == "") { ncpu = eff_cpus; req = eff_req_cpus; cap = eff_cap }
+      else if (ncpu != eff_cpus || req != eff_req_cpus) mixed = 1
     }
   } else                                           # the queue's records alone
-    for (i = 1; i <= nqt; i++) {
-      r = QT[i]
+    for (i = 1; i <= narray_records; i++) {
+      r = array_record[i]
       if (name == "") { name = R[r, "Name"]; user = R[r, "UserName"] }
       k = onetask(r) ? 1 : ntasks(job "_[" R[r, "ArrayTaskID"] "]", ID)
       count(R[r, "StateCompact"], k)
     }
-  for (i = 1; i <= nqt && why == ""; i++)          # what the pending tasks wait for
-    if (R[QT[i], "StateCompact"] == "PD" && R[QT[i], "Reason"] != "None") why = R[QT[i], "Reason"]
+  for (i = 1; i <= narray_records && why == ""; i++)          # what the pending tasks wait for
+    if (R[array_record[i], "StateCompact"] == "PD" && R[array_record[i], "Reason"] != "None") why = R[array_record[i], "Reason"]
   st = (done ? " · " done " done" : "") (fail ? " · " fail " failed" : "") (canc ? " · " canc " cancelled" : "") \
        (run ? " · " run " running" : "") (pend ? " · " pend " pending" : "")
   TITLE = paint("1;36", "▌ ") paint("1", job) "  " name " · " user " · array of " total (st != "" ? ": " substr(st, 4) : "")
@@ -1578,7 +1578,7 @@ BEGIN {
   NOW = systime(); ID = id_anchor(); BARW = 16
   final_states()
   # every state squeue's StateCompact or sacct's State can name, both ways
-  split("PD R CG S CD CA F TO NF PR BF DL OOM RQ RV RS SE CF RH RF RD SI SO ST", sc, " ")
+  split("PD R CG S CD CA F TO NF PR BF DL OOM RQ RV RS SE CF RH RF RD SI SO step_row", sc, " ")
   split("PENDING RUNNING COMPLETING SUSPENDED COMPLETED CANCELLED FAILED TIMEOUT NODE_FAIL PREEMPTED " \
         "BOOT_FAIL DEADLINE OUT_OF_MEMORY REQUEUED REVOKED RESIZING SPECIAL_EXIT CONFIGURING " \
         "REQUEUE_HOLD REQUEUE_FED RESV_DEL_HOLD SIGNALING STAGE_OUT STOPPED", sl, " ")
