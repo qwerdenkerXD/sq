@@ -3173,6 +3173,12 @@ c_memalloc_call() {
 		need "fsill's queue, whole records, then $how: rc 0, the caption, no allocation call, no sstat, no mirror call" eval '
 			rc_is 0 && has "queue output incomplete" && [ "$(calls queue)" -eq 1 ] && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && [ "$(calls mirror)" -eq 0 ]'
 	done
+	# whole records, but none with a job id the table takes (a forged one, a
+	# bracket counting no task): "no readable rows", and no call for them
+	d=$(mem_fixture jobmem squeue "@include $fixtures/_common/squeue-defaults\ni=x11895; A=11895; U=1041; u=fsill; j=flye\ni=11880_[3-1]; A=11880; U=1041; u=fsill; j=badrange")
+	mem_run "$d" -- --color
+	need "own running records whose ids all fail the anchor: rc 0, no readable rows, no allocation call, no sstat, no mirror call" eval '
+		rc_is 0 && has "no readable rows" && [ "$(calls queue)" -eq 1 ] && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && [ "$(calls mirror)" -eq 0 ]'
 	# a garbage line between records costs the record it runs into, not the table
 	d=$(mem_fixture jobmem squeue "@include $fixtures/jobmem/squeue\n@raw not a record\ni=11999; A=11999; j=extra")
 	mem_run "$d" -- --color
