@@ -27,8 +27,9 @@
 # that do not fit collapse into lines like "… 42 jobs running".  Stuck jobs
 # (pending for a reason other than plain waiting), jobs blocked by a node or
 # partition fault and jobs held by an admin keep their rows longest, within
-# half the table while running jobs are hidden; running jobs come next, the
-# longest-running first, and ordinary pending jobs last.  The finished block
+# half the table while running jobs are hidden; running jobs come next, your
+# own near their memory limit first (from 90 %, then from 70 %), then the
+# longest-running, and ordinary pending jobs last.  The finished block
 # shrinks to one line, the newest failure, else the newest job, and on the
 # smallest screens the nodes to one summary line.  Below about 60 columns
 # some lines are wider than the screen and wrap, so COMPACT can still run
