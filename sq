@@ -333,8 +333,8 @@ log_note() {   # log_note KIND TEXT: TEXT, the first time KIND has something to 
 # cluster about the job, while its file is read here: one text per cause
 log_refuse_cluster() {
 	case $1 in
-		SLURM_CLUSTERS) die "sq log reads output files on this machine; unset SLURM_CLUSTERS" ;;
-		*) die "sq log reads output files on this machine; drop $1" ;;
+		SLURM_CLUSTERS) log_usage "job output files are read on this machine; unset SLURM_CLUSTERS" ;;
+		*) log_usage "job output files are read on this machine; drop $1" ;;
 	esac
 }
 
@@ -345,11 +345,11 @@ log_refuse_cluster() {
 # bitstring formats pinned
 log_fields="JobID ArrayJobID ArrayTaskID HetJobID HetJobOffset StateCompact RestartCnt
 	BatchFlag BatchHost WorkDir STDOUT STDERR UserName Name StartTime Reason exit_code"
-log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, pick the record HOW names
+log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, the record HOW names into log_*
 	SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$log_fmt \
 		collect -w facts squeue -h --jobs="$1" -t all
-	local rc=$?
-	log_verdict= log_why=
+	local rc=$? kv k
+	for k in $log_keys; do printf -v "log_$k" ''; done
 	if [ $rc -ne 0 ]; then
 		# a job Slurm no longer knows is rc 1 and this text (23.11.4, measured)
 		if [ $rc = 1 ] && LC_ALL=C grep -q 'Invalid job id specified' "$tmp/facts.err" 2>/dev/null
@@ -359,26 +359,36 @@ log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, pick the record HOW nam
 		return
 	fi
 	log_pick "$2" "$3" "${4-}" > "$tmp/pick" || { log_verdict=fail; log_why="squeue output unreadable"; return; }
-	mapfile -d '' -t REC < "$tmp/pick"
-	log_verdict=${REC[0]-fail}
-	[ "$log_verdict" != bad ] || { log_verdict=fail; log_why="squeue output unreadable"; }
+	while IFS= read -r -d '' kv; do   # KEY=VALUE, the keys log_pick writes
+		case " $log_keys " in *" ${kv%%=*} "*) printf -v "log_${kv%%=*}" '%s' "${kv#*=}" ;; esac
+	done < "$tmp/pick"
+	[ -n "$log_verdict" ] && [ "$log_verdict" != bad ] || { log_verdict=fail; log_why="squeue output unreadable"; }
 }
-# From $tmp/facts, the record HOW names, NUL-separated (no path holds a NUL):
-#   ok NOTE JobID ArrayTaskID State RestartCnt BatchFlag BatchHost Reason
-#      exit_code OUTPATH ERRPATH         NOTE: "", "last" or "het LEADER OFFSET"
-#   array FIRST LIST | tasks FIRST LIST  the array's task ids, up to 10
-#   leader LEADER OFFSET                 a het component; its leader is not here
-#   none | notask | nothet | bad
+# What log_pick says, as KEY=VALUE, NUL-separated (no path holds a NUL):
+#   verdict  ok, array or tasks (the array's task ids), leader (a het
+#            component without its leader in the answer), none, notask,
+#            nothet, bad
+#   ok:      via: "", last (the array's last task) or het (a component, and
+#            leader and offset name its het job and place); jobid, tid
+#            (ArrayTaskID), state, restart, batch, host, reason, exit, and
+#            out and err, the two paths
+#   array, tasks: first (the smallest task id) and list (up to 10)
+#   leader:  leader and offset
+log_keys="verdict via jobid tid state restart batch host reason exit out err first list leader offset why"
 # HOW is job (a plain id: the job itself, the leader of its het job, or the
 # last task of an array, which carries the array's id), task (JOB_TASK),
 # het (the leader of het job JOB) or tasks (array JOB's task ids).
 log_pick() {   # log_pick HOW JOB [TASK]
-	env LC_ALL=C gawk -v how="$1" -v job="$2" -v task="${3-}" '
-	BEGIN { RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"] }
+	env LC_ALL=C gawk -v how="$1" -v job="$2" -v task="${3-}" -v fields="$log_fields" '
+	BEGIN {
+		RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"]
+		nf = split(fields, NAME, /[ \t\n]+/)        # R[record, field name], in this order
+	}
 	# every record whole, its job id a number, or nothing is read at all
-	NF != 17 || RT == "" || $1 !~ /^[0-9]+$/ { bad = 1; exit }
-	{ nrec++; for (i = 1; i <= NF; i++) R[nrec, i] = $i }
-	function put(x) { printf "%s%c", x, 0 }
+	NF != nf || RT == "" || $1 !~ /^[0-9]+$/ { bad = 1; exit }
+	{ nrec++; for (i = 1; i <= NF; i++) R[nrec, NAME[i]] = $i }
+	function put(key, value) { printf "%s=%s%c", key, value, 0 }
+	function onetask(r) { return R[r, "ArrayTaskID"] ~ /^[0-9]+$/ }   # one task, numbered
 	# slurmstepd, src/slurmd/common/fname.c (23.11.4): remove_path_slashes()
 	# drops each backslash and keeps the second of two, and any backslash at
 	# all means no expansion
@@ -397,7 +407,7 @@ log_pick() {   # log_pick HOW JOB [TASK]
 	# letter without one stays as written, "%" and all
 	function expand(f, r,   out, p, q, n, c, wid, host, v) {
 		n = length(f); p = q = 1
-		host = R[r, 9]; sub(/[.].*/, "", host)
+		host = R[r, "BatchHost"]; sub(/[.].*/, "", host)
 		while (p <= n) {
 			if (substr(f, p, 1) != "%") { p++; continue }
 			if (substr(f, p + 1, 1) == "%") { out = out substr(f, q, p + 1 - q); p += 2; q = p; continue }
@@ -410,14 +420,14 @@ log_pick() {   # log_pick HOW JOB [TASK]
 				if (p > n) break
 			}
 			c = substr(f, p, 1)
-			if      (c == "a") v = pad(R[r, 3] ~ /^[0-9]+$/ ? R[r, 3] : 4294967294, wid)   # NO_VAL
-			else if (c == "A") v = pad(R[r, 2], wid)
-			else if (c == "j" || c == "J") v = pad(R[r, 1], wid)
+			if      (c == "a") v = pad(onetask(r) ? R[r, "ArrayTaskID"] : 4294967294, wid)   # NO_VAL
+			else if (c == "A") v = pad(R[r, "ArrayJobID"], wid)
+			else if (c == "j" || c == "J") v = pad(R[r, "JobID"], wid)
 			else if (c == "n" || c == "t") v = pad(0, wid)
 			else if (c == "N") v = host
 			else if (c == "s") v = "batch"
-			else if (c == "u") v = R[r, 13]
-			else if (c == "x") v = R[r, 14]
+			else if (c == "u") v = R[r, "UserName"]
+			else if (c == "x") v = R[r, "Name"]
 			else continue
 			out = out substr(f, q, p - 1 - q) v; p++; q = p
 		}
@@ -427,7 +437,7 @@ log_pick() {   # log_pick HOW JOB [TASK]
 	# with a backslash is appended to it as it is, without a "/" (sic)
 	function fullpath(f, r,   dir) {
 		if (substr(f, 1, 1) == "/") return index(f, "\\") ? unslash(f) : expand(f, r)
-		dir = R[r, 10]
+		dir = R[r, "WorkDir"]
 		if (index(f, "\\")) return dir unslash(f)
 		return dir (dir ~ /\/$/ ? "" : "/") expand(f, r)
 	}
@@ -436,21 +446,23 @@ log_pick() {   # log_pick HOW JOB [TASK]
 	# prints STDOUT for STDERR (src/squeue/print.c, 23.11.4), and slurmstepd
 	# then writes stderr where stdout goes
 	function outpat(r) {
-		if (R[r, 11] != R[r, 10] "/slurm-" R[r, 1] ".out") return R[r, 11]
-		return (R[r, 3] ~ /^[0-9]+$/) ? "slurm-%A_%a.out" : "slurm-%J.out"
+		if (R[r, "STDOUT"] != R[r, "WorkDir"] "/slurm-" R[r, "JobID"] ".out") return R[r, "STDOUT"]
+		return onetask(r) ? "slurm-%A_%a.out" : "slurm-%J.out"
 	}
-	function errpat(r) { return (R[r, 12] == R[r, 11]) ? outpat(r) : R[r, 12] }
-	function ok(r, note,   i) {
-		put("ok"); put(note)
-		split("1 3 6 7 8 9 16 17", I, " "); for (i = 1; i <= 8; i++) put(R[r, I[i]])
-		put(fullpath(outpat(r), r)); put(fullpath(errpat(r), r))
+	function errpat(r) { return (R[r, "STDERR"] == R[r, "STDOUT"]) ? outpat(r) : R[r, "STDERR"] }
+	function ok(r, via) {
+		put("verdict", "ok"); put("via", via)
+		put("jobid", R[r, "JobID"]); put("tid", R[r, "ArrayTaskID"]); put("state", R[r, "StateCompact"])
+		put("restart", R[r, "RestartCnt"]); put("batch", R[r, "BatchFlag"]); put("host", R[r, "BatchHost"])
+		put("reason", R[r, "Reason"]); put("exit", R[r, "exit_code"])
+		put("out", fullpath(outpat(r), r)); put("err", fullpath(errpat(r), r))
 	}
 	# the task ids of array job, smallest first, at most 10 of them; a
 	# pending part is a bracket expression: a, a-b, a-b:step, %throttle
 	function tasks(verdict,   r, x, t, nt, i, m, a, b, s, k, cnt, ids, sorted, nid, list) {
 		for (r = 1; r <= nrec; r++) {
-			if (R[r, 2] != job || R[r, 3] == "N/A") continue
-			x = R[r, 3]; sub(/%[0-9]+$/, "", x)
+			if (R[r, "ArrayJobID"] != job || R[r, "ArrayTaskID"] == "N/A") continue
+			x = R[r, "ArrayTaskID"]; sub(/%[0-9]+$/, "", x)
 			nt = split(x, t, ",")
 			for (i = 1; i <= nt; i++) {
 				if (!match(t[i], /^([0-9]+)(-([0-9]+)(:([0-9]+))?)?$/, m)) continue
@@ -460,41 +472,40 @@ log_pick() {   # log_pick HOW JOB [TASK]
 				for (k = a; k <= b && k < a + 10 * s; k += s) ids[k] = 1
 			}
 		}
-		if (!cnt) { put("none"); return }
+		if (!cnt) { put("verdict", "none"); return }
 		nid = asorti(ids, sorted, "@ind_num_asc")
 		for (i = 1; i <= nid && i <= 10; i++) list = list (i > 1 ? "," : "") sorted[i]
-		put(verdict); put(sorted[1]); put(list (cnt > 10 ? ",…" : ""))
+		put("verdict", verdict); put("first", sorted[1]); put("list", list (cnt > 10 ? ",…" : ""))
 	}
 	END {
-		if (bad) { put("bad"); exit }
+		if (bad) { put("verdict", "bad"); exit }
 		if (how == "tasks") { tasks("tasks"); exit }
 		if (how == "task") {
-			for (r = 1; r <= nrec; r++) if (R[r, 2] == job && R[r, 3] == task) { ok(r, ""); exit }
-			put("notask"); exit
+			for (r = 1; r <= nrec; r++)
+				if (R[r, "ArrayJobID"] == job && R[r, "ArrayTaskID"] == task) { ok(r, ""); exit }
+			put("verdict", "notask"); exit
 		}
 		if (how == "het") {
-			for (r = 1; r <= nrec; r++) if (R[r, 4] == job && R[r, 5] == "0") { ok(r, ""); exit }
-			for (r = 1; r <= nrec; r++) if (R[r, 1] == job) { put("nothet"); exit }
-			put("none"); exit
-		}
-		for (me = 1; me <= nrec; me++) if (R[me, 1] == job) break
-		if (me <= nrec && R[me, 4] != "N/A") {        # a het job: its leader writes
-			if (R[me, 5] == "0") { ok(me, ""); exit }
 			for (r = 1; r <= nrec; r++)
-				if (R[r, 4] == R[me, 4] && R[r, 5] == "0") { ok(r, "het " R[me, 4] " " R[me, 5]); exit }
-			put("leader"); put(R[me, 4]); put(R[me, 5]); exit
+				if (R[r, "HetJobID"] == job && R[r, "HetJobOffset"] == "0") { ok(r, ""); exit }
+			for (r = 1; r <= nrec; r++) if (R[r, "JobID"] == job) { put("verdict", "nothet"); exit }
+			put("verdict", "none"); exit
 		}
-		for (r = 1; r <= nrec; r++) if (R[r, 2] == job && R[r, 3] != "N/A") { na++; last = r }
-		if (na == 1 && R[last, 1] == job && R[last, 3] ~ /^[0-9]+$/) { ok(last, "last"); exit }
+		for (me = 1; me <= nrec; me++) if (R[me, "JobID"] == job) break
+		if (me <= nrec && R[me, "HetJobID"] != "N/A") {        # a het job: its leader writes
+			if (R[me, "HetJobOffset"] == "0") { ok(me, ""); exit }
+			for (r = 1; r <= nrec; r++)
+				if (R[r, "HetJobID"] == R[me, "HetJobID"] && R[r, "HetJobOffset"] == "0") {
+					ok(r, "het"); put("leader", R[me, "HetJobID"]); put("offset", R[me, "HetJobOffset"]); exit
+				}
+			put("verdict", "leader"); put("leader", R[me, "HetJobID"]); put("offset", R[me, "HetJobOffset"]); exit
+		}
+		for (r = 1; r <= nrec; r++) if (R[r, "ArrayJobID"] == job && R[r, "ArrayTaskID"] != "N/A") { na++; last = r }
+		if (na == 1 && R[last, "JobID"] == job && onetask(last)) { ok(last, "last"); exit }
 		if (na) { tasks("array"); exit }
 		if (me <= nrec) { ok(me, ""); exit }
-		put("none")
+		put("verdict", "none")
 	}' "$tmp/facts"
-}
-log_take() {   # the picked record into log_*
-	log_jobid=${REC[2]} log_tid=${REC[3]} log_state=${REC[4]} log_restart=${REC[5]}
-	log_batch=${REC[6]} log_host=${REC[7]} log_reason=${REC[8]} log_exit=${REC[9]}
-	log_out=${REC[10]} log_err=${REC[11]}
 }
 # the file to read, from the record just taken: refused where it is /dev/null,
 # noted where --err names the stdout file
@@ -503,7 +514,7 @@ log_resolve() {
 	if [ $log_want = err ]; then
 		[ "$log_err" != /dev/null ] || log_fail "job $log_label's stderr is discarded (it goes to /dev/null); drop --err"
 		[ "$log_err" != "$log_out" ] ||
-			log_note same "job $log_label writes its stderr into its stdout file; following that"
+			log_note same "job $log_label writes its stderr into its stdout file; $doing that"
 		log_path=$log_err
 	else
 		if [ "$log_out" = /dev/null ]; then
@@ -636,12 +647,21 @@ sub_log() {
 			log_fail "following needs GNU tail; use --no-follow"
 	fi
 	trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
-	make_tmp
 	for v in $(compgen -e); do case $v in SQUEUE_*) unset "$v" ;; esac; done
 	nonce=$(mint_nonce) || die "no usable random field separator"
 	export SQ_NONCE=$nonce
 	log_fmt=
 	for v in $log_fields; do log_fmt="$log_fmt${log_fmt:+,}$v:$nonce"; done
+	# The clock: a tick a second is a read on a FIFO of its own, which nothing
+	# writes, so no process sleeps.  The sentinel is what tail's --pid
+	# watches: killing it ends the stream, and it ends itself, removing $tmp,
+	# within a second of sq being killed outright, so it starts before the
+	# first Slurm call
+	make_tmp
+	mkfifo "$tmp/nap" && exec {log_nap}<> "$tmp/nap" || log_fail "cannot make a timer FIFO in $tmp"
+	{ while kill -0 $$ 2>/dev/null; do read -t 1 -u "$log_nap"; done; rm -rf "$tmp"; } &
+	log_sentinel_pid=$! log_tail_pid=; log_pids=$log_sentinel_pid
+	local doing=following; [ $log_follow = 1 ] || doing=showing
 
 	# the first answer: the record to follow, or why there is none.  A het
 	# job's output is its leader's (offset 0), the only component that runs
@@ -652,28 +672,28 @@ sub_log() {
 	[ -z "$off" ] || { how=het; [ "$off" = 0 ] || het=$job; }
 	log_ask "$qid" $how "$job" "$task"
 	if [ "$log_verdict" = leader ]; then
-		het=${REC[1]} qid=${REC[1]} how=het job=${REC[1]}
+		het=$log_leader qid=$log_leader how=het job=$log_leader
 		log_ask "$qid" het "$job"
 	fi
 	case $log_verdict in
-		fail) log_fail "slurm unreachable · $log_why" ;;
 		notask)   # its array may be known: then which tasks it has
 			log_ask "$asked" tasks "$asked"
 			[ "$log_verdict" != tasks ] ||
-				log_fail "Slurm does not know task $log_label; array $asked has tasks ${REC[2]}"
-			log_verdict=none ;;
-		array)  log_usage "$asked is an array; name a task, e.g. sq log ${asked}_${REC[1]} (its tasks: ${REC[2]})" ;;
+				log_fail "Slurm does not know task $log_label; array $asked has tasks $log_list"
+			[ "$log_verdict" = fail ] || log_verdict=none ;;
+		array)  log_usage "$asked is an array; name a task, e.g. sq log ${asked}_$log_first (its tasks: $log_list)" ;;
 		nothet) log_usage "$asked is not a het job, so $log_label names no component of one; e.g. sq log $asked" ;;
 	esac
+	[ "$log_verdict" != fail ] || log_fail "slurm unreachable · $log_why"
 	[ "$log_verdict" = ok ] ||
 		log_fail "Slurm does not know job $log_label (it ended more than about 5 minutes ago, or never existed), so its output path is unknown"
-	case ${REC[1]} in
-		last)   log_note last "job $log_label is task ${asked}_${REC[3]} of an array; following it" ;;
-		het\ *) set -- ${REC[1]}; het=$2 qid=$2 how=het job=$2 ;;
+	case $log_via in
+		last) log_note last "job $log_label is task ${asked}_$log_tid of an array; $doing it" ;;
+		het)  het=$log_leader qid=$log_leader how=het job=$log_leader ;;
 	esac
 	[ -z "$het" ] ||
-		log_note het "job $log_label belongs to het job $het, whose leader $het+0 writes its output; following that"
-	log_take; log_resolve
+		log_note het "job $log_label belongs to het job $het, whose leader $het+0 writes its output; $doing that"
+	log_resolve
 	log_classify "$log_state"
 	local baseline=$log_restart
 
@@ -690,22 +710,15 @@ sub_log() {
 			log_say "job $log_label ended: $log_sname${log_exit:+ (exit code $log_exit)}"; }
 		exit 0
 	fi
-	log_tail_pid= log_sentinel_pid=
 	[ $log_kind != final ] || log_finish final    # already over: shown as it is
 
-	# The loop: a tick a second (a read on a FIFO of its own, which nothing
-	# writes, so no process sleeps), Slurm asked every 5th tick.  The sentinel
-	# is what tail's --pid watches: killing it ends the stream, and it ends
-	# itself, removing $tmp, within a second of sq being killed outright.
-	mkfifo "$tmp/nap" && exec {log_nap}<> "$tmp/nap" || log_fail "cannot make a timer FIFO in $tmp"
-	{ while kill -0 $$ 2>/dev/null; do read -t 1 -u "$log_nap"; done; rm -rf "$tmp"; } &
-	log_sentinel_pid=$!; log_pids=$log_sentinel_pid
-	local tick=0 started=0 waited=0 grace=-1 ending=
+	# The loop, Slurm asked every 5th tick
+	local tick=0 started=0 waited=0 grace=-1 ending= reason
 	while :; do
 		if [ -z "$ending" ] && [ $tick -gt 0 ] && [ $((tick % 5)) = 0 ]; then
 			log_ask "$qid" $how "$job" "$task"
 			case $log_verdict in
-				ok)   log_take; log_classify "$log_state"
+				ok)   log_classify "$log_state"
 				      # a requeue counts once the job has run in this follow, or
 				      # when RestartCnt rose; seen pending, it is still waiting
 				      if [ $log_kind = held ] && [ $started = 1 ]; then ending=held
@@ -720,7 +733,9 @@ sub_log() {
 		fi
 		if [ -z "$ending" ]; then
 			case $log_kind in
-				wait|requeue|held) log_note pending "job $log_label is pending (${log_reason:-no reason given}); waiting for it to start" ;;
+				wait|requeue|held)   # a reason of None says nothing
+				      case $log_reason in ''|None) reason= ;; *) reason=" ($log_reason)" ;; esac
+				      log_note pending "job $log_label is pending$reason; waiting for it to start" ;;
 				run)  if [ $started = 0 ]; then         # the path as the job computed it
 				          started=1; log_resolve
 				      fi
@@ -738,6 +753,7 @@ sub_log() {
 		# tail gone on its own: a reader gone, a write error, a failure
 		if [ -n "$log_tail_pid" ] && ! kill -0 "$log_tail_pid" 2>/dev/null; then
 			{ wait "$log_tail_pid"; } 2>/dev/null; local rc=$?
+			log_pids=$log_sentinel_pid log_tail_pid=   # reaped: its pid is no longer ours
 			log_tail_verdict $rc; exit 0
 		fi
 		[ $grace != 0 ] || log_finish "$ending"
@@ -822,13 +838,14 @@ mark_filter() {                  # $1 the filter's own spelling, $2 as written
 # name is matched exactly as written, never abbreviated or case-folded.
 # Every other bare word is a usage error: squeue takes none, and used to answer
 # one with a fake "slurm unreachable".  The loop below keeps what this needs:
-# subpos stays 1 while a subcommand may still stand at the next word, and
+# subpos stays 1 while a subcommand may still stand at the next word (valued
+# says whether an option that takes a value is what ended that), and
 # after_j / after_cluster hold the word before it when that was a -j value or
 # an unparsed short-option cluster (-ao); clustercause the first -M, --cluster(s),
 # --federation or --sibling, which sq log refuses.
 subcommands=log
 is_subcommand() { case " $subcommands " in *" $1 "*) return 0 ;; esac; return 1; }
-subpos=1 after_j= after_cluster= j_seen= cluster_seen= clustercause=
+subpos=1 valued=0 after_j= after_cluster= j_seen= cluster_seen= clustercause=
 # the hint for a word that is no subcommand: a fixed table, never a guess
 # from edit distance.  The long options sq knows, for one written without "--"
 long_names=" me all hide array noconvert noheader priority local federation sibling
@@ -860,6 +877,7 @@ place_word() {   # place_word WORD REST...: run the subcommand WORD names, else 
 		# sq log, the only subcommand, refuses a cluster selection, also where
 		# it would otherwise only be told to come first
 		[ -z "$clustercause" ] || log_refuse_cluster "$clustercause"
+		[ "$subpos" = 1 ] || [ "$valued" = 1 ] || die "subcommands come first: sq $1 …"
 		[ "$subpos" = 1 ] || die "subcommands come first, before any option that takes a value: sq $1 …"
 		local sub=$1; shift
 		"sub_$sub" "$@"; exit
@@ -871,7 +889,7 @@ while [ $# -gt 0 ]; do
 	after_j=$j_seen after_cluster=$cluster_seen; j_seen= cluster_seen=
 	case $1 in
 		-o|--format) [ $# -ge 2 ] || die "$1 needs a column list, e.g. -o i,j,u"
-			fields=$2; fsrc=-o; subpos=0; shift 2 ;;
+			fields=$2; fsrc=-o; subpos=0 valued=1; shift 2 ;;
 		-c|--center|--centre) center=1; shift ;;
 		-C|--center-all|--centre-all) center=2; shift ;;
 		-x|--expand) fold=0; shift ;;
@@ -884,7 +902,7 @@ while [ $# -gt 0 ]; do
 				|| die "--compact and --full contradict each other; give one of them"
 			modeflag=$1; shift ;;
 		--reserve|--reserve=*)  # the value attached, or the next word
-			subpos=0
+			subpos=0 valued=1
 			case $1 in
 				--reserve=*) reserve=${1#*=}; shift ;;
 				*) [ $# -ge 2 ] || die "--reserve needs a number of lines, e.g. sq --reserve 2"
@@ -985,7 +1003,7 @@ while [ $# -gt 0 ]; do
 				esac
 				args+=("$1"); shift; continue
 			fi
-			subpos=0
+			subpos=0 valued=1
 			case $kopt in -M) clustercause=${clustercause:-$opt} ;; esac
 			[ $have -eq 1 ] || [ $# -ge 2 ] || { opt_hint "$kopt"
 				die "$opt needs $vnoun, e.g. sq $opt $vex"; }
