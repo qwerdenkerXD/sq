@@ -83,6 +83,11 @@
 # jobs show the backfill start estimate; down nodes show their reason.
 
 set -u
+# POSIXLY_CORRECT in the caller's environment puts bash in POSIX mode (no
+# process substitution) and makes every gawk sq starts a --posix one, which
+# refuses gawk's own extensions and a newline in a string.  Unset, it turns
+# bash's POSIX mode off again and reaches no child.
+unset POSIXLY_CORRECT
 # COLUMNS must only ever mean "my caller told me the size" (watch exports it):
 # bash's checkwinsize, on even in a script, would otherwise set it from the
 # terminal after the first external command whenever stderr is a tty, and

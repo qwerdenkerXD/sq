@@ -1726,6 +1726,29 @@ c_locale_not_utf8() {
 		need "$args: stderr empty"    err_empty
 	done
 }
+# POSIXLY_CORRECT in the caller's environment once put bash in POSIX mode and
+# made every gawk a --posix one: the dashboard exited 1 with nothing on
+# stdout, and sq job died on a newline in a gawk string
+c_posixly_correct() {
+	T_TITLE="POSIXLY_CORRECT=1: the dashboard, sq job and sq log print what they print without it"
+	local want fx
+	sq_run mixed --
+	want=$RUN/screen; without_clock "$OUT" > "$want"
+	sq_run mixed POSIXLY_CORRECT=1 --
+	need "dashboard: rc 0, stderr empty, the same screen" eval 'rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT")'
+	job_run finished-11912 -- --no-color job 11912
+	want=$RUN/report; cp "$OUT" "$want"
+	job_run finished-11912 POSIXLY_CORRECT=1 -- --no-color job 11912
+	need "sq job: rc 0, stderr empty, the same report" eval 'rc_is 0 && err_empty && job_is "$want"'
+	fx=$(log_fx posix <<'EOF'
+StateCompact=CD
+@file create wd/out_500.log line\n
+EOF
+)
+	sq_run "$fx" POSIXLY_CORRECT=1 -- log --no-follow 500
+	need "sq log: rc 0, the file, and the note it prints without it" eval 'rc_is 0 && out_is "line
+" && err_is "sq log: job 500 ended: COMPLETED (exit code 0:0)"'
+}
 # A NAME is no id, even one that looks like a bracket: it keeps the plain cut
 name_cut() {         # name_cut SECTION ID: the NAME of row ID is a right cut of the full name
 	rows "$1" | ID=$2 LC_ALL=$utf8 gawk '
@@ -4466,7 +4489,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale locale_pinned locale_missing locale_not_utf8 shrink_name shrink_extent
+	shrink_locale locale_pinned locale_missing locale_not_utf8 posixly_correct shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40
