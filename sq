@@ -213,6 +213,17 @@ trap cleanup EXIT
 tmo=${SQ_TIMEOUT:-5}
 case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeout
 [ -n "$(printf '%s' "$tmo" | tr -d '0.')" ] || tmo=5    # 0, 0.0 mean "no limit"
+# A caller's SQUEUE_* and SACCT_* settings filter, sort or reformat, even
+# under --jobs / -j (SACCT_FEDERATION and SACCT_LOCAL too), so a question sq
+# asks for itself must not inherit them.  exported_names PATTERN...: the
+# exported variables whose names match one of these shell patterns, one a line
+exported_names() {
+	local name pattern
+	for name in $(compgen -e); do
+		for pattern; do case $name in $pattern) printf '%s
+' "$name"; break ;; esac; done
+	done
+}
 # Every collector runs through collect, so its own stderr (NAME.err) and
 # timeout's (NAME.tmo) land apart: the client's fd 3 becomes its stderr, and
 # timeout keeps fd 2.  sh -c exec keeps the pid, so TERM and KILL reach the
@@ -551,15 +562,22 @@ jobmem_snapshot() {
 # written as the new snapshot.  -w: every call through collect -w, as a
 # subcommand makes them
 jobmem_collect() {   # jobmem_collect [-w]
-	local w=${1-} memids memrc sstat_limit
+	local w=${1-} memids memrc sstat_limit allocrc inherited
 	: > "$tmp/memalloc"; : > "$tmp/memread"
 	# framed like the fallback's call: the format in SQUEUE_FORMAT2, so the
-	# queue nonce never reaches a command line.  StateCompact is %t's letter
+	# queue nonce never reaches a command line.  StateCompact is %t's letter.
+	# The caller's SQUEUE_* filters (SQUEUE_STATES, SQUEUE_PARTITION, ...)
+	# would narrow it as the screen's options would: unexported for this
+	# call alone, as the screen's calls after it still take them
+	inherited=$(exported_names 'SQUEUE_*')
+	[ -z "$inherited" ] || export -n $inherited
 	SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,tres-alloc:$nonce,NumNodes:$nonce" \
 		collect $w alloc squeue -h -u "$myuid"
+	allocrc=$?
+	[ -z "$inherited" ] || export $inherited
 	# a job without mem= has no known allocation (0).  Output that is not
 	# every record whole fails the call as a non-zero exit does
-	if [ $? -ne 0 ] || ! env LC_ALL=C gawk "$shared_awk"'
+	if [ $allocrc -ne 0 ] || ! env LC_ALL=C gawk "$shared_awk"'
 		BEGIN { RS = ENVIRON["SQ_NONCE"] "\n"; FS = ENVIRON["SQ_NONCE"] }
 		NF != 4 || $1 !~ /^[0-9]+$/ || RT == "" { bad = 1; exit }
 		{ mb = tres_mem($3); printf "%s\t%s\t%.0f\t%s\n", $1, $2, (mb < 0) ? 0 : mb, $4 }
@@ -1006,7 +1024,7 @@ sub_log() {
 			log_fail "following needs GNU tail; use --no-follow"
 	fi
 	trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
-	for v in $(compgen -e); do case $v in SQUEUE_*) unset "$v" ;; esac; done
+	unset $(exported_names 'SQUEUE_*')
 	nonce=$(mint_nonce) || die "no usable random field separator"
 	export SQ_NONCE=$nonce
 	log_fmt=
@@ -1666,9 +1684,8 @@ sub_job() {
 	job_pss_since
 	[ -z "$off" ] || job_fail "het jobs are not supported yet"
 	trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
-	# every SQUEUE_* and SACCT_* setting unset: they filter, sort or reformat
-	# even under --jobs / -j (SACCT_FEDERATION and SACCT_LOCAL too)
-	for v in $(compgen -e); do case $v in SQUEUE_*|SACCT_*) unset "$v" ;; esac; done
+	# every SQUEUE_* and SACCT_* setting unset (see exported_names)
+	unset $(exported_names 'SQUEUE_*' 'SACCT_*')
 	# two nonces, as the dashboard has: sacct's --delimiter is on its command
 	# line for anyone to read, the queue's stays in the environment
 	nonce=$(mint_nonce) && nonce2=$(mint_nonce) || die "no usable random field separator"

@@ -2973,6 +2973,17 @@ c_jobmem_gates() {
 	need "filters on the screen: the allocation call is still squeue -h -u 1041 and nothing else, sstat still asks for all 8" eval '
 		rc_is 0 && [ "$(gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"squeue\" && /tres-alloc/ && /StateCompact/ { print \$3 }" "$LOG")" = "-h -u 1041 " ] &&
 		argv_has sstat -j 11895,11898,11902,11903,11904,11905,11906,11908'
+	# ... nor do the filters a caller exports, which the screen's calls still take
+	local filters="SQUEUE_PARTITION SQUEUE_STATES SQUEUE_ACCOUNT SQUEUE_QOS SQUEUE_NAMES" v
+	mem_run jobmem SQ_WIDTH=110 SQUEUE_PARTITION=main SQUEUE_STATES=R,PD SQUEUE_ACCOUNT=bio SQUEUE_QOS=normal SQUEUE_NAMES=flye -- --color
+	need "SQUEUE_* filters exported: rc 0, the allocation call once, its SQUEUE_FORMAT2 sq's" eval '
+		rc_is 0 && [ "$(calls alloc)" -eq 1 ] && gawk -F"\t" "\$1 == \"CALL\" && /tres-alloc/ && /StateCompact/ && /\tSQUEUE_FORMAT2=JobID/ { f = 1 } END { exit !f }" "$LOG"'
+	for v in $filters; do
+		need "$v: not in the allocation call's environment, in the queue call's and the MEM totals' call" eval '
+			gawk -F"\t" -v v='"$v"' "\$1 == \"CALL\" && \$2 == \"squeue\" { for (i = 4; i <= NF; i++) if (index(\$i, v \"=\") == 1) has = 1
+				if (/tres-alloc/ && /StateCompact/) alloc += has; else if (/tres-alloc/) mirror += has; else queue += has; has = 0 }
+				END { exit !(alloc == 0 && mirror == 1 && queue == 1) }" "$LOG"'
+	done
 	# fsill with a pending job only: no call
 	mkdir -p "$d"
 	for f in sinfo sacct; do printf '@include %s\n' "$fixtures/jobmem/$f" > "$d/$f"; done
