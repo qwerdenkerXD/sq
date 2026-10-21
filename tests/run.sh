@@ -2957,7 +2957,7 @@ c_jobmem_gates() {
 			eval 'rc_is 0 && err_empty && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && cmp -s "$base" <(without_clock "$OUT")'
 	done
 	need "MEM not shown: no %A %U asked for either" eval '! env_of squeue 1 SQUEUE_FORMAT | grep -qE "%[AU]"'
-	# empty too: squeue then takes the first cluster the database knows
+	# empty too: squeue then fails ("No cluster '' known by database.")
 	for f in bioinf ""; do
 		mem_run jobmem SQSTUB_UID=4242 SQ_WIDTH=110 SLURM_CLUSTERS="$f" -- --color
 		base=$RUN/base; without_clock "$OUT" > "$base"

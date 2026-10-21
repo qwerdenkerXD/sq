@@ -2110,8 +2110,8 @@ keys=${keys%,}                       # the last nonce leaves an empty field that
 # the queue also brings each row's unique job id (%A, what the allocation call
 # and sstat name a job by, never 123_4) and numeric uid (%U, "own" is the uid
 # that `id -u` names, never a login compared as text), hidden and last.
-# SLURM_CLUSTERS counts even when empty: squeue then takes the first cluster
-# the database knows (slurmdb_get_info_cluster with no name), not the local one.
+# SLURM_CLUSTERS counts even when empty: squeue then fails with rc 1 ("No
+# cluster '' known by database."), so there are no rows to measure either.
 memon=0 qpos_jobid= qpos_uid=
 case ",$keys," in *,m,*) memon=1 ;; esac
 case " $seen " in *" -M "*) memon=0 ;; esac
