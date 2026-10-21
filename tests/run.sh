@@ -4283,7 +4283,7 @@ EOF
 	need "squeue down, accounting's UID fsill's: own, its MEM line (the allocation call answers apart)" has "12/64G now"
 }
 c_job_branches() {   # Q2, Q3
-	T_TITLE="the report's branches: over 100 %, never started (real rows and cancelled pending), squeue ended before accounting, interactive, no steps, the cap while running, an array with none completed"
+	T_TITLE="the report's branches: over 100 %, never started (real rows and cancelled pending), squeue ended before accounting, stopped, interactive, no steps, the cap while running, an array with none completed"
 	local d
 	d=$(job_fx over sacct <<'EOF'
 JobID=800; TotalCPU=30:00.000
@@ -4319,6 +4319,10 @@ EOF
 	need "squeue says COMPLETED, accounting still RUNNING: squeue's state and times, efficiency only that accounting has no end yet" eval '
 		rc_is 0 && kv_is state "COMPLETED · exit 0" && kv_is ran "30m00s on fb2-bioinf (LocalQ)" && matches "^  ended +.* \(15m ago\)$" &&
 		notes_are "accounting has not recorded its end yet" && ! matches "^  (CPU|MEM) "'
+	# ST, squeue's StateCompact for STOPPED, once lost from the table of names
+	d=$(job_fx stopped squeue-all <<<'JobID=800; StateCompact=ST; EndTime=N/A'); job_fx stopped sacct <<<'JobID=800; State=STOPPED; End=Unknown' > /dev/null
+	job_run "$d" -- --no-color job 800
+	need "a stopped job (ST): its state is STOPPED" eval 'rc_is 0 && err_empty && kv_is state "STOPPED on fb2-bioinf (LocalQ)"'
 	d=$(job_fx interactive squeue-all <<<'JobID=800; BatchFlag=0'); job_fx interactive sacct <<<'JobID=800' > /dev/null
 	job_run "$d" -- --no-color job 800
 	need "an interactive job: its output went to its terminal" eval 'rc_is 0 && kv_is output "its terminal (an interactive job)" && lacks "stdout"'
