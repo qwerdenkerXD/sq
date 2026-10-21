@@ -1317,7 +1317,7 @@ c_sacct_fallback() {
 	need "stderr empty"               err_empty
 	need "stubs: sacct, then the fallback" calls_are 1 1 1 1
 	need "every call has SLURM_TIME_FORMAT=standard" all_calls_env SLURM_TIME_FORMAT standard sinfo squeue sacct
-	need "fallback argv: squeue -t all -h" argv_has squeue -t all -h
+	need "fallback argv: squeue -h -t all, -t all last" eval 'argv_has squeue -h -t all && fallback_t_all_last'
 	# squeue's third call: the second is the mirror call MEM's totals come from
 	need "fallback uses SQUEUE_FORMAT2 and not SQUEUE_FORMAT" eval '
 		[ "$(env_of squeue 3 SQUEUE_FORMAT)" = "(unset)" ] && [ "$(env_of squeue 3 SQUEUE_FORMAT2)" != "(unset)" ]'
@@ -1357,6 +1357,30 @@ c_refuse_states_eq() {
 	T_TITLE="--states= refused (rc 2, empty stdout); --states=R accepted"
 	refusal empty "--states=" "--states=R"
 	need "--states=R forwarded"       argv_has squeue -h -S t,i --states=R
+}
+# A state filter is the queue's alone (Franz's decision): the finished block
+# shows every finished job.  sacct never gets it, and the fallback puts its own
+# -t all last, as squeue keeps the last -t; it used to come first, so -t R
+# also emptied the fallback's finished block
+fallback_t_all_last() {   # the fallback call's arguments end in "-t all"
+	gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) ~ / -t all / { n++; if ($3 ~ / -t all $/) last++ }
+		END { exit !(n == 1 && last == 1) }' "$LOG"
+}
+c_state_filter_queue_only() {
+	T_TITLE="-t filters the queue only: the finished block from sacct as without it, and the fallback's own -t all comes last"
+	local t
+	for t in "-t R" "-tR" "--states=R" "--state R"; do
+		sq_run mixed -- $t
+		need "$t: rc 0, stderr empty, sacct and no fallback" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
+		need "$t: the queue call has it, sacct not" eval 'argv_has squeue -h -S t,i '"$t"' && ! grep "^CALL	sacct" "$LOG" | grep -qE " (-t|--states?)"'
+		need "$t: finished row 1001, the caption of no filter" eval 'rows recent | grep -qE "^ +1001 +done +COMPLETED " && has "recently finished · last 2h" && lacks "equivalent"'
+	done
+	sq_run noacct -- -t R
+	need "no accounting, -t R: rc 0, the fallback, its -t all after -t R" eval 'rc_is 0 && calls_are 1 1 1 1 && argv_has squeue -h -t R -t all && fallback_t_all_last'
+	need "... and its three finished rows" eval '[ "$(nrows recent)" -eq 3 ] && has "recently finished · recent only (no accounting)"'
+	sq_run noacct -- -t R -n x
+	need "-t R -n x: the fallback for -n, its -t all last, the caption names -n" eval '
+		rc_is 0 && calls_are 1 1 1 0 && fallback_t_all_last && [ "$(nrows recent)" -eq 3 ] && has "recent only (-n has no sacct equivalent)"'
 }
 c_accept_S_empty() {
 	T_TITLE="-S '' accepted (rc 0) and forwarded as given"
@@ -4522,7 +4546,7 @@ cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
 	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe silent_failure real_reason_wins bell_text bell_statedir centre sacct_fallback
-	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
+	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
 	pending_strided pending_long

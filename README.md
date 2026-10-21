@@ -251,6 +251,7 @@ efficiency
   too, because a signalled job's own row reports success and only its step carries the signal.
   Without accounting, or with a filter `sacct` has no equivalent for, the block falls back to
   `squeue -t all`, which only remembers jobs for `MinJobAge` (often 300 s), and the caption says so.
+  A state filter (`-t`) filters the queue only: the block shows every finished job either way.
 - **Reading EXIT:** the exit code, then what ExitCode's second field says, taken from the job
   and its steps (the first non-zero one, except that an out-of-memory always wins): `rc/sigN`
   is signal N as Slurm records it, `rc/oom` out of memory, and `rc/errN` the low 7 bits of a

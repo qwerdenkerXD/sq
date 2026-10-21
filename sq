@@ -71,7 +71,8 @@
 # are read along with it, because the allocation row of a signalled job
 # reports plain success and only its step carries the signal.  With no
 # accounting, or with a filter that has no sacct equivalent, the block falls
-# back to squeue -t all and its caption says so.
+# back to squeue -t all and its caption says so.  A state filter (-t) filters
+# the queue only: the block shows every finished job either way.
 # A new failure rings the bell once, and only while it is
 # younger than SQ_BELL_HORIZON, so a first run, a cleared cache and a week of
 # downtime all stay quiet.  The state kept is "<jobid><tab><end epoch>" lines
@@ -2278,14 +2279,17 @@ fi
 # closed list.  Dropping an unknown arg is not an option either: the queue
 # table and this block would then disagree about what they are showing.
 # -u maps to -u and then suppresses -a, because sacct takes the LAST of the two
-# and "-u x -a" quietly means "everybody".
+# and "-u x -a" quietly means "everybody".  A state filter (-t) is the queue's
+# alone: the block shows every finished job whatever it says, so sacct never
+# gets it (and needs no fallback for it), and the fallback's own -t all, last,
+# overrides it.
 sargs=(); sfilt=; sskip=; suser=0; ai=0
 while [ $ai -lt ${#args[@]} ]; do
 	a=${args[$ai]}; ai=$((ai+1)); v=; have=0
 	case $a in                                       # all four spellings:
 		--me)        v=${login:=$(id -un)}; have=2 ;;   # carries no value of its own,
 		--*=*)       v=${a#*=}; have=1; a=${a%%=*} ;;   # it supplies one: sacct has
-		-[upAqjM]?*) v=${a#??}; have=1; a=${a:0:2} ;;   # no --me, only -u <login>
+		-[upAqjMt]?*) v=${a#??}; have=1; a=${a:0:2} ;;  # no --me, only -u <login>
 	esac
 	case $a in                                       # -u x and --user x
 		-u|--user)               sf=-u; lbl=user ;;
@@ -2297,12 +2301,14 @@ while [ $ai -lt ${#args[@]} ]; do
 		-q|--qos)                sf=-q; lbl=qos ;;
 		-j|--job|--jobs)         sf=-j; lbl=job ;;
 		-M|--cluster|--clusters) sf=-M; lbl=cluster ;;
+		-t|--states|--state)     sf= ;;
 		*) sskip="$a has no sacct equivalent"; break ;;
 	esac
 	if [ $have -eq 0 ]; then
 		[ $ai -lt ${#args[@]} ] || { sskip="$a is missing its value"; break; }
 		v=${args[$ai]}; ai=$((ai+1))
 	fi
+	[ -n "$sf" ] || continue                         # -t: the queue's alone
 	sargs+=("$sf" "$v"); sfilt="$sfilt · $lbl=$v"
 	[ "$sf" = -u ] && suser=1
 done
@@ -2348,11 +2354,13 @@ if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 fi
 
 # every field is nonce-terminated, including the last, so gawk can tell a name
-# holding the delimiter, a tab or a newline from a real record boundary
+# holding the delimiter, a tab or a newline from a real record boundary.  sq's
+# own -t all comes after the caller's arguments: squeue keeps the last -t, so
+# a -t of the caller's filters the queue only, as it does with sacct
 if [ "$recent" != 0 ] && [ "$rsrc" = none ] && [ -z "$jerr" ]; then
 	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 \
 		SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,State:$nonce,exit_code:$nonce,TimeUsed:$nonce,EndTime:$nonce,ArrayJobID:$nonce,ArrayTaskID:$nonce,UserName:$nonce,Name:$nonce" \
-		collect recent squeue -t all -h "${args[@]+"${args[@]}"}"
+		collect recent squeue -h "${args[@]+"${args[@]}"}" -t all
 	fe=$?
 	if [ $fe -eq 0 ]; then rsrc=squeue
 	else why_of rerr $fe "$tmp/recent" squeue; : > "$tmp/recent"
