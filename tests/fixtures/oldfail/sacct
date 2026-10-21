@@ -4,7 +4,7 @@
 # row, 106 moves into "+N more" with its 3 jobs, so "+8 more" (not 6) tells a
 # shifted block from one where the failure merely overwrote that row.
 @include ../_common/sacct-defaults
-JobID=100; JobName=bad; State=FAILED; ExitCode=1:0; End=\{now-13h}
+JobID=100; JobName=bad; State=FAILED; ExitCode=1:0; End=\{now-13h30m}
 JobID=101; JobName=ok1; End=\{now-12h59m}
 JobID=102; JobName=ok2; End=\{now-12h58m}
 JobID=103; JobName=ok3; End=\{now-12h57m}

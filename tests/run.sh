@@ -1234,7 +1234,7 @@ bell_fixture() {   # bell_fixture: a job of alice's that FAILED a minute ago, no
 	local d=$T_DIR/fx-bell; mkdir -p "$d"
 	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
 	printf '@include %s\n' "$fixtures/_common/empty" > "$d/squeue"
-	printf '@include %s\nJobID=7001; JobName=crash; State=FAILED; ExitCode=1:0; End=\\{now-1m}\n' \
+	printf '@include %s\nJobID=7001; JobName=crash; State=FAILED; ExitCode=1:0; End=\\{now-1m30s}\n' \
 		"$fixtures/_common/sacct-defaults" > "$d/sacct"
 	printf '%s' "$d"
 }
@@ -1798,6 +1798,27 @@ EOF
 	sq_run "$fx" POSIXLY_CORRECT=1 -- log --no-follow 500
 	need "sq log: rc 0, the file, and the note it prints without it" eval 'rc_is 0 && out_is "line
 " && err_is "sq log: job 500 ended: COMPLETED (exit code 0:0)"'
+}
+# WSL steps its clock back about 1.5 s every 30 s, so between the stub's answer
+# and sq reading the clock a second can go missing: a job that ended exactly
+# 12h before the stub ran then reads 11h, and a case comparing two runs'
+# screens failed now and then.  So every end a dashboard fixture gives sits
+# mid-bucket (12h30m, 3m30s), and a step of 2 s either way (SQSTUB_SKEW) draws
+# the same screen
+c_clock_step() {
+	T_TITLE="every fixture with a relative time draws the same screen when the clock steps 2 s back or forward after the stub answered"
+	local dir fx want skew
+	for dir in "$fixtures"/*/; do
+		fx=${dir%/}; fx=${fx##*/}
+		case $fx in _common|sqjob) continue ;; esac
+		grep -qE '\\\{(now|epoch)|_common/(sacct|squeue-all)-defaults' "$dir"* 2>/dev/null || continue
+		sq_run "$fx" -- --full --color
+		want=$RUN/screen; without_clock "$OUT" > "$want"
+		for skew in -2 2; do
+			sq_run "$fx" SQSTUB_SKEW=$skew -- --full --color
+			need "$fx, the clock stepped ${skew}s: the same screen" eval 'cmp -s "$want" <(without_clock "$OUT")'
+		done
+	done
 }
 # A NAME is no id, even one that looks like a bracket: it keeps the plain cut
 name_cut() {         # name_cut SECTION ID: the NAME of row ID is a right cut of the full name
@@ -4554,7 +4575,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale locale_pinned locale_missing locale_not_utf8 posixly_correct shrink_name shrink_extent
+	shrink_locale locale_pinned locale_missing locale_not_utf8 posixly_correct clock_step shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40

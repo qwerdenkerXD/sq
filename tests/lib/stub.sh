@@ -27,6 +27,9 @@
 #                   @file live there, and \{run} in a value names it
 #   SQSTUB_IGNORE_TERM  a tool name: that tool ignores SIGTERM, so sq's timeout
 #                   has to kill it, and timeout then exits 137, not 124
+#   SQSTUB_SKEW     seconds the clock steps once the stub has answered: -1
+#                   prints every \{now...} and \{epoch...} 1 s later, as a
+#                   clock stepped back 1 s would leave it for sq (default 0)
 #
 # Formats, as the real tools take them (see tests/FAITHFULNESS.md):
 #   sinfo   -o FMT or -O FMT             %<letter> grammar or Field:0suffix

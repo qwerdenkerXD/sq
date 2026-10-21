@@ -2,7 +2,7 @@
 # (CANCELLED, PREEMPTED, REVOKED: yellow), all newer than the one FAILED job,
 # so COMPACT looks past them for the newest failure
 @include ../_common/sacct-defaults
-JobID=300; JobName=bad; State=FAILED; ExitCode=1:0; End=\{now-13h}
+JobID=300; JobName=bad; State=FAILED; ExitCode=1:0; End=\{now-13h30m}
 JobID=301; JobName=bumped; State=PREEMPTED; End=\{now-12h50m}
 JobID=302; JobName=stopped; State=CANCELLED; End=\{now-12h40m}
 JobID=303; JobName=fed; State=REVOKED; End=\{now-12h30m}

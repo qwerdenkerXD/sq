@@ -1,2 +1,2 @@
 # The fallback's -O fields (squeue -t all), for a finished job
-@defaults StateCompact=CD; State=COMPLETED; exit_code=0:0; TimeUsed=1:00; EndTime=\{now-12h}; ArrayJobID=N/A; ArrayTaskID=N/A; UserName=alice; Name=job
+@defaults StateCompact=CD; State=COMPLETED; exit_code=0:0; TimeUsed=1:00; EndTime=\{now-12h30m}; ArrayJobID=N/A; ArrayTaskID=N/A; UserName=alice; Name=job
