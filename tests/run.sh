@@ -1820,6 +1820,27 @@ c_clock_step() {
 		done
 	done
 }
+# W4/V5 (why-v2): an age from 48 h on reads in days and hours, as elap()
+# prints a day, where hours alone ran to 8736h; below 48 h byte for byte as
+# before.  The dashboard shows one only when SQ_SINCE reaches back that far
+c_ago_days() {
+	T_TITLE="the finished block's AGO from 48 h on in days and hours (2d02h, a group's range too), below 48 h as before (47h)"
+	local d=$T_DIR/fx; mkdir -p "$d"
+	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
+	: > "$d/squeue"
+	cat > "$d/sacct" <<EOF
+@include $fixtures/_common/sacct-defaults
+JobID=701; JobName=new; End=\{now-47h30m}
+JobID=702; JobName=old; End=\{now-50h30m}
+JobID=703_0; JobName=arr; End=\{now-77h30m}
+JobID=703_1; JobName=arr; End=\{now-47h10m}
+EOF
+	sq_run "$d" SQ_SINCE=now-5days -- --full
+	need "rc 0, stderr empty" eval 'rc_is 0 && err_empty'
+	need "47h30m ago: 47h" eval 'rows recent | grep -qE "^ +701 +new +COMPLETED .* 47h$"'
+	need "50h30m ago: 2d02h" eval 'rows recent | grep -qE "^ +702 +old +COMPLETED .* 2d02h$"'
+	need "a group from 47h10m to 77h30m ago: 47h-3d05h" eval 'rows recent | grep -qE "^ +703_\[0-1\] ×2 +arr +COMPLETED .* 47h-3d05h$"'
+}
 # A NAME is no id, even one that looks like a bracket: it keeps the plain cut
 name_cut() {         # name_cut SECTION ID: the NAME of row ID is a right cut of the full name
 	rows "$1" | ID=$2 LC_ALL=$utf8 gawk '
@@ -2025,7 +2046,7 @@ jobid_fits_shown() {
 }
 # what two runs of the same screen may differ in: the title's clock, and AGO,
 # which can tick over an hour between them (the fixtures' end times are fixed)
-without_clock_ago() { sed -E '1s/[0-9]{2}:[0-9]{2}:[0-9]{2} [^ ]+$//; s/ +([0-9]+[smh]|-)$//' "$1"; }
+without_clock_ago() { sed -E '1s/[0-9]{2}:[0-9]{2}:[0-9]{2} [^ ]+$//; s/ +([0-9]+d[0-9]{2}h|[0-9]+[smh]|-)$//' "$1"; }
 
 # compact_case FIXTURE W H "SINFO QUEUE FALLBACK SACCT" "JOBS RUNNING PENDING OTHER" [VAR=value...]
 # The FULL twin, then COMPACT at W x H with what every accepted screen has: it
@@ -2766,7 +2787,7 @@ c_compact_fold_elapsed() {   # decisions 12 and 13
 sgr_of() { plain_rows_with "$1" | LC_ALL=C grep -o "$ESC\[[0-9;]*m" | paste -sd' '; }   # sgr_of TEXT: the escapes of the row holding TEXT
 plain_rows_with() { LC_ALL=C grep -aF -- "$1" "$OUT"; }
 # the clock and AGO, with the escapes around them, are what two runs may differ in
-without_clock_ago_sgr() { sed -E "/SLURM/s/[0-9]{2}:[0-9]{2}:[0-9]{2}//; s/ +([0-9]+[smh]|-)($ESC\[[0-9;]*m)?\$//" "$1"; }
+without_clock_ago_sgr() { sed -E "/SLURM/s/[0-9]{2}:[0-9]{2}:[0-9]{2}//; s/ +([0-9]+d[0-9]{2}h|[0-9]+[smh]|-)($ESC\[[0-9;]*m)?\$//" "$1"; }
 c_compact_colour() {
 	T_TITLE="--color: CANCELLED, PREEMPTED and REVOKED rows are coloured alike in COMPACT and FULL, and COMPACT is FULL when everything fits"
 	local st full=() fullout names=(stopped bumped fed)     # their job names
@@ -4575,7 +4596,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale locale_pinned locale_missing locale_not_utf8 posixly_correct clock_step shrink_name shrink_extent
+	shrink_locale locale_pinned locale_missing locale_not_utf8 posixly_correct clock_step ago_days shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40

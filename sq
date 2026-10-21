@@ -347,11 +347,14 @@ function ntasks(id, anchor,   br, t, nt, i, m, sum) {
 }
 # the colours: an SGR escape, or nothing when colour is off
 function e(c) { return color ? "\033[" c "m" : "" }       # colour, or nothing
+# an age or a time to come, coarsely: from 48 h on in days and hours, as
+# elap() prints them (3d05h), as hours alone ran to 8736h for a start a year out
 function ago(s) {
-  if (s < 0)    return "-"
-  if (s < 60)   return s "s"
-  if (s < 3600) return int(s/60) "m"
-  return int(s/3600) "h"
+  if (s < 0)      return "-"
+  if (s < 60)     return s "s"
+  if (s < 3600)   return int(s/60) "m"
+  if (s < 172800) return int(s/3600) "h"
+  return elap(s)
 }
 function dur(s,   a, b, m, sec) {                         # 3-12:04:05 -> seconds
   if (s !~ /[0-9]/) return -1

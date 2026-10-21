@@ -2,7 +2,7 @@
 state and times
   state     TIMEOUT · exit 0/sig15: signal 15 (SIGTERM)
   ran       12h00m on fb2-bioinf (LocalQ)
-  ended     2026-10-08 01:48 (304h ago)
+  ended     2026-10-08 01:48 (12d16h ago)
 resources
   CPUs      32 allocated
   memory    32G allocated

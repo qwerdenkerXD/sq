@@ -2,7 +2,7 @@
 [2mstate and times[0m
   state     [32mCOMPLETED[0m · exit 0
   ran       10m11s on fb2-bioinf (LocalQ)
-  ended     2026-10-15 09:20 (128h ago)
+  ended     2026-10-15 09:20 (5d08h ago)
 [2mresources[0m
   CPUs      2 allocated
   memory    2G allocated
