@@ -90,20 +90,21 @@ sq_run() {
 # ERR, LOG), its environment in ENVLIST and sq's arguments in SQ_ARGV
 sq_env() {
 	local fixture=$1; shift
+	run_n=$((run_n+1))
+	RUN=$T_DIR/run$run_n; mkdir -p "$RUN/home"
+	OUT=$RUN/out ERR=$RUN/err LOG=$RUN/log; : > "$LOG"
 	# TZ=UTC: a fixture's \{now-2h} is printed in local time and sq reads it back
-	# with mktime, which cannot tell the two passes of a repeated DST hour apart
+	# with mktime, which cannot tell the two passes of a repeated DST hour apart.
+	# HOME is the run's own unless the case sets or removes it
 	local -A env=([PATH]="$here/bin:$PATH" [LC_ALL]=$utf8 [TZ]=UTC
 	              [SQSTUB_FIXTURE]=$([[ $fixture == /* ]] && echo "$fixture" || echo "$fixtures/$fixture")
-	              [SQ_TIMEOUT]=3 [SQ_WIDTH]=120 [SQ_HEIGHT]=50 [SQSTUB_UID]=4242)
+	              [SQ_TIMEOUT]=3 [SQ_WIDTH]=120 [SQ_HEIGHT]=50 [SQSTUB_UID]=4242 [HOME]=$RUN/home)
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do
 		case $1 in -*) unset "env[${1#-}]" ;; *=*) env[${1%%=*}]=${1#*=} ;; esac
 		shift
 	done
 	[ $# -gt 0 ] && shift
-	run_n=$((run_n+1))
-	RUN=$T_DIR/run$run_n; mkdir -p "$RUN/home"
-	OUT=$RUN/out ERR=$RUN/err LOG=$RUN/log; : > "$LOG"
-	env[HOME]=$RUN/home; env[SQSTUB_LOG]=$LOG
+	env[SQSTUB_LOG]=$LOG
 	ENVLIST=(); local k
 	# sq's own mktemp -d lands under the run, so a sq killed before its EXIT trap
 	# (the 30s bound below) leaves nothing behind once $work is removed
@@ -1255,6 +1256,31 @@ c_bell_text() {
 	need "bob: rc 0, silent, the job is alice's" eval 'rc_is 0 && [ "$(bels)" -eq 0 ]'
 	bell_run "$fx" SQ_BELL_USER=bob SQ_BELL_ALL=1
 	need "bob with SQ_BELL_ALL=1: rc 0, one bell" eval 'rc_is 0 && [ "$(bels)" -eq 1 ]'
+}
+# The bell's state directory is the one JOBMEM's snapshot uses: XDG_CACHE_HOME
+# only when absolute, else HOME's .cache only when HOME is absolute, else none,
+# and then the bell is off.  An unset HOME once killed sq ("HOME: unbound
+# variable"), with or without the bell.  sq runs in a directory of its own
+# here, so whatever a relative path would write shows up there.
+c_bell_statedir() {
+	T_TITLE="the bell's state directory: no HOME is no state and no bell, never a crash; a relative XDG_CACHE_HOME counts for nothing"
+	local fx want cwd=$T_DIR/cwd
+	mkdir -p "$cwd"; pushd "$cwd" > /dev/null || return
+	sq_run mixed --
+	want=$RUN/screen; without_clock "$OUT" > "$want"
+	sq_run mixed -HOME --
+	need "HOME unset: rc 0, stderr empty, the same screen" eval 'rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT")'
+	fx=$(bell_fixture)
+	bell_run "$fx" SQ_BELL_USER=alice
+	need "with HOME: one bell, remembered under HOME/.cache" eval 'rc_is 0 && [ "$(bels)" -eq 1 ] && [ -s "$RUN/home/.cache/sq/alerted" ]'
+	bell_run "$fx" SQ_BELL_USER=alice -HOME
+	need "HOME unset, on a terminal: rc 0, no bell, the screen drawn" eval 'rc_is 0 && [ "$(bels)" -eq 0 ] && has "7001"'
+	bell_run "$fx" SQ_BELL_USER=alice HOME=relhome
+	need "HOME relative: rc 0, no bell" eval 'rc_is 0 && [ "$(bels)" -eq 0 ]'
+	bell_run "$fx" SQ_BELL_USER=alice XDG_CACHE_HOME=relcache
+	need "XDG_CACHE_HOME relative: one bell, remembered under HOME/.cache" eval 'rc_is 0 && [ "$(bels)" -eq 1 ] && [ -s "$RUN/home/.cache/sq/alerted" ]'
+	need "nothing written in the working directory" eval '[ -z "$(ls -A "$cwd")" ]'
+	popd > /dev/null || return
 }
 # -c centres the screen in the width, -C in the height too, but only on a
 # screen (a terminal, or COLUMNS and LINES set): the screen moves as a whole
@@ -4480,7 +4506,7 @@ c_job_sources() {   # Q7
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe silent_failure real_reason_wins bell_text centre sacct_fallback
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe silent_failure real_reason_wins bell_text bell_statedir centre sacct_fallback
 	refuse_t_empty refuse_states_eq accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column

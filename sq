@@ -515,20 +515,26 @@ gawk_locale() {   # the locale gawk runs in, into gloc
 # failed (every own running row then reads "!").  myuid is the caller's uid,
 # set by whoever calls these.
 memfail=0 myuid=
+# The directory sq keeps its state in, the bell's and the snapshot's, into
+# VAR: XDG_CACHE_HOME/sq, but only when XDG_CACHE_HOME is absolute, as a
+# relative one would put the state wherever sq happens to run; else
+# HOME/.cache/sq, only when HOME is set and absolute; else empty, no state
+cache_dir() {   # cache_dir VAR
+	local dir=
+	case ${XDG_CACHE_HOME:-} in
+		/*) dir=$XDG_CACHE_HOME/sq ;;
+		*)  case ${HOME:-} in /*) dir=$HOME/.cache/sq ;; esac ;;
+	esac
+	printf -v "$1" '%s' "$dir"
+}
 # the snapshot in use: whole and well-formed, and taken in the last 30 s, its
 # job lines into memread (rc 0); anything else (missing, garbled, from the
 # future) empties memread (rc 1), and is a call.  memdir is the snapshot's
 # directory, empty when there is none to use, memnow the epoch it is judged by
 jobmem_snapshot() {
-	# XDG_CACHE_HOME counts only when absolute, as a relative one would
-	# put the snapshot wherever sq happens to run.  No usable directory,
-	# or a memuse there that is no regular file, means a call on every
-	# run, silently, and nothing written
-	memdir=
-	case ${XDG_CACHE_HOME:-} in
-		/*) memdir=$XDG_CACHE_HOME/sq ;;
-		*)  case ${HOME:-} in /*) memdir=$HOME/.cache/sq ;; esac ;;
-	esac
+	# No usable directory, or a memuse there that is no regular file,
+	# means a call on every run, silently, and nothing written
+	cache_dir memdir
 	[ -z "$memdir" ] || mkdir -p "$memdir" 2>/dev/null || memdir=
 	[ -z "$memdir" ] || ! [ -e "$memdir/memuse" ] || [ -f "$memdir/memuse" ] || memdir=
 	printf -v memnow '%(%s)T' -1
@@ -2145,9 +2151,10 @@ bellall=${SQ_BELL_ALL:-0}
 rmax=${SQ_RECENT_MAX:-0}
 case $rmax in ''|*[!0-9]*|?????????*) rmax=0 ;; esac
 [ "$rmax" -gt 0 ] 2>/dev/null || rmax=0
-statedir=${XDG_CACHE_HOME:-$HOME/.cache}/sq
-statetmp=$statedir/alerted.$$                   # renamed over alerted at the end
-[ "$bell" = 0 ] || mkdir -p "$statedir" 2>/dev/null || bell=0
+# no state directory turns the bell off, as one that cannot be made does
+cache_dir statedir
+statetmp=${statedir:+$statedir/alerted.$$}      # renamed over alerted at the end
+[ "$bell" = 0 ] || { [ -n "$statedir" ] && mkdir -p "$statedir" 2>/dev/null; } || bell=0
 
 # writing to /dev/tty is a gawk FATAL without a controlling terminal (ssh
 # without -t, cron, systemd), and the device node exists even then, so the only
