@@ -1,4 +1,4 @@
-# sq job's sacct rows (sacct -p -n --noconvert -a -j ID -o its 22 fields,
+# sq job's sacct rows (sacct -p -n --noconvert -a -j ID -o its 24 fields,
 # SLURM_TIME_FORMAT=%s): job 800 as job-defaults has it, its job row; a step
 # row says JobID=800.batch; JobIDRaw=800.batch; UID=; User= and its usage
-@defaults JobID=800; JobIDRaw=800; UID=1050; User=alice; State=COMPLETED; ExitCode=0:0; ElapsedRaw=1800; AllocCPUS=2; ReqCPUS=2; ReqTRES=billing=2,cpu=2,mem=4G,node=1; AllocTRES=billing=2,cpu=2,mem=4G,node=1; TotalCPU=00:00:00; TRESUsageInTot=; TRESUsageInMax=; NTasks=; Submit=\{epoch-50m30s}; Start=\{epoch-45m30s}; End=\{epoch-15m30s}; NodeList=fb2-bioinf; Partition=LocalQ; WorkDir=/w; JobName=job
+@defaults JobID=800; JobIDRaw=800; UID=1050; User=alice; State=COMPLETED; ExitCode=0:0; ElapsedRaw=1800; AllocCPUS=2; ReqCPUS=2; ReqTRES=billing=2,cpu=2,mem=4G,node=1; AllocTRES=billing=2,cpu=2,mem=4G,node=1; TotalCPU=00:00:00; TRESUsageInTot=; TRESUsageInMax=; NTasks=; Submit=\{epoch-50m30s}; Start=\{epoch-45m30s}; End=\{epoch-15m30s}; NodeList=fb2-bioinf; Partition=LocalQ; WorkDir=/w; TimelimitRaw=60; FailedNode=; JobName=job

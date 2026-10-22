@@ -4215,8 +4215,8 @@ c_job_contract() {   # Q0
 		argv_has squeue -h --jobs=11912 -t all && [ "$(env_of squeue 1 SQUEUE_FORMAT)" = "(unset)" ] &&
 		[ "$(env_of squeue 1 SQUEUE_FORMAT2)" = "$(for f in JobID ArrayJobID ArrayTaskID HetJobID HetJobOffset StateCompact RestartCnt BatchFlag BatchHost WorkDir STDOUT STDERR UserName Name StartTime Reason exit_code Partition SubmitTime EndTime TimeLimit TimeLeft TimeUsed Dependency NumCPUs NumNodes tres-alloc NodeList UserID; do printf "%s:%s," "$f" "$n"; done | sed "s/,\$//")" ] &&
 		! grep "^CALL" "$LOG" | cut -f3 | grep -qF "$n"'
-	need "sacct -p --delimiter=<a nonce of its own> -n --noconvert -a -j 11912 -o the 22 fields, never -X or -D" eval '
-		argv_has sacct -p "--delimiter=$n2" -n --noconvert -a -j 11912 -o JobID,JobIDRaw,UID,User,State,ExitCode,ElapsedRaw,AllocCPUS,ReqCPUS,ReqTRES,AllocTRES,TotalCPU,TRESUsageInTot,TRESUsageInMax,NTasks,Submit,Start,End,NodeList,Partition,WorkDir,JobName &&
+	need "sacct -p --delimiter=<a nonce of its own> -n --noconvert -a -j 11912 -o the 24 fields (TimelimitRaw and FailedNode for the why section), never -X or -D" eval '
+		argv_has sacct -p "--delimiter=$n2" -n --noconvert -a -j 11912 -o JobID,JobIDRaw,UID,User,State,ExitCode,ElapsedRaw,AllocCPUS,ReqCPUS,ReqTRES,AllocTRES,TotalCPU,TRESUsageInTot,TRESUsageInMax,NTasks,Submit,Start,End,NodeList,Partition,WorkDir,TimelimitRaw,FailedNode,JobName &&
 		argv_lacks sacct -X && argv_lacks sacct -D && [ "$n2" != "$n" ]'
 	need "one squeue and one sacct call, no sstat (not a running job)" eval '[ "$(calls squeue)" = 1 ] && [ "$(calls sacct)" = 1 ] && [ "$(calls sstat)" = 0 ]'
 	job_run finished-11912 SQ_FMT=bogus%% SQ_CENTER=x SQ_COMPACT=7 SQ_RECENT_MAX=-1 -- --no-color job -- 11912
@@ -4349,7 +4349,7 @@ EOF
 	need "squeue down, accounting's UID fsill's: own, its MEM line (the allocation call answers apart)" has "12/64G now"
 }
 c_job_branches() {   # Q2, Q3
-	T_TITLE="the report's branches: over 100 %, never started (real rows and cancelled pending), squeue ended before accounting, stopped, interactive, no steps, the cap while running, an array with none completed"
+	T_TITLE="the report's branches: over 100 %, never started (real rows and cancelled pending), squeue ended before accounting, stopped, interactive, no steps, the cap while running, an array with none completed, NODE_FAIL's node"
 	local d
 	d=$(job_fx over sacct <<'EOF'
 JobID=800; TotalCPU=30:00.000
@@ -4406,6 +4406,22 @@ EOF
 	job_run "$d" -- --no-color job 700
 	need "an array with no task completed: the counts, the pending reason, no bars" eval '
 		rc_is 0 && title_is "▌ 700  job · alice · array of 4: 4 pending" && notes_are "no task has completed yet; pending (Dependency)" && ! matches "^  (CPU|MEM) "'
+	# W4/V6: a NODE_FAIL job's state line names the node it lost, not the
+	# signal of a step Slurm killed with it
+	d=$(job_fx nf sacct <<'EOF'
+JobID=800; State=NODE_FAIL; ExitCode=1:0; FailedNode=fb2-bioinf-0; NodeList=fb2-bioinf-0
+JobID=800.extern; JobIDRaw=800.extern; UID=; User=; State=CANCELLED; ExitCode=0:9; FailedNode=
+JobID=800.0; JobIDRaw=800.0; UID=; User=; State=CANCELLED; ExitCode=0:9; FailedNode=
+EOF
+)
+	job_run "$d" -- --no-color job 800
+	need "NODE_FAIL from accounting: 'NODE_FAIL on' its FailedNode, no signal" eval 'rc_is 0 && kv_is state "NODE_FAIL on fb2-bioinf-0" && lacks "sig9"'
+	sed -i 's/FailedNode=fb2-bioinf-0; NodeList=fb2-bioinf-0/FailedNode=; NodeList=fb2-bioinf-0/' "$d/sacct"
+	job_run "$d" -- --no-color job 800
+	need "... FailedNode empty: its NodeList" eval 'rc_is 0 && kv_is state "NODE_FAIL on fb2-bioinf-0"'
+	d=$(job_fx nfq squeue-all <<<'JobID=800; StateCompact=NF; exit_code=0:1; NodeList=fb2-bioinf-0; BatchFlag=0')
+	job_run "$d" -- --no-color job 800
+	need "... from squeue alone: its NodeList" eval 'rc_is 0 && kv_is state "NODE_FAIL on fb2-bioinf-0"'
 }
 c_job_own() {   # Q2: an own running job's memory is JOBMEM's
 	T_TITLE="an own running job's MEM line is JOBMEM's reading: a fresh snapshot is used (no sstat, no allocation call), a stale one renewed for all own jobs in the dashboard's format; ? and !; the dashboard after sq job calls nothing"

@@ -1,2 +1,4 @@
+# TimelimitRaw (minutes) and FailedNode, which sq job asks for too: none recorded here
+@defaults TimelimitRaw=; FailedNode=
 JobID=11960; JobIDRaw=11960; UID=1033; User=hal; State=RUNNING; ExitCode=0:0; ElapsedRaw=18131; AllocCPUS=32; ReqCPUS=32; ReqTRES=billing=32,cpu=32,mem=250G,node=1; AllocTRES=billing=32,cpu=32,mem=250G,node=1; TotalCPU=00:00:00; TRESUsageInTot=; TRESUsageInMax=; NTasks=; Submit=\{epoch-19840s}; Start=\{epoch-19800s}; End=Unknown; NodeList=fb2-bioinf; Partition=LocalQ; WorkDir=/media/BioNAS2/hal/asm; JobName=flye-asm
 JobID=11960.batch; JobIDRaw=11960.batch; UID=; User=; State=RUNNING; ExitCode=0:0; ElapsedRaw=18131; AllocCPUS=32; ReqCPUS=32; ReqTRES=; AllocTRES=cpu=32,mem=250G,node=1; TotalCPU=00:00:00; TRESUsageInTot=; TRESUsageInMax=; NTasks=1; Submit=\{epoch-19800s}; Start=\{epoch-19800s}; End=Unknown; NodeList=fb2-bioinf; Partition=; WorkDir=; JobName=batch

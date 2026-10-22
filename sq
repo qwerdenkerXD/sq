@@ -1214,7 +1214,8 @@ job_refuse_cluster() {
 job_qfields="$log_fields Partition SubmitTime EndTime TimeLimit TimeLeft TimeUsed Dependency NumCPUs
 	NumNodes tres-alloc NodeList UserID"
 job_afields="JobID JobIDRaw UID User State ExitCode ElapsedRaw AllocCPUS ReqCPUS ReqTRES AllocTRES
-	TotalCPU TRESUsageInTot TRESUsageInMax NTasks Submit Start End NodeList Partition WorkDir JobName"
+	TotalCPU TRESUsageInTot TRESUsageInMax NTasks Submit Start End NodeList Partition WorkDir TimelimitRaw
+	FailedNode JobName"
 # SQ_PSS_SINCE, its epoch into job_pss (0: unset).  Only these forms, so a
 # typo is an error, never a date GNU date makes of it ("1" is 01:00 today):
 # YYYY-MM-DD[ HH:MM[:SS]][ ZONE], ZONE UTC, +HHMM or an abbreviation date
@@ -1449,6 +1450,11 @@ function never_started(q, r) {
 }
 
 # ---- sq job ID: one job, or one task -------------------------------------------
+# the state line of an ended job: its exit, but for a NODE_FAIL job the node
+# it lost, as a step Slurm killed with it (signal 9) would read as though the
+# job had been killed
+function ended_state(state, c, q, r) { return (c == "NF") ? state " on " failed_node(q, r) : state " · " exit_text(c) }
+function failed_node(q, r) { return (r && A[r, "FailedNode"] != "") ? A[r, "FailedNode"] : q ? R[q, "NodeList"] : A[r, "NodeList"] }
 function exit_text(c,   t, sg) {
   sg = JSG[jid] + 0; t = "exit " exlabel(JRC[jid] + 0, sg)
   if (sg == 0)   return t
@@ -1489,12 +1495,12 @@ function build_job(   q, r, c, final, never, name, user, unique, state, reason, 
     # it, while accounting has the end; else squeue's
     if (r && (stcode(A[r, "State"]) in DONE)) {
       xcm(jid, A[r, "ExitCode"]); for (step = 1; step <= nsteps[jid]; step++) xcm(jid, A[step_row[jid, step], "ExitCode"])
-      kv("state", "state", state " · " exit_text(c))
+      kv("state", "state", ended_state(state, c, q, r))
       if (!never) kv("state", "ran", elap(A[r, "ElapsedRaw"] + 0) " on " A[r, "NodeList"] " (" A[r, "Partition"] ")")
       ended = A[r, "End"]
     } else {
       xcm(jid, R[q, "exit_code"], 1)
-      kv("state", "state", state " · " exit_text(c))
+      kv("state", "state", ended_state(state, c, q, r))
       if (!never) kv("state", "ran", elap(dur(R[q, "TimeUsed"])) " on " R[q, "NodeList"] " (" R[q, "Partition"] ")")
       ended = R[q, "EndTime"]
     }

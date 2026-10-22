@@ -1,1 +1,3 @@
+# TimelimitRaw (minutes) and FailedNode, which sq job asks for too: none recorded here
+@defaults TimelimitRaw=; FailedNode=
 JobID=11962; JobIDRaw=11962; UID=1033; User=hal; State=PENDING; ExitCode=0:0; ElapsedRaw=0; AllocCPUS=0; ReqCPUS=48; ReqTRES=billing=48,cpu=48,mem=375G,node=1; AllocTRES=; TotalCPU=00:00:00; TRESUsageInTot=; TRESUsageInMax=; NTasks=; Submit=\{epoch-9000s}; Start=Unknown; End=Unknown; NodeList=None assigned; Partition=LocalQ; WorkDir=/media/BioNAS2/hal/asm; JobName=hifiasm
