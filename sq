@@ -3204,14 +3204,22 @@ fi
 # sacct and squeue spell the same letters differently and several take a value
 # on one side but not the other (-p partition vs --parsable, -s steps vs
 # --state, -S sort vs --starttime), so nothing is forwarded that is not on this
-# closed list.  Dropping an unknown arg is not an option either: the queue
-# table and this block would then disagree about what they are showing.
+# closed list.  An arg that changes WHICH jobs squeue lists is mapped to
+# sacct's, else the block falls back to squeue: dropped, it would leave the
+# queue table and this block disagreeing about what they show (--all, --hide
+# and --local fall back; sacct's --all would mean every user, not every
+# partition).  An arg that only changes how squeue shows its jobs is mapped
+# or dropped (Franz, 2026-10-22): --array (-r) is sacct's --array, which lists
+# a pending array's remainder one row per task as squeue's does, and so is
+# SQUEUE_ARRAY, which squeue reads as --array when set at all; --noconvert and
+# --priority (-P) change nothing about a finished job and are dropped.
 # -u maps to -u and then suppresses -a, because sacct takes the LAST of the two
 # and "-u x -a" quietly means "everybody".  A state filter (-t) is the queue's
 # alone: the block shows every finished job whatever it says, so sacct never
 # gets it (and needs no fallback for it), and the fallback's own -t all, last,
 # overrides it.
 sargs=(); sfilt=; sskip=; suser=0; ai=0
+sarray=${SQUEUE_ARRAY+--array}                   # sacct's --array, or empty
 while [ $ai -lt ${#args[@]} ]; do
 	a=${args[$ai]}; ai=$((ai+1)); v=; have=0
 	case $a in                                       # all four spellings:
@@ -3230,6 +3238,8 @@ while [ $ai -lt ${#args[@]} ]; do
 		-j|--job|--jobs)         sf=-j; lbl=job ;;
 		-M|--cluster|--clusters) sf=-M; lbl=cluster ;;
 		-t|--states|--state)     sf= ;;
+		-r|--array)              sarray=--array; continue ;;
+		--noconvert|-P|--priority) continue ;;
 		*) sskip="$a has no sacct equivalent"; break ;;
 	esac
 	if [ $have -eq 0 ]; then
@@ -3270,7 +3280,7 @@ if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	aflag=(-a); [ "$suser" = 0 ] || aflag=()
 	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 collect recent \
 		sacct -p --delimiter="$nonce2" -n -S "$since" -E now \
-		"${aflag[@]+"${aflag[@]}"}" "${sargs[@]+"${sargs[@]}"}" \
+		"${aflag[@]+"${aflag[@]}"}" "${sargs[@]+"${sargs[@]}"}" ${sarray:+"$sarray"} \
 		-o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName
 	se=$?
 	# rc=0 with no rows is not proof of success (-M/-r typos are silent), which

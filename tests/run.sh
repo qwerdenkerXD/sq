@@ -1361,6 +1361,39 @@ c_sacct_fallback() {
 	need "footer 1/1/0/0"             footer_is 1 1 0 0
 }
 
+# A forwarded flag that changes only how squeue shows its jobs keeps the
+# finished block on sacct (Franz, 2026-10-22, "Map/drop, keep 3"): --array and
+# -r become sacct's --array, as SQUEUE_ARRAY does when set at all (squeue
+# reads it so, empty too); --noconvert, --priority and -P are not passed on.
+# One that changes which jobs squeue lists still falls back: --hide, --all,
+# --local.  Each reaches the queue call as written.
+c_sacct_flags() {
+	T_TITLE="--array/-r and SQUEUE_ARRAY map to sacct --array, --noconvert/--priority/-P are dropped, --hide/--all/--local fall back"
+	local f
+	for f in --array -r; do
+		sq_run empty -- "$f"
+		need "$f: rc 0, the block from sacct, which got --array, the queue call $f" eval '
+			rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && argv_has sacct --array && argv_lacks sacct -r && argv_has squeue -h -S t,i "$f"'
+	done
+	for f in --noconvert --priority -P; do
+		sq_run empty -- "$f"
+		need "$f: rc 0, the block from sacct, which got neither it nor --array, the queue call $f" eval '
+			rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && argv_lacks sacct "$f" && argv_lacks sacct --array && argv_has squeue -h -S t,i "$f"'
+	done
+	for f in SQUEUE_ARRAY=1 SQUEUE_ARRAY=; do
+		sq_run empty "$f" --
+		need "$f: rc 0, the block from sacct, which got --array" eval '
+			rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && argv_has sacct --array'
+	done
+	sq_run empty --
+	need "neither: sacct without --array" eval 'rc_is 0 && calls_are 1 1 0 1 && argv_lacks sacct --array'
+	for f in --hide --all --local; do
+		sq_run empty -- "$f"
+		need "$f: rc 0, the squeue fallback, which says why" eval '
+			rc_is 0 && calls_are 1 1 1 0 && has "recent only ($f has no sacct equivalent)"'
+	done
+}
+
 # ---- 9. option refusals ------------------------------------------------------
 # A refused option exits 2 before any Slurm call, so each case pairs it with an
 # accepted run that differs only in that option: that run proves the stubs are
@@ -5572,7 +5605,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe silent_failure real_reason_wins bell_text bell_statedir centre sacct_fallback
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe silent_failure real_reason_wins bell_text bell_statedir centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column

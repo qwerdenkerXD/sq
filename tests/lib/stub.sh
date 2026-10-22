@@ -170,7 +170,11 @@ while [ $# -gt 0 ]; do
 		squeue:-L|squeue:--licenses|squeue:--license|squeue:-R|squeue:--reservation)
 			take "$@" ;;              # a filter: logged above, never applied
 		squeue:--me|squeue:--all|squeue:--hide|\
-		squeue:--priority|squeue:--federation|squeue:--local|squeue:--sibling)
+		squeue:-P|squeue:--priority|squeue:--federation|squeue:--local|squeue:--sibling)
+			[ "$has" = 0 ] || refuse "$a takes no value"; shift_n=1 ;;
+		# these change what squeue prints (one row per task; unconverted sizes):
+		# rendered as written, so a fixture given them is written that way
+		squeue:-r|squeue:--array|squeue:--noconvert)
 			[ "$has" = 0 ] || refuse "$a takes no value"; shift_n=1 ;;
 
 		sacct:-p|sacct:--parsable)   parsable=1; trail=1; shift_n=1 ;;
@@ -178,11 +182,11 @@ while [ $# -gt 0 ]; do
 		sacct:-n|sacct:--noheader)   noheader=1; shift_n=1 ;;
 		sacct:-a|sacct:--allusers) shift_n=1 ;;
 		# sq job asks for unconverted sizes (bytes for usage, M for TRES), and a
-		# fixture writes them that way
-		sacct:--noconvert)         shift_n=1 ;;
-		# refused like any option the stub does not render: --array and --noconvert
-		# change what squeue prints (one row per task; unconverted sizes), and sacct
-		# -X drops the step rows, the only ones carrying a signal (seen live)
+		# fixture writes them that way; --array (a pending array's remainder one
+		# row per task) is rendered as written too
+		sacct:--noconvert|sacct:--array) shift_n=1 ;;
+		# refused like any option the stub does not render: sacct -X drops the
+		# step rows, the only ones carrying a signal (seen live)
 		sacct:--delimiter)           take "$@"; delim=$val ;;
 		sacct:-o|sacct:--format)     take "$@"; cmd_o=$val ;;
 		sacct:-j|sacct:--jobs)       take "$@"; jobs=$val ;;   # picks <file>.LIST, if any

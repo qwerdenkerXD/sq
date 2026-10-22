@@ -277,6 +277,10 @@ efficiency
   Without accounting, or with a filter `sacct` has no equivalent for, the block falls back to
   `squeue -t all`, which only remembers jobs for `MinJobAge` (often 300 s), and the caption says so.
   A state filter (`-t`) filters the queue only: the block shows every finished job either way.
+  `--array` (`-r`, or `SQUEUE_ARRAY` set) becomes sacct's `--array`, one row per task of a
+  pending array's remainder; `--noconvert` and `--priority` (`-P`) only change how squeue shows
+  its jobs and are not passed to sacct; `--all`, `--hide` and `--local` change which jobs squeue
+  lists, which sacct cannot follow, so they fall back.
 - **Reading EXIT:** the exit code, then what ExitCode's second field says, taken from the job
   and its steps (the first non-zero one, except that an out-of-memory always wins): `rc/sigN`
   is signal N as Slurm records it, `rc/oom` out of memory, and `rc/errN` the low 7 bits of a
