@@ -1,9 +1,9 @@
 # "faults": pending reasons that name a fault of the cluster (blocked on
 # nodes: NodeDown, PartitionDown, PartitionInactive, FrontEndDown,
 # PowerNotAvail, PowerReserved), a launch failure Slurm requeued held and a
-# job it requeued in held state (held by admin), NodeDrain, which Slurm 23.11
-# has no such reason as (so it is unknown: stuck), and ordinary waiting; then
-# 8 running jobs
+# job it requeued in held state (pending: held for its owner to release),
+# NodeDrain, which Slurm 23.11 has no such reason as (so it is unknown:
+# stuck), and ordinary waiting; then 8 running jobs
 @include ../_common/squeue-defaults
 i=601; j=job601; t=PD; T=PENDING; M=0:00; R=(PartitionDown); S=N/A; r=PartitionDown
 i=602; j=job602; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority

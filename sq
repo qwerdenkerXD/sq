@@ -486,6 +486,37 @@ function mem_outcome(id, alloc_mb, nodes) {
   if (memfail) return "failed"
   return (alloc_mb > 0 && nodes == "1" && (id in job_outcome)) ? job_outcome[id] : "none"
 }
+# Why a job is pending, one table for the sections of the dashboard (jclass)
+# and the why section of sq job: the kind of its reason.  wait: time alone
+# frees it (plain waiting, a dependency, a throttled array); own: a hold its
+# owner can release (JobHeldUser, and the holds Slurm sets on a requeue,
+# which leave the job held by its user: job_mgr.c, 23.11); fault: a node or
+# partition is down or out of reach, for an admin to mend; admin: a hold by
+# an admin; never: a request no node or limit can ever meet; stuck: anything
+# else, also every reason sq does not know, so it stays visible, and a QOS
+# or association limit (but one per job, or on minutes used, never frees
+# up: never).  Only a CLOSED list of reasons is plain waiting, and by
+# whole-string equality, never a prefix: "Dependency" must not swallow
+# "DependencyNeverSatisfied"; the texts with a free part (ReqNodeNotAvail,
+# ...) by their fixed start
+function pend_tables(   x, i) {
+  split("None Priority Resources Dependency BeginTime Prolog Cleaning SchedDefer Reservation Licenses JobArrayTaskLimit", x, " ")
+  for (i in x) PEND_KIND[x[i]] = "wait"
+  PEND_KIND["JobHeldUser"] = "own"; PEND_KIND["JobHeldAdmin"] = "admin"
+  split("NodeDown PartitionDown PartitionInactive FrontEndDown PowerNotAvail PowerReserved", x, " ")
+  for (i in x) PEND_KIND[x[i]] = "fault"
+  split("BadConstraints PartitionConfig PartitionNodeLimit PartitionTimeLimit InvalidAccount InvalidQOS " \
+        "AccountNotAllowed QOSNotAllowed JobHoldMaxRequeue", x, " ")
+  for (i in x) PEND_KIND[x[i]] = "never"
+}
+function pend_kind(why) {
+  if (why in PEND_KIND) return PEND_KIND[why]
+  if (why ~ /^ReqNodeNotAvail/ || why ~ /^Nodes required for job are /) return "fault"
+  if (why ~ /requeued held$/ || why ~ /^job requeued in /) return "own"
+  if (why ~ /^uid [0-9]+ not in group/) return "never"
+  if (why ~ /^(QOS|Assoc)/) return (why ~ /PerJob|Minutes/) ? "never" : "stuck"
+  return "stuck"
+}
 # the final states, by squeue code, into DONE, and those that are failures
 # (worth a bell, red) into BAD
 function final_states(   ts, i) {
@@ -2479,20 +2510,16 @@ function when(t,   ep) {                                  # start estimate, comp
 
 # ---- COMPACT: which section a row is in, and what fits the screen ----------
 # Sections: 1 stuck, 2 blocked on nodes, 3 held by admin, 4 pending, 5 running,
-# 6 other live states (COMPLETING, SUSPENDED, ...).  Only a CLOSED list of reasons
-# is ordinary waiting; any other pending reason is stuck, so a reason sq does not
-# know stays visible instead of vanishing into "… n jobs pending".  Whole-string
-# equality on %r, never a prefix: "Dependency" must not swallow
-# "DependencyNeverSatisfied".  A prefix is safe only on the visible side, which
-# only names the category: a cluster fault is "blocked on nodes", a hold that
-# needs an admin (a launch failure Slurm requeued held, or a job it requeued
-# in held state) "held by admin".
-function jclass(st, why) {
+# 6 other live states (COMPLETING, SUSPENDED, ...), by the kind of a pending
+# reason (pend_kind): waiting and the holds of its owner are pending, a fault of the
+# cluster is "blocked on nodes", a hold by an admin "held by admin", and all the
+# rest stuck, so a reason sq does not know stays visible instead of vanishing
+# into "… n jobs pending"
+function jclass(st, why,   kind) {
   if (st == "R")  return 5
   if (st != "PD") return 6
-  if (why in WAITING) return 4
-  if (why in FAULT || why ~ /^ReqNodeNotAvail/ || why ~ /^Nodes required for job are /) return 2
-  return (why == "JobHeldAdmin" || why ~ /requeued held$/ || why ~ /^job requeued in /) ? 3 : 1
+  kind = pend_kind(why)
+  return (kind == "wait" || kind == "own") ? 4 : (kind == "fault") ? 2 : (kind == "admin") ? 3 : 1
 }
 # The screen is GROWN along one fixed list of steps (fit) and stops at the first
 # step that does not fit, so a taller screen only ever adds: lines a step could
@@ -2789,13 +2816,7 @@ BEGIN{
   for (i=1; i<=nsl; i++) { SC[slong[i]] = scode[i]; FIN[slong[i]] = sfin[i]+0 }
   nu = split(uidmap, um, ",")                             # "1021=amadvi,"
   for (i=1; i<=nu; i++) if (split(um[i], uv, "=") == 2) UMAP[uv[1]] = uv[2]
-  split("None Priority Resources Dependency BeginTime Prolog Cleaning SchedDefer " \
-        "Reservation Licenses JobHeldUser JobArrayTaskLimit", wr, " ")   # waiting, held
-                                                          # by its owner, or throttled
-  for (i in wr) WAITING[wr[i]] = 1
-  split("NodeDown PartitionDown PartitionInactive FrontEndDown PowerNotAvail " \
-        "PowerReserved", wr, " ")                         # a fault of the cluster
-  for (i in wr) FAULT[wr[i]] = 1
+  pend_tables()
   split("stuck|blocked on nodes|held by admin|pending|running|other", SECNAME, "|")
   split("title banner qcap notes nodes reasons fin fslots b0 b1 b2 b3 b4", SHOWN, " ")
   split("JOBID NAME STATE EXIT ELAPSED AGO", rhd, " ")

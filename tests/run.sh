@@ -2416,9 +2416,10 @@ census() {   # census TOTALS H
 		        RANK["stuck"] = 1; RANK["blocked on nodes"] = 2; RANK["held by admin"] = 3; RANK["pending"] = 4 }
 		# the settled classifier (stuck-classifier notes, 2026-10-06): a CLOSED
 		# allow-list of collapsible reasons (plus JobHeldUser, which Franz
-		# collapses, and JobArrayTaskLimit, decision 28) is ordinary pending; node reasons and the other cluster
-		# faults are blocked; JobHeldAdmin and a launch failure Slurm requeued
-		# held are held; EVERY OTHER reason is stuck, visible by default, so a
+		# collapses, and JobArrayTaskLimit, decision 28) is ordinary pending, and
+		# so are the holds Slurm sets on a requeue, which the owner releases
+		# (why-v2 V8); node reasons and the other cluster faults are blocked;
+		# JobHeldAdmin is held; EVERY OTHER reason is stuck, visible by default, so a
 		# misread or unknown reason fails loud (NodeDrain, which 23.11 does not
 		# have, among them).  The reason is what the NODE/REASON cell
 		# shows inside its parentheses (to the cell'"'"'s end, if the cell was cut).
@@ -2427,9 +2428,10 @@ census() {   # census TOTALS H
 			if (t !~ / PENDING /) return "other"
 			r = match(t, /\(([^)]*)/, m) ? m[1] : ""
 			if (r ~ /^(None|Priority|Resources|Dependency|BeginTime|Prolog|Cleaning|SchedDefer|Reservation|Licenses|JobHeldUser|JobArrayTaskLimit)$/) return "pending"
+			if (r ~ /requeued held$/ || r ~ /^job requeued in /) return "pending"
 			if (r ~ /^ReqNodeNotAvail/ || r ~ /^Nodes required for job are / ||
 			    r ~ /^(NodeDown|PartitionDown|PartitionInactive|FrontEndDown|PowerNotAvail|PowerReserved)$/) return "blocked"
-			if (r == "JobHeldAdmin" || r ~ /requeued held$/ || r ~ /^job requeued in /) return "held"
+			if (r == "JobHeldAdmin") return "held"
 			return "stuck"
 		}
 		{ nl++ }
@@ -2562,16 +2564,17 @@ c_compact_sweep_quiet40() {   # CALL (made inside the target screens, listed to 
 
 # faults: the categories of the VISIBLE reasons (a CALL, listed to Franz,
 # overrulable; the collapse rule is unchanged): a fault of the cluster is
-# blocked on nodes, a launch failure requeued held and a job requeued in held
-# state are held by admin, and
+# blocked on nodes; a launch failure requeued held and a job requeued in held
+# state are pending, held for their owner to release (why-v2 V8: Slurm sets
+# its user hold, WAIT_HELD_USER), and
 # NodeDrain, no reason 23.11 has, is unknown and so stuck
 c_compact_sweep_faults() {
-	T_TITLE="faults at every height 6..50: partition, front-end and power faults count as blocked on nodes, 'launch failed requeued held' and 'job requeued in held state' as held, NodeDrain as stuck; every sweep invariant"
+	T_TITLE="faults at every height 6..50: partition, front-end and power faults count as blocked on nodes, 'launch failed requeued held' and 'job requeued in held state' as pending (the owner's hold), NodeDrain as stuck; every sweep invariant"
 	sweep_case faults 100 50 "1 1 0 1" "22 8 14 0" \
-		"stuck=1 blocked=6 held=3 pending=4 running=8 other=0" "recently finished: 600 qc FAILED 1"
+		"stuck=1 blocked=6 held=0 pending=7 running=8 other=0" "recently finished: 600 qc FAILED 1"
 	sq_run faults SQ_WIDTH=100 SQ_HEIGHT=17 -- --compact
-	need "17 lines: PartitionDown blocked, NodeDrain stuck, 604 held and '… 2 jobs held by admin' hiding 610 and 614 (requeued in held state)" \
-		queue_seq_is "601|604|608|… 5 jobs blocked on nodes|… 2 jobs held by admin|… 4 jobs pending|… 8 jobs running"
+	need "17 lines: PartitionDown blocked, NodeDrain stuck, 604, 610 and 614 (requeued held) in '… 7 jobs pending', no held section" \
+		queue_seq_is "601|608|… 5 jobs blocked on nodes|… 7 jobs pending|626|627|… 6 jobs running"
 }
 
 # ---- 14. COMPACT: the behaviour rules no screen shows --------------------------
