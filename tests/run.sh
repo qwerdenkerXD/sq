@@ -5249,8 +5249,10 @@ c_why_budget() {   # Franz #1, W2, V13, V16
 	sq_start "$dep" SQSTUB_UID=1041 -SQ_TIMEOUT -- --no-color job 11963; runs+=("$RUN")
 	for r in "${runs[@]}"; do sq_finish "$r" 60; done
 	use_run "${runs[0]}"; RC=$(cat "$RUN/rc")
-	need "accounting silent, SQ_TIMEOUT unset: the pinned ≥N screen, after 30 s and before 35" eval '
-		rc_is 0 && screen_is "$jfx/screens/why__array-silent.txt" && [ "$(finished_in $start)" -ge 29 ] && [ "$(finished_in $start)" -le 36 ] && nothing_at_exit'
+	# the end is a whole-second mtime and WSL steps the clock back about 1.5 s
+	# every 30 s: 27 s still tells the 30 s budget from SQ_TIMEOUT's 5
+	need "accounting silent, SQ_TIMEOUT unset: the pinned ≥N screen, after 30 s (27 by the clock) and before 35" eval '
+		rc_is 0 && screen_is "$jfx/screens/why__array-silent.txt" && [ "$(finished_in $start)" -ge 27 ] && [ "$(finished_in $start)" -le 36 ] && nothing_at_exit'
 	use_run "${runs[1]}"; RC=$(cat "$RUN/rc")
 	need "... colour on" eval 'rc_is 0 && screen_is "$jfx/screens/why__array-silent.ansi"'
 	use_run "${runs[2]}"; RC=$(cat "$RUN/rc")
