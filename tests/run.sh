@@ -1812,6 +1812,39 @@ c_locale_not_utf8() {
 		need "$args: stderr empty"    err_empty
 	done
 }
+# The start estimate names its month in English whatever the caller's locale
+# (Franz, 2026-10-22: "Always English").  strftime's %b said "Okt" under
+# de_DE, a wide "10月" under ja_JP.UTF-8, and where LC_CTYPE is UTF-8 but
+# LC_TIME is not (LANG=ja_JP.eucJP LC_CTYPE=C.UTF-8) put that locale's raw
+# bytes on the screen and gawk's "Invalid multibyte data" on stderr.  Job 1103
+# starts tomorrow, which reads "Oct23 14:05", unless tomorrow is next year: a
+# date then, with no month name to check.  The locales are built as in
+# locale_not_utf8.
+month_row() {   # month_row: job 1103's row holds its start as an English month, day and time
+	local en='(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[0-3][0-9] [0-2][0-9]:[0-5][0-9]'
+	[ "$(TZ=UTC date -d '+1 day' +%Y)" = "$(TZ=UTC date +%Y)" ] || en='[0-9]{4}-[0-9]{2}-[0-9]{2}'
+	rows queue | grep -E "^ *1103 " | grep -qE "(^| )$en( |$)"
+}
+c_month_english() {
+	T_TITLE="the start estimate's month in English under de_DE.UTF-8, de_DE.ISO-8859-1, ja_JP.UTF-8 and a non-UTF-8 LC_TIME: valid UTF-8, stderr empty"
+	local loc=$T_DIR/loc l src charmap name fx how
+	mkdir -p "$loc"
+	for l in de_DE:UTF-8:de_DE.UTF-8 de_DE:ISO-8859-1:de_DE.ISO-8859-1 ja_JP:UTF-8:ja_JP.UTF-8 ja_JP:EUC-JP:ja_JP.eucJP; do
+		IFS=: read -r src charmap name <<< "$l"
+		localedef -i "$src" -f "$charmap" "$loc/$name" > /dev/null 2>&1
+		if ! [ "$(LOCPATH=$loc LC_ALL=$name locale charmap 2>/dev/null)" = "$charmap" ]; then
+			T_FAIL+=("localedef could not build $name (needs glibc's locale sources)"); return
+		fi
+	done
+	fx=$(mem_fixture mixed squeue "$(sed 's/S=\\{now+400d}/S=\\{now+1d}/' "$fixtures/mixed/squeue" | sed "s|^@include \.\./|@include $fixtures/|")")
+	for how in LC_ALL=C.UTF-8 LC_ALL=de_DE.UTF-8 LC_ALL=de_DE.ISO-8859-1 LC_ALL=ja_JP.UTF-8 \
+	           "-LC_ALL LANG=C.UTF-8 LC_TIME=de_DE.UTF-8" "-LC_ALL LANG=ja_JP.eucJP LC_CTYPE=C.UTF-8" \
+	           "-LC_ALL LANG=de_DE.ISO-8859-1 LC_CTYPE=C.UTF-8"; do
+		sq_run "$fx" $how LOCPATH="$loc" --
+		need "$how: rc 0, stderr empty, valid UTF-8, job 1103 starts on an English month" \
+			eval 'rc_is 0 && err_empty && utf8_valid && month_row'
+	done
+}
 # POSIXLY_CORRECT in the caller's environment once put bash in POSIX mode and
 # made every gawk a --posix one: the dashboard exited 1 with nothing on
 # stdout, and sq job died on a newline in a gawk string
@@ -5548,7 +5581,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale locale_pinned locale_missing locale_not_utf8 posixly_correct clock_step ago_days cancel_names shrink_name shrink_extent
+	shrink_locale locale_pinned locale_missing locale_not_utf8 month_english posixly_correct clock_step ago_days cancel_names shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40

@@ -3374,11 +3374,17 @@ function fcol(code) {                     # one table drives finished-ness, the 
   if (code == "CD") return "32"           # stop reading as failures and an unknown
   return (code in BAD) ? "31" : "33"      # state is loud instead of silent
 }
-function when(t,   ep) {                                  # start estimate, compactly
+# The month always in English (Franz, 2026-10-22): the %b of strftime names it
+# in the LC_TIME of the caller, "Okt", a Latin-1 byte where that locale is no
+# UTF-8 one, or a wide "10月"
+function when(t,   ep, month) {                           # start estimate, compactly
   ep = epoch(t)
   if (!ep || ep < systime()) return ""
   if (strftime("%F", ep) == strftime("%F", systime())) return strftime("%H:%M", ep)
-  if (strftime("%Y", ep) == strftime("%Y", systime())) return strftime("%b%d %H:%M", ep)
+  if (strftime("%Y", ep) == strftime("%Y", systime())) {
+    split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", month, " ")
+    return month[strftime("%m", ep) + 0] strftime("%d %H:%M", ep)
+  }
   return strftime("%Y-%m-%d", ep)
 }
 

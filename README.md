@@ -332,7 +332,7 @@ efficiency
   not answer either.
 - **Clock times are the server's,** in its time zone, which the title names (`UTC` on many
   clusters). Set `TZ`, e.g. `TZ=Europe/Berlin sq`, to read the title and the start estimates
-  in your own.
+  in your own. A start estimate names its month in English whatever your locale (`Oct23 14:05`).
 - **A `␚` stands for bytes that are not valid UTF-8,** one per broken piece, in error messages,
   in filters and `SQ_SINCE` on captions, in usage errors and in the host name in the title.
   What Slurm's tables print (job names, node names, reasons) never gets one.
