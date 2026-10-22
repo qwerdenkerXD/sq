@@ -2,7 +2,8 @@
 # tests/lib/stub.sh, which documents the fixture format.  Input comes from the
 # environment: STUB_TOOL, STUB_MODE (pct | long | sacct | raw), STUB_FMT, STUB_DELIM,
 # STUB_TRAIL, STUB_FILE, SQSTUB_LOG, STUB_MIRROR=1 when the queue's own file
-# answers sq's mirror call (stub.sh says how), STUB_CALL (which call of this
+# answers sq's mirror call (stub.sh says how), STUB_DERIVE=1 when the sinfo
+# file answers scontrol (ditto), STUB_CALL (which call of this
 # tool and format this is in the run) and STUB_RUN (the run's directory).
 
 function refuse(msg) {
@@ -183,7 +184,23 @@ function slurm_value(k, v,   len) {
   return v
 }
 
+# scontrol -o show node from a sinfo record: each node once, the figures sinfo
+# has, in scontrol's order (stub.sh says why)
+function derive_node(   rec, k, cpus, out) {
+  parse_fields(cur_text, rec)
+  for (k in DEF) if (!(k in rec)) rec[k] = DEF[k]
+  if (!("nodelist" in rec) || rec["nodelist"] in DERIVED) return
+  DERIVED[rec["nodelist"]] = 1
+  out = "NodeName=" rec["nodelist"]
+  if (split(rec["cpusstate"], cpus, "/") == 4) out = out " CPUAlloc=" cpus[1] " CPUTot=" cpus[4]
+  if ("cpusload" in rec) out = out " CPULoad=" rec["cpusload"]
+  if ("memory" in rec)   out = out " RealMemory=" rec["memory"]
+  if ("allocmem" in rec) out = out " AllocMem=" rec["allocmem"]
+  if ("freemem" in rec)  out = out " FreeMem=" rec["freemem"]
+  printf "%s\n", out
+}
 function render(   rec, i, out, k, src) {
+  if (derive) { derive_node(); return }
   if (mode == "raw") { printf "%s\n", decode(cur_text); return }
   parse_fields(cur_text, rec)
   out = lit[0]
@@ -244,7 +261,7 @@ function run_file(path, depth,   line, rc, saved_file, saved_line, dir, d, arg, 
     if (line !~ /^@/) { cur_text = line; render(); continue }
     d = line; sub(/[ \t].*$/, "", d)
     arg = substr(line, length(d) + 1); sub(/^[ \t]/, "", arg)
-    if (mirror && d != "@defaults" && d != "@include") continue   # the records alone
+    if ((mirror || derive) && d != "@defaults" && d != "@include") continue   # the records alone
     if (d == "@file") { if (!step || step == call) file_op(arg); continue }
     if (d == "@defaults")     { delete tmp; parse_fields(arg, tmp); for (k in tmp) DEF[k] = tmp[k] }
     else if (d == "@include") {
@@ -274,7 +291,7 @@ function run_file(path, depth,   line, rc, saved_file, saved_line, dir, d, arg, 
 
 BEGIN {
   tool = ENVIRON["STUB_TOOL"]; mode = ENVIRON["STUB_MODE"]; fmt = ENVIRON["STUB_FMT"]
-  mirror = (ENVIRON["STUB_MIRROR"] == "1")
+  mirror = (ENVIRON["STUB_MIRROR"] == "1"); derive = (ENVIRON["STUB_DERIVE"] == "1")
   logf = ENVIRON["SQSTUB_LOG"]
   call = ENVIRON["STUB_CALL"] + 0
   parse_format()

@@ -24,7 +24,14 @@
 #                   (squeue --jobs=LIST, sacct -j LIST) reads <file>.LIST
 #                   instead where the fixture has one (squeue-all.11950,
 #                   sacct.11950,11958): two calls of one tool at once, which no
-#                   @step can tell apart, each get their own answer
+#                   @step can tell apart, each get their own answer.  A
+#                   fixture without scontrol-node answers scontrol -o show node
+#                   from its sinfo file, as the mirror call is answered: its
+#                   records alone, each node once (sinfo -N prints one record per
+#                   partition), as a line of the figures sinfo has, in
+#                   scontrol's order: NodeName, CPUAlloc, CPUTot, CPULoad,
+#                   RealMemory, AllocMem, FreeMem.  No MemSpecLimit, so a node
+#                   reads as one without (scontrol prints it only when set)
 #   SQSTUB_LOG      file every invocation is appended to, one line per call:
 #                   CALL <tool> <argv, %q-quoted> <VAR=%q value | VAR(unset)>...
 #                   (the fixed list below, then every other SQUEUE_* and SACCT_*
@@ -126,7 +133,7 @@ line=$(printf 'CALL\t%s\t' "$tool"; [ $# -gt 0 ] && printf '%q ' "$@"
 printf '%s\n' "$line" >> "$SQSTUB_LOG"
 
 # ---- argv: every option sq can send, nothing else --------------------------
-mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0
+mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0 derive=0
 cmd_o=; cmd_O=; states=; jobs=; show=
 need_value() { [ $# -ge 2 ] || refuse "$1 needs a value"; }
 while [ $# -gt 0 ]; do
@@ -257,7 +264,8 @@ case $tool in
 	scontrol)
 		[ "$show" = node ]  || refuse "only 'show node' is emulated"
 		[ $noheader = 1 ]   || refuse "only the one-line form (-o) is emulated"
-		mode=raw; fmt="show node"; file=scontrol-node ;;
+		mode=raw; fmt="show node"; file=scontrol-node
+		[ -f "$SQSTUB_FIXTURE/scontrol-node" ] || { file=sinfo; derive=1; } ;;
 	*) refuse "unknown tool" ;;
 esac
 
@@ -280,11 +288,11 @@ counter=$rundir/.stubcalls.$tool.$(printf '%s' "$fmt" | cksum | cut -d' ' -f1)
 # a core limit of exactly 1 byte dumps nothing, even where cores go to a pipe
 # (systemd-coredump, WSL), which ignore a limit of 0; bash's ulimit counts in
 # blocks, hence prlimit, and without it 0 still stops a core file
-sig=; [ "$mirror" = 1 ] ||       # the mirror call answered from the queue's file: records alone
+sig=; [ "$mirror" = 1 ] || [ "$derive" = 1 ] ||   # a call answered from another tool's file: records alone
 	sig=$(LC_ALL=C sed -n 's/^@signal[[:space:]]\{1,\}\([0-9]\{1,\}\)[[:space:]]*$/\1/p' "$path" | head -n 1)
 if [ -n "$sig" ]; then
 	prlimit --pid $$ --core=1 2>/dev/null || ulimit -c 0 2>/dev/null
 	kill -"$sig" $$; refuse "still alive after @signal $sig"
 fi
 STUB_TOOL=$tool STUB_MODE=$mode STUB_FMT=$fmt STUB_DELIM=$delim STUB_TRAIL=$trail \
-STUB_FILE=$path STUB_MIRROR=$mirror STUB_CALL=$call STUB_RUN=$rundir LC_ALL=C exec gawk -f "$stubdir/render.awk"
+STUB_FILE=$path STUB_MIRROR=$mirror STUB_DERIVE=$derive STUB_CALL=$call STUB_RUN=$rundir LC_ALL=C exec gawk -f "$stubdir/render.awk"
