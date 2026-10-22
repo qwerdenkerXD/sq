@@ -98,7 +98,8 @@ watch -tc -n 1 'sq -C'
 - Slurm client tools: `sinfo`, `squeue`, and `sacct` when accounting (slurmdbd) is set up (for
   `sq job`'s efficiency too);
   without it the finished block falls back to `squeue -t all` and says so; `sstat` for the
-  memory your own running jobs use
+  memory your own running jobs use; `scontrol` for the memory each node reserves for its
+  OS (`MemSpecLimit`) and for `sq job`'s per-node view
 - **gawk** (GNU awk; plain awk and mawk won't do)
 - coreutils (`timeout`, `stty`) and `tput`
 - GNU `tail` 8.28 or newer, only for [`sq log`](#sq-log) to follow a file (`--no-follow` does
