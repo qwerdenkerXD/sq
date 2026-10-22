@@ -51,7 +51,8 @@ for l in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
 done
 [ -n "$utf8" ] || { echo "run.sh: no UTF-8 locale available (tried C.UTF-8, en_US.UTF-8)" >&2; exit 2; }
 
-# TMPDIR is honoured; with -k the evidence stays there, under a recognisable name
+# TMPDIR is honoured; with -k the evidence stays there, under a recognisable
+# name, and a failed case's stays without -k too (sq-failed-NAME.*, see verdict)
 work=$(mktemp -d "${TMPDIR:-/tmp}/sq-tests.XXXXXX") || exit 2
 [ $keep = 0 ] || echo "evidence kept in $work"
 # every session a background sq ran in (sq_start) is emptied on the way out too
@@ -365,7 +366,15 @@ verdict() {
 		XFAIL) n_xfail=$((n_xfail+1)) ;; XPASS) n_xpass=$((n_xpass+1)) ;;
 	esac
 	printf '%-5s  %-24s %s\n' "$status" "$T_NAME" "${reason//$'\x1f'/; }"
-	[ $status = FAIL ] || [ $status = XPASS ] && [ $keep = 0 ] && printf '       evidence: rerun with -k\n'
+	# a failed case keeps its run directories even without -k, as a flake may
+	# not come back for a rerun: moved out of the work dir the suite removes
+	local kept
+	if { [ $status = FAIL ] || [ $status = XPASS ]; } && [ $keep = 0 ]; then
+		if kept=$(mktemp -d "${TMPDIR:-/tmp}/sq-failed-$T_NAME.XXXXXX") && mv "$T_DIR" "$kept/"; then
+			printf '       evidence kept in %s\n' "$kept/$T_NAME"
+		else printf '       evidence: rerun with -k\n'
+		fi
+	fi
 	return 0
 }
 
@@ -1051,8 +1060,12 @@ c_scrub_sites() {
 	sq_run wide SQ_SINCE="2026-01-01${c1}T00" --
 	need "SQ_SINCE with C1: rc 0, the caption says since 2026-01-01T00, no C1" eval 'rc_is 0 && has "recently finished · since 2026-01-01T00" && c1_inert'
 	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "no\\302\\233de\\n"\n' > "$hbin/hostname"; chmod +x "$hbin/hostname"
+	# three needs, not one: this failed now and then in full runs, and which
+	# part did is the first thing to know
 	sq_run wide PATH="$hbin:$here/bin:$PATH" --
-	need "host name with C1: rc 0, the title says node, no C1" eval 'rc_is 0 && plain | head -1 | grep -qF "SLURM node " && c1_inert'
+	need "host name with C1: rc 0" rc_is 0
+	need "host name with C1: the title says SLURM node" eval 'plain | head -1 | grep -qF "SLURM node "'
+	need "host name with C1: no C1 on the screen" c1_inert
 }
 
 # Bytes that are no UTF-8 - Latin-1 text, a character cut in half - reach no
