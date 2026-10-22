@@ -1739,10 +1739,14 @@ c_shrink_locale() {
 # cell at another width (and split a character at some).  sq pins a UTF-8
 # locale for gawk, so the screen, colour and all, is the one the UTF-8 caller
 # gets: an elided id, the shrink ladder, bar glyphs, a COMPACT "… n jobs".
+# Where no locale tool answers (musl has none) gawk alone judges a locale: a
+# failing one first on PATH stands in for it
 without_clock() { sed -E '1s/[0-9]{2}:[0-9]{2}:[0-9]{2}//' "$1"; }
 c_locale_pinned() {
-	T_TITLE="under LC_ALL=C, and with no locale set at all, sq draws byte for byte the screen it draws under UTF-8"
-	local fx args want how
+	T_TITLE="under LC_ALL=C, and with no locale set at all, sq draws byte for byte the screen it draws under UTF-8, also where the locale tool fails"
+	local fx args want how nolocale=$T_DIR/nolocale
+	mkdir -p "$nolocale"
+	printf '#!/bin/sh\necho "locale: not found" >&2\nexit 127\n' > "$nolocale/locale"; chmod +x "$nolocale/locale"
 	for args in "shrink-pending SLURM_BITSTR_LEN=0 SQ_WIDTH=79" "shrink-pending SLURM_BITSTR_LEN=0 SQ_WIDTH=80" \
 	            "shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=50" "shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=80" \
 	            "bars-busy SQ_WIDTH=60" "bars-busy SQ_WIDTH=100" "busy24 SQ_WIDTH=100 SQ_HEIGHT=24"; do
@@ -1752,6 +1756,9 @@ c_locale_pinned() {
 		for how in LC_ALL=C -LC_ALL; do
 			sq_run "$fx" "$@" "$how" -- --color --compact
 			need "$args, $how: rc 0, the UTF-8 screen" eval 'rc_is 0 && cmp -s "$want" <(without_clock "$OUT")'
+			sq_run "$fx" "$@" "$how" PATH="$nolocale:$here/bin:$PATH" -- --color --compact
+			need "$args, $how, the locale tool failing: rc 0, stderr empty, the UTF-8 screen" \
+				eval 'rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT")'
 		done
 	done
 }

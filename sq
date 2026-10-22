@@ -597,14 +597,19 @@ color_resolve() {
 # and the whole layout changes meaning.  So gawk runs under the caller's locale
 # if that is UTF-8, else C.UTF-8, else the first UTF-8 locale installed; with
 # none at all, under the caller's as before.  A locale is UTF-8 when its
-# charmap says so (ja_JP.eucJP counts "…" as one character too, but "█" as
-# two) and gawk, which does the counting, agrees.
+# charmap says so and gawk, which does the counting, counts "…█" as two
+# characters (ja_JP.eucJP counts "…" as one, but "█" as two).  Without a
+# locale tool that answers (musl, a minimal image) gawk's count alone decides:
+# under C it is 6, under eucJP 3, though a GB18030 locale would pass it too.
 # Set through env, never as "LC_ALL=x cmd": bash applies that to itself too,
 # and restoring a caller's LC_ALL that names no installed locale puts a
 # setlocale warning on the screen each time.
 utf8_ok() {
-	[ "$(env LC_ALL="$1" locale charmap 2>/dev/null)" = UTF-8 ] &&
-	env LC_ALL="$1" gawk 'BEGIN { exit length("…") != 1 }' 2>/dev/null
+	local charmap
+	if charmap=$(env LC_ALL="$1" locale charmap 2>/dev/null); then
+		[ "$charmap" = UTF-8 ] || return 1
+	fi
+	env LC_ALL="$1" gawk 'BEGIN { exit length("…█") != 2 }' 2>/dev/null
 }
 gawk_locale() {   # the locale gawk runs in, into gloc
 	gloc=${LC_ALL:-}                 # empty: gawk reads LC_CTYPE and LANG as before
