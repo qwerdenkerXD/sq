@@ -1,0 +1,14 @@
+  ▌ SLURM FranzGB  07:49:47 UTC
+
+  fb2-bioinf   ████░░░░░  45%  58/128 cpu   ███░░░░░░░  27%  265/977G mem  mixed
+  fb2-bioinf-0 ·········   0%   0/24  cpu   ··········   0%    0/75G  mem  down*
+               ↳ Not responding · since 2026-10-20
+
+  JOBID         NAME     USER     STATE   TIME    LEFT       CPU MEM  NODE/REASO
+  5101          megahit  schroder RUNNING 3:12:40 4-20:47:20  16 100G fb2-bioinf
+  5102_[0-1] ×2 assemble alice    RUNNING 3:12:40 4-20:47:20  16 128G fb2-bioinf
+  5105          blast    bob      RUNNING 1:02:11   22:57:49  10  37G fb2-bioinf
+
+  recently finished · last 2h · nothing in this window
+
+  4 jobs   4 running   0 pending   0 other

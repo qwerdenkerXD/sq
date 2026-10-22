@@ -3113,6 +3113,21 @@ done
 SLURM_TIME_FORMAT=standard collect nodes sinfo -hN -O "$nfmt"
 why_of nerr $? "$tmp/nodes" sinfo
 
+# MemSpecLimit, the memory Slurm keeps from jobs on a node, is the one figure
+# the memory bar needs that sinfo cannot print (23.11.4 has no -O field for
+# it), so scontrol is asked whenever sinfo answered.  Its line ends in free
+# text (Reason=, Comment=, Extra=) that may name anything, which node_read is
+# made for.  A caller's SCONTROL_* settings change what show node lists
+# (SCONTROL_ALL, SCONTROL_FEDERATION), so they are unset, as sq job unsets them.
+# For gawk: $tmp/nodespec, empty when the call failed, and serr why it did
+: > "$tmp/nodespec"; serr=
+if [ -z "$nerr" ]; then
+	unset $(exported_names 'SCONTROL_*')
+	collect nodespec scontrol -o show node
+	why_of serr $? "$tmp/nodespec" scontrol
+	[ -z "$serr" ] || : > "$tmp/nodespec"
+fi
+
 SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT=$fmt collect jobs squeue -h -S t,i "${args[@]+"${args[@]}"}"
 why_of jerr $? "$tmp/jobs" squeue
 
@@ -3288,8 +3303,8 @@ statef=$statedir/alerted host=$(hostname -s | scrub) now=$(date '+%H:%M:%S %Z')
 # unavailable" the filter or sacct's, the fallback's, squeue's: the filter is
 # the actionable half and the fallback's stderr only a symptom
 uwhy=$(first_why nerr jerr) fwhy=$(first_why rwhy rerr jerr)
-memallocf=$tmp/memalloc memreadf=$tmp/memread memtotalf=$tmp/memtotal
-sqv="center fold color bell eta recent bellall me statef statetmp uwhy jerr rwhy fwhy wtxt sfilt host now memallocf memreadf memtotalf"
+memallocf=$tmp/memalloc memreadf=$tmp/memread memtotalf=$tmp/memtotal nodespecf=$tmp/nodespec
+sqv="center fold color bell eta recent bellall me statef statetmp uwhy jerr rwhy fwhy wtxt sfilt host now memallocf memreadf memtotalf nodespecf serr"
 for v in $sqv; do export "SQV_$v=${!v}"; done
 env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \
                       -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
@@ -3400,7 +3415,7 @@ function height(   h, l) {
   h = 1 + SHOW["b4"] + SHOW["title"] + SHOW["b1"] + SHOW["b2"]
   h += BANNER * (SHOW["banner"] + SHOW["b0"]) + QCAP * SHOW["qcap"] + NOTES * SHOW["notes"]
   if (SHOW["nodes"] == 1) h++
-  if (SHOW["nodes"] == 2) h += nn + (nbad || ntrunc) + (skip[1] > 0) + SHOW["reasons"] * NRSN
+  if (SHOW["nodes"] == 2) h += nn + (nbad || ntrunc) + (skip[1] > 0) + MEMNOTE + SHOW["reasons"] * NRSN
   if ((l = qbody())) h += l + 1                   # and the column header
   if ((l = finlines())) h += l + SHOW["b3"]
   return h
@@ -3457,13 +3472,46 @@ function fit(   x) {
   CAP = -1                                        # every running job fits: lifted
   fill(1) && fill(2) && fill(3) && fill(6) && fillfin() && fill(4)
 }
-function digest(   r, s, nc, nord, ns, u, t, x, i) {   # nodes: 1 allocated, 1 down* · 128/256 cpu
+# nodes: 1 allocated, 1 down* · 128/256 cpu, and where the memory bar counts
+# allocated memory (membar) · 335/1052G mem
+function digest(   r, s, nc, nord, ns, u, t, x, i, ma, mt) {
   for (r=1; r<=nn; r++) {
     s = nst[r]; if (!(s in nc)) nord[++ns] = s
-    nc[s]++; u += used[r]; t += tot[r]
+    nc[s]++; u += used[r]; t += tot[r]; ma += memalloc[r]; mt += memden[r]
   }
   for (i=1; i<=ns; i++) x = x (i > 1 ? ", " : "") nc[nord[i]] " " nord[i]
-  return "nodes: " x " · " u+0 "/" t+0 " cpu"
+  return "nodes: " x " · " u+0 "/" t+0 " cpu" (MEMALLOC ? sprintf(" · %.0f/%.0fG mem", ma/1024, mt/1024) : "")
+}
+# The memory bar shows memory allocated where Slurm schedules memory, as the
+# CPU figure counts allocated cores, and memory in use where it does not.  It
+# is scheduled when some node has AllocMem > 0: cons_tres fills it only under
+# CR_*_MEMORY, and then on every node a job holds.  None, but CPUs allocated
+# somewhere: not scheduled (CR_CORE), and the bar stays memory in use.
+# Nothing allocated anywhere: both agree on 0 allocated, and the allocated bar
+# does not draw the page cache of an idle node as use.  Allocated counts against
+# what jobs can be given, RealMemory less MemSpecLimit (from scontrol, read by
+# node_read): none for a node scontrol does not list, lists twice (a line
+# forged by free text) or gives no figure below RealMemory for, and none for
+# any node when the call failed, which the MEMNOTE line under the nodes says.
+# Into MEMALLOC, and per node memden (what jobs can be given), memu, mempc
+# and memt as the allocated figures, wf and wm their widths
+function membar(   r, anyalloc, anycpu, i, spec) {
+  for (r=1; r<=nn; r++) { if (memalloc[r] > 0) anyalloc = 1; if (used[r] > 0) anycpu = 1 }
+  if (!(MEMALLOC = anyalloc || !anycpu)) return
+  node_read(nodespecf)
+  MEMNOTE = (serr != "")
+  wf = wm = 0
+  for (r=1; r<=nn; r++) {
+    i = (node[r] in NODE_AT) ? NODE_AT[node[r]] : 0
+    spec = (i && !(i in NODE_BAD)) ? NODE_SPECMEM[i] : 0
+    if (spec < 0 || spec >= memreal[r]) spec = 0
+    memden[r] = memreal[r] - spec
+    memu[r]  = sprintf("%.0f", memalloc[r]/1024)
+    mempc[r] = memden[r] ? int(memalloc[r]*100/memden[r]) : 0
+    memt[r]  = sprintf("%.0fG", memden[r]/1024)
+    if (length(memu[r]) > wf) wf = length(memu[r])
+    if (length(memt[r]) > wm) wm = length(memt[r])
+  }
 }
 function clip(x, wd) { return (length(x) > wd) ? substr(x, 1, wd-1) "…" : x }
 # the JOBID and EXIT cells of a finished group, for its row and for the one-line form
@@ -3819,6 +3867,7 @@ END{
   # exactly as they do when sinfo returns nothing at all, so the caption sits on a
   # narrower dashboard than a healthy node block would give
   if (ntrunc || nbad) { nn = 0; wn = wu = wt = wf = wm = ws = 0 }
+  if (nn) membar()
   if (qtrunc || qbad) q = 0
   if (rtrunc || rbad) dq = 0
 
@@ -4145,13 +4194,17 @@ END{
     p = tot[r] ? int(used[r]*100/tot[r]) : 0
     mp = mempc[r]
     sc = cells(used[r], load[r], tot[r], barc, down ? "31" : (p>85 ? "33" : "32"))
-    sm = cells(memalloc[r], meminuse[r], memreal[r], barm,
-               down ? "31" : (mp>95 ? "1;31" : (mp>85 ? "33" : "32")))
+    if (MEMALLOC)                               # allocated, drawn as the CPU bar is
+      sm = cells(memalloc[r], (meminuse[r] < 0) ? -1 : memalloc[r], memden[r], barm,
+                 down ? "31" : (mp>85 ? "33" : "32"))
+    else
+      sm = cells(memalloc[r], meminuse[r], memreal[r], barm,
+                 down ? "31" : (mp>95 ? "1;31" : (mp>85 ? "33" : "32")))
     out[++o] = sprintf("%s%s%-*s%s %s%s%3d%%  %s%*d%s/%-*d cpu   %s%s%3s%%  %s%*s%s/%-*s mem  %*s%s%s%s",
                        lm, e("1"), wn, node[r], e("0"), sc, (bar?" ":""), p,
                        e("1"), wu, used[r], e("0"), wt, tot[r],
                        sm, (bar?" ":""), (mp<0 ? "-" : sprintf("%d", mp)),
-                       e(mp>95 && mp>=0 ? "1;31" : "1"), wf, memu[r], e("0"), wm, memt[r],
+                       e(mp>95 && mp>=0 && !MEMALLOC ? "1;31" : "1"), wf, memu[r], e("0"), wm, memt[r],
                        npad+0, "", e("2"), nst[r], e("0"))
     if (SHOW["reasons"] && nreason[r] != "") {
       x = nreason[r]
@@ -4162,6 +4215,9 @@ END{
   if (SHOW["nodes"] == 2 && skip[1])           # see which table it is talking about
     out[++o] = sprintf("%s%s↳ %d unreadable node row%s skipped%s", lm, e("2"),
                        skip[1], (skip[1] > 1 ? "s" : ""), e("0"))
+  if (SHOW["nodes"] == 2 && MEMNOTE)
+    out[++o] = sprintf("%s%s%s%s", lm, e("2"),
+                       clip("↳ memory counts RealMemory: scontrol did not answer (" serr ")", target), e("0"))
   if (SHOW["b2"]) out[++o] = ""
 
   if (QCAP && !SHOW["qcap"]) ;                 # COMPACT found no line for the caption

@@ -1,0 +1,5 @@
+# bioserver idle as read live 2026-10-17, after Stage B: RealMemory
+# 1031000/80000 (MemSpecLimit 31000/3200 in scontrol-node), nothing allocated,
+# FreeMem below RealMemory, as page cache and the OS use 228G and 10G
+CPUsState=0/128/0/128; NodeList=fb2-bioinf; FreeMem=797679; Memory=1031000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.22; AllocMem=0
+CPUsState=0/24/0/24; NodeList=fb2-bioinf-0; FreeMem=70108; Memory=80000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0

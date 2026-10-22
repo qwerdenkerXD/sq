@@ -1,0 +1,4 @@
+  ▌ SLURM FranzGB  07:49:48 UTC
+  nodes: 1 mixed, 1 down* · 58/152 cpu · 265/1052G mem
+  recently finished · last 2h · nothing in this window
+  4 jobs   4 running   0 pending   0 other

@@ -1,0 +1,12 @@
+  ▌ SLURM FranzGB  07:49:43 UTC
+
+  fb2-bioinf   ██████▒░░░░░░░░░  45%  58/128 cpu   ▓▓▓▓▓▓▓▓░░░░░░░░  48%  493/1007G mem  mixed
+  fb2-bioinf-0 ████████████████ 100%  24/24  cpu   ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  97%   76/78G   mem  allocated
+
+  JOBID    NAME       USER    STATE      TIME          LEFT          CPU    MEM    NODE/REASON    
+  5106     hmmscan    erin    RUNNING    1-02:11:05    1-21:48:55     24    70G    fb2-bioinf-0
+  … 4 jobs running
+
+  recently finished · last 2h · nothing in this window
+
+  5 jobs   5 running   0 pending   0 other

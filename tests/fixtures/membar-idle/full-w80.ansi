@@ -1,0 +1,10 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m07:49:33 UTC[0m
+
+  [1mfb2-bioinf  [0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m0[0m/128 cpu   [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m0[0m/977G mem  [2midle[0m
+  [1mfb2-bioinf-0[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m0[0m/24  cpu   [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m0[0m/75G  mem  [2midle[0m
+
+  [2mqueue is empty[0m
+
+  [2mrecently finished · last 2h · nothing in this window[0m
+
+  [1m0[0m jobs   [32m0 running[0m   [33m0 pending[0m   [31m0 other[0m

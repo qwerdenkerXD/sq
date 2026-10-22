@@ -1,0 +1,5 @@
+# busy, memory scheduled (CR_CORE_MEMORY).  fb2-bioinf: 265G allocated
+# (schroder 100G, alice 2x64G, bob 37G), 493G in use = jobs + 228G cache;
+# fb2-bioinf-0: one 70G job, 76G in use
+CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=526168; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=51.20; AllocMem=271360
+CPUsState=24/0/0/24; NodeList=fb2-bioinf-0; FreeMem=2176; Memory=80000; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=23.81; AllocMem=71680

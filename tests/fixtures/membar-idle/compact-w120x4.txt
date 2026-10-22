@@ -1,0 +1,4 @@
+  ▌ SLURM FranzGB  07:49:34 UTC
+  nodes: 2 idle · 0/152 cpu · 0/1052G mem
+  queue is empty
+  0 jobs   0 running   0 pending   0 other

@@ -1,2 +1,2 @@
-  fb2-bioinf    25%  32/128 cpu    40%  391/977G mem  mixed
-  fb2-bioinf-0   0%   0/24  cpu     3%    3/75G  mem  idle
+  fb2-bioinf    25%  32/128 cpu    13%  128/977G mem  mixed
+  fb2-bioinf-0   0%   0/24  cpu     0%    0/75G  mem  idle

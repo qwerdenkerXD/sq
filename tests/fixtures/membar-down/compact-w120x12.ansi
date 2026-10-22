@@ -1,0 +1,12 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m07:49:48 UTC[0m
+
+  [1mfb2-bioinf  [0m [32m█[32m█[32m█[32m█[32m█[32m█[2;32m▒[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m  45%  [1m58[0m/128 cpu   [32m█[32m█[32m█[32m█[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m  27%  [1m265[0m/977G mem  [2mmixed[0m
+  [1mfb2-bioinf-0[0m [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m 0[0m/24  cpu   [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m  0[0m/75G  mem  [2mdown*[0m
+               [2m↳ Not responding · since 2026-10-20[0m
+
+  [4mJOBID    NAME    USER    STATE    TIME    LEFT    CPU    MEM    NODE/REASON                [0m
+  [2m… 4 jobs running[0m
+
+  [2mrecently finished · last 2h · nothing in this window[0m
+
+  [1m4[0m jobs   [32m4 running[0m   [33m0 pending[0m   [31m0 other[0m

@@ -26,7 +26,7 @@
 #
 # Known gaps, left out on purpose because they are cosmetic: right alignment
 # of numeric columns, the truncation of a long drain reason.  The bar glyphs
-# are checked only on the node screens of the bars_* cases.
+# are checked only on the node screens of the bars_* and membar_* cases.
 
 set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -497,7 +497,7 @@ c_nodes_dup_apart()    { T_TITLE="a node in two partitions, its records apart: o
 c_nodes_dup_adjacent() { T_TITLE="a node in two partitions, its records adjacent: one line"; dup_two_idle nodes-dup-adjacent; }
 c_nodes_dup_digest() {
 	T_TITLE="COMPACT at 4 lines: the node summary counts a node in two partitions once"
-	dup_compact4 nodes-dup-apart "nodes: 2 idle · 0/64 cpu"
+	dup_compact4 nodes-dup-apart "nodes: 2 idle · 0/64 cpu · 0/250G mem"
 }
 c_nodes_dup_drained() {
 	T_TITLE="a drained node in two partitions: one line, one ↳ reason, counted once in the summary"
@@ -510,7 +510,7 @@ c_nodes_dup_drained() {
 		plain | grep -A1 -E "^ +node02 " | tail -1 | grep -qE "^ +↳ bad\|disk\?replace · since 2026-10-01$"'
 	need "no unreadable node note"    no_skips
 	need "no node caption"            lacks "node output"
-	dup_compact4 drained-dup "nodes: 1 idle, 1 drained · 0/64 cpu"
+	dup_compact4 drained-dup "nodes: 1 idle, 1 drained · 0/64 cpu · 0/250G mem"
 }
 c_node_one_dup() {
 	T_TITLE="one node in two partitions: the screen of it in one, FULL and COMPACT at 4, 5 and 6 lines"
@@ -2142,7 +2142,7 @@ c_compact_busy24_h8() {   # decisions 10 and 11
 	T_TITLE="busy24 at 8 lines: the node summary line, all three stuck/blocked jobs AND the failure, no blank"
 	compact_case busy24 100 8 "1 1 0 1" "151 128 23 0"
 	compact_lines 8 0
-	need "the nodes as one summary line"  nodes_digest "nodes: 1 allocated, 1 down* · 128/256 cpu"
+	need "the nodes as one summary line"  nodes_digest "nodes: 1 allocated, 1 down* · 128/256 cpu · 443/1006G mem"
 	compact_queue "4201|4202|4207"
 	busy_finished_line
 	narrow_ids
@@ -2894,7 +2894,9 @@ c_compact_error_screens() {
 # fixtures/bars-*/nodes-w<W>.{txt,ansi} are the node lines of the accepted target
 # screens (2026-10-07) at 120, 80 and 60 columns, without and with colour.  The
 # used-memory number is bold like the CPU one (bold red above 95%), as Franz chose
-# 2026-10-15; the prototype that drew the screens already printed it so.
+# 2026-10-15; the prototype that drew the screens already printed it so.  These
+# clusters schedule memory (AllocMem), so since MEMBAR (2026-10-22) their memory
+# bar counts it allocated, re-pinned so; the in-use bar is membar-crcore's.
 node_lines() {    # the node block: after the blank below the title, up to the next blank
 	gawk 'b == 1 && $0 == "" { exit } b == 1 { print } $0 == "" { b++ }' "$OUT"
 }
@@ -2949,7 +2951,7 @@ c_bars_edges() {
 	sq_run bars-edges -- --full --color
 	need "rc 0, nothing on stderr" eval 'rc_is 0 && err_empty'
 	need "draining: CPU bar █ 31, ▒ 2;31, ░ 2" bar_kinds_are drn01 1 "2:░ 2;31:▒ 31:█"
-	need "draining: memory bar █ 31, ▒ 2;31, ░ 2" bar_kinds_are drn01 2 "2:░ 2;31:▒ 31:█"
+	need "draining: memory bar, allocated, █ 31, ░ 2" bar_kinds_are drn01 2 "2:░ 31:█"
 	need "0 CPUs, 0 memory: both bars all ░" eval 'bar_kinds_are zero01 1 "2:░" && bar_kinds_are zero01 2 "2:░"'
 	need "0 CPUs, 0 memory, use N/A: both bars all ·" eval 'bar_kinds_are zero02 1 "2:·" && bar_kinds_are zero02 2 "2:·"'
 	need "85% allocated: CPU bar green" bar_kinds_are pct85 1 "2:░ 32:█"
@@ -2991,6 +2993,154 @@ c_bars_width_sweep() {
 	done
 }
 
+# ---- the memory bar: allocated where Slurm schedules memory (MEMBAR v1/v2) ----
+# fixtures/membar-{idle,busy,crcore,down} are bioserver after Stage B
+# (RealMemory 1031000/80000, MemSpecLimit 31000/3200 in their scontrol-node):
+# idle, busy with memory scheduled, the same jobs under CR_CORE, and busy with
+# fb2-bioinf-0 not responding.  Their <mode>.{txt,ansi} are the variant-A screens
+# Franz accepted on 2026-10-21 (drawn on host FranzGB); CR_CORE's are today's.
+membar_modes="full-w120:120:50:--full full-w80:80:50:--full compact-w120x12:120:12:--compact compact-w120x4:120:4:--compact"
+c_membar_screens() {
+	T_TITLE="the memory bar: the accepted variant-A screens byte for byte, clock aside, idle, busy and down, CR_CORE as today; FULL at 120 and 80, COMPACT 120x12 and 120x4"
+	local c m name w h flag ext
+	for c in idle busy crcore down; do
+		for m in $membar_modes; do
+			IFS=: read -r name w h flag <<< "$m"
+			for ext in txt ansi; do
+				sq_run "membar-$c" SQSTUB_HOST=FranzGB SQ_WIDTH="$w" SQ_HEIGHT="$h" -- "$flag" "$([ $ext = ansi ] && echo --color || echo --no-color)"
+				need "$c $name $ext: rc 0, stderr empty, the accepted screen" eval '
+					rc_is 0 && err_empty && cmp -s <(without_clock "$fixtures/membar-$c/$name.$ext") <(without_clock "$OUT")'
+			done
+		done
+	done
+}
+# the memory part of NODE's line, spaces squeezed: its bar, %, figure, "mem" and state
+mem_part() { plain | gawk -v n="$1" '$1 == n { sub(/.* cpu +/, ""); gsub(/ +/, " "); print; exit }'; }
+mem_part_is() { [ "$(mem_part "$1")" = "$2" ]; }
+digest_line() { plain | grep -E '^ *nodes: ' | sed -E 's/^ +//'; }
+c_membar_detect() {
+	T_TITLE="memory scheduled (some node has AllocMem): allocated against RealMemory less MemSpecLimit; CR_CORE (none has, CPUs are allocated): memory in use against RealMemory, as today; nothing allocated: the allocated view, 0"
+	sq_run membar-busy -- --full
+	need "scheduled: 265 of 977G and 70 of 75G allocated, █ then ░" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" &&
+		mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated"'
+	sq_run membar-busy SQ_HEIGHT=4 -- --compact
+	need "... the summary line adds allocated/schedulable memory" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/1052G mem" ]'
+	sq_run membar-crcore -- --full
+	need "CR_CORE: memory in use of RealMemory, ▓ in use beyond the (no) allocation" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "▓▓▓▓▓▓▓▓░░░░░░░░ 48% 493/1007G mem mixed" &&
+		mem_part_is fb2-bioinf-0 "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 97% 76/78G mem allocated"'
+	sq_run membar-crcore SQ_HEIGHT=4 -- --compact
+	need "... the summary line counts no memory" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu" ]'
+	sq_run membar-idle -- --full
+	need "nothing allocated: 0 of 977G and of 75G, all ░, not the 228G of page cache and OS" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "░░░░░░░░░░░░░░░░ 0% 0/977G mem idle" &&
+		mem_part_is fb2-bioinf-0 "░░░░░░░░░░░░░░░░ 0% 0/75G mem idle"'
+}
+c_membar_call() {
+	T_TITLE="scontrol -o show node once whenever sinfo answered, under CR_CORE too, no SCONTROL_* reaching it; none when sinfo did not answer"
+	local c
+	for c in idle busy crcore down; do
+		sq_run "membar-$c" SCONTROL_ALL=1 SCONTROL_FEDERATION=1 -- --full
+		need "$c, a caller's SCONTROL_*: rc 0, stderr empty, scontrol -o show node once, without them" eval '
+			rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && argv_has scontrol -o show node &&
+			gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"scontrol\" && /SCONTROL_/ { f = 1 } END { exit f }" "$LOG"'
+	done
+	sq_run empty -- --full
+	need "a node without MemSpecLimit: RealMemory counts" eval '
+		rc_is 0 && [ "$(calls scontrol)" = 1 ] && mem_part_is node01 "░░░░░░░░░░░░░░░░ 0% 0/125G mem idle"'
+	sq_run sinfo-fails -- --full
+	need "sinfo failing: no scontrol call" eval '[ "$(calls sinfo)" = 1 ] && [ "$(calls scontrol)" = 0 ]'
+}
+membar_note() { plain | grep -E '^ *↳ memory counts RealMemory' | sed -E 's/^ +//'; }
+c_membar_fail() {
+	T_TITLE="scontrol failing or silent: RealMemory counts and one dim line under the nodes says why, cut to the width; none under CR_CORE; COMPACT makes room for it, and its summary line counts RealMemory without it"
+	local d why='slurm_load_node error: Unable to contact slurm controller (connect failure)'
+	d=$(mem_fixture membar-busy scontrol-node "@stderr $why\n@exit 1")
+	sq_run "$d" -- --full --color
+	need "failing: rc 0, stderr empty, 265 of 1007G and 70 of 78G" eval '
+		rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" &&
+		mem_part_is fb2-bioinf-0 "██████████████░░ 89% 70/78G mem allocated"'
+	need "... the line right under the nodes, dim, naming scontrol's error, cut with … to the node lines' width" eval '
+		plain | sed -n 5p | grep -q "^  ↳ memory counts RealMemory: scontrol did not answer (slurm_load_node error: Unable to .*…\$" &&
+		sed -n 5p "$OUT" | grep -q "^  $ESC\[2m↳ .*…$ESC\[0m\$" && [ "$(plain | sed -n 5p | LC_ALL=$utf8 gawk "{ print length(\$0) }")" -le "$(node_width)" ]'
+	sq_run "$d" SQ_WIDTH=80 -- --full
+	need "... at 80 columns too" eval 'rc_is 0 && membar_note | grep -q "…\$" && [ "$(width)" -le 80 ]'
+	d=$(mem_fixture membar-busy scontrol-node "@exit 1")
+	sq_run "$d" -- --full
+	need "failing with nothing on stderr: the line whole, naming the exit status" eval '
+		rc_is 0 && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol did not answer (scontrol failed (exit 1))" ]'
+	d=$(mem_fixture membar-busy scontrol-node "@stderr $why\n@exit 1")
+	sq_run "$d" SQ_HEIGHT=12 -- --compact
+	need "... COMPACT at 12 lines: the nodes with the line, within 12 lines, the footer last" eval '
+		rc_is 0 && [ -n "$(membar_note)" ] && [ "$(plain | wc -l)" -le 12 ] && plain | tail -n 1 | grep -qE "^ +5 jobs "'
+	sq_run "$d" SQ_HEIGHT=4 -- --compact
+	need "... the summary line: allocated of RealMemory, no line for it" eval '
+		rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/1085G mem" ] && [ -z "$(membar_note)" ]'
+	d=$(mem_fixture membar-busy scontrol-node "@hang 10")
+	sq_run "$d" -- --full
+	need "silent: the same, after SQ_TIMEOUT" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" &&
+		[ "$(membar_note)" = "↳ memory counts RealMemory: scontrol did not answer (no response after 3s)" ]'
+	d=$(mem_fixture membar-crcore scontrol-node "@stderr $why\n@exit 1")
+	sq_run "$d" SQSTUB_HOST=FranzGB -- --full --no-color
+	need "CR_CORE: no line, the screen as accepted" eval '
+		rc_is 0 && [ -z "$(membar_note)" ] && cmp -s <(without_clock "$fixtures/membar-crcore/full-w120.txt") <(without_clock "$OUT")'
+}
+c_membar_over() {
+	T_TITLE="allocated beyond what jobs can be given (RealMemory less MemSpecLimit): the bar full, the figure as it is, yellow, never bold red"
+	local d
+	d=$(mem_fixture membar-busy sinfo 'CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=526168; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=51.20; AllocMem=1024000
+CPUsState=24/0/0/24; NodeList=fb2-bioinf-0; FreeMem=2176; Memory=80000; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=23.81; AllocMem=71680')
+	sq_run "$d" -- --full --color
+	need "1000 of 977G: rc 0, 102 %, every cell █ in yellow, the figure bold" eval '
+		rc_is 0 && err_empty && mem_part_is fb2-bioinf "████████████████ 102% 1000/977G mem mixed" &&
+		bar_kinds_are fb2-bioinf 2 "33:█" && plain_has_sgr fb2-bioinf "$ESC[1m1000$ESC[0m/977G"'
+}
+plain_has_sgr() { grep -E "^ +$ESC\[1m$1( |$ESC)" "$OUT" | grep -qF -- "$2"; }   # plain_has_sgr NODE TEXT: NODE's coloured line holds TEXT
+c_membar_down() {
+	T_TITLE="a down node shows its allocated memory in the CPU bar's red: ▒ where its use is not known, █ where it is (draining), ░ or · for the rest"
+	local d
+	d=$(mem_fixture membar-down sinfo 'CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=526168; Memory=1031000; StateLong=draining; Reason=disk; TimeStamp=2026-10-20T21:14:03; CPUsLoad=51.20; AllocMem=271360
+CPUsState=8/0/16/24; NodeList=fb2-bioinf-0; FreeMem=N/A; Memory=80000; StateLong=down*; Reason=Not responding; TimeStamp=2026-10-20T21:14:03; CPUsLoad=N/A; AllocMem=40960')
+	sq_run "$d" -- --full --color
+	need "down*, 40G allocated, use not known: rc 0, 53 % of 75G, ▒ in dim red then ·, as its CPU bar" eval '
+		rc_is 0 && err_empty && mem_part_is fb2-bioinf-0 "▒▒▒▒▒▒▒▒▒······· 53% 40/75G mem down*" &&
+		bar_kinds_are fb2-bioinf-0 2 "2:· 2;31:▒" && bar_kinds_are fb2-bioinf-0 1 "2:· 2;31:▒"'
+	need "draining, use known: █ in red, then ░" eval '
+		mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem draining" && bar_kinds_are fb2-bioinf 2 "2:░ 31:█"'
+}
+c_membar_forged() {
+	T_TITLE="MemSpecLimit only before Reason=/Comment=/Extra=, the first one counting: free text naming one, a forged line, a figure at or above RealMemory and a node scontrol does not list count none"
+	local d big small
+	big=$(grep '^NodeName=fb2-bioinf ' "$fixtures/membar-busy/scontrol-node")
+	small=$(grep '^NodeName=fb2-bioinf-0 ' "$fixtures/membar-busy/scontrol-node")
+	d=$(mem_fixture membar-busy scontrol-node "${big/ MemSpecLimit=31000/} Reason=checking MemSpecLimit=500000 [root@2026-10-21T10:00:00]\n$small")
+	sq_run "$d" -- --full
+	need "a Reason naming MemSpecLimit=, none before it: fb2-bioinf counts RealMemory, fb2-bioinf-0 its own, no line" eval '
+		rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" &&
+		mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated" && [ -z "$(membar_note)" ]'
+	d=$(mem_fixture membar-busy scontrol-node "$big Reason=checking MemSpecLimit=500000 [root@2026-10-21T10:00:00]\n$small")
+	sq_run "$d" -- --full
+	need "... and one before it: that one counts" eval 'rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed"'
+	d=$(mem_fixture membar-busy scontrol-node "$big Comment=x\nNodeName=fb2-bioinf RealMemory=1031000 AllocMem=0 MemSpecLimit=900000 State=IDLE\n$small")
+	sq_run "$d" -- --full
+	need "a Comment whose newline starts a second NodeName=fb2-bioinf line: RealMemory counts" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed"'
+	d=$(mem_fixture membar-busy scontrol-node "$big Extra=MemSpecLimit=0\n$small")
+	sq_run "$d" -- --full
+	need "an Extra= at the end naming MemSpecLimit=0: ignored" eval 'rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed"'
+	d=$(mem_fixture membar-busy scontrol-node "${big/ MemSpecLimit=31000/ MemSpecLimit=1031000}\n${small/ MemSpecLimit=3200/ MemSpecLimit=lots}")
+	sq_run "$d" -- --full
+	need "MemSpecLimit as large as RealMemory, or no number: RealMemory counts" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" && mem_part_is fb2-bioinf-0 "██████████████░░ 89% 70/78G mem allocated"'
+	d=$(mem_fixture membar-busy scontrol-node "$small")
+	sq_run "$d" -- --full
+	need "fb2-bioinf not listed: RealMemory for it, fb2-bioinf-0 its own, no line" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" &&
+		mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated" && [ -z "$(membar_note)" ]'
+}
+
 # ============================================================================
 # memory use of the caller's own running jobs (JOBMEM-v4)
 # ============================================================================
@@ -3015,7 +3165,7 @@ mem_of() {    # mem_of ID: the MEM cell of row ID, plain (default columns: the o
 epoch_now() { printf '%(%s)T' -1; }
 mem_fixture() {   # mem_fixture FROM FILE TEXT: a copy of fixture FROM whose FILE is TEXT (fixture escapes)
 	local d=$T_DIR/fx-$2-$RANDOM f; mkdir -p "$d"
-	for f in sinfo sacct squeue squeue-alloc squeue-tres sstat squeue-all; do
+	for f in sinfo sacct squeue squeue-alloc squeue-tres sstat squeue-all scontrol-node; do
 		[ -f "$fixtures/$1/$f" ] && printf '@include %s\n' "$fixtures/$1/$f" > "$d/$f"
 	done
 	printf '%b\n' "$3" > "$d/$2"
@@ -5365,6 +5515,7 @@ cases=(
 	compact_no_size compact_error_screens
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
+	membar_screens membar_detect membar_call membar_fail membar_over membar_down membar_forged
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
