@@ -3,7 +3,11 @@
 # of its output (counts, rows, captions, escapes, widths, exit codes), never a
 # snapshot of it.
 #
-#   tests/run.sh [-k|--keep] [NAME...]     NAME: run only the case of that name
+#   tests/run.sh [-k|--keep] [--pin] [NAME...]   NAME: run only the case of that name
+#
+# --pin writes what sq prints into the pinned screens of sq job and its why
+# section (tests/fixtures/sqjob/screens) instead of comparing with them, for
+# a change that is meant to change them; git diff then shows what changed.
 #
 # Needs bash, gawk, coreutils, util-linux `script` and `setsid` for the
 # terminal cases, and glibc's localedef with its locale sources for one case;
@@ -27,11 +31,12 @@ set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 sq=${SQ_UNDER_TEST:-${here%/*}/sq}    # SQ_UNDER_TEST: another build of sq, e.g. an installed one
 fixtures=$here/fixtures
-keep=0; only=()
+keep=0; pin=0; only=()
 for a in "$@"; do
 	case $a in
 		-k|--keep) keep=1 ;;
-		-h|--help) sed -n '2,17{s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
+		--pin) pin=1 ;;
+		-h|--help) sed -n '2,22{s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
 		-*) printf 'run.sh: unknown option %s\n' "$a" >&2; exit 2 ;;
 		*) only+=("$a") ;;
 	esac
@@ -4173,6 +4178,15 @@ job_run() {   # job_run FIXTURE [VAR=value | -VAR]... -- [sq args]: sq_run as fs
 }
 job_mask() { sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}/<date>/g' "$1"; }   # the dates, as without_clock the clock
 job_is() { cmp -s <(job_mask "$1") <(job_mask "$OUT"); }   # job_is FILE: stdout is FILE, dates aside
+# stdout with the run's own directory left out, which the paths of a fixture
+# whose output files sq reads begin with (\{run}/media/...)
+unrooted() { RUNDIR=$RUN gawk '{ while ((i = index($0, ENVIRON["RUNDIR"] "/"))) $0 = substr($0, 1, i - 1) substr($0, i + length(ENVIRON["RUNDIR"])); print }' "$OUT"; }
+# screen_is FILE: stdout is the pinned screen FILE, dates aside and unrooted;
+# with --pin it becomes FILE
+screen_is() {
+	if [ $pin = 1 ]; then unrooted > "$1"; return 0; fi
+	cmp -s <(job_mask "$1") <(unrooted | job_mask /dev/stdin)
+}
 # job_fx NAME FILE: fixture NAME's FILE is stdin, a squeue-all after
 # job-defaults, a sacct after job-sacct-defaults; until given, squeue-all
 # forgot the job and sacct answers nothing.  Prints its directory
@@ -4210,7 +4224,7 @@ c_job_screens() {   # Q2, Q3, acceptance 1
 			ext=ansi; [ $flag = --color ] || ext=txt
 			if [ $c = oom-11818-nopss ]; then job_run oom-11818 -SQ_PSS_SINCE -- $flag job "${id[$c]}"
 			else job_run $c -- $flag job "${id[$c]}"; fi
-			need "$c $flag: rc 0, stderr empty, the accepted screen" eval 'rc_is 0 && err_empty && job_is "$jfx/screens/job__$c.$ext"'
+			need "$c $flag: rc 0, stderr empty, the accepted screen" eval 'rc_is 0 && err_empty && screen_is "$jfx/screens/job__$c.$ext"'
 		done
 	done
 	local cache=$T_DIR/cache; mkdir -p "$cache"
@@ -4611,8 +4625,9 @@ c_job_sources() {   # Q7
 	need "accounting hanging, a pending job: the line under the title" eval 'rc_is 0 && [ "$(plain | sed -n 2p)" = "  ↳ accounting did not answer within 3s" ] && lacks efficiency'
 	cp "$jfx/array-11367/squeue-all" "$d/squeue-all"
 	job_run "$d" -- --no-color job 11367
-	need "accounting hanging, an array: the counts squeue has, no bars, why" eval '
-		rc_is 0 && title_is "▌ 11367  sweep · hal · array of 5: 3 running · 2 pending" && notes_are "accounting did not answer within 3s" && ! matches "^  (CPU|MEM) "'
+	need "accounting hanging, an array: the counts squeue has, a floor (≥, V16), no bars, why" eval '
+		rc_is 0 && title_is "▌ 11367  sweep · hal · array of ≥5 (accounting did not answer): 3 running · 2 pending" &&
+		notes_are "done, failed and cancelled tasks are not counted: accounting did not answer within 3s" && ! matches "^  (CPU|MEM) "'
 	printf '@stderr slurm_load_jobs error: Unable to contact slurm controller (connect failure)\n@exit 1\n' > "$d/squeue-all"
 	printf '@stderr sacct: error: Problem talking to the database: Connection refused\n@exit 1\n' > "$d/sacct"
 	job_run "$d" -- --no-color job 11912
@@ -4623,6 +4638,46 @@ c_job_sources() {   # Q7
 	: > "$d/sacct"; printf '@stderr slurm_load_jobs error: Unable to contact slurm controller (connect failure)\n@exit 1\n' > "$d/squeue-all"
 	job_run "$d" -- --no-color job 11912
 	need "squeue down, accounting without it: rc 1, squeue's reason" eval 'rc_is 1 && err_is "sq job: slurm unreachable · slurm_load_jobs error: Unable to contact slurm controller (connect failure)"'
+}
+
+# Franz #1 (2026-10-21): one-shot, sq job waits 30 s for accounting, and an
+# array's count is a floor while accounting is missing (why-v2 W2, V13, V16)
+finished_in() { printf '%s' $(( $(stat -c %Y "$RUN/rc") - $1 )); }   # finished_in START: seconds from START to sq's end
+timeout_of() {   # timeout_of TOOL: the bound sq's timeout gave TOOL's first call (TIMEOUT lines, SQSTUB_TIMEOUT=log)
+	gawk -F'\t' -v t="$1" '$1 == "TIMEOUT" && index(" " $2 " ", " 3>&- " t " ") { n = split($2, a, " ")
+		for (i = 1; i <= n; i++) if (a[i] == "-k") { print a[i + 2]; exit } }' "$LOG"
+}
+c_why_budget() {   # Franz #1, W2, V13, V16
+	T_TITLE="sq job waits 30 s for accounting unless SQ_TIMEOUT validly says otherwise (invalid: as unset), while squeue is asked; the queue keeps SQ_TIMEOUT's 5 s; the ≥N array"
+	local runs=() r start=$(epoch_now) d v
+	sq_start "$jfx/array-silent-11367" SQSTUB_UID=1041 SQ_PSS_SINCE=@$(( start - pss_ago )) -SQ_TIMEOUT -- --no-color job 11367; runs+=("$RUN")
+	sq_start "$jfx/array-silent-11367" SQSTUB_UID=1041 SQ_PSS_SINCE=@$(( start - pss_ago )) -SQ_TIMEOUT -- --color job 11367; runs+=("$RUN")
+	for r in "${runs[@]}"; do sq_finish "$r" 60; done
+	use_run "${runs[0]}"; RC=$(cat "$RUN/rc")
+	need "accounting silent, SQ_TIMEOUT unset: the pinned ≥N screen, after 30 s and before 35" eval '
+		rc_is 0 && screen_is "$jfx/screens/why__array-silent.txt" && [ "$(finished_in $start)" -ge 29 ] && [ "$(finished_in $start)" -le 36 ] && nothing_at_exit'
+	use_run "${runs[1]}"; RC=$(cat "$RUN/rc")
+	need "... colour on" eval 'rc_is 0 && screen_is "$jfx/screens/why__array-silent.ansi"'
+	for v in 2 2.5 7; do
+		job_run finished-11912 "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=$v -- --no-color job 11912
+		need "SQ_TIMEOUT=$v: sacct and squeue both $v" eval 'rc_is 0 && [ "$(timeout_of sacct)" = $v ] && [ "$(timeout_of squeue)" = $v ]'
+	done
+	for v in abc 0 0.0 -1 '' 1.2.3; do
+		job_run finished-11912 "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT="$v" -- --no-color job 11912
+		need "SQ_TIMEOUT='$v' (no valid bound): sacct 30, squeue 5" eval 'rc_is 0 && [ "$(timeout_of sacct)" = 30 ] && [ "$(timeout_of squeue)" = 5 ]'
+	done
+	job_run finished-11912 "$(timeout_as)" SQSTUB_TIMEOUT=log -SQ_TIMEOUT -- --no-color job 11912
+	need "SQ_TIMEOUT unset: sacct 30, squeue 5" eval 'rc_is 0 && [ "$(timeout_of sacct)" = 30 ] && [ "$(timeout_of squeue)" = 5 ]'
+	d=$T_DIR/fx-short; mkdir -p "$d"; cp "$jfx/array-11367/squeue-all" "$d/"; printf '@hang 10\n' > "$d/sacct"
+	job_run "$d" SQ_TIMEOUT=2 -- --no-color job 11367
+	need "SQ_TIMEOUT=2, accounting hanging: 2 s, and the ≥N note says 2s" eval '
+		rc_is 0 && notes_are "done, failed and cancelled tasks are not counted: accounting did not answer within 2s"'
+	d=$T_DIR/fx-both; mkdir -p "$d"
+	for v in squeue-all sacct; do { echo '@hang 2'; cat "$jfx/finished-11912/$v"; } > "$d/$v"; done
+	start=$(date +%s%N)
+	job_run "$d" SQ_TIMEOUT=6 -- --no-color job 11912
+	need "squeue and sacct 2 s each: asked at once, about 2 s in all (under 3.5), the pinned report" eval '
+		rc_is 0 && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 3500 ] && job_is "$jfx/screens/job__finished-11912.txt"'
 }
 
 # ============================================================================
@@ -4661,6 +4716,7 @@ cases=(
 	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
 	sub_dispatch sub_stray log_follow log_now log_syntax log_paths log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
+	why_budget
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

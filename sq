@@ -52,7 +52,8 @@
 #                SQ_BELL_ALL=1.  SQ_ETA 0 = no pending start estimates
 #      SQ_BELL_HORIZON  a failure only rings while it is this fresh (600s; 0 mutes)
 #      SQ_COLOR  0 = never colour, 1 = always
-#      SQ_TIMEOUT seconds to wait for slurm before declaring it unreachable (5)
+#      SQ_TIMEOUT seconds to wait for slurm before declaring it unreachable (5;
+#                 sq job waits 30 s for accounting unless it is set)
 #      SQ_SINCE  how far back the finished block looks (sacct -S; now-2hours)
 #      SQ_RECENT_MAX  finished rows (default: every one in FULL, the space
 #                     left up to 25 in COMPACT; a value you set is used as
@@ -194,10 +195,11 @@ tmp=
 make_tmp() { tmp=$(mktemp -d) || exit 1; }
 memtmp=                                         # the memuse snapshot being written
 statetmp=                                       # the bell's state being written
-collect_pid= log_pids=                          # a client collect -w waits for; sq log's
-                                                # tail and its sentinel
-collect_pidfile= job_sentinel_pid=              # where collect -w names that client for
+collect_pid= log_pids=                          # the clients collect -w and -b wait for;
+                                                # sq log's tail and its sentinel
+collect_pidfile= job_sentinel_pid=              # where collect names those clients for
                                                 # a sentinel; sq job's sentinel
+declare -A collect_bg=()                        # collect -b's clients, by NAME
 # The processes first, by pid (each ended with TERM and waited for, so none
 # outlives sq), then the files
 cleanup() {
@@ -236,23 +238,35 @@ exported_names() {
 # a trapped signal then acts at once instead of when the client is done, and
 # the EXIT cleanup can end the client through timeout, which sits in a process
 # group of its own that a Ctrl-C never reaches.  The dashboard does not use it,
-# as a Ctrl-C there is left to what bash makes of a foreground client.  With
-# collect_pidfile set, -w also writes that pid there while it waits (and
-# empties the file after), so a sentinel can end the client once sq is gone.
-collect() {   # collect [-t SECONDS] [-w] NAME TOOL ARGS...: stdout into $tmp/NAME,
-	local limit=$tmo name bg=0 rc   # bounded by SECONDS, SQ_TIMEOUT's by default
+# as a Ctrl-C there is left to what bash makes of a foreground client.  -b
+# starts it the same way and returns at once, so several calls run together;
+# collect_join NAME then waits for it and returns its status.  With
+# collect_pidfile set, the pids waited for are written there (an empty file
+# once none is left), so a sentinel can end the clients once sq is gone.
+collect() {   # collect [-t SECONDS] [-w|-b] NAME TOOL ARGS...: stdout into $tmp/NAME,
+	local limit=$tmo name how=fg   # bounded by SECONDS, SQ_TIMEOUT's by default
 	[ "$1" != -t ] || { limit=$2; shift 2; }
-	[ "$1" != -w ] || { bg=1; shift; }
+	case $1 in -w) how=wait; shift ;; -b) how=bg; shift ;; esac
 	name=$1; shift
 	set -- timeout $verbose -k 2 "$limit" sh -c 'exec "$@" 2>&3 3>&-' "$1" "$@"
-	if [ $bg = 0 ]; then
+	if [ $how = fg ]; then
 		{ "$@" > "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo"; } 2>/dev/null
-	else
-		{ "$@" > "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo" &
-		  collect_pid=$!; [ -z "$collect_pidfile" ] || printf '%s\n' "$collect_pid" > "$collect_pidfile"
-		  wait "$collect_pid"; rc=$?; collect_pid=
-		  [ -z "$collect_pidfile" ] || : > "$collect_pidfile"; return $rc; } 2>/dev/null
+		return
 	fi
+	{ "$@" > "$tmp/$name" 3> "$tmp/$name.err" 2> "$tmp/$name.tmo" & } 2>/dev/null
+	collect_bg[$name]=$!; collect_pid="$collect_pid${collect_pid:+ }$!"; collect_inflight
+	[ $how = bg ] || collect_join "$name"
+}
+collect_join() {   # collect_join NAME: wait for collect -b NAME, its status
+	local pid=${collect_bg[$1]} rc p left=
+	{ wait "$pid"; } 2>/dev/null; rc=$?
+	for p in $collect_pid; do [ "$p" = "$pid" ] || left="$left${left:+ }$p"; done
+	collect_pid=$left; unset 'collect_bg[$1]'; collect_inflight
+	return $rc
+}
+# what a sentinel must end once sq is gone: the clients waited for
+collect_inflight() {
+	[ -z "$collect_pidfile" ] || printf '%s\n' "$collect_pid" > "$collect_pidfile"
 }
 # --verbose makes timeout say "sending signal ..." before it signals; it exists
 # since coreutils 8.29, and an older timeout refuses it (rc 125) without running
@@ -275,10 +289,10 @@ timeout --verbose 1 true > /dev/null 2>&1 && verbose=--verbose
 # from elsewhere: a crash.  Otherwise NAME.tmo is shown only for rc 125 with
 # an empty NAME.err, timeout's own failure (an unknown option, no fork); its
 # "dumped core" after a crash never is.
-why_of() {   # why_of NAME RC OUTPUT TOOL: OUTPUT as collect left it, e.g. $tmp/nodes
-	local rc=$2 real= why=
+why_of() {   # why_of NAME RC OUTPUT TOOL [SECONDS]: OUTPUT as collect left it, e.g. $tmp/nodes,
+	local rc=$2 real= why=                 # SECONDS its bound if not SQ_TIMEOUT's
 	if [ "$rc" = 124 ] || { [ "$rc" = 137 ] && { [ -s "$3.tmo" ] || [ -z "$verbose" ]; }; }; then
-		real="no response after ${tmo}s"
+		real="no response after ${5:-$tmo}s"
 	elif [ "$rc" != 0 ]; then
 		real=$(scrub -f "$3.err")
 		[ -n "$real" ] || [ "$rc" != 125 ] || real=$(scrub -f "$3.tmo")
@@ -1202,8 +1216,8 @@ sub_log() {
 # The facts: one squeue --jobs=ID -t all (the live state, reason, dependency,
 # start estimate, time left and output paths, while Slurm knows the job), one
 # sacct -j ID without -X (request, allocation, the steps' CPU time and memory,
-# the exit, and the job itself once squeue forgot it), and for the caller's
-# own running job JOBMEM's reading.  One source down: the other's view, with a
+# the exit, and the job itself once squeue forgot it), both asked at once, and
+# for the caller's own running job JOBMEM's reading.  One source down: the other's view, with a
 # dim line saying which; both: rc 1.
 job_help() {
 	cat <<'EOF'
@@ -1220,7 +1234,11 @@ over its completed tasks: the median, the weakest task and the best.
 Exit 0 when shown, 1 when Slurm does not know the job or cannot be asked,
 2 for a usage error, 128+N when stopped by signal N.
 
-env: SQ_PSS_SINCE  when this cluster's accounting moved from RSS to PSS
+env: SQ_TIMEOUT    seconds to wait for Slurm (5); sq job waits 30 s for
+                   accounting, which a big array keeps busy, unless
+                   SQ_TIMEOUT is set to a valid number of seconds, which
+                   then bounds that wait too
+     SQ_PSS_SINCE  when this cluster's accounting moved from RSS to PSS
                    (JobAcctGatherParams=UsePss), as YYYY-MM-DD[ HH:MM[:SS]]
                    [ ZONE], YYYY-MM-DDTHH:MM[:SS]Z or @EPOCH, e.g.
                    SQ_PSS_SINCE="2026-10-19 15:59 CEST": a peak measured in a
@@ -1238,6 +1256,8 @@ Good to know:
 - Efficiency comes from accounting, so it shows once accounting has recorded
   the job's end, a moment after squeue says it ended.
 - Slurm forgets a job's output paths about 5 minutes after it ends.
+- While accounting does not answer, an array's count is a floor (>=N): its
+  done, failed and cancelled tasks are only known there.
 EOF
 }
 # every message names sq job and is scrubbed whole: it carries ids, names and
@@ -1640,14 +1660,17 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
     if (R[array_record[i], "StateCompact"] == "PD" && R[array_record[i], "Reason"] != "None") why = R[array_record[i], "Reason"]
   st = (done ? " · " done " done" : "") (fail ? " · " fail " failed" : "") (canc ? " · " canc " cancelled" : "") \
        (run ? " · " run " running" : "") (pend ? " · " pend " pending" : "")
-  TITLE = paint("1;36", "▌ ") paint("1", job) "  " name " · " user " · array of " total (st != "" ? ": " substr(st, 4) : "")
+  # Franz (#1): while accounting is missing, the done, failed and cancelled
+  # tasks are, so the count is a floor and says why
+  TITLE = paint("1;36", "▌ ") paint("1", job) "  " name " · " user " · array of " \
+          ((!ntask_rows && astat != "ok") ? "≥" total " (accounting did not answer)" : total) (st != "" ? ": " substr(st, 4) : "")
   source_notes(1)
   if (ncv) cmed = median(CV, ncv)
   if (nmv) mmed = median(MV, nmv)
   if (ncv) line("arr", cpuline(cmed, cap, "median · min " pct1(cmin) " (" cminid ") · max " pct1(cmax) \
                 ((!mixed && cap) ? " · " plural(ncpu, "CPU") " per task (" req " requested)" : "")))
   if (nmv) line("arr", memline(mmed, memcolour(mmed), "median · min " pct1(mmin) " (" mminid ") · max " pct1(mmax)))
-  if (astat != "ok") note("arr", acct_down())
+  if (astat != "ok") note("arr", (!ntask_rows ? "done, failed and cancelled tasks are not counted: " : "") acct_down())
   else if (!done) note("arr", "no task has completed yet" (why != "" ? "; pending (" why ")" : ""))
   if (!mixed && cap) note("arr", captext(req, ncpu, cap))
   if (polled) note("arr", plural(polled, "task") ": " POLLED)
@@ -1697,13 +1720,13 @@ BEGIN {
 JOBAWK
 job_run() {   # job_run PHASE: the report's gawk, PHASE pick (what to show) or show
 	env LC_ALL="$gloc" gawk -v phase="$1" -v job="$job" -v task="$task" -v myuid="$myuid" -v qstat="$qstat" \
-		-v astat="$astat" -v memfail="$memfail" -v pss="$job_pss" -v tmo="$tmo" \
+		-v astat="$astat" -v memfail="$memfail" -v pss="$job_pss" -v tmo="$job_atmo" \
 		-v qfields="$job_qfields" -v afields="$job_afields" "$shared_awk$fname_awk$job_awk"
 }
 
 sub_job() {
 	local a v f positional=0 idraw= idset=0 job task= off= label rc qfmt= afmt= kv
-	local qstat astat qwhy= qwhy_real= awhy= awhy_real= verdict= raw= state= own=0
+	local qstat astat= qwhy= qwhy_real= awhy= awhy_real= verdict= raw= state= own=0 job_atmo
 	while [ $# -gt 0 ]; do
 		a=$1; shift
 		if [ $positional = 0 ]; then
@@ -1755,7 +1778,7 @@ sub_job() {
 	collect_pidfile=$tmp/inflight
 	mkfifo "$tmp/nap" && exec {job_nap}<> "$tmp/nap" || job_fail "cannot make a timer FIFO in $tmp"
 	{ while kill -0 $$ 2>/dev/null; do read -t 1 -u "$job_nap"; done
-	  read -r v < "$tmp/inflight" 2>/dev/null && [ -n "$v" ] && kill "$v" 2>/dev/null
+	  read -r v < "$tmp/inflight" 2>/dev/null && [ -n "$v" ] && kill $v 2>/dev/null
 	  rm -rf "$tmp"; } &
 	job_sentinel_pid=$!
 	color_resolve
@@ -1763,6 +1786,14 @@ sub_job() {
 	myuid=$(id -u 2>/dev/null)
 	case $myuid in ''|*[!0-9]*) myuid= ;; esac
 
+	# Franz's decision (2026-10-21): one-shot, sq job waits up to 30 s for
+	# accounting (a big array's rows take a while), SQ_TIMEOUT's bound
+	# instead when it sets a valid one (tmo took it as given); the queue
+	# keeps SQ_TIMEOUT's.  sacct runs while squeue is asked
+	job_atmo=30; [ "$tmo" != "${SQ_TIMEOUT-}" ] || job_atmo=$tmo
+	for f in $job_afields; do afmt="$afmt${afmt:+,}$f"; done
+	SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 collect -t "$job_atmo" -b acct \
+		sacct -p --delimiter="$nonce2" -n --noconvert -a -j "$label" -o "$afmt"
 	for f in $job_qfields; do qfmt="$qfmt${qfmt:+,}$f:$nonce"; done
 	SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$qfmt collect -w queue squeue -h --jobs="$label" -t all
 	rc=$?
@@ -1771,12 +1802,10 @@ sub_job() {
 	elif [ $rc = 1 ] && LC_ALL=C grep -q 'Invalid job id specified' "$tmp/queue.err" 2>/dev/null; then qstat=none
 	else qstat=fail; why_of qwhy $rc "$tmp/queue" squeue
 	fi
-	for f in $job_afields; do afmt="$afmt${afmt:+,}$f"; done
-	SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 collect -w acct \
-		sacct -p --delimiter="$nonce2" -n --noconvert -a -j "$label" -o "$afmt"
+	collect_join acct
 	rc=$?
 	if [ $rc = 0 ]; then astat=ok
-	else why_of awhy $rc "$tmp/acct" sacct; astat=fail; [ "$awhy_real" != "no response after ${tmo}s" ] || astat=timeout
+	else why_of awhy $rc "$tmp/acct" sacct "$job_atmo"; astat=fail; [ "$awhy_real" != "no response after ${job_atmo}s" ] || astat=timeout
 	fi
 	export SQJ_QFILE=$tmp/queue SQJ_AFILE=$tmp/acct SQJ_MEMREAD=$tmp/memread SQJ_AWHY=$awhy SQJ_COLOR=$color
 	: > "$tmp/memread"

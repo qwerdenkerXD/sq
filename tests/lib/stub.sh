@@ -101,9 +101,9 @@ refuse() {
 [ -n "${SQSTUB_FIXTURE:-}" ] || refuse "SQSTUB_FIXTURE is not set: this is sq's test stub, not Slurm"
 
 # ---- the log line, written before anything can fail -------------------------
-{
-	printf 'CALL\t%s\t' "$tool"
-	[ $# -gt 0 ] && printf '%q ' "$@"
+# composed first and appended in one write, as sq job asks several tools at
+# once and their lines must not mix
+line=$(printf 'CALL\t%s\t' "$tool"; [ $# -gt 0 ] && printf '%q ' "$@"
 	for v in SQUEUE_FORMAT SQUEUE_FORMAT2 SLURM_TIME_FORMAT SLURM_BITSTR_LEN \
 	         SQ_NONCE SQ_NONCE2 SQ_NONCE3 SLURM_CLUSTERS; do
 		if [ -n "${!v+set}" ]; then printf '\t%s=%q' "$v" "${!v}"
@@ -111,9 +111,8 @@ refuse() {
 	done
 	for v in $(compgen -e); do      # any other squeue or sacct setting that reached it
 		case $v in SQUEUE_FORMAT|SQUEUE_FORMAT2) ;; SQUEUE_*|SACCT_*) printf '\t%s=%q' "$v" "${!v}" ;; esac
-	done
-	printf '\n'
-} >> "$SQSTUB_LOG"
+	done)
+printf '%s\n' "$line" >> "$SQSTUB_LOG"
 
 # ---- argv: every option sq can send, nothing else --------------------------
 mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0

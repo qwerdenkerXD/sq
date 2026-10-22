@@ -9,6 +9,8 @@
 #   broken  timeout's own failure: every call fails with rc 125, as when it
 #           cannot fork; SQSTUB_TIMEOUT_TEXT, when set, is what it says instead
 #           (printf %b: several lines, any bytes)
+#   log     the real one, each call logged first as "TIMEOUT <argv>" in
+#           SQSTUB_LOG, so a case can read the bound sq gave a client
 real=
 IFS=: read -ra dirs <<< "$PATH"
 for dir in "${dirs[@]}"; do
@@ -29,7 +31,10 @@ case ${SQSTUB_TIMEOUT:-} in
 		{ "$real" "$@" 2>&3; } 3>&2 2>/dev/null; rc=$?    # without bash's own "Segmentation fault"
 		[ $rc != 139 ] || echo "timeout: the monitored command dumped core" >&2
 		exit $rc ;;
+	log)
+		printf 'TIMEOUT\t%s\n' "$*" >> "${SQSTUB_LOG:?}"
+		exec "$real" "$@" ;;
 	broken)
 		printf '%b\n' "${SQSTUB_TIMEOUT_TEXT:-timeout: fork system call failed: Resource temporarily unavailable}" >&2; exit 125 ;;
-	*)	echo "tests/lib/timeout-as/timeout: SQSTUB_TIMEOUT is not old, core or broken" >&2; exit 125 ;;
+	*)	echo "tests/lib/timeout-as/timeout: SQSTUB_TIMEOUT is not old, core, broken or log" >&2; exit 125 ;;
 esac
