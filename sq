@@ -1018,7 +1018,10 @@ log_classify() {
 		*) log_kind=run ;;
 	esac
 }
+# Only a regular file is read, as sq job's why tail reads one: opening a FIFO
+# blocks for good, and tail streams a device like /dev/zero forever
 log_readable() {   # is the file there to be read?  Not yet: 1.  Unreadable: rc 1 for sq
+	[ ! -e "$log_path" ] || [ -f "$log_path" ] || log_fail "$log_path is not a regular file"
 	{ : < "$log_path"; } 2>/dev/null && return 0
 	[ -e "$log_path" ] || return 1
 	local why; why=$({ : < "$log_path"; } 2>&1)

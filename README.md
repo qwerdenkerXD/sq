@@ -183,7 +183,8 @@ watch -n 5 'sq log --no-follow -n 20 12345'
   job ended (`sq log: job 12345 ended: FAILED (exit code 1:0)`). The exit code is 0 whatever
   the job's own outcome, 1 when the file cannot be shown (Slurm forgets a job about 5 minutes
   after it ends, and its path with it; an interactive job; output to `/dev/null`; a file not
-  readable), 2 for a usage error, 128+N when stopped by signal N.
+  readable; a path that is no regular file, such as a FIFO or a device, which `sq job` does not
+  read either), 2 for a usage error, 128+N when stopped by signal N.
 - A requeued job ends the stream with a note; run `sq log` again for its new run.
 - It follows for as long as Slurm cannot tell it the job ended, and asks Slurm every 5 s.
   "Live" can lag: a job on another node writes through NFS, and many programs buffer their

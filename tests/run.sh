@@ -4133,6 +4133,26 @@ sq log: job 500 ended: COMPLETED (exit code 0:0)"'
 "'
 }
 
+# A FIFO or a device as the output path: opening the FIFO blocked sq log for
+# good, and tail streamed /dev/zero into its reader without end.  Refused at
+# once, as sq job's why tail refuses one, running or ended, followed or not
+c_log_not_regular() {
+	T_TITLE="sq log on a FIFO or /dev/zero as the output path: rc 1 within 2 s, 'is not a regular file', nothing left running"
+	local fifo=$T_DIR/fifo path state mode
+	mkfifo "$fifo"
+	for path in "$fifo" /dev/zero; do
+		for state in R CD; do
+			for mode in --no-follow ""; do
+				sq_start "$(log_fx "${path##*/}-$state${mode:+-nofollow}" <<<"StateCompact=$state; STDOUT=$path; STDERR=$path")" \
+					-- log ${mode:+"$mode"} 500
+				sq_finish "$RUN" 2
+				need "$path, $state, ${mode:-following}: rc 1 within 2 s, the refusal, nothing written, nothing left running" \
+					eval 'rc_is 1 && out_empty && err_is "sq log: $path is not a regular file" && nothing_at_exit && nothing_left'
+			done
+		done
+	done
+}
+
 c_log_syntax() {   # L1
 	T_TITLE="sq log's command line: options before or after the id, -n N, repeats, --, every refusal with an example"
 	local example="e.g. sq log 12345, an array task 12345_4 or a het job's component 12345+1" w
@@ -5530,7 +5550,7 @@ cases=(
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
 	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
-	sub_dispatch sub_stray log_follow log_now log_syntax log_paths log_stream
+	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_tail_hung why_forged why_pending why_dep
 	why_resources why_ended why_array why_budget why_parallel why_signals
