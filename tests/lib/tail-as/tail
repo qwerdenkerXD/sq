@@ -6,6 +6,8 @@
 #   old      GNU coreutils 8.22 (RHEL 7), older than the 8.28 sq log follows with
 #   hang     any call but --version blocks (sleeps 30 s, in place of tail), as a
 #            read on a hung NFS mount does
+#   log      the real tail, each call logged first as "TAIL <argv>" in
+#            SQSTUB_LOG, so a case can tell whether sq read a file at all
 # Any other call is the real tail's.
 real=
 IFS=: read -ra dirs <<< "$PATH"
@@ -22,4 +24,5 @@ for a in "$@"; do
 	esac
 done
 [ "${SQSTUB_TAIL:-}" != hang ] || exec sleep 30
+[ "${SQSTUB_TAIL:-}" != log ] || printf 'TAIL\t%s\n' "$*" >> "${SQSTUB_LOG:?}"
 exec "$real" "$@"

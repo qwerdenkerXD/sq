@@ -4870,6 +4870,18 @@ c_why_tail_file() {   # W3, V1-V3
 		why_run "$d" -- --no-color job 11836
 		need "$st: no tail, no note about the file" eval 'rc_is 0 && ! why_lines | grep -qE "ends with|its output"'
 	done
+	# ... and with a readable file, which a tail for every final state would
+	# read without a word: tail-as logs every read; FAILED is the control
+	for st in F OOM TO CA NF; do
+		d=$(tail_fx "rd$st" StateCompact=$st -- "$(out_file 'readable\n')" "$(dated 200s)")
+		why_run "$d" PATH="$here/lib/tail-as:$here/bin:$PATH" SQSTUB_TAIL=log -- --no-color job 11836
+		if [ $st = F ]; then
+			need "FAILED, a readable file: read once (tail -c 4097), its line shown" eval '
+				rc_is 0 && [ "$(grep -c "^TAIL	-c 4097 -- " "$LOG")" = 1 ] && tail_lines_are readable'
+		else
+			need "$st, a readable file: never read, no tail (V1)" eval 'rc_is 0 && ! grep -q "^TAIL" "$LOG" && ! why_lines | grep -qE "ends with|its output"'
+		fi
+	done
 	d=$(tail_fx other UserName=schroder UserID=1029 -- "$(out_file 'theirs\n')" "$(dated 200s)")
 	why_run "$d" -- --no-color job 11836
 	need "another user's job: its tail too" eval 'rc_is 0 && tail_lines_are theirs'
