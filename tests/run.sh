@@ -3662,7 +3662,7 @@ c_memalloc_narrow() {
 	need "... on a 70-column screen without colour: rc 0, the whole form, !121G" eval 'rc_is 0 && [ "$(mem_of 4008)" = "!121G" ]'
 }
 c_memalloc_call() {
-	T_TITLE="the mirror call: the queue call's arguments and env pins without its sort, framed by the queue nonce; none with MEM hidden, a cluster selection, a queue call failed (also after whole records), cut off or unreadable, or no row; nor JOBMEM's calls on a queue cut off"
+	T_TITLE="the mirror call: the queue call's arguments and env pins without its sort, framed by the queue nonce; none with MEM hidden, a cluster selection (SQUEUE_FEDERATION, SQUEUE_SIB, SQUEUE_SIBLING too, empty or not, and no JOBMEM call then), a queue call failed (also after whole records), cut off or unreadable, or no row; nor JOBMEM's calls on a queue cut off"
 	local main mirror at n args f d how
 	mem_run memalloc SQ_WIDTH=110 -- --color -p main -n blastp,prokka --all -S i
 	main=$(gawk -F'\t' '$1 == "CALL" && $2 == "squeue" { print $3; exit }' "$LOG")
@@ -3686,6 +3686,16 @@ c_memalloc_call() {
 	for f in bioinf ""; do
 		mem_run memalloc SQ_WIDTH=110 SLURM_CLUSTERS="$f" -- --color
 		need "SLURM_CLUSTERS='$f': rc 0, no mirror call, busco its %m in the unit rule" eval 'rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7.6G ]'
+	done
+	# squeue's --federation and --sibling as settings, which squeue reads when
+	# set at all: as fsill, whose fastqc runs, so JOBMEM's calls would come too
+	mem_run memalloc SQ_WIDTH=110 -- --color
+	need "none of them, as fsill: rc 0, the allocation call, sstat and the mirror call" eval '
+		rc_is 0 && [ "$(calls alloc)" -eq 1 ] && [ "$(calls sstat)" -eq 1 ] && [ "$(calls mirror)" -eq 1 ]'
+	for f in SQUEUE_FEDERATION=1 SQUEUE_FEDERATION= SQUEUE_SIB=1 SQUEUE_SIB= SQUEUE_SIBLING=1 SQUEUE_SIBLING=; do
+		mem_run memalloc SQ_WIDTH=110 "$f" -- --color
+		need "$f: rc 0, no allocation call, no sstat, no mirror call, busco its %m in the unit rule" eval '
+			rc_is 0 && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7.6G ]'
 	done
 	mem_run memalloc SQ_WIDTH=110 -- --color -o i,j,u,T,M,L,C,R
 	need "MEM not shown (-o without m): rc 0, no mirror call" eval 'rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(calls queue)" -eq 1 ]'

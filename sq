@@ -3042,11 +3042,16 @@ keys=${keys%,}                       # the last nonce leaves an empty field that
 # that `id -u` names, never a login compared as text), hidden and last.
 # SLURM_CLUSTERS counts even when empty: squeue then fails with rc 1 ("No
 # cluster '' known by database."), so there are no rows to measure either.
+# SQUEUE_FEDERATION, SQUEUE_SIB and SQUEUE_SIBLING are squeue's --federation
+# and --sibling when set at all, empty too (squeue 23.11 checks only that).
+# FederationParameters=fed_display in slurm.conf does the same and is not
+# detected: it would take a scontrol call on every refresh.
 memon=0 qpos_jobid= qpos_uid=
 case ",$keys," in *,m,*) memon=1 ;; esac
 case " $seen " in *" -M "*) memon=0 ;; esac
 [ "$clustersel" = 0 ] || memon=0
 [ -z "${SLURM_CLUSTERS+set}" ] || memon=0
+[ -z "${SQUEUE_FEDERATION+set}${SQUEUE_SIB+set}${SQUEUE_SIBLING+set}" ] || memon=0
 [ "$memon" = 0 ] || { qfield A; qpos_jobid=$qfields; qfield U; qpos_uid=$qfields; }
 
 cols=${SQ_WIDTH:-${COLUMNS:-}}

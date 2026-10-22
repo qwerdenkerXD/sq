@@ -316,9 +316,12 @@ efficiency
   `--mem=0` job the memory of the node it lands on. A red `!` before the value means sq could
   not get the totals, and the value is squeue's `%m`; a job Slurm reports no total for shows
   `%m` too. The totals cost one more `squeue` call per refresh, made only while MEM is shown and
-  no cluster is selected: under `-M`, `--federation`, `--sibling` or `SLURM_CLUSTERS`, MEM is
-  `%m`. `%m` means what squeue means by it, per node, or per CPU for a `--mem-per-cpu` job, but
-  is printed in the same units (`7800M` reads `7.6G`); a `0` (`--mem=0`) stays `0`.
+  no cluster is selected: under `-M`, `--federation`, `--sibling`, `SLURM_CLUSTERS` or
+  `SQUEUE_FEDERATION`, `SQUEUE_SIB`, `SQUEUE_SIBLING` (set at all, even empty), MEM is `%m`, and
+  your own jobs' use is not read either. `FederationParameters=fed_display` in `slurm.conf`
+  selects the federation too, but sq does not detect it. `%m` means what squeue means by it, per
+  node, or per CPU for a `--mem-per-cpu` job, but is printed in the same units (`7800M` reads
+  `7.6G`); a `0` (`--mem=0`) stays `0`.
 - **Your own running jobs show the memory they use** in MEM, as in use/allocated (`83/100G`,
   `7.7/15.2G`), green below 70 %, yellow from 70 %, red from 90 %, bold red from 100 % (on a
   screen too narrow for that, whole numbers, `7/15G`, but an allocation below 10 keeps its
