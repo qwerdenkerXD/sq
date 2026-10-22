@@ -1,0 +1,15 @@
+[1;36m▌ [0m[1m11967[0m  qc-batch · hal
+[2mstate and times[0m
+  state       [33mPENDING[0m (JobHeldUser)
+  start       no estimate yet
+  submitted   2026-10-21 17:10 (1h ago)
+[2mwhy[0m
+  [33mneeds action[0m: on user hold; only hal (or an admin) can release it
+[2mresources[0m
+  CPUs        2 requested
+  memory      15.2G requested
+  time limit  4h00m
+[2mfiles[0m
+  work dir    /media/BioNAS2/hal/qc
+  stdout      /media/BioNAS2/hal/qc/slurm-11967.out
+  stderr      into stdout

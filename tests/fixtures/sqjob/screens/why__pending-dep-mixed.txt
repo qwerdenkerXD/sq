@@ -1,0 +1,18 @@
+▌ 11969  report · fsill
+state and times
+  state       PENDING (Dependency)
+  dependency  afterok:11950(unfulfilled),afterany:11958(unfulfilled)
+  start       no estimate yet
+  submitted   2026-10-21 18:31 (10m ago)
+why
+  waits its turn: it may start once all of these are met
+    11950  must complete successfully · now RUNNING on fb2-bioinf · 21h46m left of 1d00h
+    11958  must end · now PENDING (Resources) · Slurm's estimate: 2026-10-22 16:28 (in 21h)
+resources
+  CPUs        1 requested
+  memory      7.6G requested
+  time limit  1h00m
+files
+  work dir    /media/BioNAS2/fsill/rnaseq
+  stdout      /media/BioNAS2/fsill/rnaseq/slurm-11969.out
+  stderr      into stdout

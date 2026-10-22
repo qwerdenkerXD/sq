@@ -1,0 +1,2 @@
+@include ../../_common/job-defaults
+JobID=11964; ArrayJobID=11964; StateCompact=PD; Reason=Resources; UserName=fsill; UserID=1041; Name=assembly; NodeList=; BatchHost=; NumCPUs=100; tres_alloc=cpu=100,mem=200G,node=1,billing=100; TimeUsed=0:00; TimeLeft=3-00:00:00; TimeLimit=3-00:00:00; SubmitTime=\{epoch-1290s}; StartTime=\{epoch+31451400s}; WorkDir=/media/BioNAS2/fsill/asm; STDOUT=/media/BioNAS2/fsill/asm/slurm-11964.out; STDERR=/media/BioNAS2/fsill/asm/slurm-11964.out; EndTime=N/A

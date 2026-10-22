@@ -1,0 +1,19 @@
+[1;36m▌ [0m[1m11353[0m  prokka-sif · hal
+[2mstate and times[0m
+  state     [31mFAILED[0m · exit 4
+  ran       6s on fb2-bioinf-0 (LocalQ)
+  ended     2026-10-16 05:21 (5d13h ago)
+[2mwhy[0m
+  exit 4 (or 132: a command killed by SIGILL, illegal instruction)
+  [2m↳ sacct prints an exit above 128 less 128, so it cannot tell the two apart[0m
+  [2m↳ an illegal instruction often means a program built for a newer CPU than fb2-bioinf-0's[0m
+[2mresources[0m
+  CPUs      4 allocated
+  memory    12.5G allocated
+[2mfiles[0m
+  work dir  /media/BioNAS2/hal/prokka
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+[2mefficiency[0m
+  CPU [31m█[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[2;31m▒[0m   4.2%  1s of 24s
+  MEM [2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[0m   0.4%  0.0/12.5G peak (the batch script)
+  [2m↳ the batch script started before 2026-10-20 14:45 UTC (RSS accounting): memory shared between processes counted once per process; the peak may read high[0m

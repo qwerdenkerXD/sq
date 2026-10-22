@@ -1,0 +1,21 @@
+[1;36m▌ [0m[1m11955[0m  toobig · fsill
+[2mstate and times[0m
+  state       [33mPENDING[0m (BadConstraints)
+  start       no estimate yet
+  submitted   2026-10-21 18:39 (2m ago)
+[2mwhy[0m
+  [31mcan never start[0m: no node it may use (LocalQ) is that big
+    [2m              CPUs  memory for jobs[0m
+    it asks        140           986.3G
+    fb2-bioinf     128           976.5G  too few CPUs, too little memory
+    fb2-bioinf-0    24              75G  too few CPUs, too little memory
+  [2m↳ memory for jobs is a node's RealMemory less what Slurm keeps for the system (MemSpecLimit): 1006.8G less 30.2G on fb2-bioinf[0m
+  [2m↳ Slurm keeps it pending all the same; remove it: scancel 11955[0m
+[2mresources[0m
+  CPUs        140 requested
+  memory      986.3G requested
+  time limit  1h00m
+[2mfiles[0m
+  work dir    /home/fsill
+  stdout      /home/fsill/slurm-11955.out
+  stderr      into stdout

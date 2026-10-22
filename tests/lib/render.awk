@@ -1,6 +1,6 @@
 # Renders a fixture in the format a Slurm client was asked for; driven by
 # tests/lib/stub.sh, which documents the fixture format.  Input comes from the
-# environment: STUB_TOOL, STUB_MODE (pct | long | sacct), STUB_FMT, STUB_DELIM,
+# environment: STUB_TOOL, STUB_MODE (pct | long | sacct | raw), STUB_FMT, STUB_DELIM,
 # STUB_TRAIL, STUB_FILE, SQSTUB_LOG, STUB_MIRROR=1 when the queue's own file
 # answers sq's mirror call (stub.sh says how), STUB_CALL (which call of this
 # tool and format this is in the run) and STUB_RUN (the run's directory).
@@ -17,6 +17,7 @@ function where() { return cur_file " line " cur_line }
 # the format, as tokens: lit[0] val[1] lit[1] val[2] ... val[nf] lit[nf]
 function parse_format(   i, c, d, m, items, p, name, spec) {
   nf = 0; lit[0] = ""
+  if (mode == "raw") return                   # scontrol -o: each line as written
   if (mode == "pct") {                        # squeue -o / SQUEUE_FORMAT, sinfo -o:
     for (i = 1; i <= length(fmt); i++) {      # %<letter>, then literal text up to
       c = substr(fmt, i, 1)                   # the next %
@@ -183,6 +184,7 @@ function slurm_value(k, v,   len) {
 }
 
 function render(   rec, i, out, k, src) {
+  if (mode == "raw") { printf "%s\n", decode(cur_text); return }
   parse_fields(cur_text, rec)
   out = lit[0]
   for (i = 1; i <= nf; i++) {
@@ -224,7 +226,8 @@ function file_op(arg,   m, op, rel, rest, full, dir) {
   else if (op == "truncate") { printf "" > full; close(full) }
   else if (op == "chmod")    { if (rest !~ /^[0-7]+$/ || system("chmod " rest " -- " shq(full)) != 0) refuse(where() ": @file chmod " rest " failed") }
   else if (op == "touch")    { if (system("touch -d " shq(decode(rest)) " -- " shq(full)) != 0) refuse(where() ": @file touch failed") }
-  else refuse(where() ": @file knows create, append, truncate, chmod and touch, not '" op "'")
+  else if (op == "fifo")     { if (system("mkfifo -- " shq(full)) != 0) refuse(where() ": @file fifo failed") }
+  else refuse(where() ": @file knows create, append, truncate, chmod, touch and fifo, not '" op "'")
 }
 
 function run_file(path, depth,   line, rc, saved_file, saved_line, dir, d, arg, tmp, k, step, on) {

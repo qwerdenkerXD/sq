@@ -1,0 +1,19 @@
+▌ 11820  kraken-build · schroder
+state and times
+  state     OUT_OF_MEMORY · exit 0/oom
+  ran       1m40s on fb2-bioinf (LocalQ)
+  ended     2026-10-18 12:56 (3d05h ago)
+why
+  it used more than its 2G memory limit, so the kernel killed it
+resources
+  CPUs      2 allocated (1 requested)
+  memory    2G allocated
+files
+  work dir  /media/BioNAS2/schroder/kraken
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+efficiency
+  CPU ███████▒▒▒▒▒▒▒▒▒  45.5%  1m31s of 3m20s
+  MEM ███████████████▒  91.8%  1.8/2G peak (the batch script)
+  ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%
+  ↳ OUT_OF_MEMORY: it hit its 2G limit between two samples; the peak shown is too low
+  ↳ the batch script started before 2026-10-20 14:45 UTC (RSS accounting): memory shared between processes counted once per process; the peak may read high

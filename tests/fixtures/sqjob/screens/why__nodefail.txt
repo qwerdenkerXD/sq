@@ -1,0 +1,16 @@
+▌ 11971  bash · amadvi
+state and times
+  state     NODE_FAIL on fb2-bioinf-0
+  ran       1h02m on fb2-bioinf-0 (LocalQ)
+  ended     2026-10-21 18:38 (3m ago)
+why
+  its node fb2-bioinf-0 failed while it ran
+  ↳ an interactive job is never requeued
+resources
+  CPUs      4 allocated
+  memory    12.5G allocated
+files
+  work dir  /home/amadvi
+  output    its terminal (an interactive job)
+efficiency
+  CPU ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   0.0%  0s of 4h08m

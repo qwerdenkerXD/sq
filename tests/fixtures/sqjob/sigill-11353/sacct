@@ -1,0 +1,4 @@
+@include ../../_common/job-sacct-defaults
+@defaults UID=1025; User=hal; Submit=\{epoch-480000s}; Start=\{epoch-479990s}; End=\{epoch-479984s}; WorkDir=/media/BioNAS2/hal/prokka; ElapsedRaw=6; AllocCPUS=4; ReqCPUS=4; ReqTRES=billing=4,cpu=4,mem=12800M,node=1; AllocTRES=billing=4,cpu=4,mem=12800M,node=1; NodeList=fb2-bioinf-0; Partition=LocalQ; TimelimitRaw=120
+JobID=11353; JobIDRaw=11353; State=FAILED; ExitCode=4:0; TotalCPU=00:01.210; JobName=prokka-sif
+JobID=11353.batch; JobIDRaw=11353.batch; UID=; User=; State=FAILED; ExitCode=4:0; ReqTRES=; AllocTRES=cpu=4,mem=12800M,node=1; TotalCPU=00:01.210; TRESUsageInTot=cpu=00:00:01,energy=0,fs/disk=31457280,mem=52428800,pages=0,vmem=1073741824; TRESUsageInMax=cpu=00:00:01,energy=0,fs/disk=31457280,mem=52428800,pages=0,vmem=1073741824; NTasks=1; Partition=; WorkDir=; JobName=batch; TimelimitRaw=

@@ -1,0 +1,16 @@
+▌ 11945  star-index · fsill
+state and times
+  state     CANCELLED · exit 0/sig15: signal 15 (SIGTERM)
+  ran       1h12m on fb2-bioinf (LocalQ)
+  ended     2026-10-21 17:25 (1h ago)
+why
+  cancelled by you after it ran 1h12m
+resources
+  CPUs      8 allocated
+  memory    60.9G allocated
+files
+  work dir  /media/BioNAS2/fsill/rnaseq
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+efficiency
+  CPU ██████████████▒▒  88.7%  8h31m of 9h36m
+  MEM ████████▒▒▒▒▒▒▒▒  52.5%  32.0/60.9G peak (the batch script)

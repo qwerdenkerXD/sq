@@ -1,0 +1,24 @@
+▌ 11836  count-reads · fsill
+state and times
+  state     FAILED · exit 127
+  ran       2m20s on fb2-bioinf (LocalQ)
+  ended     2026-10-21 18:39 (2m ago)
+why
+  exit 127: a command was not found (a typo, a module not loaded, or not on PATH)
+  its output ends with:
+    /var/spool/slurmd/job11836/slurm_script: line 9: samtols: command not found
+    2026-10-21 09:41:47 counting bam/S47.sorted.bam
+    /var/spool/slurmd/job11836/slurm_script: line 9: samtols: command not found
+    2026-10-21 09:41:48 counting bam/S48.sorted.bam
+    /var/spool/slurmd/job11836/slurm_script: line 9: samtols: command not found
+resources
+  CPUs      2 allocated (1 requested)
+  memory    15.2G allocated
+files
+  work dir  /media/BioNAS2/fsill/rnaseq
+  stdout    /media/BioNAS2/fsill/rnaseq/logs/count-reads-11836.out
+  stderr    into stdout
+efficiency
+  CPU ███████▒▒▒▒▒▒▒▒▒  46.8%  2m11s of 4m40s
+  MEM █▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   8.0%  1.2/15.2G peak (the batch script)
+  ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%

@@ -1,0 +1,6 @@
+# bioserver's users as the why fixtures know them (getent passwd, tests/bin/getent)
+root:x:0:0:root:/root:/bin/bash
+amadvi:x:1021:1021::/home/amadvi:/bin/bash
+hal:x:1025:1025::/home/hal:/bin/bash
+schroder:x:1029:1029::/home/schroder:/bin/bash
+fsill:x:1041:1041::/home/fsill:/bin/bash

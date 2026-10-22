@@ -1,0 +1,15 @@
+▌ 11967  qc-batch · hal
+state and times
+  state       PENDING (JobHeldUser)
+  start       no estimate yet
+  submitted   2026-10-21 17:10 (1h ago)
+why
+  needs action: on user hold; only hal (or an admin) can release it
+resources
+  CPUs        2 requested
+  memory      15.2G requested
+  time limit  4h00m
+files
+  work dir    /media/BioNAS2/hal/qc
+  stdout      /media/BioNAS2/hal/qc/slurm-11967.out
+  stderr      into stdout

@@ -1,0 +1,5 @@
+@include ../../_common/job-defaults
+# its output file, dated after the job started (the render script's content)
+@file create media/BioNAS2/hal/prokka/slurm-11353.out INFO:    Using cached SIF image\n/var/spool/slurmd/job11353/slurm_script: line 6: 2214 Illegal instruction     (core dumped) apptainer exec prokka.sif prokka --cpus 4 --outdir out contigs.fa\n
+@file touch media/BioNAS2/hal/prokka/slurm-11353.out \{now-120s}
+JobID=11353; ArrayJobID=11353; StateCompact=F; exit_code=132:0; UserName=hal; UserID=1025; Name=prokka-sif; NodeList=fb2-bioinf-0; BatchHost=fb2-bioinf-0.bioinf.local; NumCPUs=4; tres_alloc=cpu=4,mem=12800M,node=1,billing=4; TimeUsed=0:06; TimeLeft=1:59:54; TimeLimit=2:00:00; SubmitTime=\{epoch-136s}; StartTime=\{epoch-126s}; EndTime=\{epoch-150s}; WorkDir=\{run}/media/BioNAS2/hal/prokka; STDOUT=\{run}/media/BioNAS2/hal/prokka/slurm-11353.out; STDERR=\{run}/media/BioNAS2/hal/prokka/slurm-11353.out; Reason=NonZeroExitCode

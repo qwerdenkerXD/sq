@@ -1,0 +1,23 @@
+▌ 11353  prokka-sif · hal
+state and times
+  state     FAILED · exit 4
+  ran       6s on fb2-bioinf-0 (LocalQ)
+  ended     2026-10-21 18:39 (2m ago)
+why
+  exit 132: a command in it was killed by signal 4 (SIGILL, illegal instruction)
+  ↳ a shell reports a command killed by signal N as exit 128+N; sacct will print exit 4, as it prints any exit above 128 less 128
+  ↳ an illegal instruction often means a program built for a newer CPU than fb2-bioinf-0's
+  its output ends with:
+    INFO:    Using cached SIF image
+    /var/spool/slurmd/job11353/slurm_script: line 6: 2214 Illegal instruction     (core dumped) app…
+  ↳ read here on fb2-bioinf; the job wrote it on fb2-bioinf-0
+resources
+  CPUs      4 allocated
+  memory    12.5G allocated
+files
+  work dir  /media/BioNAS2/hal/prokka
+  stdout    /media/BioNAS2/hal/prokka/slurm-11353.out
+  stderr    into stdout
+efficiency
+  CPU █▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   4.2%  1s of 24s
+  MEM ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   0.4%  0.0/12.5G peak (the batch script)

@@ -1,0 +1,24 @@
+[1;36m▌ [0m[1m11836[0m  count-reads · fsill
+[2mstate and times[0m
+  state     [31mFAILED[0m · exit 127
+  ran       2m20s on fb2-bioinf (LocalQ)
+  ended     2026-10-21 18:39 (2m ago)
+[2mwhy[0m
+  exit 127: a command was not found (a typo, a module not loaded, or not on PATH)
+  [2mits output ends with:[0m
+    /var/spool/slurmd/job11836/slurm_script: line 9: samtols: command not found
+    2026-10-21 09:41:47 counting bam/S47.sorted.bam
+    /var/spool/slurmd/job11836/slurm_script: line 9: samtols: command not found
+    2026-10-21 09:41:48 counting bam/S48.sorted.bam
+    /var/spool/slurmd/job11836/slurm_script: line 9: samtols: command not found
+[2mresources[0m
+  CPUs      2 allocated (1 requested)
+  memory    15.2G allocated
+[2mfiles[0m
+  work dir  /media/BioNAS2/fsill/rnaseq
+  stdout    /media/BioNAS2/fsill/rnaseq/logs/count-reads-11836.out
+  stderr    into stdout
+[2mefficiency[0m
+  CPU [32m█[32m█[32m█[32m█[32m█[32m█[32m█[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[0m  46.8%  2m11s of 4m40s
+  MEM [32m█[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[0m   8.0%  1.2/15.2G peak (the batch script)
+  [2m↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%[0m

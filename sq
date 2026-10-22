@@ -24,10 +24,11 @@
 #                           pushes the footer off screen (or --reserve 2)
 #   sq log JOBID            a job's output file, followed while the job runs
 #                           (sq log -h)
-#   sq job JOBID            one job: state, resources, files, and its CPU and
-#                           memory efficiency once it ended; an array's summary
-#                           (sq job -h).  A subcommand comes first: only options
-#                           that take no value may stand before it
+#   sq job JOBID            one job: state, why it is where it is, resources,
+#                           files, and its CPU and memory efficiency once it
+#                           ended; an array's summary (sq job -h).  A subcommand
+#                           comes first: only options that take no value may
+#                           stand before it
 #
 # Two modes.  FULL shows every job.  COMPACT fits the screen's height: rows
 # that do not fit collapse into lines like "… 42 jobs running".  Stuck jobs
@@ -199,11 +200,14 @@ collect_pid= log_pids=                          # the clients collect -w and -b 
                                                 # sq log's tail and its sentinel
 collect_pidfile= job_sentinel_pid=              # where collect names those clients for
                                                 # a sentinel; sq job's sentinel
+job_reader_pid=                                 # sq job's reader of an output file
 declare -A collect_bg=()                        # collect -b's clients, by NAME
 # The processes first, by pid (each ended with TERM and waited for, so none
-# outlives sq), then the files
+# outlives sq), then the files.  The output file's reader alone is killed
+# outright and never waited for: it may hang in the kernel (sq job says why)
 cleanup() {
 	local pid
+	[ -z "$job_reader_pid" ] || kill -KILL "$job_reader_pid" 2>/dev/null
 	for pid in $collect_pid $log_pids $job_sentinel_pid; do kill "$pid" 2>/dev/null; done
 	for pid in $collect_pid $log_pids $job_sentinel_pid; do wait "$pid" 2>/dev/null; done
 	[ -z "$tmp" ] || rm -rf "$tmp"; rm -f ${statetmp:+"$statetmp"} ${memtmp:+"$memtmp"}
@@ -264,9 +268,10 @@ collect_join() {   # collect_join NAME: wait for collect -b NAME, its status
 	collect_pid=$left; unset 'collect_bg[$1]'; collect_inflight
 	return $rc
 }
-# what a sentinel must end once sq is gone: the clients waited for
+# what a sentinel must end once sq is gone: the clients waited for, and sq
+# job's reader of an output file
 collect_inflight() {
-	[ -z "$collect_pidfile" ] || printf '%s\n' "$collect_pid" > "$collect_pidfile"
+	[ -z "$collect_pidfile" ] || printf '%s\n' "$collect_pid${job_reader_pid:+ $job_reader_pid}" > "$collect_pidfile"
 }
 # --verbose makes timeout say "sending signal ..." before it signals; it exists
 # since coreutils 8.29, and an older timeout refuses it (rc 125) without running
@@ -531,6 +536,34 @@ function pend_kind(why) {
   if (why ~ /^(QOS|Assoc)/) return (why ~ /PerJob|Minutes/) ? "never" : "stuck"
   return "stuck"
 }
+# ---- scontrol -o show node: one node a line, as Slurm 23.11 prints it
+# (slurm_sprint_node_table): NodeName first, the figures, then free text an
+# admin sets (Reason=, Comment=, Extra=), which may hold anything: a
+# "MemSpecLimit=" of its own, or a newline and a whole forged line.  So a key
+# is read only before the first " Reason=", " Comment=" or " Extra=", the
+# first one of its name counts (MemSpecLimit and Partitions are printed only
+# when set, so a later one would be the text), and a NodeName seen twice
+# leaves that node unknown (NODE_BAD).  By index 1..NN: NODE_NAME, NODE_CPUS
+# (CPUEfctv, else CPUTot), NODE_CPUALLOC, NODE_REALMEM, NODE_ALLOCMEM and
+# NODE_SPECMEM (MemSpecLimit, 0 when absent) in MB, NODE_STATE, NODE_PARTS
+# (its partitions, comma-separated); a number missing or garbled is -1
+function node_read(file,   ln, KV, s, m, name, n) {
+  while ((getline ln < file) > 0) {
+    if (ln !~ /^NodeName=/) continue
+    if (match(ln, / (Reason|Comment|Extra)=/)) ln = substr(ln, 1, RSTART - 1)
+    delete KV; s = ln
+    while (match(s, /(^| )([A-Za-z_]+)=([^ ]*)/, m)) { if (!(m[2] in KV)) KV[m[2]] = m[3]; s = substr(s, RSTART + RLENGTH) }
+    name = KV["NodeName"]
+    if (name in NODE_AT) { NODE_BAD[NODE_AT[name]] = 1; continue }
+    n = NODE_AT[name] = ++NN; NODE_NAME[n] = name
+    NODE_CPUS[n] = node_num(("CPUEfctv" in KV) ? KV["CPUEfctv"] : KV["CPUTot"])
+    NODE_CPUALLOC[n] = node_num(KV["CPUAlloc"]); NODE_REALMEM[n] = node_num(KV["RealMemory"])
+    NODE_ALLOCMEM[n] = node_num(KV["AllocMem"]); NODE_SPECMEM[n] = ("MemSpecLimit" in KV) ? node_num(KV["MemSpecLimit"]) : 0
+    NODE_STATE[n] = KV["State"]; NODE_PARTS[n] = KV["Partitions"]
+  }
+  close(file)
+}
+function node_num(x) { return (x ~ /^[0-9]{1,12}$/) ? x + 0 : -1 }
 # the final states, by squeue code, into DONE, and those that are failures
 # (worth a bell, red) into BAD
 function final_states(   ts, i) {
@@ -538,6 +571,15 @@ function final_states(   ts, i) {
   split("F TO NF OOM DL BF", ts, " "); for (i in ts) BAD[ts[i]] = 1
 }
 '
+# The terminal's size, into tty_lines and tty_cols, from stty, which needs no
+# terminfo entry for $TERM as tput does (xterm-kitty, xterm-ghostty).  No
+# controlling terminal leaves both empty, silently; a pty not sized yet says
+# 0 0.  For the dashboard and sq job
+tty_size() {
+	local size
+	size=$({ stty size </dev/tty; } 2>/dev/null) || size=
+	tty_lines=${size% *} tty_cols=${size#* }
+}
 # colour: honour NO_COLOR, else auto-detect.  A pipe with COLUMNS set is
 # watch, which wants the escapes; a bare pipe or redirect does not.  For the
 # dashboard and sq job, from --color/--no-color and SQ_COLOR
@@ -1216,9 +1258,11 @@ sub_log() {
 # The facts: one squeue --jobs=ID -t all (the live state, reason, dependency,
 # start estimate, time left and output paths, while Slurm knows the job), one
 # sacct -j ID without -X (request, allocation, the steps' CPU time and memory,
-# the exit, and the job itself once squeue forgot it), both asked at once, and
-# for the caller's own running job JOBMEM's reading.  One source down: the other's view, with a
-# dim line saying which; both: rc 1.
+# the exit, the time limit, the node lost, and the job itself once squeue
+# forgot it), asked at once, then what the why section needs (job_why_start)
+# while sacct is still asked, and for the caller's own running job JOBMEM's
+# reading.  One source down: the other's view, with a dim line saying which;
+# both: rc 1.
 job_help() {
 	cat <<'EOF'
 usage: sq job [--color|--no-color] JOBID
@@ -1231,13 +1275,22 @@ the dashboard's MEM reads it (? no reading yet, ! the reading failed).  JOBID
 is 12345, an array task 12345_4, or an array 12345, which gets one summary
 over its completed tasks: the median, the weakest task and the best.
 
+Why: for a pending job, what holds it and who can act (it waits its turn,
+needs action, waits for an admin, can never start, will never start, or is
+stuck: a reason sq has no words for); for an ended one that did not
+complete, its exit in plain words, who cancelled it, its time or memory
+limit, the node it lost; for an array, its tasks that did not complete.  A
+failed job's output ends the section with its last lines, for any job
+whose file you can read, other users' too.
+
 Exit 0 when shown, 1 when Slurm does not know the job or cannot be asked,
 2 for a usage error, 128+N when stopped by signal N.
 
 env: SQ_TIMEOUT    seconds to wait for Slurm (5); sq job waits 30 s for
                    accounting, which a big array keeps busy, unless
                    SQ_TIMEOUT is set to a valid number of seconds, which
-                   then bounds that wait too
+                   then bounds that wait too.  Every call is done by that
+                   wait and 5 s more
      SQ_PSS_SINCE  when this cluster's accounting moved from RSS to PSS
                    (JobAcctGatherParams=UsePss), as YYYY-MM-DD[ HH:MM[:SS]]
                    [ ZONE], YYYY-MM-DDTHH:MM[:SS]Z or @EPOCH, e.g.
@@ -1255,7 +1308,13 @@ Good to know:
   killed for its memory can read well below its limit.
 - Efficiency comes from accounting, so it shows once accounting has recorded
   the job's end, a moment after squeue says it ended.
-- Slurm forgets a job's output paths about 5 minutes after it ends.
+- Slurm forgets a job's output paths about 5 minutes after it ends, and its
+  last lines with them.  They come from the last 4096 bytes of the file
+  (its stderr when that has a file of its own), only from a regular file
+  written while the job ran, and are cut to the terminal's width.
+- That file is read by a process of its own, given 2 s: on a network mount
+  that hangs, the process cannot be stopped, and it is the one process sq
+  may leave behind.
 - While accounting does not answer, an array's count is a floor (>=N): its
   done, failed and cancelled tasks are only known there.
 EOF
@@ -1387,6 +1446,7 @@ function pick(   r, id, p, k) {
   if (arow) { jid = A[arow, "JobID"]; raw = A[arow, "JobIDRaw"] }
   else if (inmeta) { jid = job "_" task; raw = "" }
   else { jid = onetask(qrow) ? R[qrow, "ArrayJobID"] "_" R[qrow, "ArrayTaskID"] : R[qrow, "JobID"]; raw = R[qrow, "JobID"] }
+  TASKS_EXPR = R[qrow, "ArrayTaskID"]               # the tasks its record holds (%N, a throttle)
   if (inmeta) R[qrow, "ArrayTaskID"] = task         # its paths are the task's
   STATE = qrow ? R[qrow, "StateCompact"] : stcode(A[arow, "State"])
   OWN = (myuid != "") && (qrow ? R[qrow, "UserID"] : A[arow, "UID"]) == myuid
@@ -1460,7 +1520,7 @@ function print_sections(   i, w, cur) {
     if (MS[i] != cur) { cur = MS[i]; if (cur in SECNAME) printf "%s\n", paint("2", SECNAME[cur]) }
     if      (MT[i] == "kv")   printf "  %-*s  %s\n", w, MK[i], MV[i]
     else if (MT[i] == "line") printf "%s\n", MV[i]
-    else if (MS[i] == "eff" || MS[i] == "arr" || MS[i] == "top") printf "  %s\n", paint("2", "↳ " MV[i])
+    else if (MS[i] == "eff" || MS[i] == "arr" || MS[i] == "top" || MS[i] == "why") printf "  %s\n", paint("2", "↳ " MV[i])
     else                      printf "  %*s  %s\n", w, "", paint("2", "↳ " MV[i])
   }
 }
@@ -1571,6 +1631,8 @@ function build_job(   q, r, c, final, never, name, user, unique, state, reason, 
     }
     if (isepoch(ended)) kv("state", "ended", when(ended))
   }
+  OWNER = user; OWNER_UID = q ? R[q, "UserID"] : A[r, "UID"]
+  build_why(c, q, r)
 
   # resources: a pending job's request (or one that never ran), else what it
   # was given and asked for.  The memory a running job uses is the
@@ -1678,7 +1740,557 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
   if (rss) note("arr", plural(rss, "task") " started before " pss_text() \
                 " (RSS accounting): shared memory counted once per process; their peaks may read high")
   if (multi) note("arr", plural(multi, "task") " peaked in a step of several tasks: that peak adds up each task's own, an upper bound")
+  if (ntask_rows) why_array()
   print_sections()
+}
+
+# ---- why: plain words on why the job is where it is -----------------------------
+# Franz's decisions (2026-10-21): a section of sq job for a pending job (what
+# holds it) and an ended one (why it failed, who cancelled it), none for a
+# running or a completed job, "Accept as rendered"; a failed job's last
+# output lines for every job whose file is readable ("All jobs").  Under its
+# dim caption the verdict comes first, its word coloured by who has to act,
+# then rows indented 4 and notes at "  ↳"; only the output lines are cut to
+# the width.  Beyond the two answers it reads what job_why_collect asked
+# for: a dependency's parents, the nodes and the queue for a job waiting on
+# resources, the names of who cancelled, and the output file's last lines
+function wl(t)  { line("why", "  " t) }
+function wl2(t) { line("why", "    " t) }
+function wn(t)  { note("why", t) }
+function put(key, value) { printf "%s=%s%c", key, value, 0 }
+# the verdict, its word coloured: time alone fixes it (green), someone has to
+# act or sq cannot tell (yellow), it never will (red)
+function vword(kind, text,   word, hue) {
+  word = (kind == "wait") ? "waits its turn" : (kind == "act") ? "needs action" : (kind == "admin") ? "waits for an admin" \
+       : (kind == "never") ? "can never start" : (kind == "will") ? "will never start" : "stuck"
+  hue = (kind == "wait") ? "32" : (kind == "never" || kind == "will") ? "31" : "33"
+  return paint(hue, word) ": " text
+}
+function wclip(s, wd) { return (length(s) > wd) ? substr(s, 1, wd - 1) "…" : s }
+# a uid as the reader knows it: you, root, a name (the owner's said so), the
+# owner when getent named no one but the uid is the job's own, else the number
+function who(uid, owner, owner_uid,   nm) {
+  if (myuid != "" && uid == myuid) return "you"
+  if (uid == "0") return "root (an admin, or Slurm itself)"
+  nm = (uid in UMAP) ? UMAP[uid] : ""
+  if (nm == "") return (owner_uid != "" && uid == owner_uid) ? "its owner" : "uid " uid
+  return (nm == owner || uid == owner_uid) ? nm " (its owner)" : nm
+}
+function canceller(st,   m) { return match(st, /^CANCELLED by ([0-9]+)$/, m) ? m[1] : "" }
+function signame(sg) {
+  return "signal " sg ((sg in SIGNAME) ? " (" SIGNAME[sg] ((sg in SIGPLAIN) ? ", " SIGPLAIN[sg] : "") ")" : "")
+}
+function cancel_hint() {
+  if (OWN) wn("Slurm keeps it pending all the same; remove it: scancel " jid)
+  else     wn("Slurm keeps it pending all the same, until " OWNER " or an admin cancels it")
+}
+# a dependency clause, type:parent[_task|_*][+minutes](state), into m: 1 the
+# type, 2 the parent, 4 its task or *, 6 the minutes, 7 the state
+function depclause(c, m) { return match(c, /^([a-z]+):([0-9]+)(_([0-9]+|\*))?(\+([0-9]+))?\(([a-z]+)\)$/, m) }
+# a job of the queue answer as the report names jobs: an array task N_T, a
+# pending array's record N_[tasks], else its job id
+function qjob(p,   t) {
+  t = RQ[p, "ArrayTaskID"]
+  if (t ~ /^[0-9]+$/) return RQ[p, "ArrayJobID"] "_" t
+  if (t != "" && t != "N/A") return RQ[p, "ArrayJobID"] "_[" t "]"
+  return RQ[p, "JobID"]
+}
+
+# ---- the plan, from squeue's record alone: which answers more the section
+# needs, so the shell asks for them while accounting is still being asked
+function why_plan(   q, reason, dep, n, cl, i, m, id, pl, pd, host, path, which) {
+  if (verdict != "one" || !qrow) return
+  q = qrow
+  if (STATE == "PD") {
+    reason = R[q, "Reason"]
+    if (reason ~ /^(Resources|Priority|BadConstraints)$/) put("nodes", 1)
+    if (reason ~ /^(Resources|Priority)$/) put("queue", 1)
+    dep = R[q, "Dependency"]
+    if (dep != "" && dep != "(null)") {
+      n = split(dep, cl, /[,?]/)
+      for (i = 1; i <= n; i++) if (depclause(cl[i], m)) {
+        id = m[2] ((m[4] != "" && m[4] != "*") ? "_" m[4] : "")
+        pl = pl (pl == "" ? "" : ",") id
+        if (m[7] == "failed") pd = pd (pd == "" ? "" : ",") id
+      }
+      put("parents", pl); put("pdone", pd)
+    }
+  }
+  # a failed batch job's output, its end: stderr when that has a file of its
+  # own (errors land there), else stdout; only while squeue knows the paths,
+  # and with the start and the end to judge the file's date by
+  if (STATE != "F" || R[q, "BatchFlag"] == "0" || !isepoch(R[q, "StartTime"]) || !isepoch(R[q, "EndTime"])) return
+  if (errpat(q) != outpat(q) && R[q, "STDERR"] != "/dev/null") { path = fullpath(errpat(q), q); which = "stderr" }
+  else if (R[q, "STDOUT"] != "/dev/null") { path = fullpath(outpat(q), q); which = (R[q, "STDERR"] == "/dev/null") ? "stdout" : "output" }
+  if (path == "") return
+  host = R[q, "BatchHost"]; sub(/[.].*/, "", host)
+  put("tail", path); put("which", which); put("start", R[q, "StartTime"]); put("end", R[q, "EndTime"]); put("host", host)
+}
+# the uids of who cancelled the job, a step or a task, for the shell to name
+function why_uids(   r, by, seen, uids) {
+  for (r = 1; r <= na; r++) if ((by = canceller(A[r, "State"])) != "" && !(by in seen)) { seen[by]; uids = uids " " by }
+  put("uids", uids)
+}
+
+# ---- the extra answers, in the show phase
+function why_load(   nu, um, i, mf, ln) {
+  nu = split(ENVIRON["SQJ_UIDMAP"], um, ",")
+  for (i = 1; i <= nu; i++) if (split(um[i], mf, "=") == 2) UMAP[mf[1]] = mf[2]
+  npq = read_stream(ENVIRON["SQJ_WPARENTS"], NONCE, qfields, RP, "^[0-9]+$"); if (npq < 0) npq = 0
+  npa = read_stream(ENVIRON["SQJ_WPACCT"], NONCE2, afields, AP, ID "([.][A-Za-z0-9_+.-]+)?$"); if (npa < 0) npa = 0
+  nrq = read_stream(ENVIRON["SQJ_WQUEUE"], NONCE, ENVIRON["SQJ_WQFIELDS"], RQ, "^[0-9]+$"); if (nrq < 0) nrq = 0
+  node_read(ENVIRON["SQJ_WNODES"])
+  while ((getline ln < ENVIRON["SQJ_WTAIL"]) > 0) TAIL[++ntail] = ln
+  close(ENVIRON["SQJ_WTAIL"])
+}
+
+# ---- the section of one job, after its state and times
+function build_why(c, q, r) {
+  if (c == "PD") why_pending(q, r)
+  else if (c == "RH" || c == "SE") why_requeue_held(c)
+  else if (c in DONE) why_ended(c, q, r)
+}
+# a hold its owner can release: who can
+function release_hint(v, text) {
+  if (OWN) wl(vword(v, text "; it can start once you release it: scontrol release " jid))
+  else     wl(vword(v, text "; only " OWNER " (or an admin) can release it"))
+}
+# a requeue that left the job held (RH) or in special exit (SE): its owner
+# may release it, as a hold of their own (Slurm 23.11, job_mgr.c)
+function why_requeue_held(c) {
+  if (OWN) wl(vword("act", "held after a requeue" (c == "SE" ? " (special exit)" : "") ": scontrol release " jid))
+  else     wl(vword("act", "held after a requeue" (c == "SE" ? " (special exit)" : "") "; only " OWNER " (or an admin) can release it"))
+}
+
+# ---- pending: the reason in plain words, and whether time alone fixes it.
+# The verdict is the kind the dashboard files the reason under (pend_kind),
+# its owner's hold "needs action", a fault of the cluster "waits for an
+# admin"; the words only add the detail.  Dependency, Resources, Priority
+# and BadConstraints look further: at the parents, the nodes and the queue
+function why_pending(q, r,   reason, p, m, v) {
+  if (!q) { wl(vword("stuck", "squeue did not answer, so its reason is unknown")); return }
+  reason = R[q, "Reason"]; p = R[q, "Partition"]
+  v = pend_kind(reason); v = (v == "own") ? "act" : (v == "fault") ? "admin" : v
+  if (reason == "Dependency" || reason == "DependencyNeverSatisfied") why_dep(q, reason)
+  else if (reason == "Resources" || reason == "Priority") why_res(q, reason)
+  else if (reason == "BadConstraints") why_toobig(q)
+  else if (reason == "JobHeldUser") release_hint(v, "on user hold")
+  else if (reason ~ /requeued held$/) release_hint(v, "it failed to launch, so Slurm requeued it held")
+  else if (reason ~ /^job requeued in /) release_hint(v, "it was requeued held")
+  else if (reason == "JobHeldAdmin") wl(vword(v, "an admin held it; only an admin can release it"))
+  else if (reason == "BeginTime")
+    wl(vword(v, isepoch(R[q, "StartTime"]) && R[q, "StartTime"] > NOW ? "it asked not to start before " stamp(R[q, "StartTime"]) " (--begin)" \
+                                                                      : "its begin time has passed; the scheduler starts it on a next pass"))
+  else if (reason == "JobArrayTaskLimit")
+    wl(vword(v, match(TASKS_EXPR, /%([0-9]+)$/, m) ? "its array runs at most " m[1] " tasks at once; this one starts when one of them ends" \
+                                                   : "its array runs only so many tasks at once; this one starts when one of them ends"))
+  else if (reason == "None")        wl(vword(v, "the scheduler has not looked at it yet"))
+  else if (reason == "Prolog")      wl(vword(v, "its node runs the prolog; it is about to start"))
+  else if (reason == "Cleaning")    wl(vword(v, "Slurm still cleans up after its previous run"))
+  else if (reason == "SchedDefer")  wl(vword(v, "the scheduler defers new jobs to its next pass"))
+  else if (reason == "Reservation") wl(vword(v, "its reservation has not begun"))
+  else if (reason == "Licenses")    wl(vword(v, "the licenses it asks for are in use"))
+  else if (reason in NEVERWHY)      wl(vword(v, sprintf(NEVERWHY[reason], p)))
+  else if (reason ~ /^uid [0-9]+ not in group/) wl(vword(v, "its user may not use partition " p))
+  else if (reason in FAULTWHY) wl(vword(v, sprintf(FAULTWHY[reason], p)))
+  else if (reason ~ /^ReqNodeNotAvail/)
+    wl(vword(v, "nodes it needs are not available" (match(reason, /UnavailableNodes:(.*)$/, m) ? ": " m[1] : (tolower(reason) ~ /reserved/ ? " (reserved)" : ""))))
+  else if (reason ~ /^Nodes required for job are /) wl(vword(v, "nodes it needs are down, drained or reserved"))
+  # a limit per job, or of minutes used, never frees up however many jobs end
+  else if (reason ~ /^(QOS|Assoc)/ && v == "never") wl(vword(v, "it asks for more than a limit allows (" reason ")"))
+  else if (reason ~ /^(QOS|Assoc)/) wl(vword(v, "a limit holds it (" reason ") until enough jobs under that limit end"))
+  else wl(vword(v, "Slurm says " reason "; sq has no plain words for that"))
+  if (v == "never" && reason !~ /^(Dependency|DependencyNeverSatisfied|BadConstraints)$/) cancel_hint()
+  if (R[q, "RestartCnt"] + 0 > 0) wn("requeued " plural(R[q, "RestartCnt"] + 0, "time") " so far (a node failure, or scontrol requeue)")
+}
+
+# ---- Dependency: each parent, its condition and its state now
+function depcond(i, form,   t, x, h) {      # FORM has, have (the lead line) or must (a row)
+  t = DT[i]; h = (form == "must") ? "" : form " "
+  if (form == "must")
+    x = (t == "after") ? "start" : (t == "afterany") ? "end" : (t == "afterok") ? "complete successfully" : (t == "afternotok") ? "fail" \
+      : (t == "aftercorr") ? "complete successfully, task by matching task" : (t == "afterburstbuffer") ? "end and stage out its burst buffer" : "meet " t
+  else
+    x = (t == "after") ? "started" : (t == "afterany") ? "ended" : (t == "afterok") ? "completed successfully" : (t == "afternotok") ? "failed" \
+      : (t == "aftercorr") ? "completed successfully, task by matching task" : (t == "afterburstbuffer") ? "ended and staged out its burst buffer" : "met " t
+  x = (form == "must" ? "must " : h) x
+  if (DD[i] != "") x = x (form == "must" ? ", then " plural(DD[i] + 0, "minute") " more" : " and " plural(DD[i] + 0, "minute") " have passed")
+  return x
+}
+function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids, lead, idw, st) {
+  dep = R[q, "Dependency"]
+  if (dep == "" || dep == "(null)") {
+    if (reason == "DependencyNeverSatisfied") { wl(vword("will", "a job it depends on ended the wrong way")); cancel_hint() }
+    else wl(vword("wait", "its dependency is met now; the scheduler starts it on a next pass"))
+    return
+  }
+  anyof = index(dep, "?") > 0
+  n = split(dep, cl, /[,?]/); same = 1
+  for (i = 1; i <= n; i++) {
+    DT[i] = DP[i] = DD[i] = DS[i] = DSTAR[i] = ""
+    if (depclause(cl[i], m)) {
+      DT[i] = m[1]; DP[i] = m[2] ((m[4] != "" && m[4] != "*") ? "_" m[4] : ""); DD[i] = m[6]; DS[i] = m[7]
+      DSTAR[i] = (m[4] == "*" || (m[4] == "" && is_array_parent(m[2])))
+    } else if (match(cl[i], /^singleton\(([a-z]+)\)$/, m)) { DT[i] = "singleton"; DS[i] = m[1] }
+    else { DT[i] = "raw"; DP[i] = cl[i] }
+    if (DS[i] == "failed") nf++; else nu++
+    if (DT[i] != DT[1] || DD[i] != DD[1] || DT[i] ~ /^(singleton|raw)$/) same = 0
+    if (DT[i] != "raw" && length(DP[i]) > idw) idw = length(DP[i])
+  }
+  never = anyof ? (nu == 0) : (nf > 0)
+  if (n == 1 && DT[1] == "singleton") {
+    lead = "it may start once no other job of " (OWN ? "yours" : OWNER "'s") " named " R[q, "Name"] " runs or waits ahead of it"
+    wl(vword(never ? "will" : "wait", lead)); if (never) cancel_hint(); return
+  }
+  if (same) {
+    for (i = 1; i <= n; i++) ids = ids (i == 1 ? "" : (i == n ? (anyof ? " or " : " and ") : ", ")) (DSTAR[i] ? "every task of array " DP[i] : DP[i])
+    lead = "it may start " (never ? "only " : "") "once " ids " " depcond(1, (n > 1 && !anyof) ? "have" : "has")
+  } else lead = "it may start " (never ? "only " : "") "once " (anyof ? "one" : "all") " of these " (anyof ? "is" : "are") " met"
+  wl(vword(never ? "will" : "wait", lead (never ? ", which can no longer happen" : "")))
+  for (i = 1; i <= n; i++) {
+    if (DT[i] == "singleton") { wl2(sprintf("%-*s  %s", idw, "", "no other job of " (OWN ? "yours" : OWNER "'s") " named " R[q, "Name"] " runs or waits ahead of it")); continue }
+    if (DT[i] == "raw") { wl2(DP[i]); continue }
+    st = DSTAR[i] ? array_state(DP[i]) : parent_state(DP[i])
+    if (!same) st = depcond(i, "must") (DS[i] == "failed" ? ", which can no longer happen" : "") " · now " st
+    wl2(sprintf("%-*s  %s", idw, DP[i], st))
+  }
+  if (never) cancel_hint()
+}
+# a parent's state now: squeue's record while it has one, else accounting's
+function parent_state(pid,   p, a, c, x, left) {
+  for (p = 1; p <= npq; p++)
+    if (RP[p, "JobID"] == pid || (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/ && RP[p, "ArrayJobID"] "_" RP[p, "ArrayTaskID"] == pid)) break
+  if (p <= npq) {
+    c = RP[p, "StateCompact"]
+    if (c == "PD") return paint(stcolour(c), "PENDING") " (" RP[p, "Reason"] ")" (isepoch(RP[p, "StartTime"]) && RP[p, "StartTime"] > NOW ? " · Slurm's estimate: " when(RP[p, "StartTime"]) : " · no start estimate")
+    if (c in DONE) {
+      split(RP[p, "exit_code"], x, ":")
+      return paint(stcolour(c), stname(c)) " · exit " exlabel(exfield(x[1]), exfield(x[2])) (isepoch(RP[p, "EndTime"]) ? " · ended " ago(NOW - RP[p, "EndTime"]) " ago" : "")
+    }
+    left = RP[p, "TimeLeft"]
+    left = (left == "UNLIMITED") ? "no time limit" : (left == "INVALID") ? "past its time limit" : elap(dur(left)) " left of " elap(dur(RP[p, "TimeLimit"]))
+    return paint(stcolour(c), stname(c)) " on " RP[p, "NodeList"] " · " left
+  }
+  for (a = 1; a <= npa; a++) if (AP[a, "JobID"] == pid) break
+  if (a <= npa) {
+    split(AP[a, "ExitCode"], x, ":"); c = stcode(AP[a, "State"])
+    return paint(stcolour(c), stname(c)) ((c in DONE) ? " · exit " exlabel(exfield(x[1]), exfield(x[2])) (isepoch(AP[a, "End"]) ? " · ended " ago(NOW - AP[a, "End"]) " ago" : "") : "")
+  }
+  if (ENVIRON["SQJ_WPQ"] == "fail") return "unknown: squeue did not answer"
+  return "Slurm no longer knows it"
+}
+# an array parent: does squeue answer task records for it?  Its tasks' states, counted
+function is_array_parent(id,   p) {
+  for (p = 1; p <= npq; p++) if (RP[p, "ArrayJobID"] == id && RP[p, "ArrayTaskID"] != "N/A") return 1
+  return 0
+}
+function array_state(id,   p, c, k, N, ord, out, i) {
+  for (p = 1; p <= npq; p++) {
+    if (RP[p, "ArrayJobID"] != id || RP[p, "ArrayTaskID"] == "N/A") continue
+    c = RP[p, "StateCompact"]; k = (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/) ? 1 : ntasks(id "_[" RP[p, "ArrayTaskID"] "]", ID)
+    if (!(c in N)) ord[++i] = c
+    N[c] += k
+  }
+  for (k = 1; k <= i; k++) out = out (k == 1 ? "" : " · ") N[ord[k]] " " paint(stcolour(ord[k]), stname(ord[k]))
+  if (out == "") return (ENVIRON["SQJ_WPQ"] == "fail") ? "unknown: squeue did not answer" : "Slurm no longer lists its tasks"
+  return "its tasks now: " out
+}
+
+# ---- Resources, Priority, BadConstraints: the request against the nodes.
+# A node's CPUs are CPUEfctv (CPUTot without it), its memory for jobs
+# RealMemory less MemSpecLimit, and free is that less what is allocated
+function node_jobmem(i) { return NODE_REALMEM[i] - NODE_SPECMEM[i] }
+function node_cpufree(i) { return NODE_CPUS[i] - NODE_CPUALLOC[i] }
+function node_memfree(i) { return node_jobmem(i) - NODE_ALLOCMEM[i] }
+# the nodes its partitions hold, by index into the scontrol answer, into USE[]
+function usable_nodes(q,   i, k, nn, NP, pass) {
+  nuse = 0
+  for (i = 1; i <= NN; i++) {
+    nn = split(NODE_PARTS[i], NP, ","); pass = 0
+    for (k = 1; k <= nn; k++) if (index("," R[q, "Partition"] ",", "," NP[k] ",")) pass = 1
+    if (pass) USE[++nuse] = i
+  }
+}
+function node_down(i) { return NODE_STATE[i] ~ /DOWN|DRAIN|FAIL|NOT_RESPONDING|POWER/ }
+function node_downword(i) { return (NODE_STATE[i] ~ /DRAIN/) ? "drained" : (NODE_STATE[i] ~ /DOWN|NOT_RESPONDING/) ? "down" : tolower(NODE_STATE[i]) }
+# a node whose figures sq can use: listed once, with every number it reads
+function node_known(i) {
+  return !(i in NODE_BAD) && NODE_CPUS[i] >= 0 && NODE_CPUALLOC[i] >= 0 && NODE_REALMEM[i] >= 0 && NODE_ALLOCMEM[i] >= 0 && NODE_SPECMEM[i] >= 0
+}
+function node_big(i, rq_c, rq_m) { return NODE_CPUS[i] >= rq_c && (rq_m <= 0 || node_jobmem(i) >= rq_m) }
+function node_fits(i, rq_c, rq_m) { return node_cpufree(i) >= rq_c && (rq_m <= 0 || node_memfree(i) >= rq_m) }
+# the table: "free" (free now, of what jobs can get) or "total" (what jobs can get)
+function node_table(q, how, rq_c, rq_m,   i, k, w, cw, mw, CT, MT, VT, hc, hm, fc, fm, fits_c, fits_m) {
+  w = length("it asks")
+  for (k = 1; k <= nuse; k++) { i = USE[k]; if (length(NODE_NAME[i]) > w) w = length(NODE_NAME[i]) }
+  CT[0] = rq_c ""; MT[0] = (rq_m > 0) ? memsize(rq_m, 0) : "-"; VT[0] = ""
+  for (k = 1; k <= nuse; k++) {
+    i = USE[k]
+    if (!node_known(i)) { CT[k] = "?"; MT[k] = "?"; VT[k] = (i in NODE_BAD) ? "unknown: scontrol listed it twice" : "unknown: scontrol did not say"; continue }
+    fc = node_cpufree(i); fm = node_memfree(i)
+    fits_c = (NODE_CPUS[i] >= rq_c); fits_m = (rq_m <= 0 || node_jobmem(i) >= rq_m)
+    if (how == "total") { CT[k] = NODE_CPUS[i] ""; MT[k] = memsize(node_jobmem(i), 0) }
+    else { CT[k] = fc " of " NODE_CPUS[i]; MT[k] = memsize(fm, 0) " of " memsize(node_jobmem(i), 0) }
+    if (!fits_c || !fits_m) VT[k] = (how == "total" ? "" : "never fits: ") (!fits_c && !fits_m ? "too few CPUs, too little memory" : !fits_c ? "too few CPUs" : "too little memory")
+    else if (node_down(i)) VT[k] = node_downword(i)
+    else if (how == "total") VT[k] = "big enough"
+    else if (fc >= rq_c && (rq_m <= 0 || fm >= rq_m)) VT[k] = "fits now"
+    else VT[k] = (fc < rq_c && rq_m > 0 && fm < rq_m) ? "too few CPUs and too little memory free" : (fc < rq_c) ? "too few CPUs free" : "too little memory free"
+    if (node_down(i) && (fits_c && fits_m)) { CT[k] = "-"; MT[k] = "-" }
+  }
+  for (k = 0; k <= nuse; k++) { if (length(CT[k]) > cw) cw = length(CT[k]); if (length(MT[k]) > mw) mw = length(MT[k]) }
+  hc = (how == "total") ? "CPUs" : "CPUs free"; hm = (how == "total") ? "memory for jobs" : "memory free"
+  if (length(hc) > cw) cw = length(hc); if (length(hm) > mw) mw = length(hm)
+  wl2(paint("2", sprintf("%-*s  %*s  %*s", w, "", cw, hc, mw, hm)))
+  wl2(sprintf("%-*s  %*s  %*s", w, "it asks", cw, CT[0], mw, MT[0]))
+  for (k = 1; k <= nuse; k++) wl2(sprintf("%-*s  %*s  %*s  %s", w, NODE_NAME[USE[k]], cw, CT[k], mw, MT[k], VT[k]))
+}
+function nodes_unknown_note(q) { wn(ENVIRON["SQJ_WNODESTAT"] == "ok" ? "no node is in partition " R[q, "Partition"] : "the nodes are unknown: scontrol did not answer") }
+# Slurm's queue order (V9): the higher priority first, then the earlier
+# submit, then the lower job id
+function before(p, prio, submit, id) {
+  if (RQ[p, "PriorityLong"] + 0 != prio) return RQ[p, "PriorityLong"] + 0 > prio
+  if (RQ[p, "SubmitTime"] + 0 != submit) return RQ[p, "SubmitTime"] + 0 < submit
+  return RQ[p, "JobID"] + 0 < id + 0
+}
+function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio, submit, later, lead, nbig, nbigdown, fitnow, idw) {
+  rq_c = R[q, "NumCPUs"] + 0; rq_m = tres_mem(R[q, "tres-alloc"])
+  usable_nodes(q)
+  if (reason == "Priority") {
+    # its own priority as the queue answer gives it; submit time from its record
+    for (me = 1; me <= nrq; me++) if (RQ[me, "JobID"] == raw) break
+    prio = (me <= nrq) ? RQ[me, "PriorityLong"] + 0 : 0; submit = R[q, "SubmitTime"] + 0
+    for (p = 1; p <= nrq; p++) {
+      if (p == me || RQ[p, "StateCompact"] != "PD" || RQ[p, "Reason"] !~ /^(Resources|Priority)$/) continue
+      if (!before(p, prio, submit, raw) || !share_nodes(RQ[p, "Partition"])) continue
+      AH[++ahead] = p
+    }
+    for (a = 2; a <= ahead; a++)              # in that order
+      for (b = a; b > 1 && before(AH[b], RQ[AH[b - 1], "PriorityLong"] + 0, RQ[AH[b - 1], "SubmitTime"] + 0, RQ[AH[b - 1], "JobID"]); b--) {
+        t = AH[b]; AH[b] = AH[b - 1]; AH[b - 1] = t
+      }
+    # "submitted before it" while that is the whole story, the queue order
+    # once a higher priority put a later job ahead
+    for (k = 1; k <= ahead; k++) if (RQ[AH[k], "SubmitTime"] + 0 > submit) later = 1
+    if (ahead) wl(vword("wait", plural(ahead, "job") (later ? " ahead of it in the queue " : " submitted before it ") (ahead == 1 ? "comes" : "come") " first"))
+    else wl(vword("wait", "a job ahead of it in the queue comes first"))
+    for (k = 1; k <= ahead && k <= 3; k++) if (length(qjob(AH[k])) > idw) idw = length(qjob(AH[k]))
+    for (k = 1; k <= ahead && k <= 3; k++) {
+      p = AH[k]
+      wl2(sprintf("%-*s  %-9s %3s CPUs  %6s  %s (%s), submitted %s ago", idw, qjob(p), RQ[p, "UserName"], RQ[p, "NumCPUs"],
+                  memsize(tres_mem(RQ[p, "tres-alloc"]), 0), paint(stcolour("PD"), "PENDING"), RQ[p, "Reason"], ago(NOW - RQ[p, "SubmitTime"])))
+    }
+    if (ahead > 3) wl2("… and " (ahead - 3) " more")
+    if (ENVIRON["SQJ_WQUEUESTAT"] != "ok") wn("the jobs ahead are unknown: squeue did not answer")
+    lead = "what the nodes it may use (" R[q, "Partition"] ") have free now:"
+  } else {
+    for (k = 1; k <= nuse; k++) {
+      i = USE[k]
+      if (!node_known(i) || !node_big(i, rq_c, rq_m)) continue
+      if (node_down(i)) { nbigdown++; continue }
+      nbig++
+      if (node_fits(i, rq_c, rq_m)) fitnow = NODE_NAME[i]
+    }
+    if (fitnow != "") wl(vword("wait", "enough is free now on " fitnow "; Slurm should start it on a next pass"))
+    else if (!nbig && nbigdown) wl(vword("admin", "every node big enough for it is down or drained"))
+    else wl(vword("wait", "too little is free now on the nodes it may use (" R[q, "Partition"] ")"))
+  }
+  if (!nuse) { nodes_unknown_note(q); return }
+  if (lead != "") wl(lead)
+  node_table(q, "free", rq_c, rq_m)
+  if (R[q, "NumNodes"] + 0 > 1) wn("it asks for " R[q, "NumNodes"] " nodes; the table compares one")
+  if (reason == "Resources") why_blockers(q, rq_c, rq_m)
+}
+function share_nodes(parts,   k, i, NP, nn, j) {
+  for (k = 1; k <= nuse; k++) {
+    i = USE[k]; nn = split(NODE_PARTS[i], NP, ",")
+    for (j = 1; j <= nn; j++) if (index("," parts ",", "," NP[j] ",")) return 1
+  }
+  return 0
+}
+# which running jobs have to end first: on each node that can ever hold it,
+# its jobs by end time (none: a year, as Slurm plans one without a limit)
+# until enough is free; the node where that comes first.  sq's own
+# reckoning, not Slurm's: it leaves out the jobs ahead and backfill
+function why_blockers(q, rq_c, rq_m,   k, i, p, nj, J, E, a, b, t, fc, fm, best, bestt, BL, nbl, fin, end, est, unl, unlend, w, idw) {
+  if (ENVIRON["SQJ_WQUEUESTAT"] != "ok") { wn("which jobs must end first is unknown: squeue did not answer"); return }
+  for (k = 1; k <= nuse; k++) {
+    i = USE[k]
+    if (!node_known(i) || node_down(i) || !node_big(i, rq_c, rq_m)) continue
+    if (node_fits(i, rq_c, rq_m)) return                          # it fits now: nothing to wait for
+    fc = node_cpufree(i); fm = node_memfree(i)
+    nj = 0; delete J; delete E
+    for (p = 1; p <= nrq; p++)
+      if (RQ[p, "StateCompact"] != "PD" && index("," RQ[p, "NodeList"] ",", "," NODE_NAME[i] ",")) {
+        J[++nj] = p; end = RQ[p, "EndTime"]; E[nj] = isepoch(end) ? end + 0 : NOW + 365 * 86400
+      }
+    for (a = 2; a <= nj; a++) for (b = a; b > 1 && E[b] < E[b - 1]; b--) { t = E[b]; E[b] = E[b - 1]; E[b - 1] = t; t = J[b]; J[b] = J[b - 1]; J[b - 1] = t }
+    fin = 0
+    for (a = 1; a <= nj; a++) {
+      fc += RQ[J[a], "NumCPUs"]; t = tres_mem(RQ[J[a], "tres-alloc"]); if (t > 0) fm += t
+      if (fc >= rq_c && (rq_m <= 0 || fm >= rq_m)) { fin = a; break }
+    }
+    if (fin && (best == "" || E[fin] < bestt)) {
+      best = i; bestt = E[fin]; nbl = fin; for (a = 1; a <= fin; a++) BL[a] = J[a]
+    }
+  }
+  if (best == "") return
+  wl("it needs " (nbl == 1 ? "this job" : "these jobs") " to end first, on " NODE_NAME[best] ":")
+  for (a = 1; a <= nbl; a++) {
+    p = BL[a]; if (length(RQ[p, "UserName"]) > w) w = length(RQ[p, "UserName"]); if (length(qjob(p)) > idw) idw = length(qjob(p))
+  }
+  for (a = 1; a <= nbl; a++) {
+    p = BL[a]
+    if (RQ[p, "TimeLimit"] == "UNLIMITED") { unl = unl (unl == "" ? "" : ", ") qjob(p); if (isepoch(RQ[p, "EndTime"]) && (unlend == "" || RQ[p, "EndTime"] + 0 < unlend)) unlend = RQ[p, "EndTime"] + 0 }
+    wl2(sprintf("%-*s  %-*s %3s CPUs  %6s  %s", idw, qjob(p), w, RQ[p, "UserName"], RQ[p, "NumCPUs"], memsize(tres_mem(RQ[p, "tres-alloc"]), 0),
+                RQ[p, "TimeLimit"] == "UNLIMITED" ? "no time limit" : elap(dur(RQ[p, "TimeLeft"])) " left"))
+  }
+  est = R[q, "StartTime"]
+  if (unl != "") wn((isepoch(est) && est > NOW && unlend != "" && est + 86400 >= unlend ? "Slurm's estimate is that far out because " : "") \
+                    unl (index(unl, ",") ? " have" : " has") " no time limit: Slurm plans such a job to run for a year")
+}
+function why_toobig(q,   rq_c, rq_m, k, i, any, memshort) {
+  rq_c = R[q, "NumCPUs"] + 0; rq_m = tres_mem(R[q, "tres-alloc"])
+  usable_nodes(q)
+  for (k = 1; k <= nuse; k++) {
+    i = USE[k]; if (!node_known(i)) continue
+    if (node_big(i, rq_c, rq_m)) any = 1
+    if (rq_m > 0 && node_jobmem(i) < rq_m && NODE_SPECMEM[i] > 0 && (!memshort || node_jobmem(i) > node_jobmem(memshort))) memshort = i
+  }
+  if (!nuse) {
+    wl(vword("never", "no node it may use (" R[q, "Partition"] ") meets what it asks for"))
+    nodes_unknown_note(q); cancel_hint(); return
+  }
+  if (any) wl(vword("never", "no node it may use (" R[q, "Partition"] ") meets its constraints (--constraint, --gres or the like)"))
+  else     wl(vword("never", "no node it may use (" R[q, "Partition"] ") is that big"))
+  node_table(q, "total", rq_c, rq_m)
+  if (memshort) wn("memory for jobs is a node's RealMemory less what Slurm keeps for the system (MemSpecLimit): " \
+                   memsize(NODE_REALMEM[memshort], 0) " less " memsize(NODE_SPECMEM[memshort], 0) " on " NODE_NAME[memshort])
+  cancel_hint()
+}
+
+# ---- an ended job: who cancelled it, the exit in plain words, its last lines
+function why_ended(c, q, r,   lim, el) {
+  if (c == "CD") return
+  if (c == "CA") { why_cancelled(q, r); return }
+  if (c == "TO") {
+    lim = q ? R[q, "TimeLimit"] : (r && A[r, "TimelimitRaw"] ~ /^[0-9]+$/) ? A[r, "TimelimitRaw"] * 60 "" : ""
+    if (q && lim != "") lim = dur(lim) ""
+    el = r ? A[r, "ElapsedRaw"] + 0 : dur(R[q, "TimeUsed"])
+    wl("it reached its time limit" (lim != "" && lim + 0 >= 0 ? " of " elap(lim + 0) : "") " after " elap(el))
+    return
+  }
+  if (c == "OOM") { wl("it used more than its " (ALLOC > 0 ? memsize(ALLOC, 0) " " : "") "memory limit, so the kernel killed it"); return }
+  if (c == "NF") {
+    wl("its node " failed_node(q, r) " failed while it ran")
+    if (q && R[q, "BatchFlag"] == "0") wn("an interactive job is never requeued")
+    else if (q && R[q, "RestartCnt"] + 0 > 0) wn("Slurm had requeued it " plural(R[q, "RestartCnt"] + 0, "time") " before")
+    return
+  }
+  if (c == "DL") { wl("Slurm ended it: its deadline (--deadline) could no longer be met"); return }
+  if (c == "PR") { wl("preempted: a job with a higher priority took its resources"); return }
+  if (c == "BF") { wl("its node failed to boot"); return }
+  if (c == "F")  why_failed(q, r)
+}
+function why_cancelled(q, r,   by, how, sub_, end) {
+  by = r ? canceller(A[r, "State"]) : ""
+  if (never_started(q, r)) {
+    sub_ = r ? A[r, "Submit"] : R[q, "SubmitTime"]; end = r ? A[r, "End"] : R[q, "EndTime"]
+    how = "while it was pending" (isepoch(sub_) && isepoch(end) && end >= sub_ ? ", " elap(end - sub_) " after it was submitted" : "")
+  } else how = "after it ran " elap(r ? A[r, "ElapsedRaw"] + 0 : dur(R[q, "TimeUsed"]))
+  if (by != "") wl("cancelled by " who(by, OWNER, OWNER_UID) " " how)
+  else if (r && (stcode(A[r, "State"]) in DONE)) {
+    wl("cancelled " how "; Slurm recorded no one")
+    wn("it records no one when it cancels a job itself (a dependency that can never be met, with --kill-on-invalid-dep; a disabled scrontab entry)")
+  } else wl("cancelled " how "; who did it shows once accounting has recorded the end")
+}
+function why_failed(q, r,   rc, sg, k, s, by, sname, rawrc, m, node) {
+  rc = JRC[jid] + 0; sg = JSG[jid] + 0
+  node = q ? R[q, "NodeList"] : r ? A[r, "NodeList"] : ""
+  for (k = 1; k <= nsteps[jid] && by == ""; k++) { s = step_row[jid, k]; by = canceller(A[s, "State"]); sname = stepname(A[s, "JobID"]) }
+  if (q && match(R[q, "exit_code"], /^([0-9]+):([0-9]+)$/, m) && m[2] + 0 == 0) rawrc = m[1] + 0
+  if (by != "") wl(sname " was cancelled by " who(by, OWNER, OWNER_UID) (sg ? ", which ended the job with " signame(sg) : ""))
+  else if (sg >= 1 && sg <= 31) wl("killed by " signame(sg))
+  else if (sg > 31 && sg != 125) {
+    wl(sg == 53 ? "its script never started: Slurm could not open its output file" : "Slurm error " sg ((sg in SLERR) ? ": " SLERR[sg] : ""))
+    if (sg == 53) wn("e.g. -o or -e names a directory that does not exist, or one it may not write to")
+  }
+  else if (rawrc != "" && rawrc >= 129 && rawrc <= 159) {
+    wl("exit " rawrc ": a command in it was killed by " signame(rawrc - 128))
+    wn("a shell reports a command killed by signal N as exit 128+N; sacct will print exit " rawrc - 128 ", as it prints any exit above 128 less 128")
+    if (rawrc == 132) wn("an illegal instruction often means a program built for a newer CPU than " node "'s")
+  }
+  else if (rawrc != "" && rawrc > 159) wl("exit " rawrc ": the program's own code" (rawrc == 255 ? " (exit(-1) is 255)" : "") "; its output may say what it means")
+  else if (rc == 1)   wl("exit 1: the program reported an error itself; its output should say which")
+  else if (rc == 2)   wl("exit 2: often a usage error (a wrong option or argument) or a shell syntax error")
+  else if (rc == 126 || rc == 127) {
+    wl(rc == 127 ? "exit 127: a command was not found (a typo, a module not loaded, or not on PATH)" : "exit 126: a command was found but could not be run (not executable)")
+    if (rawrc == "") wn("or exit " rc + 128 ", the program's own code (exit(-1) is 255): sacct prints an exit above 128 less 128, so it cannot tell the two apart")
+  }
+  else if (rc >= 3 && rc <= 31 && rawrc == "") {
+    wl("exit " rc " (or " rc + 128 ": a command killed by " ((rc in SIGNAME) ? SIGNAME[rc] ((rc in SIGPLAIN) ? ", " SIGPLAIN[rc] : "") : "signal " rc) ")")
+    wn("sacct prints an exit above 128 less 128, so it cannot tell the two apart")
+    if (rc == 4) wn("an illegal instruction often means a program built for a newer CPU than " node "'s")
+  }
+  else if (rc)        wl("exit " rc ": the program's own code; its output may say what it means")
+  else                wl("Slurm marked it FAILED, but neither the job nor a step recorded an exit code")
+  why_tail()
+}
+# its output's last lines, as the shell read them (bounded, scrubbed), or why
+# there are none
+function why_tail(   info, which, me, host, k) {
+  info = ENVIRON["SQJ_WTAILINFO"]; which = ENVIRON["SQJ_WWHICH"]; me = ENVIRON["SQJ_WME"]; host = ENVIRON["SQJ_WHOST"]
+  if (info == "") return
+  if (info == "ok") {
+    wl(paint("2", "its " which " ends with:"))
+    for (k = 1; k <= ntail; k++) wl2(wclip(TAIL[k], COLS - 4))
+  }
+  else if (info == "empty")      wn("its " which " is empty")
+  else if (info == "blank")      wn("its " which " holds only blank lines")
+  else if (info == "older")      wn("its " which " was last written before the job started, so it is not this run's; not shown")
+  else if (info == "later")      wn("its " which " file was written after the job ended (a later run?)")
+  else if (info == "notregular") wn("its " which " is not a regular file")
+  else if (info == "hung")       wn("its " which " file did not answer within 2s")
+  else if (info == "missing")    wn("its " which " is not there" (host != "" && host != me ? "; the job wrote it on " host : ""))
+  else if (info == "unreadable") wn("its " which " cannot be read here")
+  if ((info == "ok" || info == "empty" || info == "blank") && host != "" && me != "" && host != me) wn("read here on " me "; the job wrote it on " host)
+}
+
+# ---- an array: its tasks that did not complete, grouped by why
+function why_array(   i, r, id, c, by, never, key, k, s, n, GN, GI, GK, a, b, t, first, x, m) {
+  for (i = 1; i <= ntask_rows; i++) {
+    r = task_row[i]; id = A[r, "JobID"]; c = stcode(A[r, "State"])
+    if (c == "CD" || !(c in DONE)) continue
+    if (c == "CA") {
+      by = canceller(A[r, "State"]); never = (A[r, "AllocCPUS"] + 0 == 0 || A[r, "Start"] == "None" || A[r, "Start"] == "Unknown")
+      key = "cancelled" (by != "" ? " by " who(by, A[r, "User"], A[r, "UID"]) : "") (never ? " while pending" : " while running")
+    } else if (c == "F") {
+      xcm(id, A[r, "ExitCode"])
+      for (s = 1; s <= nsteps[id]; s++) xcm(id, A[step_row[id, s], "ExitCode"])
+      x = JSG[id] + 0
+      key = (x >= 1 && x <= 31) ? "failed by " signame(x) : (x > 31 && x != 125) ? "failed by Slurm error " x : "failed with exit " (JRC[id] + 0)
+      if (first == "") first = id
+    } else {
+      key = (c == "OOM") ? "ran out of memory" : (c == "TO") ? "reached the time limit" : (c == "NF") ? "lost their node" : "ended " stname(c)
+      if (first == "") first = id
+    }
+    if (!(key in GN)) GK[++n] = key
+    GN[key] += ntasks(id, ID); if (GN[key] - ntasks(id, ID) < 3 || GI[key] == "") GI[key] = GI[key] (GI[key] == "" ? "" : ", ") id
+    else if (GI[key] !~ /…$/) GI[key] = GI[key] ", …"
+  }
+  for (a = 2; a <= n; a++) for (b = a; b > 1 && (GK[b] !~ /^cancelled/ && GK[b - 1] ~ /^cancelled/ || \
+                                               (GK[b] ~ /^cancelled/) == (GK[b - 1] ~ /^cancelled/) && GN[GK[b]] > GN[GK[b - 1]]); b--) {
+    t = GK[b]; GK[b] = GK[b - 1]; GK[b - 1] = t
+  }
+  for (k = 1; k <= n; k++) wl(GN[GK[k]] " " GK[k] ": " GI[GK[k]])
+  for (i = 1; i <= narray_records; i++) {          # the pending tasks, by the record that holds them
+    r = array_record[i]
+    if (R[r, "StateCompact"] != "PD" || onetask(r)) continue
+    x = R[r, "Reason"]
+    wl(ntasks(job "_[" R[r, "ArrayTaskID"] "]", ID) " pending: " \
+       ((x == "JobArrayTaskLimit" && match(R[r, "ArrayTaskID"], /%([0-9]+)$/, m)) ? "the array runs at most " m[1] " tasks at once" : "Slurm's reason: " x))
+  }
+  if (first != "") wn("sq job " first " says more about one of them")
 }
 
 BEGIN {
@@ -1702,7 +2314,24 @@ BEGIN {
   SLERR[54] = "its prolog failed"; SLERR[46] = "no process container"; SLERR[48] = "setuid/setgid failed"
   SLERR[115] = "a spank plugin failed"
   SECNAME["state"] = "state and times"; SECNAME["res"] = "resources"; SECNAME["files"] = "files"
-  SECNAME["eff"] = "efficiency"
+  SECNAME["eff"] = "efficiency"; SECNAME["why"] = "why"
+  COLS = ENVIRON["SQJ_COLS"] + 0; if (COLS < 21) COLS = 120
+  pend_tables()
+  # the why section's words: a signal's effect, a reason that can never or
+  # only by an admin be met (%s the partition)
+  split("hangup|interrupted, as by Ctrl-C|quit|illegal instruction|trace trap|aborted itself, e.g. a failed assertion|bus error|" \
+        "arithmetic error, e.g. a division by zero|killed outright|user signal 1|invalid memory access, a segmentation fault|" \
+        "user signal 2|wrote to a pipe nobody reads|alarm clock|asked to terminate", x, "|")
+  for (i in x) SIGPLAIN[i] = x[i]
+  NEVERWHY["PartitionConfig"] = "it asks for more than partition %s offers"
+  NEVERWHY["PartitionNodeLimit"] = "it asks for more nodes than partition %s allows"
+  NEVERWHY["PartitionTimeLimit"] = "its time limit is longer than partition %s allows"
+  NEVERWHY["InvalidAccount"] = "its account is not valid"; NEVERWHY["InvalidQOS"] = "its QOS is not valid"
+  NEVERWHY["AccountNotAllowed"] = "its account may not use partition %s"; NEVERWHY["QOSNotAllowed"] = "its QOS may not use partition %s"
+  NEVERWHY["JobHoldMaxRequeue"] = "it was requeued too often; Slurm holds it for good"
+  FAULTWHY["NodeDown"] = "a node it needs is down"; FAULTWHY["PartitionDown"] = "partition %s is down"
+  FAULTWHY["PartitionInactive"] = "partition %s is inactive"; FAULTWHY["FrontEndDown"] = "the front end node is down"
+  FAULTWHY["PowerNotAvail"] = "not enough power is available"; FAULTWHY["PowerReserved"] = "the power it needs is reserved"
 
   # squeue's records: their job id a number; sacct's rows: an id or a step's
   nq = (qstat == "ok") ? read_stream(ENVIRON["SQJ_QFILE"], NONCE, qfields, R, "^[0-9]+$") : 0
@@ -1710,23 +2339,203 @@ BEGIN {
   if (nq < 0) { qstat = "bad"; nq = 0; delete R }
   if (na < 0) { astat = "bad"; na = 0; delete A }
   verdict = pick()
+  if (phase == "plan") { why_plan(); exit 0 }
   if (phase == "pick") {
     printf "verdict=%s%cqstat=%s%castat=%s%craw=%s%cstate=%s%cown=%d%c", verdict, 0, qstat, 0, astat, 0, raw, 0, STATE, 0, OWN, 0
+    why_uids()
     exit 0
   }
   mem_load(ENVIRON["SQJ_MEMREAD"])
+  why_load()
   if (verdict == "array") build_array(); else build_job()
 }
 JOBAWK
-job_run() {   # job_run PHASE: the report's gawk, PHASE pick (what to show) or show
+# ---- what the why section asks for beyond the two answers ---------------------
+# Each only when the job's record calls for it (job_run plan): the parents of
+# a dependency (squeue, and accounting for those that failed), the nodes and
+# the queue for a job waiting on resources (scontrol -o show node, squeue -t
+# PD,R), and a failed job's output file.  They run while sacct is asked, and
+# every call of sq job ends by one deadline, sacct's budget and 5 s more from
+# its first call (job_limit); the names of who cancelled come after sacct
+# answered (uid_names), within the same deadline.
+job_why_qfields="JobID ArrayJobID ArrayTaskID StateCompact UserName Partition NodeList NumCPUs tres-alloc EndTime
+	TimeLeft TimeLimit SubmitTime Reason PriorityLong"
+# the time in microseconds, into VAR: bash 5's EPOCHREALTIME, whose decimal
+# point is the locale's, else whole seconds
+now_us() {   # now_us VAR
+	local t=${EPOCHREALTIME:-}; t=${t//[!0-9]/}
+	[ -n "$t" ] || printf -v t '%(%s)T000000' -1
+	printf -v "$1" '%s' "$((10#$t))"
+}
+# SECONDS as a timeout takes them (2, 2.5, .5, 5.) in microseconds, into VAR
+us_of() {   # us_of VAR SECONDS
+	local int=${2%%.*} frac=
+	case $2 in *.*) frac=${2#*.} ;; esac
+	[ ${#int} -le 9 ] || int=999999999
+	frac=${frac}000000
+	printf -v "$1" '%s' "$(( 10#${int:-0} * 1000000 + 10#${frac:0:6} ))"
+}
+# the budget of a call: SECONDS, or what is left before the deadline if that is
+# less, into VAR; never below 0.1 s, as timeout reads 0 as no limit at all
+job_limit() {   # job_limit VAR SECONDS
+	local want now
+	us_of want "$2"; now_us now
+	[ $((job_deadline - now)) -ge "$want" ] || want=$((job_deadline - now))
+	[ "$want" -ge 100000 ] || want=100000
+	printf -v "$1" '%d.%06d' $((want / 1000000)) $((want % 1000000))
+}
+# One background reader does every access to the output file: the test that
+# it is a regular file (a FIFO would block an open forever), its date against
+# the run, the open and the read, so nothing else of sq ever touches it.  A
+# file on a hung NFS mount blocks whatever touches it, uninterruptibly: the
+# reader gets 2 s, is then killed (SIGKILL) and not waited for, as a process
+# in that state cannot be reaped - the one process that may outlive sq.  Its
+# verdict in tailinfo; on "read" its last 4097 bytes in tailraw, which is one
+# more than it shows, to know whether the first line was cut
+job_tail_start() {
+	touch -d "@$((w_start - 5))" -- "$tmp/tail.lo" 2>/dev/null &&
+	touch -d "@$((w_end + 60))" -- "$tmp/tail.hi" 2>/dev/null || { w_tailinfo=unreadable; return; }
+	{ ( exec > "$tmp/tailinfo" 2>/dev/null
+	    if   [ ! -e "$w_tail" ];                 then echo missing
+	    elif [ ! -f "$w_tail" ];                 then echo notregular
+	    elif [ ! -r "$w_tail" ];                 then echo unreadable
+	    elif [ "$w_tail" -ot "$tmp/tail.lo" ];   then echo older
+	    elif [ "$w_tail" -nt "$tmp/tail.hi" ];   then echo later
+	    elif [ ! -s "$w_tail" ];                 then echo empty
+	    else echo read; exec tail -c 4097 -- "$w_tail" > "$tmp/tailraw"
+	    fi ) & } 2>/dev/null
+	job_reader_pid=$!
+	collect_inflight
+}
+# its verdict within 2 s of its start, else "hung" and the reader killed
+job_tail_wait() {
+	local rc now end
+	[ -n "$job_reader_pid" ] || return 0
+	now_us now; end=$((now + 2000000))
+	while kill -0 "$job_reader_pid" 2>/dev/null && [ "$now" -lt "$end" ]; do
+		read -t 0.05 -u "$job_nap"; now_us now
+	done
+	if kill -0 "$job_reader_pid" 2>/dev/null; then
+		disown "$job_reader_pid" 2>/dev/null; kill -KILL "$job_reader_pid" 2>/dev/null
+		job_reader_pid= w_tailinfo=hung; collect_inflight; return
+	fi
+	{ wait "$job_reader_pid"; } 2>/dev/null; rc=$?
+	job_reader_pid=; collect_inflight
+	w_tailinfo=; read -r w_tailinfo < "$tmp/tailinfo" 2>/dev/null
+	[ "$w_tailinfo" != read ] || { [ $rc = 0 ] && job_tail_lines; } || w_tailinfo=unreadable
+}
+# The lines shown, from the bytes read: the last 5 that are not blank, each as
+# a terminal shows it (CR-LF ends a line, the text after the last CR is what
+# overwrote the rest, CSI and OSC escapes go), then scrubbed.  A first line
+# the 4096-byte bound cut is dropped, unless it is the only one: then it is
+# shown cut, an "…" before it.  Each goes to a file of its own for scrub,
+# as bash's read under a UTF-8 locale loses a line that ends in half a
+# character.  w_tailinfo ok, or blank when no line is left
+job_tail_lines() {
+	local n k line
+	n=$(LC_ALL=C gawk -v out="$tmp/tailline" 'BEGIN { RS = "^$" }
+	END {
+		data = $0; cut = (length(data) > 4096)
+		if (cut) { cut = (substr(data, 1, 1) != "\n"); data = substr(data, 2) }
+		n = split(data, L, "\n"); if (n && L[n] == "") n--
+		for (i = 1; i <= n; i++) {
+			s = L[i]; sub(/\r$/, "", s)
+			if (i == 1 && cut && index(s, "\r")) cut = 0        # overwritten: what shows is whole
+			sub(/.*\r/, "", s)
+			gsub(/\033\[[0-9;?]*[ -\/]*[@-~]/, "", s); gsub(/\033\][^\007\033]*(\007|\033\\)?/, "", s)
+			L[i] = s; if (s ~ /[^ \t]/) { keep[i] = 1; if (i > 1) others = 1 }
+		}
+		if (cut && keep[1]) { if (others) delete keep[1]; else { sub(/^[\200-\277]+/, "", L[1]); L[1] = "…" L[1] } }
+		for (i = n; i >= 1 && shown < 5; i--) if (i in keep) pick[++shown] = i
+		for (k = shown; k >= 1; k--) { f = out "." (shown - k + 1); print L[pick[k]] > f; close(f) }
+		print shown + 0
+	}' "$tmp/tailraw" 2>/dev/null)
+	: > "$tmp/wtail"
+	for ((k = 1; k <= ${n:-0}; k++)); do
+		line=$(scrub -f "$tmp/tailline.$k" 1000)
+		[ -z "${line//[[:space:]]/}" ] || printf '%s\n' "$line" >> "$tmp/wtail"
+	done
+	if [ -s "$tmp/wtail" ]; then w_tailinfo=ok; else w_tailinfo=blank; fi
+}
+# the plan and the calls it asks for, started in the background
+job_why_start() {
+	local kv lim f
+	[ "$qstat" = ok ] || return 0
+	job_run plan > "$tmp/plan" 2>/dev/null || return 0
+	while IFS= read -r -d '' kv; do
+		case ${kv%%=*} in
+			nodes|queue|parents|pdone|tail|which|start|end|host) printf -v "w_${kv%%=*}" '%s' "${kv#*=}" ;;
+		esac
+	done < "$tmp/plan"
+	if [ "$w_nodes" = 1 ]; then
+		job_limit lim "$tmo"; collect -t "$lim" -b wnodes scontrol -o show node
+	fi
+	if [ "$w_queue" = 1 ]; then
+		for f in $job_why_qfields; do w_qfmt="$w_qfmt${w_qfmt:+,}$f:$nonce"; done
+		job_limit lim "$tmo"
+		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$w_qfmt collect -t "$lim" -b wqueue squeue -h -t PD,R
+	fi
+	if [ -n "$w_parents" ]; then
+		job_limit lim "$tmo"
+		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$qfmt collect -t "$lim" -b wparents squeue -h --jobs="$w_parents" -t all
+	fi
+	if [ -n "$w_pdone" ]; then
+		job_limit lim "$job_atmo"
+		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 collect -t "$lim" -b wpacct \
+			sacct -p --delimiter="$nonce2" -n --noconvert -a -j "$w_pdone" -o "$afmt"
+	fi
+	[[ -z $w_tail || ! $w_start =~ ^[0-9]+$ || ! $w_end =~ ^[0-9]+$ ]] || job_tail_start
+}
+# their answers, once sacct's is in: each one a file the report reads, empty
+# when the call failed, and how it went
+job_why_finish() {
+	local name rc
+	for name in wnodes wqueue wparents wpacct; do
+		[ -n "${collect_bg[$name]-}" ] || { : > "$tmp/$name"; continue; }
+		collect_join "$name"; rc=$?
+		case $name:$rc in
+			*:0) printf -v "w_${name#w}_stat" ok ;;
+			# a parent Slurm forgot: rc 1 and this text, as for the job itself
+			wparents:1) LC_ALL=C grep -q 'Invalid job id specified' "$tmp/wparents.err" 2>/dev/null &&
+			              w_parents_stat=none || w_parents_stat=fail ;;
+			*) printf -v "w_${name#w}_stat" fail ;;
+		esac
+		[ $rc = 0 ] || : > "$tmp/$name"
+	done
+}
+# the width the output lines are cut to: COLUMNS if exported, else the
+# terminal's, else 120
+job_width() {
+	job_cols=${COLUMNS:-}
+	[ "$job_cols" -ge 21 ] 2>/dev/null && return
+	tty_size; job_cols=$tty_cols
+	[ "$job_cols" -ge 21 ] 2>/dev/null || job_cols=120
+}
+# what the report reads of them, through the environment
+job_why_export() {
+	local me=
+	[ "$w_tailinfo" != ok ] || job_width
+	[ -z "$w_tailinfo" ] || me=$(hostname -s 2>/dev/null | scrub 64)
+	export SQJ_UIDMAP=$w_uidmap SQJ_WPQ=$w_parents_stat SQJ_WNODESTAT=$w_nodes_stat SQJ_WQUEUESTAT=$w_queue_stat \
+		SQJ_WTAILINFO=$w_tailinfo SQJ_WWHICH=$w_which SQJ_WHOST=$w_host SQJ_WME=$me SQJ_COLS=$job_cols \
+		SQJ_WPARENTS=$tmp/wparents SQJ_WPACCT=$tmp/wpacct SQJ_WNODES=$tmp/wnodes SQJ_WQUEUE=$tmp/wqueue \
+		SQJ_WTAIL=$tmp/wtail SQJ_WQFIELDS=$job_why_qfields
+}
+job_run() {   # job_run PHASE: the report's gawk, PHASE plan (what more the why section
+	local as=$astat                                  # needs, from squeue alone), pick (what
+	[ "$1" != plan ] || as=pending                   # to show) or show
 	env LC_ALL="$gloc" gawk -v phase="$1" -v job="$job" -v task="$task" -v myuid="$myuid" -v qstat="$qstat" \
-		-v astat="$astat" -v memfail="$memfail" -v pss="$job_pss" -v tmo="$job_atmo" \
+		-v astat="$as" -v memfail="$memfail" -v pss="$job_pss" -v tmo="$job_atmo" \
 		-v qfields="$job_qfields" -v afields="$job_afields" "$shared_awk$fname_awk$job_awk"
 }
 
 sub_job() {
 	local a v f positional=0 idraw= idset=0 job task= off= label rc qfmt= afmt= kv
-	local qstat astat= qwhy= qwhy_real= awhy= awhy_real= verdict= raw= state= own=0 job_atmo
+	local qstat astat= qwhy= qwhy_real= awhy= awhy_real= verdict= raw= state= own=0
+	# the why section's plan, its answers' outcomes, and the names of cancellers
+	local w_nodes= w_queue= w_parents= w_pdone= w_tail= w_which= w_start= w_end= w_host= w_qfmt=
+	local w_nodes_stat= w_queue_stat= w_parents_stat= w_pacct_stat= w_tailinfo= w_uids= w_uidmap= job_cols=
+	local job_atmo job_deadline
 	while [ $# -gt 0 ]; do
 		a=$1; shift
 		if [ $positional = 0 ]; then
@@ -1762,8 +2571,9 @@ sub_job() {
 	job_pss_since
 	[ -z "$off" ] || job_fail "het jobs are not supported yet"
 	trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
-	# every SQUEUE_* and SACCT_* setting unset (see exported_names)
-	unset $(exported_names 'SQUEUE_*' 'SACCT_*')
+	# every SQUEUE_*, SACCT_* and SCONTROL_* setting unset (see exported_names;
+	# SCONTROL_ALL, SCONTROL_FEDERATION and the like change what show node lists)
+	unset $(exported_names 'SQUEUE_*' 'SACCT_*' 'SCONTROL_*')
 	# two nonces, as the dashboard has: sacct's --delimiter is on its command
 	# line for anyone to read, the queue's stays in the environment
 	nonce=$(mint_nonce) && nonce2=$(mint_nonce) || die "no usable random field separator"
@@ -1789,8 +2599,11 @@ sub_job() {
 	# Franz's decision (2026-10-21): one-shot, sq job waits up to 30 s for
 	# accounting (a big array's rows take a while), SQ_TIMEOUT's bound
 	# instead when it sets a valid one (tmo took it as given); the queue
-	# keeps SQ_TIMEOUT's.  sacct runs while squeue is asked
+	# keeps SQ_TIMEOUT's.  sacct runs while squeue is asked and the why
+	# section's calls are made, all of them done by one deadline: sacct's
+	# budget and 5 s more
 	job_atmo=30; [ "$tmo" != "${SQ_TIMEOUT-}" ] || job_atmo=$tmo
+	now_us job_deadline; us_of v "$job_atmo"; job_deadline=$((job_deadline + v + 5000000))
 	for f in $job_afields; do afmt="$afmt${afmt:+,}$f"; done
 	SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 collect -t "$job_atmo" -b acct \
 		sacct -p --delimiter="$nonce2" -n --noconvert -a -j "$label" -o "$afmt"
@@ -1802,20 +2615,24 @@ sub_job() {
 	elif [ $rc = 1 ] && LC_ALL=C grep -q 'Invalid job id specified' "$tmp/queue.err" 2>/dev/null; then qstat=none
 	else qstat=fail; why_of qwhy $rc "$tmp/queue" squeue
 	fi
+	export SQJ_QFILE=$tmp/queue SQJ_AFILE=$tmp/acct SQJ_MEMREAD=$tmp/memread SQJ_COLOR=$color
+	: > "$tmp/memread"
+	job_why_start
+	job_tail_wait
 	collect_join acct
 	rc=$?
 	if [ $rc = 0 ]; then astat=ok
 	else why_of awhy $rc "$tmp/acct" sacct "$job_atmo"; astat=fail; [ "$awhy_real" != "no response after ${job_atmo}s" ] || astat=timeout
 	fi
-	export SQJ_QFILE=$tmp/queue SQJ_AFILE=$tmp/acct SQJ_MEMREAD=$tmp/memread SQJ_AWHY=$awhy SQJ_COLOR=$color
-	: > "$tmp/memread"
+	export SQJ_AWHY=$awhy
+	job_why_finish
 
 	# what to show, and whether it is the caller's own running job
 	job_run pick > "$tmp/pick" 2> "$tmp/pick.err" &&
 	while IFS= read -r -d '' kv; do
 		case ${kv%%=*} in
 			verdict) verdict=${kv#*=} ;; qstat) qstat=${kv#*=} ;; astat) astat=${kv#*=} ;;
-			raw) raw=${kv#*=} ;; state) state=${kv#*=} ;; own) own=${kv#*=} ;;
+			raw) raw=${kv#*=} ;; state) state=${kv#*=} ;; own) own=${kv#*=} ;; uids) w_uids=${kv#*=} ;;
 		esac
 	done < "$tmp/pick"
 	[ -n "$verdict" ] || { a=$(scrub -f "$tmp/pick.err"); job_fail "${a:-its report failed}"; }
@@ -1831,6 +2648,10 @@ sub_job() {
 			      *)             job_fail "slurm unreachable · $(first_why qwhy awhy)" ;;
 		      esac ;;
 	esac
+	# who cancelled the job, a step or a task, by name: within the deadline
+	v=; [ -z "${w_uids// /}" ] || job_limit v "$tmo"
+	uid_names w_uidmap "$w_uids" -t "${v:-$tmo}" -w
+	job_why_export
 	# the caller's own running job: the memory it uses, as the dashboard
 	# reads it, from the snapshot every sq of the user's shares while it is
 	# fresh, else JOBMEM's call for all of the caller's running jobs, which
@@ -2226,13 +3047,10 @@ mincols=21 minlines=5            # anything smaller is no usable size, from any 
 [ "$compact" = 0 ] || minlines=1 # but COMPACT fits whatever height it is given, down
                                  # to the footer alone; 0 still means "not sized yet"
 
-# the terminal's own size needs no terminfo entry for $TERM, which tput does
-# (xterm-kitty, xterm-ghostty); asked once, and only for an axis the env left
-# open.  No controlling terminal fails silently, and a pty not yet sized says
-# 0 0, so a value under the minimum is left to tput instead
+# the terminal's own size (tty_size), asked once, and only for an axis the
+# env left open; a value under the minimum is left to tput instead
 if [ -z "$cols" ] || [ -z "$lines" ]; then
-	tty_size=$({ stty size </dev/tty; } 2>/dev/null) || tty_size=
-	tty_lines=${tty_size% *} tty_cols=${tty_size#* }
+	tty_size
 	[ -n "$cols" ] || { [ "$tty_cols" -ge $mincols ] 2>/dev/null && cols=$tty_cols; }
 	[ -n "$lines" ] || { [ "$tty_lines" -ge $minlines ] 2>/dev/null && lines=$tty_lines; }
 fi

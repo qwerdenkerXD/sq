@@ -1,0 +1,18 @@
+▌ 11963  merge-counts · fsill
+state and times
+  state       PENDING (DependencyNeverSatisfied)
+  dependency  afterok:11950(failed)
+  start       no estimate yet
+  submitted   2026-10-21 16:10 (2h ago)
+why
+  will never start: it may start only once 11950 has completed successfully, which can no longer happen
+    11950  FAILED · exit 1 · ended 12m ago
+  ↳ Slurm keeps it pending all the same; remove it: scancel 11963
+resources
+  CPUs        4 requested
+  memory      30.4G requested
+  time limit  12h00m
+files
+  work dir    /media/BioNAS2/fsill/rnaseq
+  stdout      /media/BioNAS2/fsill/rnaseq/logs/merge-counts-11963.out
+  stderr      into stdout

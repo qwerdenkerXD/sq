@@ -1,0 +1,8 @@
+# squeue -h -t PD,R: amadvi's 11958 (Resources) was submitted before 11962;
+# every PriorityLong 1, as on bioserver (all PriorityWeight* 0)
+@defaults ArrayJobID=0; ArrayTaskID=N/A; PriorityLong=1
+JobID=11940; ArrayJobID=11940; StateCompact=R; UserName=schroder; Partition=LocalQ; NodeList=fb2-bioinf; NumCPUs=64; tres_alloc=cpu=64,mem=500G,node=1,billing=64; EndTime=\{epoch+12600s}; TimeLeft=3:30:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-80000s}; Reason=None
+JobID=11941; ArrayJobID=11941; StateCompact=R; UserName=amadvi; Partition=LocalQ; NodeList=fb2-bioinf; NumCPUs=32; tres_alloc=cpu=32,mem=242G,node=1,billing=32; EndTime=\{epoch+40000s}; TimeLeft=11:06:40; TimeLimit=1-00:00:00; SubmitTime=\{epoch-50000s}; Reason=None
+JobID=11942; ArrayJobID=11942; StateCompact=R; UserName=amadvi; Partition=small; NodeList=fb2-bioinf-0; NumCPUs=24; tres_alloc=cpu=24,mem=62400M,node=1,billing=24; EndTime=\{epoch+7000s}; TimeLeft=1:56:40; TimeLimit=4:00:00; SubmitTime=\{epoch-8000s}; Reason=None
+JobID=11958; ArrayJobID=11958; StateCompact=PD; UserName=amadvi; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=500G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-16200s}; Reason=Resources
+JobID=11962; ArrayJobID=11962; StateCompact=PD; UserName=hal; Partition=LocalQ; NodeList=; NumCPUs=48; tres_alloc=cpu=48,mem=375G,node=1,billing=48; EndTime=N/A; TimeLeft=2-00:00:00; TimeLimit=2-00:00:00; SubmitTime=\{epoch-9000s}; Reason=Priority

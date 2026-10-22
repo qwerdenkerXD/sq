@@ -1,0 +1,2 @@
+@include ../../_common/job-defaults
+JobID=11955; ArrayJobID=11955; StateCompact=PD; Reason=BadConstraints; UserName=fsill; UserID=1041; Name=toobig; NodeList=; BatchHost=; NumCPUs=140; tres_alloc=cpu=140,mem=1010000M,node=1,billing=140; TimeUsed=0:00; TimeLeft=1:00:00; TimeLimit=1:00:00; SubmitTime=\{epoch-130s}; StartTime=N/A; WorkDir=/home/fsill; STDOUT=/home/fsill/slurm-11955.out; STDERR=/home/fsill/slurm-11955.out; EndTime=N/A

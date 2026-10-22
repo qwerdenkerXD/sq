@@ -1,0 +1,6 @@
+# squeue -h -t PD,R: 11875 and 11950 running on fb2-bioinf, 11964 itself pending;
+# every PriorityLong 1, as on bioserver (all PriorityWeight* 0)
+@defaults ArrayJobID=0; ArrayTaskID=N/A; PriorityLong=1
+JobID=11875; ArrayJobID=11875; StateCompact=R; UserName=schroder; Partition=LocalQ; NodeList=fb2-bioinf; NumCPUs=32; tres_alloc=cpu=32,mem=256G,node=1,billing=32; EndTime=\{epoch+31451400s}; TimeLeft=UNLIMITED; TimeLimit=UNLIMITED; SubmitTime=\{epoch-86400s}; Reason=None
+JobID=11950; ArrayJobID=11950; StateCompact=R; UserName=fsill; Partition=LocalQ; NodeList=fb2-bioinf; NumCPUs=16; tres_alloc=cpu=16,mem=64G,node=1,billing=16; EndTime=\{epoch+78415s}; TimeLeft=21:46:55; TimeLimit=1-00:00:00; SubmitTime=\{epoch-9115s}; Reason=None
+JobID=11964; ArrayJobID=11964; StateCompact=PD; UserName=fsill; Partition=LocalQ; NodeList=; NumCPUs=100; tres_alloc=cpu=100,mem=200G,node=1,billing=100; EndTime=N/A; TimeLeft=3-00:00:00; TimeLimit=3-00:00:00; SubmitTime=\{epoch-1290s}; Reason=Resources

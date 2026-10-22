@@ -2,7 +2,9 @@
 [2mstate and times[0m
   state     [31mOUT_OF_MEMORY[0m · exit 0/oom
   ran       34s on fb2-bioinf (LocalQ)
-  ended     2026-10-17 10:12 (3d07h ago)
+  ended     2026-10-18 10:58 (3d07h ago)
+[2mwhy[0m
+  it used more than its 500M memory limit, so the kernel killed it
 [2mresources[0m
   CPUs      2 allocated (1 requested)
   memory    500M allocated

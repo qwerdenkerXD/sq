@@ -1,0 +1,2 @@
+@include ../../_common/job-sacct-defaults
+JobID=11955; JobIDRaw=11955; UID=1041; User=fsill; State=PENDING; ExitCode=0:0; ElapsedRaw=0; AllocCPUS=0; ReqCPUS=140; ReqTRES=billing=140,cpu=140,mem=1010000M,node=1; AllocTRES=; Submit=\{epoch-130s}; Start=Unknown; End=Unknown; NodeList=None assigned; WorkDir=/home/fsill; JobName=toobig

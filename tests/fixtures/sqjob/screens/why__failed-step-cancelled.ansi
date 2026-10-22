@@ -1,0 +1,18 @@
+[1;36m▌ [0m[1m11360[0m  bash · hal
+[2mstate and times[0m
+  state     [31mFAILED[0m · exit 0/sig9: signal 9 (SIGKILL)
+  ran       10m00s on fb2-bioinf (LocalQ)
+  ended     2026-10-16 08:18 (5d10h ago)
+[2mwhy[0m
+  step 0 was cancelled by hal (its owner), which ended the job with signal 9 (SIGKILL, killed outright)
+[2mresources[0m
+  CPUs      2 allocated (1 requested)
+  memory    15.2G allocated (7.6G requested)
+[2mfiles[0m
+  work dir  /media/BioNAS2/hal/test
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+[2mefficiency[0m
+  CPU [32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[0m  49.8%  9m58s of 20m00s
+  MEM [2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[2;32m▒[0m   1.3%  0.2/15.2G peak (step 0)
+  [2m↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%[0m
+  [2m↳ step 0 started before 2026-10-20 14:45 UTC (RSS accounting): memory shared between processes counted once per process; the peak may read high[0m

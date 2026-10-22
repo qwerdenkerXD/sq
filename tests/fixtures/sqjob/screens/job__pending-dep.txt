@@ -3,7 +3,10 @@ state and times
   state       PENDING (Dependency)
   dependency  afterok:11950(unfulfilled)
   start       no estimate yet
-  submitted   2026-10-20 15:56 (25m ago)
+  submitted   2026-10-21 18:15 (25m ago)
+why
+  waits its turn: it may start once 11950 has completed successfully
+    11950  RUNNING on fb2-bioinf · 21h46m left of 1d00h
 resources
   CPUs        4 requested
   memory      30.4G requested

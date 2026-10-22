@@ -1,0 +1,24 @@
+[1;36m▌ [0m[1m11837[0m  kraken-build · schroder
+[2mstate and times[0m
+  state     [31mFAILED[0m · exit 1
+  ran       41m10s on fb2-bioinf-0 (small)
+  ended     2026-10-21 18:38 (3m ago)
+[2mwhy[0m
+  exit 1: the program reported an error itself; its output should say which
+  [2mits stderr ends with:[0m
+      File "/media/BioNAS2/schroder/kraken/scripts/build_db.py", line 88, in <module>
+        main(sys.argv[1:])
+      File "/media/BioNAS2/schroder/kraken/scripts/build_db.py", line 61, in main
+        taxa = load_taxonomy(os.path.join(args.db, "taxonomy", "nodes.dmp"), names=os.path.join(arg…
+    FileNotFoundError: [Errno 2] No such file or directory: '/media/BioNAS2/schroder/kraken/db/taxo…
+  [2m↳ read here on fb2-bioinf; the job wrote it on fb2-bioinf-0[0m
+[2mresources[0m
+  CPUs      8 allocated
+  memory    25G allocated
+[2mfiles[0m
+  work dir  /media/BioNAS2/schroder/kraken
+  stdout    /media/BioNAS2/schroder/kraken/logs/kraken-11837.out
+  stderr    /media/BioNAS2/schroder/kraken/logs/kraken-11837.err
+[2mefficiency[0m
+  CPU [33m█[33m█[33m█[33m█[33m█[33m█[33m█[2;33m▒[2;33m▒[2;33m▒[2;33m▒[2;33m▒[2;33m▒[2;33m▒[2;33m▒[2;33m▒[0m  45.9%  2h31m of 5h29m
+  MEM [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[2;33m▒[2;33m▒[2;33m▒[2;33m▒[0m  74.0%  19/25G peak (the batch script)

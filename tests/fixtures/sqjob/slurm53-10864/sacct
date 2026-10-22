@@ -1,0 +1,4 @@
+@include ../../_common/job-sacct-defaults
+@defaults UID=1025; User=hal; Submit=\{epoch-1500000s}; Start=\{epoch-1499998s}; End=\{epoch-1499998s}; WorkDir=/media/BioNAS2/hal/busco; ElapsedRaw=0; AllocCPUS=2; ReqCPUS=1; ReqTRES=billing=1,cpu=1,mem=7800M,node=1; AllocTRES=billing=2,cpu=2,mem=15600M,node=1; TimelimitRaw=60
+JobID=10864; JobIDRaw=10864; State=FAILED; ExitCode=0:53; TotalCPU=00:00:00; JobName=busco
+JobID=10864.batch; JobIDRaw=10864.batch; UID=; User=; State=FAILED; ExitCode=0:53; ReqCPUS=2; ReqTRES=; AllocTRES=cpu=2,mem=15600M,node=1; NTasks=1; Partition=; WorkDir=; JobName=batch; TimelimitRaw=

@@ -1,0 +1,2 @@
+@include ../../_common/job-defaults
+JobID=11967; ArrayJobID=11967; StateCompact=PD; Reason=JobHeldUser; UserName=hal; UserID=1025; Name=qc-batch; NodeList=; BatchHost=; NumCPUs=2; tres_alloc=cpu=2,mem=15600M,node=1,billing=2; TimeUsed=0:00; TimeLeft=4:00:00; TimeLimit=4:00:00; SubmitTime=\{epoch-5430s}; StartTime=N/A; WorkDir=/media/BioNAS2/hal/qc; STDOUT=/media/BioNAS2/hal/qc/slurm-11967.out; STDERR=/media/BioNAS2/hal/qc/slurm-11967.out; EndTime=N/A

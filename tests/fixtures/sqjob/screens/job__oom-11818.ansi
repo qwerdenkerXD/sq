@@ -2,7 +2,9 @@
 [2mstate and times[0m
   state     [31mOUT_OF_MEMORY[0m · exit 0/oom
   ran       34s on fb2-bioinf (LocalQ)
-  ended     2026-10-17 10:12 (3d07h ago)
+  ended     2026-10-18 10:58 (3d07h ago)
+[2mwhy[0m
+  it used more than its 500M memory limit, so the kernel killed it
 [2mresources[0m
   CPUs      2 allocated (1 requested)
   memory    500M allocated
@@ -14,4 +16,4 @@
   MEM [2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[2;1;31m▒[0m   0.6%  3/500M peak (the batch script)
   [2m↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%[0m
   [2m↳ OUT_OF_MEMORY: it hit its 500M limit between two samples; the peak shown is too low[0m
-  [2m↳ the batch script started before 2026-10-19 13:59 UTC (RSS accounting): memory shared between processes counted once per process; the peak may read high[0m
+  [2m↳ the batch script started before 2026-10-20 14:45 UTC (RSS accounting): memory shared between processes counted once per process; the peak may read high[0m

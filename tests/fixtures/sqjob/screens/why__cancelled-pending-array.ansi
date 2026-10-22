@@ -1,0 +1,4 @@
+[1;36m▌ [0m[1m10251[0m  j · hal · array of 4: 4 cancelled
+  [2m↳ no task has completed yet[0m
+[2mwhy[0m
+  4 cancelled by hal (its owner) while pending: 10251_[0-3]

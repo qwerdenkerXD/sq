@@ -1,0 +1,23 @@
+▌ 11964  assembly · fsill
+state and times
+  state       PENDING (Resources)
+  start       2027-10-20 19:11 (in 364d00h), Slurm's estimate
+  submitted   2026-10-21 18:19 (21m ago)
+why
+  waits its turn: too little is free now on the nodes it may use (LocalQ)
+                  CPUs free       memory free
+    it asks             100              200G
+    fb2-bioinf    80 of 128  656.5G of 976.5G  too few CPUs free
+    fb2-bioinf-0   24 of 24        75G of 75G  never fits: too few CPUs, too little memory
+  it needs these jobs to end first, on fb2-bioinf:
+    11950  fsill     16 CPUs     64G  21h46m left
+    11875  schroder  32 CPUs    256G  no time limit
+  ↳ Slurm's estimate is that far out because 11875 has no time limit: Slurm plans such a job to run for a year
+resources
+  CPUs        100 requested
+  memory      200G requested
+  time limit  3d00h
+files
+  work dir    /media/BioNAS2/fsill/asm
+  stdout      /media/BioNAS2/fsill/asm/slurm-11964.out
+  stderr      into stdout

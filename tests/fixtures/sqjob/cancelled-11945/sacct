@@ -1,0 +1,4 @@
+@include ../../_common/job-sacct-defaults
+@defaults UID=1041; User=fsill; Submit=\{epoch-9000s}; Start=\{epoch-8900s}; End=\{epoch-4580s}; WorkDir=/media/BioNAS2/fsill/rnaseq; ElapsedRaw=4320; AllocCPUS=8; ReqCPUS=8; ReqTRES=billing=8,cpu=8,mem=62400M,node=1; AllocTRES=billing=8,cpu=8,mem=62400M,node=1; TimelimitRaw=720
+JobID=11945; JobIDRaw=11945; State=CANCELLED by 1041; ExitCode=0:0; TotalCPU=08:31:02; JobName=star-index
+JobID=11945.batch; JobIDRaw=11945.batch; UID=; User=; State=CANCELLED; ExitCode=0:15; ReqTRES=; AllocTRES=cpu=8,mem=62400M,node=1; TotalCPU=08:31:02; TRESUsageInTot=cpu=08:31:02,energy=0,fs/disk=31457280000,mem=34359738368,pages=0,vmem=36507222016; TRESUsageInMax=cpu=08:31:02,energy=0,fs/disk=31457280000,mem=34359738368,pages=0,vmem=36507222016; NTasks=1; Partition=; WorkDir=; JobName=batch; TimelimitRaw=

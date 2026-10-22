@@ -1,0 +1,4 @@
+# the parents call: 11950 running, 11958 pending with an estimate
+@include ../../_common/job-defaults
+JobID=11950; ArrayJobID=11950; StateCompact=R; UserName=fsill; UserID=1041; Name=bwa-align; NodeList=fb2-bioinf; NumCPUs=16; tres_alloc=cpu=16,mem=64G,node=1,billing=16; TimeUsed=2:13:05; TimeLeft=21:46:55; TimeLimit=1-00:00:00; SubmitTime=\{epoch-9115s}; StartTime=\{epoch-9000s}; EndTime=\{epoch+78415s}; WorkDir=/media/BioNAS2/fsill/wgs
+JobID=11958; ArrayJobID=11958; StateCompact=PD; Reason=Resources; UserName=fsill; UserID=1041; Name=salmon-quant; NodeList=; NumCPUs=16; tres_alloc=cpu=16,mem=124800M,node=1,billing=16; TimeUsed=0:00; TimeLeft=6:00:00; TimeLimit=6:00:00; SubmitTime=\{epoch-1830s}; StartTime=\{epoch+78430s}; EndTime=N/A

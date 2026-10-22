@@ -1,8 +1,16 @@
 ▌ 11962  hifiasm · hal
 state and times
   state       PENDING (Priority)
-  start       2026-10-20 21:35 (in 3h), Slurm's estimate
-  submitted   2026-10-20 15:54 (2h ago)
+  start       2026-10-21 22:11 (in 3h), Slurm's estimate
+  submitted   2026-10-21 16:11 (2h ago)
+why
+  waits its turn: 1 job submitted before it comes first
+    11958  amadvi     64 CPUs    500G  PENDING (Resources), submitted 4h ago
+  what the nodes it may use (LocalQ) have free now:
+                  CPUs free       memory free
+    it asks              48              375G
+    fb2-bioinf    32 of 128  234.5G of 976.5G  too few CPUs and too little memory free
+    fb2-bioinf-0    0 of 24      14.0G of 75G  never fits: too few CPUs, too little memory
 resources
   CPUs        48 requested
   memory      375G requested

@@ -1,0 +1,16 @@
+▌ 10864  busco · hal
+state and times
+  state     FAILED · exit 0/err53: Slurm error, its output file could not be opened
+  ran       0s on fb2-bioinf (LocalQ)
+  ended     2026-10-04 10:01 (17d08h ago)
+why
+  its script never started: Slurm could not open its output file
+  ↳ e.g. -o or -e names a directory that does not exist, or one it may not write to
+resources
+  CPUs      2 allocated (1 requested)
+  memory    15.2G allocated (7.6G requested)
+files
+  work dir  /media/BioNAS2/hal/busco
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+efficiency
+  ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%

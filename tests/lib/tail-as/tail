@@ -4,6 +4,8 @@
 # it claims to be when asked --version:
 #   busybox  BusyBox's, which knows no --version (rc 1, its usage on stderr)
 #   old      GNU coreutils 8.22 (RHEL 7), older than the 8.28 sq log follows with
+#   hang     any call but --version blocks (sleeps 30 s, in place of tail), as a
+#            read on a hung NFS mount does
 # Any other call is the real tail's.
 real=
 IFS=: read -ra dirs <<< "$PATH"
@@ -19,4 +21,5 @@ for a in "$@"; do
 		*)       echo "tests/lib/tail-as/tail: SQSTUB_TAIL is not busybox or old" >&2; exit 125 ;;
 	esac
 done
+[ "${SQSTUB_TAIL:-}" != hang ] || exec sleep 30
 exec "$real" "$@"

@@ -1,0 +1,18 @@
+[1;36m▌ [0m[1m11969[0m  report · fsill
+[2mstate and times[0m
+  state       [33mPENDING[0m (Dependency)
+  dependency  afterok:11950(unfulfilled),afterany:11958(unfulfilled)
+  start       no estimate yet
+  submitted   2026-10-21 18:31 (10m ago)
+[2mwhy[0m
+  [32mwaits its turn[0m: it may start once all of these are met
+    11950  must complete successfully · now [32mRUNNING[0m on fb2-bioinf · 21h46m left of 1d00h
+    11958  must end · now [33mPENDING[0m (Resources) · Slurm's estimate: 2026-10-22 16:28 (in 21h)
+[2mresources[0m
+  CPUs        1 requested
+  memory      7.6G requested
+  time limit  1h00m
+[2mfiles[0m
+  work dir    /media/BioNAS2/fsill/rnaseq
+  stdout      /media/BioNAS2/fsill/rnaseq/slurm-11969.out
+  stderr      into stdout

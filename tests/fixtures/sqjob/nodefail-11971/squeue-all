@@ -1,0 +1,2 @@
+@include ../../_common/job-defaults
+JobID=11971; ArrayJobID=11971; StateCompact=NF; exit_code=0:1; BatchFlag=0; UserName=amadvi; UserID=1021; Name=bash; NodeList=fb2-bioinf-0; BatchHost=fb2-bioinf-0.bioinf.local; NumCPUs=4; tres_alloc=cpu=4,mem=12800M,node=1,billing=4; TimeUsed=1:02:10; TimeLeft=6:57:50; TimeLimit=8:00:00; SubmitTime=\{epoch-3950s}; StartTime=\{epoch-3910s}; EndTime=\{epoch-210s}; WorkDir=/home/amadvi; STDOUT=; STDERR=; Reason=NodeDown

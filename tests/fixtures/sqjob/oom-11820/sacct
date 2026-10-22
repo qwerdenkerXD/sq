@@ -1,0 +1,4 @@
+@include ../../_common/job-sacct-defaults
+@defaults UID=1029; User=schroder; Submit=\{epoch-280000s}; Start=\{epoch-279990s}; End=\{epoch-279890s}; WorkDir=/media/BioNAS2/schroder/kraken; ElapsedRaw=100; AllocCPUS=2; ReqCPUS=1; ReqTRES=billing=1,cpu=1,mem=2G,node=1; AllocTRES=billing=2,cpu=2,mem=2G,node=1; TimelimitRaw=60
+JobID=11820; JobIDRaw=11820; State=OUT_OF_MEMORY; ExitCode=0:125; TotalCPU=01:31.300; JobName=kraken-build
+JobID=11820.batch; JobIDRaw=11820.batch; UID=; User=; State=OUT_OF_MEMORY; ExitCode=0:125; ReqCPUS=2; ReqTRES=; AllocTRES=cpu=2,mem=2G,node=1; TotalCPU=01:31.300; TRESUsageInTot=cpu=00:01:31,energy=0,fs/disk=1048576,mem=1971322880,pages=0,vmem=2147483648; TRESUsageInMax=cpu=00:01:31,energy=0,fs/disk=1048576,mem=1971322880,pages=0,vmem=2147483648; NTasks=1; Partition=; WorkDir=; JobName=batch; TimelimitRaw=

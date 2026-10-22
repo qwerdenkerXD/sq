@@ -1,0 +1,2 @@
+@include ../../_common/job-sacct-defaults
+JobID=11967; JobIDRaw=11967; UID=1025; User=hal; State=PENDING; ExitCode=0:0; ElapsedRaw=0; AllocCPUS=0; ReqCPUS=2; ReqTRES=billing=2,cpu=2,mem=15600M,node=1; AllocTRES=; Submit=\{epoch-5430s}; Start=Unknown; End=Unknown; NodeList=None assigned; WorkDir=/media/BioNAS2/hal/qc; JobName=qc-batch; TimelimitRaw=240

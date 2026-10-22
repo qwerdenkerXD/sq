@@ -1,0 +1,24 @@
+▌ 11837  kraken-build · schroder
+state and times
+  state     FAILED · exit 1
+  ran       41m10s on fb2-bioinf-0 (small)
+  ended     2026-10-21 18:38 (3m ago)
+why
+  exit 1: the program reported an error itself; its output should say which
+  its stderr ends with:
+      File "/media/BioNAS2/schroder/kraken/scripts/build_db.py", line 88, in <module>
+        main(sys.argv[1:])
+      File "/media/BioNAS2/schroder/kraken/scripts/build_db.py", line 61, in main
+        taxa = load_taxonomy(os.path.join(args.db, "taxonomy", "nodes.dmp"), names=os.path.join(arg…
+    FileNotFoundError: [Errno 2] No such file or directory: '/media/BioNAS2/schroder/kraken/db/taxo…
+  ↳ read here on fb2-bioinf; the job wrote it on fb2-bioinf-0
+resources
+  CPUs      8 allocated
+  memory    25G allocated
+files
+  work dir  /media/BioNAS2/schroder/kraken
+  stdout    /media/BioNAS2/schroder/kraken/logs/kraken-11837.out
+  stderr    /media/BioNAS2/schroder/kraken/logs/kraken-11837.err
+efficiency
+  CPU ███████▒▒▒▒▒▒▒▒▒  45.9%  2h31m of 5h29m
+  MEM ████████████▒▒▒▒  74.0%  19/25G peak (the batch script)

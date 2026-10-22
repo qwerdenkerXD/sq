@@ -1,0 +1,2 @@
+@include ../../_common/job-sacct-defaults
+JobID=11966; JobIDRaw=11966; UID=1041; User=fsill; State=PENDING; ExitCode=0:0; ElapsedRaw=0; AllocCPUS=0; ReqCPUS=2; ReqTRES=billing=2,cpu=2,mem=15600M,node=1; AllocTRES=; Submit=\{epoch-5430s}; Start=Unknown; End=Unknown; NodeList=None assigned; WorkDir=/media/BioNAS2/fsill/qc; JobName=qc-batch; TimelimitRaw=240

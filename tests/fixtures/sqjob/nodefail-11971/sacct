@@ -1,0 +1,5 @@
+@include ../../_common/job-sacct-defaults
+@defaults UID=1021; User=amadvi; Submit=\{epoch-3950s}; Start=\{epoch-3910s}; End=\{epoch-210s}; WorkDir=/home/amadvi; ElapsedRaw=3730; AllocCPUS=4; ReqCPUS=4; ReqTRES=billing=4,cpu=4,mem=12800M,node=1; AllocTRES=billing=4,cpu=4,mem=12800M,node=1; NodeList=fb2-bioinf-0; TimelimitRaw=480
+JobID=11971; JobIDRaw=11971; State=NODE_FAIL; ExitCode=1:0; TotalCPU=00:00:00; JobName=bash; FailedNode=fb2-bioinf-0
+JobID=11971.extern; JobIDRaw=11971.extern; UID=; User=; State=CANCELLED; ExitCode=0:9; ReqTRES=; AllocTRES=billing=4,cpu=4,mem=12800M,node=1; NTasks=1; Partition=; WorkDir=; JobName=extern; TimelimitRaw=
+JobID=11971.0; JobIDRaw=11971.0; UID=; User=; State=CANCELLED; ExitCode=0:9; ReqTRES=; AllocTRES=cpu=4,mem=12800M,node=1; NTasks=1; Partition=; WorkDir=; JobName=bash; TimelimitRaw=

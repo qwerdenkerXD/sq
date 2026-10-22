@@ -1,0 +1,13 @@
+#!/bin/sh
+# not a stub: answers SQSTUB_HOST when that is set (-s: its short form), so a
+# case can say which host sq runs on; otherwise the real hostname
+if [ -n "${SQSTUB_HOST:-}" ]; then
+	case $* in -s) printf '%s\n' "${SQSTUB_HOST%%.*}" ;; '') printf '%s\n' "$SQSTUB_HOST" ;;
+		*) echo "tests/bin/hostname: only -s is emulated" >&2; exit 97 ;; esac
+	exit 0
+fi
+IFS=:
+for dir in $PATH; do
+	[ -x "$dir/hostname" ] && ! [ "$dir/hostname" -ef "$0" ] && exec "$dir/hostname" "$@"
+done
+echo "tests/bin/hostname: no real hostname on PATH" >&2; exit 127

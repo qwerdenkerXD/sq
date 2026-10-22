@@ -144,7 +144,7 @@ sq job 12345              # one job, and its efficiency once it ended (below)
 | `SQ_BELL` | `0` never rings. `SQ_BELL_ALL=1` rings for everyone's failures, not only yours. |
 | `SQ_ETA` | `0` hides pending start estimates. |
 | `SQ_COLOR` | `0` never, `1` always. |
-| `SQ_TIMEOUT` | Seconds to wait for Slurm before declaring it unreachable (default 5). |
+| `SQ_TIMEOUT` | Seconds to wait for Slurm before declaring it unreachable (default 5). `sq job` waits 30 s for accounting unless this is set to a valid number. |
 | `SQ_SINCE` | How far back the finished block looks (`sacct -S` syntax, default `now-2hours`). |
 | `SQ_RECENT_MAX` | Finished rows shown (default: every finished job in FULL, the space left on screen up to 25 in COMPACT; a value you set is used as given in FULL, and is an upper limit in COMPACT, which never pushes the footer off screen). |
 | `SQ_COMPACT` | `1` always COMPACT, `0` always FULL; anything else, or unset, decides by where the output goes. The flags beat it. |
@@ -228,11 +228,27 @@ efficiency
   the same reading (`?` none yet, `!` it failed); the CPU efficiency comes when it ends.
   Another user's running job and a pending job have no efficiency section: `sstat` answers
   only a job's owner.
+- **Why**, a section right after the state: for a pending job, what holds it and who can act,
+  as one coloured verdict (green *waits its turn*, yellow *needs action*, *waits for an admin*
+  and *stuck*, red *can never start* and *will never start*), the same kinds the dashboard sorts
+  pending jobs by, with the detail: the parents of a dependency and their state now, a job
+  waiting for resources against what each node it may use has free and the running jobs that
+  must end first, the jobs ahead of it in the queue, the command that releases a hold. For an
+  ended job that did not complete: its exit in plain words (and what sacct cannot tell apart,
+  such as exit 4 and a SIGILL), who cancelled it, the time or memory limit it hit, the node it
+  lost. A failed job's output ends the section with its last 5 lines, read from the file's last
+  4096 bytes while Slurm still knows its path, for every job whose file you can read, other
+  users' too; the file is read by one process that gets 2 s, so a hung network mount does not
+  hang `sq job` (that process, stuck in the kernel, is the one sq may leave behind). A running
+  or completed job has no why section.
 - **An array**, `sq job 12345`, gets one summary: its tasks counted by state, and over the
   completed ones the median, the weakest task and the best, so `sq job 12345_7` can look at the
-  weakest. A task is `12345_7`, or its own job id.
+  weakest, and why its other tasks did not complete. A task is `12345_7`, or its own job id.
+  While accounting does not answer, the count is a floor: `array of ≥5 (accounting did not
+  answer)`.
 - The efficiency comes from accounting (`sacct`), so it shows once accounting has recorded the
-  job's end, a moment after squeue says it ended. A job squeue has forgotten (about 5 minutes
+  job's end, a moment after squeue says it ended. `sq job` waits up to 30 s for it (a big
+  array's rows take a while), `SQ_TIMEOUT` instead when set, and asks the rest meanwhile. A job squeue has forgotten (about 5 minutes
   after it ends) is still shown from accounting, without its output paths.
 - When one of squeue and sacct does not answer, the report shows what the other knows and a dim
   line says which. Exit 0 when shown, 1 when Slurm does not know the job or cannot be asked, 2
@@ -320,11 +336,12 @@ efficiency
 tests/run.sh              # ~2 min, no cluster needed
 ```
 
-The suite puts stand-ins for `squeue`, `sinfo`, `sacct` and `sstat` first on `PATH` and feeds
-sq the shapes that are hard to get from a live cluster: large arrays, hostile job names, array
-ids Slurm truncates, a controller that hangs. Most cases assert properties of the screen
-(counts, which rows appear, that nothing is forged), not a snapshot; the node bars are compared
-byte for byte with the screens they were designed from. Known defects are listed
+The suite puts stand-ins for `squeue`, `sinfo`, `sacct`, `sstat`, `scontrol` and `getent` first
+on `PATH` and feeds sq the shapes that are hard to get from a live cluster: large arrays, hostile
+job names, array ids Slurm truncates, a controller that hangs. Most cases assert properties of
+the screen (counts, which rows appear, that nothing is forged), not a snapshot; the node bars
+and the `sq job` reports are compared byte for byte with the screens they were designed from
+(`tests/run.sh --pin` writes the latter anew, for a change meant to change them). Known defects are listed
 as expected failures, so a fix shows up as one. `tests/faithfulness.sh <host>` compares the
 stand-ins' output with the real tools, read-only, and fails wherever a real tool complains on
 stderr.

@@ -1,0 +1,5 @@
+@include ../../_common/job-sacct-defaults
+@defaults UID=1025; User=hal; Submit=\{epoch-470000s}; Start=\{epoch-469990s}; End=\{epoch-469390s}; WorkDir=/media/BioNAS2/hal/test; ElapsedRaw=600; AllocCPUS=2; ReqCPUS=1; ReqTRES=billing=1,cpu=1,mem=7800M,node=1; AllocTRES=billing=2,cpu=2,mem=15600M,node=1; TimelimitRaw=60
+JobID=11360; JobIDRaw=11360; State=FAILED; ExitCode=0:9; TotalCPU=09:58.010; JobName=bash
+JobID=11360.extern; JobIDRaw=11360.extern; UID=; User=; State=COMPLETED; ExitCode=0:0; ReqCPUS=2; ReqTRES=; AllocTRES=billing=2,cpu=2,mem=15600M,node=1; NTasks=1; Partition=; WorkDir=; JobName=extern; TimelimitRaw=
+JobID=11360.0; JobIDRaw=11360.0; UID=; User=; State=CANCELLED by 1025; ExitCode=0:9; ReqCPUS=2; ReqTRES=; AllocTRES=cpu=2,mem=15600M,node=1; TotalCPU=09:58.010; TRESUsageInTot=cpu=00:09:58,energy=0,fs/disk=1048576,mem=209715200,pages=0,vmem=524288000; TRESUsageInMax=cpu=00:09:58,energy=0,fs/disk=1048576,mem=209715200,pages=0,vmem=524288000; NTasks=1; Partition=; WorkDir=; JobName=bash; TimelimitRaw=

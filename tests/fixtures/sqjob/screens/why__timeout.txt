@@ -1,0 +1,18 @@
+▌ 11325  sleeper · hal
+state and times
+  state     TIMEOUT · exit 0/sig15: signal 15 (SIGTERM)
+  ran       1m10s on fb2-bioinf (LocalQ)
+  ended     2026-10-15 18:16 (6d00h ago)
+why
+  it reached its time limit of 1m00s after 1m10s
+resources
+  CPUs      2 allocated (1 requested)
+  memory    15.2G allocated (7.6G requested)
+files
+  work dir  /media/BioNAS2/hal/test
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+efficiency
+  CPU ████████▒▒▒▒▒▒▒▒  50.0%  1m10s of 2m20s
+  MEM ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   0.1%  0.0/15.2G peak (step 0)
+  ↳ 1 requested CPU became 2: a program running 1 thread reaches at most 50%
+  ↳ step 0 started before 2026-10-20 14:45 UTC (RSS accounting): memory shared between processes counted once per process; the peak may read high

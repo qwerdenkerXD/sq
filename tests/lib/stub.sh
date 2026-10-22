@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# The test double behind tests/bin/{squeue,sinfo,sacct,sstat}: renders whatever
-# output format sq asked for from a hand-written fixture, and logs every call.
+# The test double behind tests/bin/{squeue,sinfo,sacct,sstat,scontrol}: renders
+# whatever output format sq asked for from a hand-written fixture, and logs
+# every call.
 #
 #   tests/bin/<tool> -> stub.sh <tool> <argv...>
 #
 # Environment (set by tests/run.sh; without them the stub refuses to run, so it
 # can never be mistaken for Slurm):
 #   SQSTUB_FIXTURE  fixture directory; the stub reads <dir>/sinfo, <dir>/sacct,
-#                   <dir>/sstat, <dir>/squeue, or <dir>/squeue-all when squeue
-#                   gets "-t all" (whatever its format), or <dir>/squeue-alloc when its format asks for
+#                   <dir>/sstat, <dir>/scontrol-node, <dir>/squeue, or
+#                   <dir>/squeue-all when squeue gets "-t all" (whatever its
+#                   format), or <dir>/squeue-queue when it gets "-t PD,R" (sq
+#                   job's whole queue), or <dir>/squeue-alloc when its format asks for
 #                   StateCompact and tres-alloc (sq's allocation call, so it can
 #                   fail on its own), or <dir>/squeue-tres when it asks for
 #                   tres-alloc alone (sq's mirror call, ditto).  A fixture
@@ -17,7 +20,11 @@
 #                   but @defaults and @include is skipped), JobID from each
 #                   record's A (-O JobID is %A) and tres-alloc from its
 #                   tres_alloc, else N/A, which Slurm prints for a job without
-#                   TRES and sq reads as no total
+#                   TRES and sq reads as no total.  A call that names jobs
+#                   (squeue --jobs=LIST, sacct -j LIST) reads <file>.LIST
+#                   instead where the fixture has one (squeue-all.11950,
+#                   sacct.11950,11958): two calls of one tool at once, which no
+#                   @step can tell apart, each get their own answer
 #   SQSTUB_LOG      file every invocation is appended to, one line per call:
 #                   CALL <tool> <argv, %q-quoted> <VAR=%q value | VAR(unset)>...
 #                   (the fixed list below, then every other SQUEUE_* and SACCT_*
@@ -38,6 +45,9 @@
 #           (%<letter> grammar or Field:suffix grammar), needs -h
 #   sacct   -o F1,F2,... with -p or -P and -n, --delimiter=D (default "|")
 #   sstat   -o F1,F2,... with -p or -P, -n, -a and --noconvert
+#   scontrol -o show node: each record line of the file printed as written
+#                                        (escapes decoded), as scontrol's one
+#                                        line per node has no format to render
 # Anything the stub cannot render exactly the way Slurm would (field widths,
 # headers, unsized -O fields, an unknown option) is refused with exit 97 and a
 # STUBERROR line, never approximated.
@@ -78,7 +88,8 @@
 #                       (escapes decoded; no "..", never absolute), when the
 #                       call is served: in a step only on the call that starts
 #                       it.  OP: create (a new file holding ARG), append ARG,
-#                       truncate, chmod MODE, touch DATE (touch -d DATE)
+#                       truncate, chmod MODE, touch DATE (touch -d DATE), fifo
+#                       (a FIFO nothing writes)
 #   @signal N           die by signal N before printing anything, as a crash
 #                       does (no core is dumped).  Read by this script, not
 #                       the renderer, whose gawk would catch a SIGSEGV itself,
@@ -109,14 +120,14 @@ line=$(printf 'CALL\t%s\t' "$tool"; [ $# -gt 0 ] && printf '%q ' "$@"
 		if [ -n "${!v+set}" ]; then printf '\t%s=%q' "$v" "${!v}"
 		else printf '\t%s(unset)' "$v"; fi
 	done
-	for v in $(compgen -e); do      # any other squeue or sacct setting that reached it
-		case $v in SQUEUE_FORMAT|SQUEUE_FORMAT2) ;; SQUEUE_*|SACCT_*) printf '\t%s=%q' "$v" "${!v}" ;; esac
+	for v in $(compgen -e); do      # any other squeue, sacct or scontrol setting that reached it
+		case $v in SQUEUE_FORMAT|SQUEUE_FORMAT2) ;; SQUEUE_*|SACCT_*|SCONTROL_*) printf '\t%s=%q' "$v" "${!v}" ;; esac
 	done)
 printf '%s\n' "$line" >> "$SQSTUB_LOG"
 
 # ---- argv: every option sq can send, nothing else --------------------------
 mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0
-cmd_o=; cmd_O=; states=
+cmd_o=; cmd_O=; states=; jobs=; show=
 need_value() { [ $# -ge 2 ] || refuse "$1 needs a value"; }
 while [ $# -gt 0 ]; do
 	a=$1; v=
@@ -143,10 +154,11 @@ while [ $# -gt 0 ]; do
 		squeue:-o|squeue:--format)   take "$@"; cmd_o=$val ;;
 		squeue:-O|squeue:--Format)   take "$@"; cmd_O=$val ;;
 		squeue:-t|squeue:--states|squeue:--state) take "$@"; states=$val ;;
+		squeue:-j|squeue:--job|squeue:--jobs) take "$@"; jobs=$val ;;   # picks <file>.LIST, if any
 		squeue:-S|squeue:--sort|squeue:-u|squeue:--user|squeue:--users|\
 		squeue:-p|squeue:--partition|squeue:--partitions|\
 		squeue:-A|squeue:--account|squeue:--accounts|squeue:-q|squeue:--qos|\
-		squeue:-j|squeue:--job|squeue:--jobs|squeue:-M|squeue:--cluster|squeue:--clusters|\
+		squeue:-M|squeue:--cluster|squeue:--clusters|\
 		squeue:-n|squeue:--name|squeue:-w|squeue:--nodelist|squeue:--node|squeue:--nodes|\
 		squeue:-L|squeue:--licenses|squeue:--license|squeue:-R|squeue:--reservation)
 			take "$@" ;;              # a filter: logged above, never applied
@@ -166,9 +178,10 @@ while [ $# -gt 0 ]; do
 		# -X drops the step rows, the only ones carrying a signal (seen live)
 		sacct:--delimiter)           take "$@"; delim=$val ;;
 		sacct:-o|sacct:--format)     take "$@"; cmd_o=$val ;;
+		sacct:-j|sacct:--jobs)       take "$@"; jobs=$val ;;   # picks <file>.LIST, if any
 		sacct:-S|sacct:--starttime|sacct:-E|sacct:--endtime|sacct:-u|sacct:--user|\
 		sacct:-r|sacct:--partition|sacct:-A|sacct:--account|sacct:--accounts|\
-		sacct:-q|sacct:--qos|sacct:-j|sacct:--jobs|sacct:-M|sacct:--clusters)
+		sacct:-q|sacct:--qos|sacct:-M|sacct:--clusters)
 			take "$@" ;;              # a filter: logged above, never applied
 
 		# sstat as sq asks it: --noconvert and -a are required, as without them
@@ -181,6 +194,11 @@ while [ $# -gt 0 ]; do
 		sstat:--noconvert)           noconvert=1; shift_n=1 ;;
 		sstat:-o|sstat:--format|sstat:--fields) take "$@"; cmd_o=$val ;;
 		sstat:-j|sstat:--jobs)       take "$@" ;;   # a filter: logged above, never applied
+
+		# scontrol as sq asks it: -o, then show node (or nodes)
+		scontrol:-o|scontrol:--oneliner) noheader=1; shift_n=1 ;;
+		scontrol:show)               [ -z "$show" ] || refuse "show twice"; show=what; shift_n=1 ;;
+		scontrol:node|scontrol:nodes) [ "$show" = what ] || refuse "'$a' without show"; show=node; shift_n=1 ;;
 
 		*) refuse "option '$1' is not emulated" ;;
 	esac
@@ -211,12 +229,14 @@ case $tool in
 		else refuse "squeue's default format is not emulated: set a format"
 		fi
 		# "-t all" is the one filter that picks the fixture: it is a different
-		# question (finished jobs too), not a narrower one
-		case $states in [Aa][Ll][Ll]) file=squeue-all ;; *) file=squeue ;; esac
+		# question (finished jobs too), not a narrower one; "-t PD,R" is sq
+		# job's whole queue, a question of its own as well
+		case $states in [Aa][Ll][Ll]) file=squeue-all ;; PD,R) file=squeue-queue ;; *) file=squeue ;; esac
 		# sq's allocation call and its mirror call are questions of their own
 		# too, answered apart, so a case can fail either alone; but "-t all"
-		# first, whatever the format holds (sq job asks for tres-alloc with it)
-		[ "$file" = squeue-all ] ||
+		# and "-t PD,R" first, whatever the format holds (sq job asks for
+		# tres-alloc with both)
+		[ "$file" != squeue ] ||
 		case $mode:$fmt in
 			long:*[Ss][Tt][Aa][Tt][Ee][Cc][Oo][Mm][Pp][Aa][Cc][Tt]*[Tt][Rr][Ee][Ss]-[Aa][Ll][Ll][Oo][Cc]*) file=squeue-alloc ;;
 			long:*[Tt][Rr][Ee][Ss]-[Aa][Ll][Ll][Oo][Cc]*)
@@ -234,10 +254,15 @@ case $tool in
 		[ $noconvert = 1 ] || refuse "converted (K-suffixed) sizes are not emulated: pass --noconvert"
 		[ -n "$cmd_o" ]    || refuse "sstat's default format is not emulated: pass -o"
 		mode=sacct; fmt=$cmd_o; file=sstat ;;
+	scontrol)
+		[ "$show" = node ]  || refuse "only 'show node' is emulated"
+		[ $noheader = 1 ]   || refuse "only the one-line form (-o) is emulated"
+		mode=raw; fmt="show node"; file=scontrol-node ;;
 	*) refuse "unknown tool" ;;
 esac
 
 path=$SQSTUB_FIXTURE/$file
+[ -z "$jobs" ] || [ ! -f "$path.$jobs" ] || path=$path.$jobs
 [ -f "$path" ] || refuse "fixture $path does not exist (an unexpected call?)"
 
 # which call of this tool with this format this is, counted per run (two

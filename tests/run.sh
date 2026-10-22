@@ -13,9 +13,10 @@
 # terminal cases, and glibc's localedef with its locale sources for one case;
 # util-linux `flock` (the stub's call counter) and procps `ps` (sq log's
 # leftover processes, found by session id) for the sq log cases.
-# The stubs in tests/bin stand in for squeue/sinfo/sacct (tests/lib/stub.sh
-# says how, tests/FAITHFULNESS.md how they were checked against the real
-# ones) and for getent; tests/bin/stty only logs and runs the real stty.
+# The stubs in tests/bin stand in for squeue/sinfo/sacct/sstat/scontrol
+# (tests/lib/stub.sh says how, tests/FAITHFULNESS.md how they were checked
+# against the real ones) and for getent; tests/bin/stty only logs and runs the
+# real stty, tests/bin/id and hostname answer what a case sets.
 # Every case must see a stub answer, so the suite cannot pass against a real
 # Slurm by accident.
 #
@@ -4189,7 +4190,8 @@ screen_is() {
 }
 # job_fx NAME FILE: fixture NAME's FILE is stdin, a squeue-all after
 # job-defaults, a sacct after job-sacct-defaults; until given, squeue-all
-# forgot the job and sacct answers nothing.  Prints its directory
+# forgot the job, sacct answers nothing and getent knows no user.  Prints
+# its directory
 job_fx() {
 	local d=$T_DIR/fx-$1
 	mkdir -p "$d"
@@ -4200,6 +4202,7 @@ job_fx() {
 	esac
 	[ -f "$d/squeue-all" ] || printf '@stderr slurm_load_jobs error: Invalid job id specified\n@exit 1\n' > "$d/squeue-all"
 	[ -f "$d/sacct" ] || : > "$d/sacct"
+	[ -f "$d/passwd" ] || printf '# no user known\n' > "$d/passwd"
 	printf '%s' "$d"
 }
 kv_is() {     # kv_is KEY VALUE: a line of the report is KEY, then VALUE after the key column
@@ -4213,7 +4216,7 @@ notes_are() { [ "$(notes)" = "$(printf '%s\n' "$@")" ]; }   # notes_are TEXT...:
 alloc_calls() { gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) ~ / -u / { n++ } END { print n+0 }' "$LOG"; }   # JOBMEM's
 
 c_job_screens() {   # Q2, Q3, acceptance 1
-	T_TITLE="the accepted sq job screens byte for byte, dates aside: r2's 12 with v3's three changes and r1's pending dependency, colour on and off"
+	T_TITLE="the accepted sq job screens byte for byte, dates aside: r2's 12 with v3's three changes and r1's pending dependency, colour on and off; why-v2's days and why sections (array, oom, pending-dep, pending-est, timeout)"
 	local c ext flag
 	local -A id=([pending-est]=11962 [pending-dep]=11961 [running-own]=11950 [running-other]=11960 [finished-11912]=11912
 		[oom-11818]=11818 [oom-11818-nopss]=11818 [twotask-11584]=11584 [idle-11898]=11898
@@ -4550,7 +4553,7 @@ JobID=700_3; JobIDRaw=703; State=FAILED; ExitCode=1:0
 EOF
 )
 	job_run "$d" TZ=UTC -- --no-color job 700
-	need "array: counts, then cap, polled tasks, the pointer to the weakest, RSS tasks, multi-task tasks, in that order" eval '
+	need "array: counts, then cap, polled tasks, the pointer to the weakest, RSS tasks, multi-task tasks, in that order (the why section's pointer last)" eval '
 		rc_is 0 && title_is "▌ 700  job · alice · array of 3: 2 done · 1 failed" &&
 		has "  CPU ████████▒▒▒▒▒▒▒▒  50.0%  median · min 25.0% (700_2) · max 75.0% · 2 CPUs per task (1 requested)" &&
 		has "  MEM ████████▒▒▒▒▒▒▒▒  50.0%  median · min 25.0% (700_1) · max 75.0%" &&
@@ -4558,7 +4561,8 @@ EOF
 			"1 task: CPU time includes processes Slurm killed or never waited for (polled between two samples, so still a lower bound)" \
 			"over the 2 completed tasks; the weakest: sq job 700_2" \
 			"1 task started before <date> UTC (RSS accounting): shared memory counted once per process; their peaks may read high" \
-			"1 task peaked in a step of several tasks: that peak adds up each task'"'"'s own, an upper bound"'
+			"1 task peaked in a step of several tasks: that peak adds up each task'"'"'s own, an upper bound" \
+			"sq job 700_3 says more about one of them"'
 	sed -i 's/^JobID=700_2; JobIDRaw=702; ReqCPUS=1;/JobID=700_2; JobIDRaw=702; ReqCPUS=1; AllocCPUS=4; AllocTRES=billing=4,cpu=4,mem=4G,node=1;/' "$d/sacct"
 	job_run "$d" -SQ_PSS_SINCE -- --no-color job 700
 	need "tasks given different CPUs: no cap note, no 'per task'" eval 'rc_is 0 && ! notes | grep -q "requested CPU" && lacks "per task"'
@@ -4620,7 +4624,7 @@ c_job_sources() {   # Q7
 	printf '@raw garbage\n' > "$d/sacct"
 	job_run "$d" -- --no-color job 11912
 	need "accounting unreadable: its own words" eval 'rc_is 0 && notes_are "accounting answered what cannot be read"'
-	cp "$jfx/pending-est/squeue-all" "$d/squeue-all"; printf '@hang 10\n' > "$d/sacct"
+	cp "$jfx/pending-est/squeue-all" "$jfx/pending-est/scontrol-node" "$jfx/pending-est/squeue-queue" "$d/"; printf '@hang 10\n' > "$d/sacct"
 	job_run "$d" -- --no-color job 11962
 	need "accounting hanging, a pending job: the line under the title" eval 'rc_is 0 && [ "$(plain | sed -n 2p)" = "  ↳ accounting did not answer within 3s" ] && lacks efficiency'
 	cp "$jfx/array-11367/squeue-all" "$d/squeue-all"
@@ -4640,24 +4644,623 @@ c_job_sources() {   # Q7
 	need "squeue down, accounting without it: rc 1, squeue's reason" eval 'rc_is 1 && err_is "sq job: slurm unreachable · slurm_load_jobs error: Unable to contact slurm controller (connect failure)"'
 }
 
-# Franz #1 (2026-10-21): one-shot, sq job waits 30 s for accounting, and an
-# array's count is a floor while accounting is missing (why-v2 W2, V13, V16)
+# ============================================================================
+# sq job's why section (WHY-v1 W1-W5, v2 V1-V18)
+# ============================================================================
+# Franz (2026-10-21): the screens "Accept as rendered" (prototype why-proto),
+# the tail of a failed job's output for "All jobs", no line for a running
+# job, a big array "Longer default + mark partial".  The pinned why__ screens
+# are those renders re-rendered by the final code (--pin), the removed
+# variants left out; the completed, running, array, pending-dep and
+# pending-est screens are job__ ones above.  Their fixtures date everything
+# from the run, every age mid-bucket (days too), their output files under the
+# run's directory (\{run}/media/...), which the comparison leaves out.
+# why_cases: NAME FIXTURE ID [VAR=value...]
+why_cases=(
+	"pending-dep-mixed dep-mixed-11969 11969"
+	"pending-dep-failed dep-failed-11963 11963"
+	"pending-resources resources-11964 11964"
+	"pending-badconstraints badconstraints-11955 11955"
+	"pending-held-own held-own-11966 11966"
+	"pending-held-other held-other-11967 11967"
+	"failed-127 failed127-11836 11836"
+	"failed-1-other failed1-11837 11837"
+	"failed-sigill-purged sigill-11353 11353"
+	"failed-sigill-recent sigill-recent-11353 11353"
+	"failed-slurm53 slurm53-10864 10864"
+	"failed-step-cancelled stepcancel-11360 11360"
+	"timeout timeout-11325 11325"
+	"oom oom-11820 11820"
+	"cancelled-running-own cancelled-11945 11945"
+	"cancelled-running-seen-by-hal cancelled-11945 11945 SQSTUB_UID=1025"
+	"cancelled-pending-array pdarray-10251 10251"
+	"nodefail nodefail-11971 11971"
+)
+# why_run FIXTURE [VAR=value | -VAR]... -- [sq args]: job_run on bioserver's
+# head node, 100 columns wide, as the renders were made
+why_run() { local fx=$1; shift; job_run "$fx" SQSTUB_HOST=fb2-bioinf.bioinf.local COLUMNS=100 "$@"; }
+why_lines() { plain | gawk '/^why$/ { on = 1; next } on && /^[a-z]/ { exit } on'; }   # the why section, its caption left out
+why_has() { why_lines | grep -qxF -- "$1"; }      # why_has LINE: the section has this line, whole
+why_lacks_section() { ! plain | grep -qx why; }
+c_why_screens() {   # W1, AC1
+	T_TITLE="the accepted why screens byte for byte, dates and the run's directory aside, colour on and off: 18 renders (the 5 job__ screens above cover the rest), with V5's days and V6's NODE_FAIL line"
+	local c name fx id extra flag ext
+	for c in "${why_cases[@]}"; do
+		read -r name fx id extra <<< "$c"
+		for flag in --color --no-color; do
+			ext=ansi; [ $flag = --color ] || ext=txt
+			why_run "$fx" $extra -- $flag job "$id"
+			need "$name $flag: rc 0, stderr empty, the pinned screen" eval 'rc_is 0 && err_empty && screen_is "$jfx/screens/why__$name.$ext"'
+		done
+	done
+}
+# V18: every relative time of a why fixture sits mid-bucket, days included
+c_why_clock_step() {
+	T_TITLE="every why fixture draws its why section, and the same report when the clock steps 2 s back or forward after the stub answered"
+	local c name fx id extra want skew
+	for c in "${why_cases[@]}" "pending-dep pending-dep 11961" "pending-est pending-est 11962" "array array-11367 11367"; do
+		read -r name fx id extra <<< "$c"
+		why_run "$fx" $extra -- --no-color job "$id"
+		need "$name: rc 0, its why section" eval 'rc_is 0 && plain | grep -qx why'
+		want=$RUN/screen; unrooted | job_mask /dev/stdin > "$want"
+		for skew in -2 2; do
+			why_run "$fx" $extra SQSTUB_SKEW=$skew -- --no-color job "$id"
+			need "$name, the clock stepped ${skew}s: the same report, dates aside" eval 'cmp -s "$want" <(unrooted | job_mask /dev/stdin)'
+		done
+	done
+}
+# the calls the why section makes: framed and pinned as sq job's own, every
+# caller setting unset, each only when the job's state calls for it
+c_why_calls() {   # W2, V13, V14
+	T_TITLE="the why section's calls: scontrol -o show node and squeue -t PD,R for Resources/Priority, scontrol alone for BadConstraints, the parents' squeue and the failed ones' sacct; none for other jobs; SQUEUE_*/SACCT_*/SCONTROL_* unset, %s and 0 pinned"
+	local n2 f
+	why_run pending-est SQUEUE_SORT=bogus SQUEUE_STATES=PD SACCT_FORMAT=JobID SCONTROL_FEDERATION=1 SCONTROL_ALL=1 \
+		SLURM_TIME_FORMAT=relative SLURM_BITSTR_LEN=5 -- --no-color job 11962
+	need "Priority, a caller's SQUEUE_*, SACCT_*, SCONTROL_* and formats: rc 0, the pinned report" eval '
+		rc_is 0 && err_empty && job_is "$jfx/screens/job__pending-est.txt"'
+	need "... no call saw an SQUEUE_* but the SQUEUE_FORMAT2 sq set, an SACCT_* or an SCONTROL_*" eval '
+		only_format2 && ! grep "^CALL" "$LOG" | grep -qE "SACCT_|SCONTROL_"'
+	need "... scontrol -o show node once, and the whole queue once: squeue -h -t PD,R, 15 fields framed by the queue nonce" eval '
+		[ "$(calls scontrol)" = 1 ] && argv_has scontrol -o show node && [ "$(calls squeue)" = 2 ] && argv_has squeue -h -t PD,R &&
+		[ "$(env_of squeue 2 SQUEUE_FORMAT2)" = \
+		  "$(for f in JobID ArrayJobID ArrayTaskID StateCompact UserName Partition NodeList NumCPUs tres-alloc EndTime TimeLeft TimeLimit SubmitTime Reason PriorityLong; do printf "%s:%s," "$f" "$(env_of squeue 1 SQ_NONCE)"; done | sed "s/,\$//")" ]'
+	need "... every squeue and sacct call: SLURM_TIME_FORMAT=%s, SLURM_BITSTR_LEN=0" eval '
+		all_calls_env SLURM_TIME_FORMAT %s squeue sacct && all_calls_env SLURM_BITSTR_LEN 0 squeue sacct'
+	why_run badconstraints-11955 -- --no-color job 11955
+	need "BadConstraints: scontrol, no queue call" eval 'rc_is 0 && [ "$(calls scontrol)" = 1 ] && [ "$(calls squeue)" = 1 ]'
+	why_run dep-failed-11963 -- --no-color job 11963
+	n2=$(env_of sacct 1 SQ_NONCE2)
+	need "a failed parent: its squeue (--jobs=11950 -t all, sq job's format) and its sacct (-j 11950, sq job's fields)" eval '
+		rc_is 0 && argv_has squeue -h --jobs=11950 -t all && argv_has sacct -p "--delimiter=$n2" -n --noconvert -a -j 11950 &&
+		[ "$(calls sacct)" = 2 ] && [ "$(calls scontrol)" = 0 ]'
+	why_run dep-mixed-11969 -- --no-color job 11969
+	need "two parents, none failed: one squeue for both, no sacct for them" eval '
+		rc_is 0 && argv_has squeue -h --jobs=11950,11958 -t all && [ "$(calls sacct)" = 1 ]'
+	for f in finished-11912:11912 running-own:11950 timeout-11325:11325 held-own-11966:11966; do
+		why_run "${f%:*}" -- --no-color job "${f#*:}"
+		need "${f%:*}: no call beyond sq job's own (and JOBMEM's)" eval '
+			rc_is 0 && [ "$(calls scontrol)" = 0 ] && ! argv_has squeue -h -t PD,R && [ "$(calls sacct)" = 1 ] && [ "$(calls getent)" = 0 ]'
+	done
+}
+
+# ---- the tail of a failed job's output (W3, V1-V4, V12) ----------------------
+# tail_fx NAME [FIELD=value...] -- [@file LINE...]: failed127-11836 (fsill's
+# job, exit 127, started 270 s and ended 130 s before the run, on fb2-bioinf)
+# with its output in \{run}/media/out.log, FIELDs of its record changed and
+# its file made by these @file lines; prints its directory
+tail_fx() {
+	local d=$T_DIR/fx-$1 rec f fields=(); shift
+	while [ $# -gt 0 ] && [ "$1" != -- ]; do fields+=("$1"); shift; done
+	[ $# -gt 0 ] && shift
+	rec=$(record_with "$(grep '^JobID=11836;' "$jfx/failed127-11836/squeue-all")" \
+		'STDOUT=\{run}/media/out.log' 'STDERR=\{run}/media/out.log' "${fields[@]}")
+	mkdir -p "$d"
+	sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$jfx/failed127-11836/sacct" > "$d/sacct"
+	{ printf '@include %s\n' "$fixtures/_common/job-defaults"
+	  for f; do printf '@file %s\n' "$f"; done
+	  printf '%s\n' "$rec"; } > "$d/squeue-all"
+	printf '%s' "$d"
+}
+out_file() { printf 'create media/out.log %s' "$1"; }   # out_file CONTENT: the @file line making it (fixture escapes)
+dated() { printf 'touch media/out.log \\{now-%s}' "$1"; }  # dated AGO: the @file line dating it, e.g. 200s
+tail_lines() { why_lines | gawk 'f && /^    / { sub(/^    /, ""); print } /ends with:$/ { f = 1 }'; }   # the lines shown
+tail_lines_are() { [ "$(tail_lines)" = "$(printf '%s\n' "$@")" ]; }
+why_notes() { why_lines | gawk '/^  ↳ / { sub(/^  ↳ /, ""); print }'; }
+c_why_tail() {   # W3, V2-V4, V12
+	T_TITLE="the tail: the last 5 lines that are not blank, of the last 4096 bytes, as a terminal shows them, scrubbed, cut to COLUMNS, else the terminal's width, else 120; a first line the bound cut dropped, unless it is the only one; 0 bytes empty"
+	local d long line i
+	d=$(tail_fx plain -- "$(out_file 'one\ntwo\n\nthree\n  \nfour\nfive\nsix\nseven\n')" "$(dated 200s)")
+	why_run "$d" -- --no-color job 11836
+	need "9 lines, 2 blank: the last 5 not blank, under 'its output ends with:'" eval '
+		rc_is 0 && err_empty && why_has "  its output ends with:" && tail_lines_are three four five six seven && [ -z "$(why_notes)" ]'
+	# 50 lines of 100 bytes and a newline: 5050 bytes, so the last 4096 begin
+	# 45 bytes into line 10, which is cut and goes
+	long=; for i in $(seq -w 1 50); do long="$long$(printf 'L%s%097d' "$i" 0)\\n"; done
+	d=$(tail_fx long -- "$(out_file "$long")" "$(dated 200s)")
+	why_run "$d" COLUMNS=60 -- --no-color job 11836
+	need "5050 bytes: the last 5 lines, each cut to 60 columns with …" eval '
+		rc_is 0 && tail_lines_are $(for i in 46 47 48 49 50; do printf "L%s%052d… " $i 0; done)'
+	# the last 4096 bytes begin exactly at a line: nothing is cut, and the
+	# first of them is shown when it is one of the last five
+	d=$(tail_fx edge -- "$(out_file "$(printf 'x%.0s' $(seq 1 99))\\n$(printf '%01023d\\n%01023d\\n%01023d\\n%01023d\\n' 1 2 3 4)")" "$(dated 200s)")
+	why_run "$d" COLUMNS=30 -- --no-color job 11836
+	need "4096 bytes after a whole line: its 4 lines, none dropped" eval '
+		rc_is 0 && [ "$(tail_lines | wc -l)" = 4 ] && tail_lines | head -n 1 | grep -qx "0\{25\}…"'
+	# one line of 10000 bytes, no newline: shown, cut at its start (…) and end
+	d=$(tail_fx oneline -- "$(out_file "$(printf 'a%.0s' $(seq 1 10000))")" "$(dated 200s)")
+	why_run "$d" COLUMNS=40 -- --no-color job 11836
+	need "a single line longer than the bound: shown cut, never 'empty' (V4)" eval '
+		rc_is 0 && tail_lines_are "…$(printf "a%.0s" $(seq 1 34))…" && ! why_notes | grep -q empty'
+	# a progress bar: CRs, no newline, longer than the bound; what shows is the
+	# text after the last CR, whole
+	line=; for i in $(seq 1 200); do line="$line\\r$(printf '%3d%%|%s|' "$i" "$(printf '#%.0s' $(seq 1 20))")"; done
+	d=$(tail_fx progress -- "$(out_file "$line")" "$(dated 200s)")
+	why_run "$d" -- --no-color job 11836
+	need "a CR progress bar: its last state, as a terminal shows it" eval 'rc_is 0 && tail_lines_are "200%|####################|"'
+	d=$(tail_fx escapes -- "$(out_file '\e[1;31mred\e[0m bold\n\e]0;a title\aafter title, \e]8;;http://x\e\\link\e]8;;\e\\ end\nbell\a and \x01ctl\x7f\xc2\x9b x\nhalf \xe2\x82\nplain\r\n')" "$(dated 200s)")
+	why_run "$d" -- --color job 11836
+	need "CR-LF, CSI and OSC escapes go; other controls and C1 go; a broken character is ␚; no escape of the file reaches the screen" eval '
+		rc_is 0 && tail_lines_are "red bold" "after title, link end" "bell and ctl x" "half ␚" "plain" &&
+		! why_lines | LC_ALL=C grep -q "$(printf "\a")" && [ "$(LC_ALL=C grep -c "$ESC\]" "$OUT")" = 0 ]'
+	d=$(tail_fx empty -- 'truncate media/out.log' "$(dated 200s)")
+	why_run "$d" -- --no-color job 11836
+	need "0 bytes: 'its output is empty', no lines" eval 'rc_is 0 && [ "$(why_notes)" = "its output is empty" ] && [ -z "$(tail_lines)" ]'
+	d=$(tail_fx blank -- "$(out_file '\n  \n\t\n\e[0m\n')" "$(dated 200s)")
+	why_run "$d" -- --no-color job 11836
+	need "blank lines only: says so, not 'empty'" eval 'rc_is 0 && [ "$(why_notes)" = "its output holds only blank lines" ]'
+	# the width: COLUMNS above, else the terminal's, else 120; NOTTY: none
+	d=$(tail_fx wide -- "$(out_file "$(printf 'w%.0s' $(seq 1 300))\\n")" "$(dated 200s)")
+	NOTTY=1 why_run "$d" -COLUMNS -- --no-color job 11836
+	need "no COLUMNS and no terminal: cut to 120 (116 and the indent)" eval 'rc_is 0 && tail_lines_are "$(printf "w%.0s" $(seq 1 115))…"'
+	PTY=1 PTY_ROWS=30 PTY_COLS=70 why_run "$d" -COLUMNS -- --no-color job 11836
+	need "on a terminal of 70 columns: cut to 70" eval 'tail_lines_are "$(printf "w%.0s" $(seq 1 65))…"'
+	NOTTY=1 why_run "$d" COLUMNS=10 -- --no-color job 11836
+	need "COLUMNS below 21 is no width: 120" eval 'rc_is 0 && tail_lines_are "$(printf "w%.0s" $(seq 1 115))…"'
+}
+c_why_tail_file() {   # W3, V1-V3
+	T_TITLE="the tail's file: regular files only (a FIFO is not opened), dated within [start-5s, end+60s], missing, unreadable, its host; stderr when it has a file of its own; only for FAILED batch jobs"
+	local d st
+	d=$(tail_fx fifo -- 'fifo media/out.log')
+	why_run "$d" -- --no-color job 11836
+	need "a FIFO: not opened, 'its output is not a regular file', at once" eval '
+		rc_is 0 && err_empty && [ "$(why_notes)" = "its output is not a regular file" ] && [ -z "$(tail_lines)" ]'
+	d=$(tail_fx older -- "$(out_file 'old run\n')" "$(dated 276s)")
+	why_run "$d" -- --no-color job 11836
+	need "written 6 s before the start: not this run's" eval '
+		rc_is 0 && [ "$(why_notes)" = "its output was last written before the job started, so it is not this run'"'"'s; not shown" ]'
+	d=$(tail_fx lo -- "$(out_file 'early\n')" "$(dated 274s)")
+	why_run "$d" -- --no-color job 11836
+	need "4 s before the start: within the 5 s, shown" eval 'rc_is 0 && tail_lines_are early'
+	d=$(tail_fx later -- "$(out_file 'next run\n')" "$(dated 68s)")
+	why_run "$d" -- --no-color job 11836
+	need "62 s after the end: written later (V3)" eval '
+		rc_is 0 && [ "$(why_notes)" = "its output file was written after the job ended (a later run?)" ] && [ -z "$(tail_lines)" ]'
+	d=$(tail_fx hi -- "$(out_file 'last words\n')" "$(dated 72s)")
+	why_run "$d" -- --no-color job 11836
+	need "58 s after the end: within the 60 s, shown" eval 'rc_is 0 && tail_lines_are "last words"'
+	d=$(tail_fx missing)
+	why_run "$d" -- --no-color job 11836
+	need "no file, read on the host it ran on: 'its output is not there'" eval 'rc_is 0 && [ "$(why_notes)" = "its output is not there" ]'
+	why_run "$d" SQSTUB_HOST=fb2-bioinf-0 -- --no-color job 11836
+	need "... read on another host: which one the job wrote it on" eval '
+		rc_is 0 && [ "$(why_notes)" = "its output is not there; the job wrote it on fb2-bioinf" ]'
+	d=$(tail_fx host -- "$(out_file 'shared\n')" "$(dated 200s)")
+	why_run "$d" SQSTUB_HOST=fb2-bioinf-0.bioinf.local -- --no-color job 11836
+	need "shown on another host: the note names both" eval '
+		rc_is 0 && tail_lines_are shared && [ "$(why_notes)" = "read here on fb2-bioinf-0; the job wrote it on fb2-bioinf" ]'
+	d=$(tail_fx unreadable -- "$(out_file 'secret\n')" "$(dated 200s)" 'chmod media/out.log 000')
+	why_run "$d" -- --no-color job 11836
+	need "mode 000: 'cannot be read here'" eval 'rc_is 0 && [ "$(why_notes)" = "its output cannot be read here" ]'
+	d=$(tail_fx stderr STDERR=\\{run}/media/err.log -- "$(out_file 'out\n')" "$(dated 200s)" 'create media/err.log err\n' 'touch media/err.log \{now-200s}')
+	why_run "$d" -- --no-color job 11836
+	need "stderr in a file of its own: its stderr" eval 'rc_is 0 && why_has "  its stderr ends with:" && tail_lines_are err'
+	d=$(tail_fx stdout STDERR=/dev/null -- "$(out_file 'out\n')" "$(dated 200s)")
+	why_run "$d" -- --no-color job 11836
+	need "stderr discarded: its stdout" eval 'rc_is 0 && why_has "  its stdout ends with:" && tail_lines_are out'
+	d=$(tail_fx devnull STDOUT=/dev/null STDERR=/dev/null)
+	why_run "$d" -- --no-color job 11836
+	need "both discarded: no tail, no note" eval 'rc_is 0 && [ -z "$(why_notes)" ] && ! why_lines | grep -q "ends with"'
+	d=$(tail_fx interactive BatchFlag=0 -- 'fifo media/out.log')
+	why_run "$d" -- --no-color job 11836
+	need "an interactive job: no tail, its file never looked at" eval 'rc_is 0 && [ -z "$(why_notes)" ] && ! why_lines | grep -q "ends with"'
+	# V1: OOM, TIMEOUT, CANCELLED and NODE_FAIL get none, a FIFO there is
+	# never touched; another user's failed job gets its tail (Franz: "All jobs")
+	for st in OOM TO CA NF; do
+		d=$(tail_fx "st$st" StateCompact=$st -- 'fifo media/out.log')
+		why_run "$d" -- --no-color job 11836
+		need "$st: no tail, no note about the file" eval 'rc_is 0 && ! why_lines | grep -qE "ends with|its output"'
+	done
+	d=$(tail_fx other UserName=schroder UserID=1029 -- "$(out_file 'theirs\n')" "$(dated 200s)")
+	why_run "$d" -- --no-color job 11836
+	need "another user's job: its tail too" eval 'rc_is 0 && tail_lines_are theirs'
+}
+c_why_tail_hung() {   # V2
+	T_TITLE="a reader that does not answer (a hung NFS read, here a tail that sleeps): sq says so after 2 s, kills it, and leaves nothing behind"
+	local d
+	d=$(tail_fx hung -- "$(out_file 'never read\n')" "$(dated 200s)")
+	sq_start "$d" SQSTUB_UID=1041 SQ_PSS_SINCE=@$(( $(epoch_now) - pss_ago )) PATH="$here/lib/tail-as:$here/bin:$PATH" SQSTUB_TAIL=hang -- --no-color job 11836
+	sq_finish "$RUN" 10
+	need "rc 0, the note, nothing left in its session, the tmp dir gone" eval '
+		rc_is 0 && [ "$(why_notes)" = "its output file did not answer within 2s" ] && nothing_at_exit && [ -z "$(ls -A "$RUN/tmp")" ]'
+	local start=$(date +%s%N)
+	sq_run "$d" SQSTUB_UID=1041 PATH="$here/lib/tail-as:$here/bin:$PATH" SQSTUB_TAIL=hang -- --no-color job 11836
+	need "... within 2 s and a little (under 4 s in all)" eval 'rc_is 0 && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 4000 ]'
+}
+
+# ---- V14: scontrol's free text cannot forge the figures ------------------------
+# node_fx NAME LINE...: badconstraints-11955 (fsill's 140 CPUs and 986.3G,
+# LocalQ) against these scontrol -o show node lines; prints its directory
+node_fx() {
+	local d=$T_DIR/fx-$1 f; shift
+	mkdir -p "$d"
+	for f in squeue-all sacct; do sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$jfx/badconstraints-11955/$f" > "$d/$f"; done
+	printf '%s\n' "$@" > "$d/scontrol-node"
+	printf '%s' "$d"
+}
+c_why_forged() {   # V14
+	T_TITLE="scontrol -o show node: keys only before Reason=/Comment=/Extra=, the first one counts, a node listed twice is unknown; double spaces, a missing MemSpecLimit or CPUEfctv"
+	local big small d
+	big=$(grep '^NodeName=fb2-bioinf ' "$jfx/badconstraints-11955/scontrol-node")
+	small=$(grep '^NodeName=fb2-bioinf-0 ' "$jfx/badconstraints-11955/scontrol-node")
+	# the probe of the attack: fb2-bioinf without MemSpecLimit, its Reason
+	# naming one and another partition list
+	d=$(node_fx forged "${big/ MemSpecLimit=31000/} Reason=checking MemSpecLimit=500000 Partitions=small [root@2026-10-21T10:00:00]" "$small")
+	why_run "$d" -- --no-color job 11955
+	need "a Reason holding MemSpecLimit= and Partitions=: fb2-bioinf's memory for jobs is its RealMemory, in LocalQ still, no MemSpecLimit note for it" eval '
+		rc_is 0 && err_empty && why_has "    fb2-bioinf     128          1006.8G  too few CPUs" &&
+		! why_notes | grep -q "on fb2-bioinf\$" && why_notes | grep -qxF "memory for jobs is a node'"'"'s RealMemory less what Slurm keeps for the system (MemSpecLimit): 78.1G less 3.1G on fb2-bioinf-0"'
+	d=$(node_fx comment "$big Comment=x" "NodeName=fb2-bioinf CPUEfctv=999 CPUTot=999 RealMemory=99999999 AllocMem=0 MemSpecLimit=0 State=IDLE Partitions=LocalQ" "$small")
+	why_run "$d" -- --no-color job 11955
+	need "a Comment whose newline starts a second NodeName=fb2-bioinf line: that node unknown, not the forged figures" eval '
+		rc_is 0 && why_has "    fb2-bioinf       ?                ?  unknown: scontrol listed it twice" && ! has 999'
+	d=$(node_fx extra "$big Extra=RealMemory=1 CPUEfctv=1 MemSpecLimit=0" "$small")
+	why_run "$d" -- --no-color job 11955
+	need "an Extra= at the end, as scontrol prints it, naming figures: ignored, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
+	d=$(node_fx cputot "${big/ CPUEfctv=128/}" "${small/ CPUEfctv=24/}")
+	why_run "$d" -- --no-color job 11955
+	need "no CPUEfctv: CPUTot, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
+	d=$(node_fx garbled "${big/ RealMemory=1031000/ RealMemory=lots}" "$small")
+	why_run "$d" -- --no-color job 11955
+	need "a figure that is no number: that node unknown" eval 'rc_is 0 && why_has "    fb2-bioinf       ?                ?  unknown: scontrol did not say"'
+	printf '@stderr scontrol: error: Unable to contact slurm controller (connect failure)\n@exit 1\n' > "$d/scontrol-node"
+	why_run "$d" -- --no-color job 11955
+	need "scontrol failing: the verdict, no table, and why" eval '
+		rc_is 0 && why_has "  can never start: no node it may use (LocalQ) meets what it asks for" &&
+		[ "$(why_notes)" = "$(printf "%s\n" "the nodes are unknown: scontrol did not answer" "Slurm keeps it pending all the same; remove it: scancel 11955")" ]'
+}
+
+# ---- pending: every reason's verdict, the dashboard's kind ---------------------
+# record_with RECORD FIELD=value...: RECORD with these fields set, a field it
+# has changed in place (the stub refuses one set twice)
+record_with() {
+	local rec=$1; shift
+	printf '%s' "$rec" "${@/#/; }" | gawk -F'; ' '{ for (i = 1; i <= NF; i++) { k = $i; sub(/=.*/, "", k); if (!(k in at)) ord[++n] = k; at[k] = $i }
+		for (i = 1; i <= n; i++) printf "%s%s", (i > 1 ? "; " : ""), at[ord[i]]; print "" }'
+}
+# pend_fx NAME FIELD=value...: job 800 (alice's, uid 1050) pending in LocalQ,
+# accounting without it; prints its directory
+pend_fx() {
+	local n=$1; shift
+	record_with 'JobID=800; StateCompact=PD; Reason=None; NodeList=; BatchHost=; StartTime=N/A; EndTime=N/A; TimeUsed=0:00' "$@" | job_fx "$n" squeue-all
+}
+pend_why() {   # pend_why "FIELD=value ..." LINE: job 800 so pending has this verdict line (its first)
+	local d; d=$(pend_fx p$((++pend_n)) $1)
+	why_run "$d" -- --no-color job 800
+	[ "$RC" = 0 ] && [ "$(why_lines | head -n 1)" = "  $2" ]
+}
+c_why_pending() {   # W1, V7, V8, J3, J5
+	local d
+	T_TITLE="a pending job's verdict for every reason sq has words for, its kind the dashboard's (pend_kind): waiting, the owner's holds (V8), an admin's, faults, never (V7: a QOS limit per job), stuck; the hints, the requeue note, the colours"
+	local pend_n=0 r
+	need "JobHeldUser, own" pend_why "Reason=JobHeldUser UserID=1041" "needs action: on user hold; it can start once you release it: scontrol release 800"
+	need "launch failed requeued held (V8): the owner's to release" pend_why "Reason=launch\sfailed\srequeued\sheld" \
+		"needs action: it failed to launch, so Slurm requeued it held; only alice (or an admin) can release it"
+	need "... own" pend_why "Reason=launch\sfailed\srequeued\sheld UserID=1041" \
+		"needs action: it failed to launch, so Slurm requeued it held; it can start once you release it: scontrol release 800"
+	need "job requeued in held state" pend_why "Reason=job\srequeued\sin\sheld\sstate" "needs action: it was requeued held; only alice (or an admin) can release it"
+	need "RH (V8): held after a requeue, own" pend_why "StateCompact=RH Reason=launch\sfailure\slimit\sexceeded\srequeued\sheld UserID=1041" \
+		"needs action: held after a requeue: scontrol release 800"
+	need "SE, another's" pend_why "StateCompact=SE Reason=None" "needs action: held after a requeue (special exit); only alice (or an admin) can release it"
+	need "JobHeldAdmin" pend_why "Reason=JobHeldAdmin" "waits for an admin: an admin held it; only an admin can release it"
+	need "BeginTime passed" pend_why "Reason=BeginTime" "waits its turn: its begin time has passed; the scheduler starts it on a next pass"
+	d=$(pend_fx begin Reason=BeginTime 'StartTime=\{epoch+2h30m}')
+	why_run "$d" -- --no-color job 800
+	need "BeginTime ahead: its date" eval 'rc_is 0 && why_lines | head -n 1 | grep -qxE "  waits its turn: it asked not to start before [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} \(--begin\)"'
+	need "None"        pend_why "Reason=None" "waits its turn: the scheduler has not looked at it yet"
+	need "Prolog"      pend_why "Reason=Prolog" "waits its turn: its node runs the prolog; it is about to start"
+	need "Cleaning"    pend_why "Reason=Cleaning" "waits its turn: Slurm still cleans up after its previous run"
+	need "SchedDefer"  pend_why "Reason=SchedDefer" "waits its turn: the scheduler defers new jobs to its next pass"
+	need "Reservation" pend_why "Reason=Reservation" "waits its turn: its reservation has not begun"
+	need "Licenses"    pend_why "Reason=Licenses" "waits its turn: the licenses it asks for are in use"
+	need "PartitionConfig: never, and the hint" eval 'pend_why "Reason=PartitionConfig" "can never start: it asks for more than partition LocalQ offers" &&
+		[ "$(why_notes)" = "Slurm keeps it pending all the same, until alice or an admin cancels it" ]'
+	need "... own: remove it" eval 'pend_why "Reason=PartitionConfig UserID=1041" "can never start: it asks for more than partition LocalQ offers" &&
+		[ "$(why_notes)" = "Slurm keeps it pending all the same; remove it: scancel 800" ]'
+	need "PartitionNodeLimit"  pend_why "Reason=PartitionNodeLimit" "can never start: it asks for more nodes than partition LocalQ allows"
+	need "PartitionTimeLimit"  pend_why "Reason=PartitionTimeLimit" "can never start: its time limit is longer than partition LocalQ allows"
+	need "InvalidAccount"      pend_why "Reason=InvalidAccount" "can never start: its account is not valid"
+	need "InvalidQOS"          pend_why "Reason=InvalidQOS" "can never start: its QOS is not valid"
+	need "AccountNotAllowed"   pend_why "Reason=AccountNotAllowed" "can never start: its account may not use partition LocalQ"
+	need "QOSNotAllowed"       pend_why "Reason=QOSNotAllowed" "can never start: its QOS may not use partition LocalQ"
+	need "JobHoldMaxRequeue"   pend_why "Reason=JobHoldMaxRequeue" "can never start: it was requeued too often; Slurm holds it for good"
+	need "uid not in group"    pend_why "Reason=uid\s1050\snot\sin\sgroup\spermitted\sto\suse\sthis\spartition\s(LocalQ).\sgroups\sallowed:\sbio" \
+		"can never start: its user may not use partition LocalQ"
+	need "NodeDown"            pend_why "Reason=NodeDown" "waits for an admin: a node it needs is down"
+	need "PartitionDown"       pend_why "Reason=PartitionDown" "waits for an admin: partition LocalQ is down"
+	need "PartitionInactive"   pend_why "Reason=PartitionInactive" "waits for an admin: partition LocalQ is inactive"
+	need "FrontEndDown"        pend_why "Reason=FrontEndDown" "waits for an admin: the front end node is down"
+	need "PowerNotAvail"       pend_why "Reason=PowerNotAvail" "waits for an admin: not enough power is available"
+	need "PowerReserved"       pend_why "Reason=PowerReserved" "waits for an admin: the power it needs is reserved"
+	need "ReqNodeNotAvail with its nodes" pend_why "Reason=ReqNodeNotAvail,\sUnavailableNodes:fb2-bioinf-0" "waits for an admin: nodes it needs are not available: fb2-bioinf-0"
+	need "ReqNodeNotAvail, Reserved" pend_why "Reason=ReqNodeNotAvail,\sReserved\sfor\smaintenance" "waits for an admin: nodes it needs are not available (reserved)"
+	need "Nodes required for job are DOWN ..." pend_why "Reason=Nodes\srequired\sfor\sjob\sare\sDOWN,\sDRAINED\sor\sreserved\sfor\sjobs\sin\shigher\spriority\spartitions" \
+		"waits for an admin: nodes it needs are down, drained or reserved"
+	need "a QOS group limit: stuck, as the dashboard has it (V7)" pend_why "Reason=QOSGrpCpuLimit" "stuck: a limit holds it (QOSGrpCpuLimit) until enough jobs under that limit end"
+	need "an association limit: stuck" pend_why "Reason=AssocMaxJobsLimit" "stuck: a limit holds it (AssocMaxJobsLimit) until enough jobs under that limit end"
+	need "a QOS limit per job: never (V7), and the hint" eval 'pend_why "Reason=QOSMaxCpuPerJobLimit" "can never start: it asks for more than a limit allows (QOSMaxCpuPerJobLimit)" &&
+		[ "$(why_notes)" = "Slurm keeps it pending all the same, until alice or an admin cancels it" ]'
+	need "a limit of minutes: never" pend_why "Reason=AssocGrpCPUMinutesLimit" "can never start: it asks for more than a limit allows (AssocGrpCPUMinutesLimit)"
+	need "a reason sq does not know: stuck, Slurm's word" pend_why "Reason=Bogus" "stuck: Slurm says Bogus; sq has no plain words for that"
+	need "requeued before: the note" eval 'pend_why "Reason=None RestartCnt=2" "waits its turn: the scheduler has not looked at it yet" &&
+		[ "$(why_notes)" = "requeued 2 times so far (a node failure, or scontrol requeue)" ]'
+	# the throttle of a task still in its array's pending record
+	d=$(pend_fx task ArrayJobID=800 ArrayTaskID=5-9%2 Reason=JobArrayTaskLimit)
+	why_run "$d" -- --no-color job 800_7
+	need "a task in a pending array's record: the array's throttle" eval 'rc_is 0 && [ "$(why_lines | head -n 1)" = "  waits its turn: its array runs at most 2 tasks at once; this one starts when one of them ends" ]'
+	# the colours: green, yellow, red, by who has to act
+	local reason hue word
+	while IFS=: read -r reason hue word; do
+		d=$(pend_fx "c$reason" Reason=$reason)
+		why_run "$d" -- --color job 800
+		need "$reason: '$word' in colour $hue" eval 'rc_is 0 && LC_ALL=C grep -qF "  $ESC[${hue}m$word$ESC[0m: " "$OUT"'
+	done <<'EOF'
+None:32:waits its turn
+JobHeldUser:33:needs action
+NodeDown:33:waits for an admin
+PartitionConfig:31:can never start
+Bogus:33:stuck
+EOF
+	d=$(job_fx qdown squeue-all <<<'@stderr slurm_load_jobs error: Unable to contact slurm controller (connect failure)
+@exit 1')
+	job_fx qdown sacct <<<'JobID=800; State=PENDING; ExitCode=0:0; ElapsedRaw=0; AllocCPUS=0; Start=Unknown; End=Unknown; NodeList=None assigned' > /dev/null
+	why_run "$d" -- --no-color job 800
+	need "squeue down, accounting says PENDING: stuck, the reason unknown" eval 'rc_is 0 && why_has "  stuck: squeue did not answer, so its reason is unknown"'
+}
+
+# ---- dependencies (J6, J7) ------------------------------------------------------
+# dep_fx NAME DEPENDENCY [PARENTS-RECORD...]: job 800 pending on DEPENDENCY
+# (Reason Dependency), the parents call answered with these records (none:
+# Slurm knows none of them); prints its directory
+dep_fx() {
+	local n=$1 dep=$2 d list; shift 2
+	d=$(pend_fx "$n" Reason=Dependency "Dependency=$dep")
+	list=$(printf '%s' "$dep" | gawk '{ n = split($0, c, /[,?]/); for (i = 1; i <= n; i++) if (match(c[i], /:([0-9]+)(_([0-9]+|\*))?/, m)) printf "%s%s", (o++ ? "," : ""), m[1] ((m[3] != "" && m[3] != "*") ? "_" m[3] : "") }')
+	{ printf '@include %s\n' "$fixtures/_common/job-defaults"; printf '%s\n' "$@"; } > "$d/squeue-all.$list"
+	printf '%s' "$d"
+}
+run_rec() { printf 'JobID=%s; StateCompact=R; Name=p; TimeLeft=1:00:00; TimeLimit=2:00:00; EndTime=\\{epoch+1h00m30s}' "$1"; }   # a running parent
+c_why_dep() {   # J6, J7
+	T_TITLE="dependencies: the condition in the lead line or per row, AND and OR, a delay, singleton, an array parent, a parent Slurm forgot or squeue could not say, a met or impossible one with no clause left"
+	local d
+	d=$(dep_fx same 'afterok:900(unfulfilled),afterok:901(unfulfilled)' "$(run_rec 900)" "$(run_rec 901)")
+	why_run "$d" -- --no-color job 800
+	need "two parents, one kind: 'once 900 and 901 have completed successfully', a row each" eval '
+		rc_is 0 && [ "$(why_lines)" = "$(printf "%s\n" "  waits its turn: it may start once 900 and 901 have completed successfully" \
+			"    900  RUNNING on fb2-bioinf · 1h00m left of 2h00m" "    901  RUNNING on fb2-bioinf · 1h00m left of 2h00m")" ]'
+	d=$(dep_fx anyof 'afterany:900(unfulfilled)?afterany:901(failed)' "$(run_rec 900)")
+	why_run "$d" -- --no-color job 800
+	need "OR with one clause still open: it waits, 'once 900 or 901 has ended', 901 unknown to Slurm" eval '
+		rc_is 0 && why_has "  waits its turn: it may start once 900 or 901 has ended" && why_has "    901  Slurm no longer knows it"'
+	d=$(dep_fx anyfail 'afternotok:900(failed)?afternotok:901(failed)')
+	why_run "$d" -- --no-color job 800
+	need "OR with every clause failed: will never start, the hint" eval '
+		rc_is 0 && why_has "  will never start: it may start only once 900 or 901 has failed, which can no longer happen" &&
+		[ "$(why_notes)" = "Slurm keeps it pending all the same, until alice or an admin cancels it" ]'
+	d=$(dep_fx delay 'after:900+10(unfulfilled)' "$(run_rec 900)")
+	why_run "$d" -- --no-color job 800
+	need "a delay: 'has started and 10 minutes have passed'" eval 'rc_is 0 && why_has "  waits its turn: it may start once 900 has started and 10 minutes have passed"'
+	d=$(pend_fx single Reason=Dependency 'Dependency=singleton(unfulfilled)' Name=nightly)
+	why_run "$d" -- --no-color job 800
+	need "singleton: no other job of alice's named nightly" eval 'rc_is 0 && why_has "  waits its turn: it may start once no other job of alice'"'"'s named nightly runs or waits ahead of it"'
+	d=$(dep_fx arr 'afterok:902_*(unfulfilled)' 'JobID=903; ArrayJobID=902; ArrayTaskID=1; StateCompact=R' 'JobID=904; ArrayJobID=902; ArrayTaskID=2; StateCompact=R' \
+		'JobID=902; ArrayJobID=902; ArrayTaskID=3-5; StateCompact=PD; Reason=JobArrayTaskLimit')
+	why_run "$d" -- --no-color job 800
+	need "an array parent (_*): every task of it, its tasks counted by state" eval '
+		rc_is 0 && why_has "  waits its turn: it may start once every task of array 902 has completed successfully" &&
+		why_has "    902  its tasks now: 2 RUNNING · 3 PENDING"'
+	d=$(dep_fx task 'afterok:902_4(unfulfilled)' 'JobID=905; ArrayJobID=902; ArrayTaskID=4; StateCompact=R; TimeLeft=1:00:00; TimeLimit=2:00:00')
+	why_run "$d" -- --no-color job 800
+	need "an array task parent (902_4): its own state" eval 'rc_is 0 && why_has "    902_4  RUNNING on fb2-bioinf · 1h00m left of 2h00m"'
+	d=$(dep_fx qfail 'afterok:900(unfulfilled)' '@stderr slurm_load_jobs error: Unable to contact slurm controller (connect failure)' '@exit 1')
+	why_run "$d" -- --no-color job 800
+	need "the parents' squeue failing: 'unknown: squeue did not answer'" eval 'rc_is 0 && why_has "    900  unknown: squeue did not answer"'
+	d=$(pend_fx never Reason=DependencyNeverSatisfied)
+	why_run "$d" -- --no-color job 800
+	need "DependencyNeverSatisfied and no clause left: will never start" eval '
+		rc_is 0 && why_has "  will never start: a job it depends on ended the wrong way" && [ "$(why_notes)" = "Slurm keeps it pending all the same, until alice or an admin cancels it" ]'
+	d=$(pend_fx met Reason=Dependency)
+	why_run "$d" -- --no-color job 800
+	need "Dependency and no clause left: met, the next pass" eval 'rc_is 0 && why_has "  waits its turn: its dependency is met now; the scheduler starts it on a next pass"'
+}
+
+# ---- Resources and Priority (J9-J11, V9, V11) ---------------------------------
+# res_fx NAME FIXTURE [SED...]: FIXTURE (resources-11964 or pending-est) with
+# these sed expressions run on its scontrol-node and squeue-queue; prints its directory
+res_fx() {
+	local d=$T_DIR/fx-$1 src=$jfx/$2 f e; shift 2
+	mkdir -p "$d"
+	for f in squeue-all sacct scontrol-node squeue-queue; do
+		sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$src/$f" > "$d/$f"
+		for e; do sed -i -E "$e" "$d/$f"; done
+	done
+	printf '%s' "$d"
+}
+c_why_resources() {   # J9-J11, V9, V11
+	T_TITLE="Resources and Priority: fits now, every big node drained, several nodes, a year-long limit is no 'no time limit' (11875 live), Slurm's queue order (priority, then submit), array tasks as N_T, scontrol or the queue failing"
+	local d
+	d=$(res_fx fits resources-11964 's/^(NodeName=fb2-bioinf .*)CPUAlloc=48/\1CPUAlloc=16/')
+	why_run "$d" -- --no-color job 11964
+	need "enough free now: Slurm's reason is stale, no jobs to end first" eval '
+		rc_is 0 && why_has "  waits its turn: enough is free now on fb2-bioinf; Slurm should start it on a next pass" &&
+		why_has "    fb2-bioinf    112 of 128  656.5G of 976.5G  fits now" && ! why_lines | grep -q "to end first"'
+	d=$(res_fx drained resources-11964 's/^(NodeName=fb2-bioinf .*)State=MIXED/\1State=MIXED+DRAIN/')
+	why_run "$d" -- --no-color job 11964
+	need "every node big enough drained: waits for an admin" eval '
+		rc_is 0 && why_has "  waits for an admin: every node big enough for it is down or drained" && why_has "    fb2-bioinf            -            -  drained"'
+	d=$(res_fx year resources-11964 's/^(JobID=11875;.*)TimeLeft=UNLIMITED; TimeLimit=UNLIMITED/\1TimeLeft=362-14:00:00; TimeLimit=365-00:00:00/')
+	why_run "$d" -- --no-color job 11964
+	need "11875 with TimeLimit 365-00:00:00, as it is live: its time left, no 'no time limit' note" eval '
+		rc_is 0 && why_has "    11875  schroder  32 CPUs    256G  362d14h left" && [ -z "$(why_notes)" ]'
+	d=$(res_fx nodes2 resources-11964)
+	sed -i 's/^\(JobID=11964;.*\)$/\1; NumNodes=2/' "$d/squeue-all"
+	why_run "$d" -- --no-color job 11964
+	need "two nodes asked for: the table compares one" eval 'rc_is 0 && why_notes | grep -qxF "it asks for 2 nodes; the table compares one"'
+	d=$(res_fx task resources-11964 's/^JobID=11950; ArrayJobID=11950;/JobID=11960; ArrayJobID=11367; ArrayTaskID=212;/')
+	why_run "$d" -- --no-color job 11964
+	need "an array task among the jobs to end first: 11367_212, the column as wide as it (V11)" eval '
+		rc_is 0 && why_has "    11367_212  fsill     16 CPUs     64G  21h46m left" && why_has "    11875      schroder  32 CPUs    256G  no time limit"'
+	# Slurm's order (V9): 11958 has the higher priority though submitted after
+	# 11962, 11957 the same priority and submitted before it, 11959 a lower one
+	d=$(res_fx order pending-est 's/^(JobID=11958;.*)SubmitTime=\\\{epoch-16200s\}/\1SubmitTime=\\{epoch-3900s}; PriorityLong=9/')
+	cat >> "$d/squeue-queue" <<'EOF'
+JobID=11957; ArrayJobID=11367; ArrayTaskID=213; StateCompact=PD; UserName=hal; Partition=LocalQ; NodeList=; NumCPUs=2; tres_alloc=cpu=2,mem=15600M,node=1,billing=2; EndTime=N/A; TimeLeft=1:00:00; TimeLimit=1:00:00; SubmitTime=\{epoch-9930s}; Reason=Priority
+JobID=11959; StateCompact=PD; UserName=schroder; Partition=LocalQ; NodeList=; NumCPUs=4; tres_alloc=cpu=4,mem=31200M,node=1,billing=4; EndTime=N/A; TimeLeft=1:00:00; TimeLimit=1:00:00; SubmitTime=\{epoch-20000s}; Reason=Priority; PriorityLong=0
+EOF
+	why_run "$d" -- --no-color job 11962
+	need "ahead: the higher priority first (submitted later, so 'ahead of it in the queue'), then the earlier submit; a lower priority submitted earlier is not" eval '
+		rc_is 0 && [ "$(why_lines | sed -n 1,3p)" = "$(printf "%s\n" "  waits its turn: 2 jobs ahead of it in the queue come first" \
+			"    11958      amadvi     64 CPUs    500G  PENDING (Resources), submitted 1h ago" \
+			"    11367_213  hal         2 CPUs   15.2G  PENDING (Priority), submitted 2h ago")" ]'
+	d=$(res_fx nonodes resources-11964)
+	printf '@stderr scontrol: error: Unable to contact slurm controller (connect failure)\n@exit 1\n' > "$d/scontrol-node"
+	why_run "$d" -- --no-color job 11964
+	need "scontrol failing: the lead, then why there is no table" eval '
+		rc_is 0 && why_has "  waits its turn: too little is free now on the nodes it may use (LocalQ)" && [ "$(why_notes)" = "the nodes are unknown: scontrol did not answer" ]'
+	d=$(res_fx noqueue resources-11964)
+	printf '@stderr slurm_load_jobs error: Socket timed out on send/recv operation\n@exit 1\n' > "$d/squeue-queue"
+	why_run "$d" -- --no-color job 11964
+	need "the queue call failing, Resources: the table, then why no jobs to end first" eval '
+		rc_is 0 && why_has "    fb2-bioinf    80 of 128  656.5G of 976.5G  too few CPUs free" &&
+		[ "$(why_notes)" = "which jobs must end first is unknown: squeue did not answer" ]'
+	d=$(res_fx noqueue2 pending-est)
+	printf '@hang 10\n' > "$d/squeue-queue"
+	why_run "$d" -- --no-color job 11962
+	need "the queue call hanging, Priority: within SQ_TIMEOUT, 'a job ahead of it', and why none is named" eval '
+		rc_is 0 && why_has "  waits its turn: a job ahead of it in the queue comes first" && why_notes | grep -qxF "the jobs ahead are unknown: squeue did not answer"'
+}
+
+# ---- an ended job (J13-J19, V10) ----------------------------------------------
+# end_fx NAME [FIELD=value...] -- [STEP-ROW...]: job 800 of accounting
+# (alice's, uid 1050, ran 30 min), its job row with these fields, these step
+# rows; squeue has forgotten it; prints its directory
+end_fx() {
+	local n=$1 rec='JobID=800'; shift
+	while [ $# -gt 0 ] && [ "$1" != -- ]; do rec=$(record_with "$rec" "$1"); shift; done
+	[ $# -gt 0 ] && shift
+	printf '%s\n' "$rec" "$@" | job_fx "$n" sacct
+}
+end_why() {   # end_why FIXTURE LINE: sq job 800 has this first why line
+	why_run "$1" -- --no-color job 800
+	[ "$RC" = 0 ] && [ "$(why_lines | head -n 1)" = "  $2" ]
+}
+step() { printf 'JobID=800.%s; JobIDRaw=800.%s; UID=; User=; %s' "$1" "$1" "$2"; }   # step NAME FIELDS: a step row
+c_why_ended() {   # J13-J19, V10
+	T_TITLE="an ended job: each exit's words and its ambiguity, a signal, a Slurm error, a canceller (you, root, the owner, another, nobody recorded, not yet known), getent failing (V10), TIMEOUT, NODE_FAIL's requeue, DEADLINE, PREEMPTED, BOOT_FAIL"
+	local d
+	need "exit 2"   end_why "$(end_fx e2 State=FAILED ExitCode=2:0)" "exit 2: often a usage error (a wrong option or argument) or a shell syntax error"
+	need "exit 126" end_why "$(end_fx e126 State=FAILED ExitCode=126:0)" "exit 126: a command was found but could not be run (not executable)"
+	need "... and its twin, 254" eval 'why_notes | grep -qxF "or exit 254, the program'"'"'s own code (exit(-1) is 255): sacct prints an exit above 128 less 128, so it cannot tell the two apart"'
+	need "exit 9 from sacct: or 137, SIGKILL" end_why "$(end_fx e9 State=FAILED ExitCode=9:0)" "exit 9 (or 137: a command killed by SIGKILL, killed outright)"
+	need "exit 42: the program's own" end_why "$(end_fx e42 State=FAILED ExitCode=42:0)" "exit 42: the program's own code; its output may say what it means"
+	d=$(record_with 'JobID=800; StateCompact=F; exit_code=255:0' | job_fx raw255 squeue-all)
+	need "squeue's raw 255 wins: the program's own, no ambiguity" end_why "$d" "exit 255: the program's own code (exit(-1) is 255); its output may say what it means"
+	need "FAILED with no exit recorded" end_why "$(end_fx e0 State=FAILED ExitCode=0:0)" "Slurm marked it FAILED, but neither the job nor a step recorded an exit code"
+	need "a signal, no canceller" end_why "$(end_fx sig State=FAILED ExitCode=0:0 -- "$(step batch 'State=FAILED; ExitCode=0:11')")" \
+		"killed by signal 11 (SIGSEGV, invalid memory access, a segmentation fault)"
+	need "Slurm error 52" end_why "$(end_fx err52 State=FAILED ExitCode=0:52)" "Slurm error 52: its tasks could not start"
+	# who cancelled: getent knows bob (1025), not 1077
+	d=$(end_fx cxyou 'State=CANCELLED\sby\s1041'); printf 'bob:x:1025:1025::/home/bob:/bin/bash\n' > "$d/passwd"
+	need "by the caller: you" end_why "$d" "cancelled by you after it ran 30m00s"
+	d=$(end_fx cxroot 'State=CANCELLED\sby\s0'); printf 'bob:x:1025:1025::/home/bob:/bin/bash\n' > "$d/passwd"
+	need "by uid 0: root" end_why "$d" "cancelled by root (an admin, or Slurm itself) after it ran 30m00s"
+	d=$(end_fx cxbob 'State=CANCELLED\sby\s1025'); printf 'bob:x:1025:1025::/home/bob:/bin/bash\n' > "$d/passwd"
+	need "by another user getent names" end_why "$d" "cancelled by bob after it ran 30m00s"
+	need "... one getent call: passwd 1025" eval '[ "$(calls getent)" = 1 ] && grep -qx "CALL	getent	passwd 1025" "$LOG"'
+	d=$(end_fx cxnone 'State=CANCELLED\sby\s1077'); printf 'bob:x:1025:1025::/home/bob:/bin/bash\n' > "$d/passwd"
+	need "a uid getent does not know: uid N (V10)" end_why "$d" "cancelled by uid 1077 after it ran 30m00s"
+	d=$(end_fx cxowner 'State=CANCELLED\sby\s1050'); printf '@hang 20\nalice:x:1050:1050::/home/alice:/bin/bash\n' > "$d/passwd"
+	need "getent hanging, the owner's uid: its owner (V10), within SQ_TIMEOUT" end_why "$d" "cancelled by its owner after it ran 30m00s"
+	d=$(end_fx cxpend 'State=CANCELLED\sby\s1041' AllocCPUS=0 Start=None ElapsedRaw=0 NodeList=None\sassigned); printf 'bob:x:1025:1025::/home/bob:/bin/bash\n' > "$d/passwd"
+	need "cancelled while pending: how long after its submit" end_why "$d" "cancelled by you while it was pending, 35m00s after it was submitted"
+	d=$(end_fx cxnobody State=CANCELLED)
+	need "CANCELLED with no one recorded: says so, and when Slurm does that" eval 'end_why "$d" "cancelled after it ran 30m00s; Slurm recorded no one" &&
+		[ "$(why_notes)" = "it records no one when it cancels a job itself (a dependency that can never be met, with --kill-on-invalid-dep; a disabled scrontab entry)" ] && [ "$(calls getent)" = 0 ]'
+	d=$(record_with 'JobID=800; StateCompact=CA' | job_fx cxlag squeue-all); job_fx cxlag sacct <<<'JobID=800; State=RUNNING; End=Unknown' > /dev/null
+	need "squeue says CANCELLED, accounting has no end yet: who shows later" end_why "$d" "cancelled after it ran 30m00s; who did it shows once accounting has recorded the end"
+	d=$(record_with 'JobID=800; StateCompact=TO; TimeUsed=1:00:40; TimeLimit=1:00:00' | job_fx to squeue-all)
+	need "TIMEOUT from squeue: its limit and how long it ran" end_why "$d" "it reached its time limit of 1h00m after 1h00m"
+	d=$(record_with 'JobID=800; StateCompact=NF; exit_code=0:1; RestartCnt=1' | job_fx nf squeue-all)
+	need "NODE_FAIL of a batch job requeued before: the note" eval 'end_why "$d" "its node fb2-bioinf failed while it ran" && [ "$(why_notes)" = "Slurm had requeued it 1 time before" ]'
+	need "DEADLINE"  end_why "$(end_fx dl State=DEADLINE)" "Slurm ended it: its deadline (--deadline) could no longer be met"
+	need "PREEMPTED" end_why "$(end_fx pr State=PREEMPTED)" "preempted: a job with a higher priority took its resources"
+	need "BOOT_FAIL" end_why "$(end_fx bf State=BOOT_FAIL)" "its node failed to boot"
+	why_run "$jfx/finished-11912" -- --no-color job 11912
+	need "COMPLETED: no why section" eval 'rc_is 0 && why_lacks_section'
+	why_run "$jfx/running-own" -- --no-color job 11950
+	need "RUNNING: no why section (Franz: no line)" eval 'rc_is 0 && why_lacks_section'
+}
+c_why_array() {   # J25, V16
+	T_TITLE="an array's why: failures first by count, the first three ids then …, the pending tasks by their record's reason; the ≥N count while accounting is down"
+	local d i rows=
+	for i in 1 2 3 4 5; do rows="$rows$(printf 'JobID=900_%s; JobIDRaw=%s; State=FAILED; ExitCode=1:0' $i $((900 + i)))"$'\n'; done
+	rows="${rows}JobID=900_6; JobIDRaw=906; State=OUT_OF_MEMORY; ExitCode=0:125"$'\n'"JobID=900_7; JobIDRaw=907; State=COMPLETED"
+	d=$(job_fx arr sacct <<<"$rows")
+	record_with 'JobID=900; ArrayJobID=900; ArrayTaskID=8-9; StateCompact=PD; Reason=Dependency; NodeList=; EndTime=N/A' | job_fx arr squeue-all > /dev/null
+	why_run "$d" -- --no-color job 900
+	need "5 failed (3 ids, then …), 1 out of memory, 2 pending by reason, the pointer" eval '
+		rc_is 0 && [ "$(why_lines)" = "$(printf "%s\n" "  5 failed with exit 1: 900_1, 900_2, 900_3, …" "  1 ran out of memory: 900_6" \
+			"  2 pending: Slurm'"'"'s reason: Dependency" "  ↳ sq job 900_1 says more about one of them")" ]'
+	printf '@hang 10\n' > "$d/sacct"
+	why_run "$d" -- --no-color job 900
+	need "accounting hanging: ≥2, the note, no why section (it needs accounting)" eval '
+		rc_is 0 && title_is "▌ 900  job · alice · array of ≥2 (accounting did not answer): 2 pending" &&
+		notes_are "done, failed and cancelled tasks are not counted: accounting did not answer within 3s" && why_lacks_section'
+}
+
+# ---- the time sq job takes (W2, V13) --------------------------------------------
 finished_in() { printf '%s' $(( $(stat -c %Y "$RUN/rc") - $1 )); }   # finished_in START: seconds from START to sq's end
 timeout_of() {   # timeout_of TOOL: the bound sq's timeout gave TOOL's first call (TIMEOUT lines, SQSTUB_TIMEOUT=log)
 	gawk -F'\t' -v t="$1" '$1 == "TIMEOUT" && index(" " $2 " ", " 3>&- " t " ") { n = split($2, a, " ")
 		for (i = 1; i <= n; i++) if (a[i] == "-k") { print a[i + 2]; exit } }' "$LOG"
 }
 c_why_budget() {   # Franz #1, W2, V13, V16
-	T_TITLE="sq job waits 30 s for accounting unless SQ_TIMEOUT validly says otherwise (invalid: as unset), while squeue is asked; the queue keeps SQ_TIMEOUT's 5 s; the ≥N array"
-	local runs=() r start=$(epoch_now) d v
+	T_TITLE="sq job waits 30 s for accounting unless SQ_TIMEOUT validly says otherwise (invalid: as unset); the queue keeps SQ_TIMEOUT's 5 s; every call within sacct's budget and 5 s more; the ≥N array"
+	local runs=() r start=$(epoch_now) d dep v
+	# accounting silent, SQ_TIMEOUT unset: the pinned ≥N screen after 30 s,
+	# colour on and off at once
 	sq_start "$jfx/array-silent-11367" SQSTUB_UID=1041 SQ_PSS_SINCE=@$(( start - pss_ago )) -SQ_TIMEOUT -- --no-color job 11367; runs+=("$RUN")
 	sq_start "$jfx/array-silent-11367" SQSTUB_UID=1041 SQ_PSS_SINCE=@$(( start - pss_ago )) -SQ_TIMEOUT -- --color job 11367; runs+=("$RUN")
+	# a pending job whose queue answers after 4 s, then every other call hangs:
+	# sacct for 30 s, its parent's squeue for 5 (SQ_TIMEOUT's default), its
+	# failed parent's sacct for what is left of 35 s
+	dep=$T_DIR/fx-hangs; mkdir -p "$dep"
+	{ echo '@hang 4'; sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$jfx/dep-failed-11963/squeue-all"; } > "$dep/squeue-all"
+	printf '@hang 60\n' > "$dep/sacct"; printf '@hang 60\n' > "$dep/sacct.11950"; printf '@hang 60\n' > "$dep/squeue-all.11950"
+	sq_start "$dep" SQSTUB_UID=1041 -SQ_TIMEOUT -- --no-color job 11963; runs+=("$RUN")
 	for r in "${runs[@]}"; do sq_finish "$r" 60; done
 	use_run "${runs[0]}"; RC=$(cat "$RUN/rc")
 	need "accounting silent, SQ_TIMEOUT unset: the pinned ≥N screen, after 30 s and before 35" eval '
 		rc_is 0 && screen_is "$jfx/screens/why__array-silent.txt" && [ "$(finished_in $start)" -ge 29 ] && [ "$(finished_in $start)" -le 36 ] && nothing_at_exit'
 	use_run "${runs[1]}"; RC=$(cat "$RUN/rc")
 	need "... colour on" eval 'rc_is 0 && screen_is "$jfx/screens/why__array-silent.ansi"'
+	use_run "${runs[2]}"; RC=$(cat "$RUN/rc")
+	need "everything hanging: done within sacct's 30 s and 5 more (2 s kill grace aside), each source's note, nothing left" eval '
+		rc_is 0 && [ "$(finished_in $start)" -le 37 ] && nothing_at_exit &&
+		[ "$(plain | sed -n 2p)" = "  ↳ accounting did not answer within 30s" ] &&
+		why_has "  will never start: it may start only once 11950 has completed successfully, which can no longer happen" &&
+		why_has "    11950  unknown: squeue did not answer"'
+	# the bounds as sq gives them to timeout: SQ_TIMEOUT valid is both, and
+	# anything else is as unset (sacct 30, the queue 5)
 	for v in 2 2.5 7; do
 		job_run finished-11912 "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=$v -- --no-color job 11912
 		need "SQ_TIMEOUT=$v: sacct and squeue both $v" eval 'rc_is 0 && [ "$(timeout_of sacct)" = $v ] && [ "$(timeout_of squeue)" = $v ]'
@@ -4672,12 +5275,44 @@ c_why_budget() {   # Franz #1, W2, V13, V16
 	job_run "$d" SQ_TIMEOUT=2 -- --no-color job 11367
 	need "SQ_TIMEOUT=2, accounting hanging: 2 s, and the ≥N note says 2s" eval '
 		rc_is 0 && notes_are "done, failed and cancelled tasks are not counted: accounting did not answer within 2s"'
-	d=$T_DIR/fx-both; mkdir -p "$d"
-	for v in squeue-all sacct; do { echo '@hang 2'; cat "$jfx/finished-11912/$v"; } > "$d/$v"; done
+	job_run pending-est "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=4 -- --no-color job 11962
+	need "the why section's calls: within SQ_TIMEOUT too (at most 4 s each)" eval '
+		rc_is 0 && v=$(timeout_of scontrol) && [ "${v%%.*}" -le 4 ] && [ "${v%%.*}" -ge 3 ]'
+}
+c_why_parallel() {   # V13
+	T_TITLE="the why section's calls run while sacct is asked: three calls of 3 s each take 3 s, not 6 or 9, and draw the pinned report"
+	local d=$T_DIR/fx-slow f start
+	mkdir -p "$d"
+	for f in squeue-all sacct scontrol-node squeue-queue; do
+		{ [ $f = squeue-all ] || echo '@hang 3'; sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$jfx/pending-est/$f"; } > "$d/$f"
+	done
 	start=$(date +%s%N)
-	job_run "$d" SQ_TIMEOUT=6 -- --no-color job 11912
-	need "squeue and sacct 2 s each: asked at once, about 2 s in all (under 3.5), the pinned report" eval '
-		rc_is 0 && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 3500 ] && job_is "$jfx/screens/job__finished-11912.txt"'
+	job_run "$d" SQ_TIMEOUT=6 -- --no-color job 11962
+	need "sacct, scontrol and the queue, 3 s each: about 3 s in all (under 5), the pinned report" eval '
+		rc_is 0 && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 5000 ] && job_is "$jfx/screens/job__pending-est.txt"'
+}
+c_why_signals() {   # V2, V13: nothing outlives sq
+	T_TITLE="a signal or SIGKILL while the why section's calls and sacct run together: 128+N, or the sentinel ends them; nothing left, the tmp dir gone"
+	local d=$T_DIR/fx-hang f sig
+	mkdir -p "$d"
+	for f in squeue-all sacct scontrol-node squeue-queue; do
+		{ [ $f = squeue-all ] || echo '@hang 30'; sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$jfx/pending-est/$f"; } > "$d/$f"
+	done
+	for sig in INT:130 TERM:143 KILL:; do
+		sq_start "$d" SQSTUB_UID=1041 SQ_TIMEOUT=25 -- --no-color job 11962
+		need "SIG${sig%:*}: sacct, scontrol and the queue call all in flight at once" \
+			waits_for 10 eval '[ "$(calls scontrol)" = 1 ] && [ "$(calls sacct)" = 1 ] && argv_has squeue -h -t PD,R'
+		sleep 0.3; kill -"${sig%:*}" "$SQ_PID" 2>/dev/null
+		if [ -n "${sig#*:}" ]; then
+			sq_finish "$RUN" 20
+			need "SIG${sig%:*} while sacct, scontrol and the queue call run: rc ${sig#*:}, nothing left, the tmp dir gone" eval '
+				rc_is '"${sig#*:}"' && nothing_at_exit && waits_for 3 nothing_left && [ -z "$(ls -A "$RUN/tmp")" ]'
+		else
+			need "SIGKILL then: within 3 s the sentinel ends all three calls and removes the tmp dir" eval '
+				waits_for 3 eval "[ -z \"\$(ls -A \"\$RUN/tmp\")\" ]" && waits_for 3 nothing_left'
+			sq_finish "$RUN" 10
+		fi
+	done
 }
 
 # ============================================================================
@@ -4716,7 +5351,8 @@ cases=(
 	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
 	sub_dispatch sub_stray log_follow log_now log_syntax log_paths log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
-	why_budget
+	why_screens why_clock_step why_calls why_tail why_tail_file why_tail_hung why_forged why_pending why_dep
+	why_resources why_ended why_array why_budget why_parallel why_signals
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do
