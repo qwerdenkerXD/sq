@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# test stub: `getent passwd KEY...` answers from the fixture's passwd file
+# (SQSTUB_FIXTURE/passwd, passwd(5) lines), as getent does: each key's entry
+# in turn, by name or uid, and exit 2 when a key has none ("#" lines are
+# comments, "@include FILE" reads FILE, relative to it, there).  A first
+# line "@hang N" blocks N seconds first, as a name service that does not
+# answer.
+# Logged as "CALL getent ..." in SQSTUB_LOG.  Anything else, or a fixture
+# without a passwd file, is refused (exit 97 and a STUBERROR line): a case
+# never reads this machine's users
+refuse() {
+	printf 'stub getent: %s\n' "$*" >&2
+	[ -n "${SQSTUB_LOG:-}" ] && printf 'STUBERROR\tgetent\t%s\n' "$*" >> "$SQSTUB_LOG"
+	exit 97
+}
+[ -n "${SQSTUB_LOG:-}" ] || refuse "SQSTUB_LOG is not set: this is sq's test stub, not getent"
+printf 'CALL\tgetent\t%s\n' "$*" >> "$SQSTUB_LOG"
+[ $# -ge 2 ] && [ "$1" = passwd ] || refuse "only 'getent passwd KEY...' is emulated"
+file=${SQSTUB_FIXTURE:-}/passwd
+[ -n "${SQSTUB_FIXTURE:-}" ] && [ -f "$file" ] || refuse "fixture $file does not exist (an unexpected call?)"
+shift
+hang=$(sed -n '1s/^@hang[[:space:]]\{1,\}\([0-9]\{1,\}\)[[:space:]]*$/\1/p' "$file")
+[ -z "$hang" ] || sleep "$hang"
+FILE=$file exec gawk -F: '
+	function read(path,   ln, dir, f) {
+		while ((getline ln < path) > 0) {
+			if (ln ~ /^@include[ \t]/) {
+				f = ln; sub(/^@include[ \t]+/, "", f); dir = path; sub(/\/[^\/]*$/, "", dir)
+				read(f ~ /^\// ? f : dir "/" f); continue
+			}
+			if (ln !~ /^[@#]/) LINE[++nl] = ln
+		}
+		close(path)
+	}
+	BEGIN {
+		for (i = 1; i < ARGC; i++) KEY[i] = ARGV[i]; nk = ARGC - 1
+		read(ENVIRON["FILE"])
+		for (l = 1; l <= nl; l++) { split(LINE[l], f, ":")
+			for (i = 1; i <= nk; i++) if ((f[1] == KEY[i] || f[3] == KEY[i]) && !(i in HIT)) HIT[i] = LINE[l] }
+		for (i = 1; i <= nk; i++) if (i in HIT) print HIT[i]; else miss = 1
+		exit miss ? 2 : 0
+	}' "$@"

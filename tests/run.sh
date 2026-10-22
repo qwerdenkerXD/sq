@@ -11,7 +11,7 @@
 # leftover processes, found by session id) for the sq log cases.
 # The stubs in tests/bin stand in for squeue/sinfo/sacct (tests/lib/stub.sh
 # says how, tests/FAITHFULNESS.md how they were checked against the real
-# ones); tests/bin/stty only logs and runs the real stty.
+# ones) and for getent; tests/bin/stty only logs and runs the real stty.
 # Every case must see a stub answer, so the suite cannot pass against a real
 # Slurm by accident.
 #
@@ -1840,6 +1840,29 @@ EOF
 	need "47h30m ago: 47h" eval 'rows recent | grep -qE "^ +701 +new +COMPLETED .* 47h$"'
 	need "50h30m ago: 2d02h" eval 'rows recent | grep -qE "^ +702 +old +COMPLETED .* 2d02h$"'
 	need "a group from 47h10m to 77h30m ago: 47h-3d05h" eval 'rows recent | grep -qE "^ +703_\[0-1\] ×2 +arr +COMPLETED .* 47h-3d05h$"'
+}
+# V15 (why-v2): the cancellers' names come from one getent call through
+# collect, shared with sq job: bounded by SQ_TIMEOUT like any Slurm call
+c_cancel_names() {
+	T_TITLE="a canceller's uid reads as getent's name for it, from one bounded getent call; a hanging getent leaves the uid"
+	local d=$T_DIR/fx; mkdir -p "$d"
+	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
+	: > "$d/squeue"
+	cat > "$d/sacct" <<EOF
+@include $fixtures/_common/sacct-defaults
+JobID=801; JobName=killed; State=CANCELLED by 1025; End=\{now-15m30s}
+JobID=802; JobName=gone; State=CANCELLED by 1077; End=\{now-16m30s}
+EOF
+	printf 'bob:x:1025:1025::/home/bob:/bin/bash\n' > "$d/passwd"
+	sq_run "$d" -- --full
+	need "rc 0; 1025 is bob, 1077 unknown stays a uid; one getent call for both" eval '
+		rc_is 0 && err_empty && rows recent | grep -qE "^ +801 +killed +CANCELLED +0 by bob " &&
+		rows recent | grep -qE "^ +802 +gone +CANCELLED +0 by 1077 " && [ "$(grep -c "^CALL	getent" "$LOG")" = 1 ] &&
+		grep -qx "CALL	getent	passwd 1025 1077" "$LOG"'
+	printf '@hang 20\nbob:x:1025:1025::/home/bob:/bin/bash\n' > "$d/passwd"
+	sq_run "$d" SQ_TIMEOUT=1 -- --full
+	need "getent hanging: within SQ_TIMEOUT, the uids, nothing left" eval '
+		rc_is 0 && rows recent | grep -qE "^ +801 +killed +CANCELLED +0 by 1025 " && [ -z "$(ls -A "$RUN/tmp")" ]'
 }
 # A NAME is no id, even one that looks like a bracket: it keeps the plain cut
 name_cut() {         # name_cut SECTION ID: the NAME of row ID is a right cut of the full name
@@ -4612,7 +4635,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale locale_pinned locale_missing locale_not_utf8 posixly_correct clock_step ago_days shrink_name shrink_extent
+	shrink_locale locale_pinned locale_missing locale_not_utf8 posixly_correct clock_step ago_days cancel_names shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40

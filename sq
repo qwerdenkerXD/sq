@@ -299,6 +299,20 @@ first_why() {   # first_why NAME... (each set like why_of sets it)
 	for v in "$@"; do [ -z "${!v}" ] || { printf '%s' "${!v}"; return; }; done
 }
 
+# The login names of uids, as "uid=name," pairs into VAR, from one getent
+# call through collect, so a name service that hangs is bounded as Slurm is
+# (OPTIONs go to collect, before the call's name).  getent says nothing of
+# a uid it does not know (exit 2, the others still printed); a name keeps
+# only the characters a login name has
+uid_names() {   # uid_names VAR "UID..." [OPTION...]
+	local var=$1 uids=$2; shift 2
+	printf -v "$var" '%s' ''
+	[ -n "${uids//[[:space:]]/}" ] || return 0
+	collect "$@" passwd getent passwd $uids
+	printf -v "$var" '%s' "$(env LC_ALL=C gawk -F: 'NF >= 3 && $3 ~ /^[0-9]+$/ && !($3 in seen) {
+		seen[$3]; name = $1; gsub(/[^A-Za-z0-9._-]/, "", name); if (name != "") printf "%s=%s,", $3, name }' "$tmp/passwd" 2>/dev/null)"
+}
+
 # gawk functions shared by the programs below (the dashboard's, its memory
 # and allocation readers, sq job's), prepended to each
 shared_awk='
@@ -2379,13 +2393,8 @@ fi
 # "CANCELLED by <uid>" is the only state carrying a number, and a uid means
 # nothing to a reader.  Resolved here, not in gawk, which has no passwd access.
 uidmap=
-if [ "$rsrc" = sacct ]; then
-	for u in $(LC_ALL=C grep -ao 'CANCELLED by [0-9][0-9]*' "$tmp/recent" 2>/dev/null \
-	           | LC_ALL=C awk '{print $3}' | sort -u); do
-		nm=$(getent passwd "$u" 2>/dev/null | cut -d: -f1 | tr -cd 'A-Za-z0-9._-')
-		[ -n "$nm" ] && uidmap="$uidmap$u=$nm,"
-	done
-fi
+[ "$rsrc" != sacct ] ||
+	uid_names uidmap "$(LC_ALL=C grep -ao 'CANCELLED by [0-9][0-9]*' "$tmp/recent" 2>/dev/null | LC_ALL=C awk '{print $3}' | sort -u)"
 
 gawk_locale
 
