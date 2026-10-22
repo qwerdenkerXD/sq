@@ -9,8 +9,8 @@ watch -tc -n 1 'sq -C'
 ```
   ▌ SLURM node01  11:26:56 UTC
 
-  node01 ████▒░░░░░░░░░░░░░░  25%  32/128 cpu   ████▓░░░░░░░░░░░░░░░  24%  250/1007G mem  mixed
-  node02 ···················   0%   0/24  cpu   ····················   -%    -/79G   mem  down*
+  node01 ████▒░░░░░░░░░░░░░░  25%  32/128 cpu   ████░░░░░░░░░░░░░░░░  19%  192/1007G mem  mixed
+  node02 ···················   0%   0/24  cpu   ····················   0%    0/79G   mem  down*
          ↳ Not responding · since 2026-10-19
 
   JOBID         NAME          USER  STATE   TIME    LEFT       CPU MEM      NODE/REASON        
@@ -47,17 +47,24 @@ watch -tc -n 1 'sq -C'
   Numbers are never cut while anything else can give.
 - **One right edge.** Node stats, the job table and the finished-jobs block are measured together
   and drawn to a common width, so the dashboard reads as one block rather than three.
-- **CPU and memory bars per node, allocated and in use.** A cell is `█` in use, `▒` allocated but
-  idle, `▓` in use beyond the allocation (magenta), `░` free, and `·` where the use is not known
-  (sinfo says `N/A`). The figures beside the bars count allocated cores and memory in use. Memory
-  in use comes from the node's own free-memory reading, so it is shown even when Slurm is not
-  configured to schedule memory (`CR_CORE`), which is exactly when you most need to watch it;
-  nodes then report no memory allocated, so all of it draws as `▓`, in use beyond the allocation.
-  Bars turn yellow past 85%, memory red past 95%, and a down node's filled cells are red.
+- **CPU and memory bars per node.** A CPU cell is `█` in use, `▒` allocated but idle, `▓` in use
+  beyond the allocation (magenta), `░` free, and `·` where the use is not known (sinfo says
+  `N/A`); the figure beside it counts allocated cores. Where Slurm schedules memory, the memory
+  bar and figure count allocated memory the same way, `█` allocated and `░` free, against what
+  jobs can be given: RealMemory less the node's MemSpecLimit, `265/977G`, which one more call,
+  `scontrol -o show node`, reads. Should that call fail, RealMemory counts and a dim line under
+  the nodes says why. Where Slurm does not schedule memory (`CR_CORE`: no node has any memory
+  allocated, but some node has CPUs), the memory bar shows memory in use instead, from the node's
+  own free-memory reading, which is exactly when you most need to watch it: all of it draws as
+  `▓`, in use beyond the (absent) allocation. With nothing allocated anywhere, the bar is the
+  allocated one, `0/977G`. The one-line node summary of a small screen adds up the allocated
+  memory too, `335/1052G mem`. Bars turn yellow past 85%, memory in use red past 95%, and a down
+  node's filled cells are red.
   Two caveats. CPU in use is the node's 5-minute load average (`CPULoad`), refreshed only with
   slurmctld's node pings, so it trails the node by minutes, and it counts processes outside Slurm
-  too. Memory in use is RealMemory − FreeMem, and FreeMem follows the kernel's `MemFree`, so page
-  cache and the OS count as used: use beyond the allocation is not necessarily jobs.
+  too. Memory in use (`CR_CORE` only) is RealMemory − FreeMem, and FreeMem follows the kernel's
+  `MemFree`, so page cache and the OS count as used: use beyond the allocation is not
+  necessarily jobs.
 - **MEM is each job's total memory,** what a running job holds and what a pending one asks for,
   not squeue's `%m`, which is per node or per CPU: a `--mem-per-cpu=8G -c 4` job reads `32G`,
   not `8G`, and a folded row the sum over its jobs. Details under [Good to know](#good-to-know).
