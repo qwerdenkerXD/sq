@@ -3070,10 +3070,14 @@ bellall=${SQ_BELL_ALL:-0}
 rmax=${SQ_RECENT_MAX:-0}
 case $rmax in ''|*[!0-9]*|?????????*) rmax=0 ;; esac
 [ "$rmax" -gt 0 ] 2>/dev/null || rmax=0
-# no state directory turns the bell off, as one that cannot be made does
+# no state directory turns the bell off, as one that cannot be made or written
+# in does (a read-only ~/.cache/sq killed gawk as it wrote the state).  The
+# probe is the temp file itself, made and removed at once: left there empty,
+# it would be renamed over the bell's memory by a run without a terminal
 cache_dir statedir
 statetmp=${statedir:+$statedir/alerted.$$}      # renamed over alerted at the end
-[ "$bell" = 0 ] || { [ -n "$statedir" ] && mkdir -p "$statedir" 2>/dev/null; } || bell=0
+[ "$bell" = 0 ] || { [ -n "$statedir" ] && mkdir -p "$statedir" &&
+	: > "$statetmp" && rm -f "$statetmp"; } 2>/dev/null || bell=0
 
 # writing to /dev/tty is a gawk FATAL without a controlling terminal (ssh
 # without -t, cron, systemd), and the device node exists even then, so the only

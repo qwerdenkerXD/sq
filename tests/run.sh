@@ -1269,7 +1269,7 @@ c_bell_text() {
 # variable"), with or without the bell.  sq runs in a directory of its own
 # here, so whatever a relative path would write shows up there.
 c_bell_statedir() {
-	T_TITLE="the bell's state directory: no HOME is no state and no bell, never a crash; a relative XDG_CACHE_HOME counts for nothing"
+	T_TITLE="the bell's state directory: no HOME, or one sq cannot write in, is no state and no bell, never a crash; a relative XDG_CACHE_HOME counts for nothing"
 	local fx want cwd=$T_DIR/cwd
 	mkdir -p "$cwd"; pushd "$cwd" > /dev/null || return
 	sq_run mixed --
@@ -1285,6 +1285,16 @@ c_bell_statedir() {
 	need "HOME relative: rc 0, no bell" eval 'rc_is 0 && [ "$(bels)" -eq 0 ]'
 	bell_run "$fx" SQ_BELL_USER=alice XDG_CACHE_HOME=relcache
 	need "XDG_CACHE_HOME relative: one bell, remembered under HOME/.cache" eval 'rc_is 0 && [ "$(bels)" -eq 1 ] && [ -s "$RUN/home/.cache/sq/alerted" ]'
+	# a state directory sq cannot write in is none: it once killed gawk at the
+	# end ("cannot redirect to .../alerted.PID"), rc 2.  Root writes there anyway
+	if [ "$(id -u)" != 0 ]; then
+		local ro=$T_DIR/ro
+		mkdir -p "$ro/.cache/sq"; chmod 555 "$ro/.cache/sq"
+		bell_run "$fx" SQ_BELL_USER=alice HOME="$ro"
+		chmod 755 "$ro/.cache/sq"
+		need "~/.cache/sq read-only: rc 0, no bell, no gawk error, the screen drawn, nothing left in it" \
+			eval 'rc_is 0 && [ "$(bels)" -eq 0 ] && has "7001" && lacks "gawk" && [ -z "$(ls -A "$ro/.cache/sq")" ]'
+	fi
 	need "nothing written in the working directory" eval '[ -z "$(ls -A "$cwd")" ]'
 	popd > /dev/null || return
 }

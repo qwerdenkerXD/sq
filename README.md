@@ -297,7 +297,8 @@ efficiency
   added to and aged out after 24 h, never pruned just because one run looked at fewer jobs, and
   replaced atomically so two running copies cannot tear it. The directory is
   `$XDG_CACHE_HOME/sq` when that is an absolute path, else `~/.cache/sq` (the `memuse` below
-  lives there too); with no absolute `HOME` either, sq keeps no state and the bell stays off.
+  lives there too); with no absolute `HOME` either, or a directory sq cannot write in, sq keeps
+  no state and the bell stays off.
 - **MEM is each job's total memory:** what a running job holds and what a pending one asks for,
   as Slurm's `tres-alloc` reports it, not per node or per CPU as squeue's own `%m` prints it: a
   `--mem-per-cpu=7800M -c 2` job reads `15.2G`, not `7800M`. Binary units, `M` below 1000 MiB,
