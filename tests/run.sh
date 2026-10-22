@@ -4928,6 +4928,12 @@ c_why_forged() {   # V14
 	d=$(node_fx extra "$big Extra=RealMemory=1 CPUEfctv=1 MemSpecLimit=0" "$small")
 	why_run "$d" -- --no-color job 11955
 	need "an Extra= at the end, as scontrol prints it, naming figures: ignored, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
+	# a key twice before the cut: the first counts.  23.11.4 prints the CPU
+	# figures before OS=, whose value (the node's uname) has spaces and may
+	# name anything; a later CPUEfctv or CPUAlloc there is text, not a figure
+	d=$(node_fx first "${big/ SMP PREEMPT_DYNAMIC/ SMP CPUEfctv=999 CPUAlloc=0 PREEMPT_DYNAMIC}" "$small")
+	why_run "$d" -- --no-color job 11955
+	need "CPUEfctv= and CPUAlloc= again in the OS= text: the first ones count, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
 	d=$(node_fx cputot "${big/ CPUEfctv=128/}" "${small/ CPUEfctv=24/}")
 	why_run "$d" -- --no-color job 11955
 	need "no CPUEfctv: CPUTot, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
