@@ -12,7 +12,8 @@
 # compares as zero bytes against zero bytes, and is reported as such).
 #
 # Nothing is written on the target: the commands are squeue, sinfo and sacct
-# with output formats, and their output comes back over the ssh pipe.
+# with output formats, and scontrol show node, and their output comes back
+# over the ssh pipe.
 
 set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -171,6 +172,45 @@ else
 			verdict "sacct-bitstr=$len" "$d" "$(wc -l < "$t/fx/sacct")"
 		done
 		printf '       (array ids compared: %s)\n' "$ids"
+	fi
+fi
+
+# ---- scontrol show node: --json through the stub, and both readers of sq -------
+# The --json answer, as the fixture scontrol-node.json, must come back from the
+# stub byte for byte.  And sq's own readers, cut out of sq (between its "the
+# node readers" and "node readers end" lines), must agree: node_json_read on
+# --json with node_read on -o, asked before and after it (the figures move
+# between two calls, so either may match), the state compared as its base word
+# and the set of its flags (JSON lists the flags in another order).
+nodes_dump() {   # nodes_dump json|text FILE: what sq's reader keeps, a node a line
+	sed -n '/^# ---- the node readers/,/^# ---- node readers end/p' "$here/../sq" > "$work/readers.awk"
+	LC_ALL=C.UTF-8 gawk -v how="$1" -v f="$2" -f "$work/readers.awk" -e '
+	function flags(st,   n, a, i, j, t) {     # the base word, then the flags sorted
+		n = split(st, a, "+")
+		for (i = 2; i <= n; i++) for (j = i + 1; j <= n; j++) if (a[j] < a[i]) { t = a[i]; a[i] = a[j]; a[j] = t }
+		t = a[1]; for (i = 2; i <= n; i++) t = t "+" a[i]
+		return t
+	}
+	END {
+		if (how == "json" && !node_json_read(f)) { print "not accepted"; exit }
+		if (how == "text") node_read(f)
+		for (n = 1; n <= NN; n++) printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n", NODE_NAME[n], NODE_CPUS[n], NODE_CPUALLOC[n],
+			NODE_REALMEM[n], NODE_ALLOCMEM[n], NODE_SPECMEM[n], flags(NODE_STATE[n]), NODE_PARTS[n], NODE_BAD[n]
+	}' /dev/null
+}
+d=$work/scontrol; mkdir -p "$d/fx"
+if run_real "$d/o1" scontrol -o show node && run_real "$d" scontrol --json show node && run_real "$d/o2" scontrol -o show node; then
+	cp "$d/real.out" "$d/fx/scontrol-node.json"
+	run_stub "$d" "$d/fx" scontrol --json show node
+	verdict scontrol-json "$d" "$(LC_ALL=C grep -c '^NodeName=' "$d/o1/real.out")"
+	nodes_dump json "$d/real.out" > "$d/json.dump"; nodes_dump text "$d/o1/real.out" > "$d/o1.dump"; nodes_dump text "$d/o2/real.out" > "$d/o2.dump"
+	if [ ! -s "$d/json.dump" ] || [ "$(cat "$d/json.dump")" = "not accepted" ]; then
+		printf 'DIFFER %-16s node_json_read: %s\n' scontrol-readers "$(head -1 "$d/json.dump")"; fails=$((fails+1))
+	elif cmp -s "$d/json.dump" "$d/o1.dump" || cmp -s "$d/json.dump" "$d/o2.dump"; then
+		printf 'MATCH  %-16s node_json_read == node_read: %d nodes\n' scontrol-readers "$(wc -l < "$d/json.dump")"
+	else
+		printf 'DIFFER %-16s node_json_read != node_read on either -o:\n' scontrol-readers
+		diff "$d/o1.dump" "$d/json.dump" | sed 's/^/         | /'; fails=$((fails+1))
 	fi
 fi
 

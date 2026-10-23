@@ -37,6 +37,31 @@ A negative control: rendering the sacct fixture with `-P` instead of `-p` differ
 from the real output at byte 249 (the missing trailing delimiter), so the
 comparison can fail.
 
+## scontrol show node (automated, BATCH-K)
+
+`faithfulness.sh` asks `scontrol -o show node`, `scontrol --json show node` and
+`-o` again, and
+
+- byte-compares the `--json` answer with the stub's (the answer as the fixture
+  `scontrol-node.json`, printed verbatim);
+- runs sq's own readers, cut out of `sq` between its "the node readers" and
+  "node readers end" lines: `node_json_read` on the `--json` answer must keep
+  what `node_read` keeps from either `-o` answer (the figures may move between
+  two calls), each node's state compared as its base word and the set of its
+  flags, as JSON lists the flags in another order than `-o`.
+
+Not yet run live: bioserver was unreachable (ssh timed out) on 2026-10-23. On
+the same-moment captures of 2026-10-23 (attack-batchK3: `live.json`, `live.o`,
+json-c 0.17, Slurm 23.11.4) both hold: the stub prints `live.json` byte for
+byte (and its json-c 0.13.1 and 0.16 reprints), and both readers keep
+`fb2-bioinf|128|0|1031000|0|31000|IDLE|LocalQ,main` and
+`fb2-bioinf-0|24|0|80000|0|3200|IDLE|LocalQ,small`.
+
+The stub's own documents (made from `-o` records when a fixture has no
+`scontrol-node.json`) are byte-identical to what json-c 0.17, 0.16 and 0.13.1
+print for the same JSON (`SQSTUB_JSONC=0.17|0.16|0.13`, checked with the
+reprinters of attack-batchK3).
+
 ## squeue, through its header (automated)
 
 The queue was empty, so no squeue RECORD could be compared. A header is padded

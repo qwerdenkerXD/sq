@@ -52,8 +52,8 @@ watch -tc -n 1 'sq -C'
   `N/A`); the figure beside it counts allocated cores. Where Slurm schedules memory, the memory
   bar and figure count allocated memory the same way, `█` allocated and `░` free, against what
   jobs can be given: RealMemory less the node's MemSpecLimit, `265/977G`, which one more call,
-  `scontrol -o show node`, reads. Should that call fail, RealMemory counts and a dim line under
-  the nodes says why. Where Slurm does not schedule memory (`CR_CORE`: no node has any memory
+  `scontrol --json show node` (`scontrol -o show node` on a Slurm without JSON), reads. Should
+  that call fail, RealMemory counts and a dim line under the nodes says why. Where Slurm does not schedule memory (`CR_CORE`: no node has any memory
   allocated, but some node has CPUs), the memory bar shows memory in use instead, from the node's
   own free-memory reading, which is exactly when you most need to watch it: all of it draws as
   `▓`, in use beyond the (absent) allocation. With nothing allocated anywhere, the bar is the
@@ -98,8 +98,9 @@ watch -tc -n 1 'sq -C'
 - Slurm client tools: `sinfo`, `squeue`, and `sacct` when accounting (slurmdbd) is set up (for
   `sq job`'s efficiency too);
   without it the finished block falls back to `squeue -t all` and says so; `sstat` for the
-  memory your own running jobs use; `scontrol` for the memory each node reserves for its
-  OS (`MemSpecLimit`) and for `sq job`'s per-node view
+  memory your own running jobs use; `scontrol --json show node` (`-o` on a Slurm without
+  JSON) for the memory each node reserves for its OS (`MemSpecLimit`) and for `sq job`'s
+  per-node view
 - **gawk** (GNU awk; plain awk and mawk won't do)
 - coreutils (`timeout`, `stty`) and `tput`
 - GNU `tail` 8.28 or newer, only for [`sq log`](#sq-log) to follow a file (`--no-follow` does
