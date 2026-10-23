@@ -1489,12 +1489,13 @@ c_bell_text() {
 	need "bob with SQ_BELL_ALL=1: rc 0, one bell" eval 'rc_is 0 && [ "$(bels)" -eq 1 ]'
 }
 # The bell's user (SQ_BELL_USER, else id -un) takes the rule Slurm's user
-# names take (scrub -s, then the control rule), so a login that is no UTF-8 or
-# holds a bidi control still matches the User sacct prints for it.
+# names take (scrub -s, then the control rule), so a login that is no UTF-8,
+# holds a bidi control or a control character still matches the User sacct
+# prints for it.
 c_bell_not_utf8() {
-	T_TITLE="the bell rings for a failure of user b\\xe9a, and of a+U+202E+b, with SQ_BELL_USER set to the same bytes; not for another"
+	T_TITLE="the bell rings for a failure of user b\\xe9a, of a+U+202E+b and of a+TAB+b, with SQ_BELL_USER set to the same bytes; not for another"
 	local fx u
-	for u in 'b\xe9a' 'a\xe2\x80\xaeb'; do
+	for u in 'b\xe9a' 'a\xe2\x80\xaeb' 'a\tb'; do
 		fx=$T_DIR/fx-bell-$RANDOM; cp -r "$(bell_fixture)" "$fx"
 		printf '@include %s\nJobID=7001; User=%s; JobName=crash; State=FAILED; ExitCode=1:0; End=\\{now-1m30s}\n' \
 			"$fixtures/_common/sacct-defaults" "$u" > "$fx/sacct"
