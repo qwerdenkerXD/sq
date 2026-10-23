@@ -3234,10 +3234,17 @@ c_membar_forged() {
 		d=$(mem_fixture membar-busy scontrol-node "$big Reason=checking MemSpecLimit=500000 [root@2026-10-21T10:00:00]\n$small")
 		sq_run "$d" $nojson -- --full
 		need "${nojson:+no --json: }... and one before it: that one counts" eval 'rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed"'
-		d=$(mem_fixture membar-busy scontrol-node "$big Comment=x\nNodeName=fb2-bioinf RealMemory=1031000 AllocMem=0 MemSpecLimit=900000 State=IDLE\n$small")
-		sq_run "$d" $nojson -- --full
-		need "${nojson:+no --json: }a Comment whose newline starts a second NodeName=fb2-bioinf line: RealMemory counts" eval '
-			rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed"'
+		if [ -n "$nojson" ]; then
+			d=$(mem_fixture membar-busy scontrol-node "$big Comment=x\nNodeName=fb2-bioinf RealMemory=1031000 AllocMem=0 MemSpecLimit=900000 State=IDLE\n$small")
+			sq_run "$d" $nojson -- --full
+			need "no --json: a Comment whose newline starts a second NodeName=fb2-bioinf line: RealMemory counts" eval '
+				rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed"'
+		else   # --json prints that Comment as one string, its newline escaped
+			d=$(json_fx membar-busy "$json_add" NODE=fb2-bioinf KEY=comment V=$'x\nNodeName=fb2-bioinf RealMemory=1031000 AllocMem=0 MemSpecLimit=900000 State=IDLE')
+			sq_run "$d" -- --full
+			need "--json: a comment string holding a newline (escaped) and a NodeName=fb2-bioinf line: one node, its own MemSpecLimit, not the forged one" eval '
+				rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed"'
+		fi
 		d=$(mem_fixture membar-busy scontrol-node "$big Extra=MemSpecLimit=0\n$small")
 		sq_run "$d" $nojson -- --full
 		need "${nojson:+no --json: }an Extra= at the end naming MemSpecLimit=0: ignored" eval 'rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed"'
@@ -3357,9 +3364,22 @@ c_membar_json() {
 	need "1000 more nodes ($(( $(wc -c < "$d/scontrol-node.json") / 1024 )) KB): rc 0 within 10 s, stderr empty, the accepted screen" eval '
 		rc_is 0 && err_empty && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ] && membar_busy_is'
 }
+# json_unusable PROGRAM WHAT: scontrol --json answering, exit 0, membar-busy's
+# document run through the json_fx PROGRAM, unusable for WHAT: -o read
+# instead, and nothing of the part read kept when -o fails too
+json_unusable() {
+	local d; d=$(json_fx membar-busy "$1")
+	sq_run "$d" SQSTUB_HOST=FranzGB -- --full --no-color
+	need "exit 0, unusable ($2): --json, then -o, the accepted screen" eval '
+		rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && argv_has scontrol -o show node && membar_busy_is'
+	printf '@stderr scontrol: error: down\n@exit 1\n' > "$d/scontrol-node"
+	sq_run "$d" -- --full
+	need "... -o failing too: nothing from the part read, its reason" eval '
+		rc_is 0 && err_empty && membar_real && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (scontrol: error: down)" ]'
+}
 c_membar_fallback() {
-	T_TITLE="scontrol --json unusable (no --json, exit 0 but unreadable: empty, garbage, compact, cut, two documents, a BOM, trailing text, errors, no errors, a name not decodable): -o once more, read by node_read, nothing kept from the part read; a timeout asks no more; the -o call gets what is left of the bound; the last call's reason, FULL and COMPACT"
-	local d p why='slurm_load_node error: Unable to contact slurm controller (connect failure)' start v
+	T_TITLE="scontrol --json unusable (no --json, exit 0 but unreadable: empty, garbage, compact, cut, two documents, a BOM, trailing text, errors, no errors, a name not decodable; in an otherwise whole document an errors element, a closer of the wrong kind, a nodes element no object, a raw quote in a name): -o once more, read by node_read, nothing kept from the part read; a timeout asks no more; the -o call gets what is left of the bound; the last call's reason, FULL and COMPACT"
+	local d p why='slurm_load_node error: Unable to contact slurm controller (connect failure)' start v i
 	sq_run membar-busy SQSTUB_NOJSON=1 SQSTUB_HOST=FranzGB -- --full --no-color
 	need "Slurm 22.05 (no --json): --json, then -o, the accepted screen" eval '
 		rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && argv_has scontrol -o show node && membar_busy_is'
@@ -3369,15 +3389,22 @@ c_membar_fallback() {
 		'/^    },$/ && !n++ { print "    }"; skip = 1; next } skip && /^  \],$/ { skip = 0 } skip { next }
 		 /^  "errors": \[\],$/ { print "  \"errors\": ["; print "    {"; print "      \"error_number\": 1"; print "    }"; print "  ],"; next } { print }' \
 		'!/^  "errors": / { print }' '/"name": "fb2-bioinf-0"/ { sub(/-0/, "\\q") } { print }'; do
-		d=$(json_fx membar-busy "$p")
-		sq_run "$d" SQSTUB_HOST=FranzGB -- --full --no-color
-		need "exit 0, unusable ($(printf '%s' "$p" | head -c 40)…): --json, then -o, the accepted screen" eval '
-			rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && argv_has scontrol -o show node && membar_busy_is'
-		printf '@stderr scontrol: error: down\n@exit 1\n' > "$d/scontrol-node"
-		sq_run "$d" -- --full
-		need "... -o failing too: nothing from the part read, its reason" eval '
-			rc_is 0 && err_empty && membar_real && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (scontrol: error: down)" ]'
+		json_unusable "$p" "$(printf '%s' "$p" | head -c 40)…"
 	done
+	# each a single flaw in a document otherwise whole and balanced
+	local -a flaw=(
+		'an errors array holding a string'
+		'/^  "errors": \[\],$/ { print "  \"errors\": ["; print "    \"x\""; print "  ],"; next } { print }'
+		'the nodes array closed by }'
+		'/^  \],$/ { print "  },"; next } { print }'
+		'the first node closed by ]'
+		'/^    },$/ && !n++ { print "    ],"; next } { print }'
+		'a string element of nodes'
+		'{ print } /^  "nodes": \[$/ { print "    \"fb2-bioinf\"," }'
+		'a raw quote in a name'
+		'/"name": "fb2-bioinf-0"/ { sub(/-0/, "-\"0") } { print }'
+	)
+	for ((i = 0; i < ${#flaw[@]}; i += 2)); do json_unusable "${flaw[i + 1]}" "${flaw[i]}"; done
 	d=$(json_fx membar-busy '{ print } END { print ""; print "  \t" }')
 	sq_run "$d" SQSTUB_HOST=FranzGB -- --full --no-color
 	need "blank lines after the document: read, one call" eval 'rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && membar_busy_is'
@@ -5376,10 +5403,18 @@ c_why_forged() {   # V14
 		need "${nojson:+no --json: }a Reason holding MemSpecLimit= and Partitions=: fb2-bioinf's memory for jobs is its RealMemory, in LocalQ still, no MemSpecLimit note for it" eval '
 			rc_is 0 && err_empty && why_has "    fb2-bioinf     128          1006.8G  too few CPUs" &&
 			! why_notes | grep -q "on fb2-bioinf\$" && why_notes | grep -qxF "memory for jobs is a node'"'"'s RealMemory less what Slurm keeps for the system (MemSpecLimit): 78.1G less 3.1G on fb2-bioinf-0"'
-		d=$(node_fx comment "$big Comment=x" "NodeName=fb2-bioinf CPUEfctv=999 CPUTot=999 RealMemory=99999999 AllocMem=0 MemSpecLimit=0 State=IDLE Partitions=LocalQ" "$small")
-		why_run "$d" $nojson -- --no-color job 11955
-		need "${nojson:+no --json: }a Comment whose newline starts a second NodeName=fb2-bioinf line: that node unknown, not the forged figures" eval '
-			rc_is 0 && why_has "    fb2-bioinf       ?                ?  unknown: scontrol listed it twice" && ! has 999'
+		if [ -n "$nojson" ]; then
+			d=$(node_fx comment "$big Comment=x" "NodeName=fb2-bioinf CPUEfctv=999 CPUTot=999 RealMemory=99999999 AllocMem=0 MemSpecLimit=0 State=IDLE Partitions=LocalQ" "$small")
+			why_run "$d" $nojson -- --no-color job 11955
+			need "no --json: a Comment whose newline starts a second NodeName=fb2-bioinf line: that node unknown, not the forged figures" eval '
+				rc_is 0 && why_has "    fb2-bioinf       ?                ?  unknown: scontrol listed it twice" && ! has 999'
+		else   # --json prints that Comment as one string, its newline escaped
+			d=$(json_fx "$jfx/badconstraints-11955" "$json_add" NODE=fb2-bioinf KEY=comment \
+				V=$'x\nNodeName=fb2-bioinf CPUEfctv=999 CPUTot=999 RealMemory=99999999 AllocMem=0 MemSpecLimit=0 State=IDLE Partitions=LocalQ')
+			why_run "$d" -- --no-color job 11955
+			need "--json: a comment string holding a newline (escaped) and a NodeName=fb2-bioinf line of forged figures: one node, its own figures, the screen as pinned" eval '
+				rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && job_is "$jfx/screens/why__pending-badconstraints.txt"'
+		fi
 		d=$(node_fx extra "$big Extra=RealMemory=1 CPUEfctv=1 MemSpecLimit=0" "$small")
 		why_run "$d" $nojson -- --no-color job 11955
 		need "${nojson:+no --json: }an Extra= at the end, as scontrol prints it, naming figures: ignored, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
@@ -5404,13 +5439,25 @@ c_why_forged() {   # V14
 }
 
 c_why_nodes_json() {
-	T_TITLE="sq job's nodes from scontrol --json: names and partitions decoded, a member twice is 'did not say', a name twice 'listed it twice'; -o where --json is unusable, within what the --json call left of its bound however long sacct takes; the reason of the last call, a timeout named by its bound"
+	T_TITLE="sq job's nodes from scontrol --json: names and partitions decoded (\\b \\f \\n \\r \\t as ?, a surrogate pair as its character, a lone surrogate as U+FFFD, \\u0026 as &), a member twice is 'did not say', a name twice 'listed it twice'; -o where --json is unusable, within what the --json call left of its bound however long sacct takes; the reason of the last call, a timeout named by its bound"
 	local d u v start why='scontrol: error: Unable to contact slurm controller (connect failure)' bfx=$jfx/badconstraints-11955
 	u=$(printf '\134u')     # a backslash and u
 	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"fb2\\/x\\\"y\\\\z${u}0007\"")
 	why_run "$d" -- --no-color job 11955
 	need "a name with \\/, \\\", \\\\ and \\u0007: decoded, the control character as ?" eval '
 		rc_is 0 && err_empty && why_has "    fb2/x\"y\\z?    24              75G  too few CPUs, too little memory"'
+	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J='"fb2\b\f\n\r\tx"')
+	why_run "$d" -- --no-color job 11955
+	need "a name with \\b \\f \\n \\r \\t: each a ?" eval '
+		rc_is 0 && err_empty && why_has "    fb2?????x     24              75G  too few CPUs, too little memory"'
+	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"a${u}d83d${u}de00b${u}d800c${u}dfffd\"")
+	why_run "$d" -- --no-color job 11955
+	need "a name with a surrogate pair (U+1F600), a lone high and a lone low surrogate: 😀, then U+FFFD for each lone one" eval '
+		rc_is 0 && err_empty && why_has "    a😀b�c�d       24              75G  too few CPUs, too little memory"'
+	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"fb2${u}0026x\"")
+	why_run "$d" -- --no-color job 11955
+	need "a name with \\u0026: an &" eval '
+		rc_is 0 && err_empty && why_has "    fb2&x         24              75G  too few CPUs, too little memory"'
 	d=$(json_fx "$bfx" '/^ *"LocalQ",$/ && !n++ { sub(/LocalQ/, "Local" ENVIRON["U"] "0051") } { print }' U="$u")
 	why_run "$d" -- --no-color job 11955
 	need "a partition written with \\u0051: decoded, the screen as pinned" eval 'rc_is 0 && err_empty && job_is "$jfx/screens/why__pending-badconstraints.txt"'
@@ -5462,6 +5509,24 @@ c_why_nodes_json() {
 	need "sacct taking 3 s, --json failing at once: -o gets nearly all of 3 s (2.5 to 3: /proc/uptime counts in 1/100 s), the table drawn" eval '
 		rc_is 0 && [ "$(calls scontrol)" = 2 ] && v=$(timeout_of scontrol 2) && gawk -v v="$v" "BEGIN { exit !(v >= 2.5 && v <= 3) }" &&
 		why_has "    fb2-bioinf     128           976.5G  too few CPUs, too little memory"'
+}
+c_why_nodes_figures() {
+	T_TITLE="sq job's node table from scontrol --json (effective_cpus, state) and from -o where Slurm has none (CPUEfctv, State): the effective CPUs where they differ from the total, a state of two flags shown joined by +"
+	local d nojson ncalls efctv state
+	for nojson in "" SQSTUB_NOJSON=1; do
+		if [ -n "$nojson" ]; then ncalls=2 efctv="no --json, CPUEfctv=120 and CPUTot=128" state="no --json, State=MIXED+FAIL"
+		else ncalls=1 efctv="--json, effective_cpus 120 and cpus 128" state='--json, state ["MIXED", "FAIL"]'; fi
+		d=$(res_fx efctv resources-11964 's/^(NodeName=fb2-bioinf .*)CPUEfctv=128/\1CPUEfctv=120/')
+		why_run "$d" $nojson -- --no-color job 11964
+		need "$efctv: 72 of 120 free, not of 128" eval '
+			rc_is 0 && err_empty && [ "$(calls scontrol)" = $ncalls ] &&
+			why_has "    fb2-bioinf    72 of 120  656.5G of 976.5G  too few CPUs free"'
+		d=$(res_fx mixfail resources-11964 's/^(NodeName=fb2-bioinf .*)State=MIXED/\1State=MIXED+FAIL/')
+		why_run "$d" $nojson -- --no-color job 11964
+		need "$state: a node down, its state shown as mixed+fail" eval '
+			rc_is 0 && err_empty && [ "$(calls scontrol)" = $ncalls ] &&
+			why_has "  waits for an admin: every node big enough for it is down or drained" && why_has "    fb2-bioinf            -            -  mixed+fail"'
+	done
 }
 
 # ---- pending: every reason's verdict, the dashboard's kind ---------------------
@@ -5890,7 +5955,7 @@ cases=(
 	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
-	why_screens why_clock_step why_calls why_tail why_tail_file why_tail_hung why_forged why_nodes_json why_pending why_dep
+	why_screens why_clock_step why_calls why_tail why_tail_file why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
 	why_resources why_ended why_array why_budget why_parallel why_signals
 )
 start=$(date +%s%N)
