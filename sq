@@ -99,24 +99,55 @@ shopt -u checkwinsize
 
 die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
 
+# ---- the scrub (tests/run.sh and tests/faithfulness.sh run the text from here
+# to "scrub end" on their own input)
+# The characters sq takes out of every text it draws, Slurm's tables too, as
+# whole characters: BIDI, the 12 bidi controls (Unicode's Bidi_Control set:
+# U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069), which reorder what a
+# terminal shows after them, and C1, U+0080-U+009F (\302\233 is CSI, \302\235
+# OSC); CNTRL, the tables' control rule, each match of which reads "?": C0, DEL
+# and C1, the last in every locale, as [[:cntrl:]] holds it only under UTF-8.
+# Each an alternation of whole characters, never a byte class, which a gawk
+# under a UTF-8 locale refuses ("Invalid collation character"), so the text is
+# the same for the scrub's gawk (LC_ALL=C) and for those of shared_awk (gloc);
+# and only ever matched on text that is whole characters already, so taking
+# one out joins no bytes into a new one
+chars_awk='
+# ---- the character classes (tests/faithfulness.sh runs them with the node readers)
+BEGIN {
+  BIDI = "\330\234|\342\200\216|\342\200\217|\342\200\252|\342\200\253|\342\200\254|\342\200\255|\342\200\256|\342\201\246|\342\201\247|\342\201\250|\342\201\251"
+  C1 = "\302\200|\302\201|\302\202|\302\203|\302\204|\302\205|\302\206|\302\207|\302\210|\302\211|\302\212|\302\213|\302\214|\302\215|\302\216|\302\217|" \
+       "\302\220|\302\221|\302\222|\302\223|\302\224|\302\225|\302\226|\302\227|\302\230|\302\231|\302\232|\302\233|\302\234|\302\235|\302\236|\302\237"
+  CNTRL = "[[:cntrl:]]|" C1
+}
+# ---- character classes end
+'
 # Outside text - a filter, a setting, the host name, a collector's stderr - is
 # decoded as UTF-8 before it reaches the screen or a message, as bytes and never
-# by the locale: a control character (C0 and DEL, and C1, U+0080-U+009F, whose
-# \302\233 is CSI and \302\235 OSC) goes, any other character stays as it is, and
-# each piece that is no UTF-8 at all (a Latin-1 byte, a halved character: one
-# "maximal subpart", Unicode §3.9) becomes one ␚, U+241A.  So the terminal and
-# gawk only ever get whole characters, and as only whole ones are taken out,
-# nothing new can join where one went: a single pass, its work linear.
-# At most MAX characters are kept, 4096 by default: more than a screen line
-# shows, while each text reaches gawk as an environment string, which Linux
-# refuses beyond 128 KiB.  The rest is still read, so a writer never meets a
-# closed pipe.  With FILE only its first line is read, at most 1 MiB of it, and
-# a character that bound cut in half goes, as the cut made it, not the text.
+# by the locale: a control character (C0 and DEL, and C1) and a bidi control
+# go, any other character stays as it is, and each piece that is no UTF-8 at
+# all (a Latin-1 byte, a halved character: one "maximal subpart", Unicode
+# §3.9) becomes one ␚, U+241A.  So the terminal and gawk only ever get whole
+# characters, and as only whole ones are taken out, nothing new can join where
+# one went: a single pass, its work linear.
+# At most MAX characters are kept, 4096 by default, counted once those are
+# out: more than a screen line shows, while each text reaches gawk as an
+# environment string, which Linux refuses beyond 128 KiB.  The rest is still
+# read, so a writer never meets a closed pipe.  With FILE only its first line
+# is read, at most 1 MiB of it, and a character that bound cut in half goes, as
+# the cut made it, not the text.
+# -s, the stream mode, is the same decoding for an answer of Slurm's (a table,
+# its JSON), all of it, line by line: each line keeps its newline (and a last
+# one its absence), NUL passes, and no ASCII byte is changed, taken out or
+# added, controls included (the tables' own rule makes those "?" later, after
+# the names are compared); each broken piece becomes one ␚ and the bidi
+# controls go, as decoded characters; C1 stays, a whole character.  No MAX.
 # Under env, so bash itself never switches locale for it.
-scrub() (   # scrub [-f FILE] [MAX]: stdin, or the first line of FILE, onto stdout
-	bound=0
+scrub() (   # scrub [-s | -f FILE] [MAX]: stdin, or the first line of FILE, onto stdout
+	bound=0 stream=0
+	[ "${1-}" != -s ] || { stream=1; shift; }
 	[ "${1-}" != -f ] || { bound=1048576; exec < <(head -c $((bound + 1)) -- "$2"); shift 2; }
-	exec env LC_ALL=C gawk -v max="${1:-4096}" -v bound=$bound '
+	exec env LC_ALL=C gawk -v max="${1:-4096}" -v bound=$bound -v stream=$stream "$chars_awk"'
 	BEGIN {
 		CONT = "[\200-\277]"; BAD = "\342\220\232"     # a continuation byte; U+241A
 		CTL = "[^\040-\176\200-\377]"                 # C0 and DEL
@@ -133,6 +164,21 @@ scrub() (   # scrub [-f FILE] [MAX]: stdin, or the first line of FILE, onto stdo
 		# of those, wrapped in \001 \002, the ill-formed ones, no character: a
 		# byte that leads none, or a lead with fewer bytes than it needs
 		ILL = "\001[\200-\337]\002|\001[\340-\357]" CONT "?\002|\001[\360-\377]" CONT "?" CONT "?\002"
+		GONE = BIDI "|" C1                            # once each piece is decoded
+	}
+	# the stream mode: a line with a byte above 127 is decoded, any other passes
+	# as it is.  Its own \001 \002 become a newline (which no line holds)
+	# and a digit while the units are wrapped, and come back after
+	stream {
+		s = $0
+		if (s ~ /[\200-\377]/) {
+			if (esc = (s ~ /[\001\002]/)) { gsub(/\001/, "\n1", s); gsub(/\002/, "\n2", s) }
+			gsub(UNIT, "\001&\002", s); gsub(ILL, BAD, s); gsub(/[\001\002]+/, "", s)
+			gsub(BIDI, "", s)
+			if (esc) { gsub(/\n1/, "\001", s); gsub(/\n2/, "\002", s) }
+		}
+		printf "%s%s", s, RT
+		next
 	}
 	# globals, kept from line to line: kept, the characters printed so far, and
 	# done, set once nothing more is printed (max reached, or the one line of FILE)
@@ -153,13 +199,15 @@ scrub() (   # scrub [-f FILE] [MAX]: stdin, or the first line of FILE, onto stdo
 				tail = substr(s, length(s) - 5)        # room for \001, 4 bytes, \002
 				s = substr(s, 1, length(s) - (match(tail, /\001[\200-\377]+\002$/) ? length(tail) - RSTART + 1 : 1))
 			}
-			gsub(/\r+|\001\302[\200-\237]\002/, "", s)
+			gsub(/\r+/, "", s)
 			gsub(ILL, BAD, s)
 			gsub(/[\001\002]+/, "", s)
+			gsub(GONE, "", s)
 		}
 		emit(s); if (bound) done = 1
 	}'
 )
+# ---- scrub end
 
 # The field separator is a nonce minted per run, never per session: a job name
 # is fixed at submit time and a node's drain reason when the admin sets it, so
@@ -289,6 +337,33 @@ collect_join() {   # collect_join NAME: wait for collect -b NAME, its status
 collect_inflight() {
 	[ -z "$collect_pidfile" ] || printf '%s\n' "$collect_pid${job_reader_pid:+ $job_reader_pid}" > "$collect_pidfile"
 }
+# Is there a byte above 127 in FILE, or on stdin?  grep alone answers: rc 0
+# yes, 1 no, 2 it could not tell.  Under env, never as "LC_ALL=C grep": bash
+# would warn of a caller's LC_ALL that names no installed locale; GREP_OPTIONS
+# unset, as a grep up to 3.5 reads it
+high_bytes() {   # high_bytes [FILE]
+	env -u GREP_OPTIONS LC_ALL=C grep -q $'[\200-\377]' "$@" 2>/dev/null
+}
+# The pass every text answer of Slurm's takes before anything reads it: $tmp/NAME,
+# as its call left it, through scrub -s into NAME.tmp, renamed over it; the raw
+# answer stays when the scrub fails, and its stderr goes nowhere.  An answer
+# with no byte above 127 (grep's rc 1) is left as it is, with no gawk started.
+# It runs once the call has ended, never inside collect: the call's exit
+# status, its timeout and NAME.run stay the call's, and no pass stands between
+# a call and the read of its status
+scrub_answer() {   # scrub_answer NAME
+	local f=$tmp/$1
+	high_bytes "$f"; [ $? != 1 ] || return 0
+	{ scrub -s < "$f" > "$f.tmp" && mv -f "$f.tmp" "$f"; } 2>/dev/null || rm -f "$f.tmp"
+}
+# the same pass on a value of Slurm's that bash holds, VAR in place, kept as it
+# is when it has no byte above 127 or the scrub fails
+scrub_var() {   # scrub_var VAR
+	local v=${!1} out
+	printf '%s' "$v" | high_bytes; [ $? != 1 ] || return 0
+	out=$(printf '%s' "$v" | scrub -s 2>/dev/null; printf '.%s' $?)
+	[ "${out##*.}" != 0 ] || printf -v "$1" '%s' "${out%.*}"
+}
 # --verbose makes timeout say "sending signal ..." before it signals; it exists
 # since coreutils 8.29, and an older timeout refuses it (rc 125) without running
 # anything, so it is asked for only where a silent probe accepts it
@@ -343,6 +418,7 @@ node_answer() {   # node_answer WHYVAR FMTVAR RC NAME BOUND SHOWN [OPTION...]
 	local why_var=$1 fmt_var=$2 rc=$3 name=$4 bound=$5 shown=$6 start= end= run=0 left nwhy nwhy_real
 	shift 6
 	printf -v "$why_var" ''; printf -v "$fmt_var" json
+	scrub_answer "$name"
 	[ "$rc" = 0 ] && node_json_ok "$tmp/$name" && return
 	why_of nwhy "$rc" "$tmp/$name" scontrol "$shown"
 	if [ "$nwhy_real" != "no response after ${shown}s" ]; then
@@ -355,7 +431,7 @@ node_answer() {   # node_answer WHYVAR FMTVAR RC NAME BOUND SHOWN [OPTION...]
 		job_limit left "$left"
 		printf -v "$fmt_var" text
 		collect -t "$left" "$@" "$name" scontrol -o show node; rc=$?
-		[ "$rc" != 0 ] || return 0
+		[ "$rc" != 0 ] || { scrub_answer "$name"; return 0; }
 		why_of nwhy "$rc" "$tmp/$name" scontrol "$shown"
 	fi
 	if   [ -n "$nwhy_real" ];  then printf -v "$why_var" '%s' "$nwhy_real"
@@ -393,8 +469,9 @@ uid_names() {   # uid_names VAR "UID..." [OPTION...]
 }
 
 # gawk functions shared by the programs below (the dashboard's, its memory
-# and allocation readers, sq job's), prepended to each
-shared_awk='
+# and allocation readers, sq job's), prepended to each; the character classes
+# of the scrub (chars_awk) first
+shared_awk=$chars_awk'
 # a size as Slurm prints it MB-based (%m, the mem= of tres-alloc), an exact
 # M/G/T/P suffix and maybe a fraction (1.50G), in MB; -1 for anything else
 # (%m prints 0 for --mem=0)
@@ -2704,16 +2781,23 @@ job_tail_lines() {
 	done
 	if [ -s "$tmp/wtail" ]; then w_tailinfo=ok; else w_tailinfo=blank; fi
 }
-# the plan and the calls it asks for, started in the background
+# the plan and the calls it asks for, started in the background.  The plan
+# reads the queue answer as Slurm sent it, as the output file it names (tail)
+# is opened by the path the job wrote it under; the queue passes scrub -s
+# right after it, so all the rest reads it as the dashboard reads its tables,
+# and so does the plan's host, which the why section shows and compares
 job_why_start() {
 	local kv lim f
 	[ "$qstat" = ok ] || return 0
-	job_run plan > "$tmp/plan" 2>/dev/null || return 0
+	job_run plan > "$tmp/plan" 2>/dev/null; f=$?
+	scrub_answer queue
+	[ $f = 0 ] || return 0
 	while IFS= read -r -d '' kv; do
 		case ${kv%%=*} in
 			nodes|queue|parents|pdone|tail|which|start|end|host) printf -v "w_${kv%%=*}" '%s' "${kv#*=}" ;;
 		esac
 	done < "$tmp/plan"
+	scrub_var w_host
 	if [ "$w_nodes" = 1 ]; then
 		job_limit w_nodes_bound "$tmo"; collect -t "$w_nodes_bound" -r -b wnodes scontrol --json show node
 	fi
@@ -2756,6 +2840,7 @@ job_why_finish() {
 			*) printf -v "w_${name#w}_stat" fail ;;
 		esac
 		[ $rc = 0 ] || : > "$tmp/$name"
+		scrub_answer "$name"
 	done
 }
 # the width the output lines are cut to: COLUMNS if exported, else the
@@ -2873,6 +2958,7 @@ sub_job() {
 	elif [ $rc = 1 ] && LC_ALL=C grep -q 'Invalid job id specified' "$tmp/queue.err" 2>/dev/null; then qstat=none
 	else qstat=fail; why_of qwhy $rc "$tmp/queue" squeue
 	fi
+	[ "$qstat" = ok ] || scrub_answer queue          # no plan reads it (job_why_start)
 	export SQJ_QFILE=$tmp/queue SQJ_AFILE=$tmp/acct SQJ_MEMREAD=$tmp/memread SQJ_COLOR=$color
 	: > "$tmp/memread"
 	job_why_start
@@ -2882,6 +2968,7 @@ sub_job() {
 	if [ $rc = 0 ]; then astat=ok
 	else why_of awhy $rc "$tmp/acct" sacct "$job_atmo"; astat=fail; [ "$awhy_real" != "no response after ${job_atmo}s" ] || astat=timeout
 	fi
+	scrub_answer acct
 	export SQJ_AWHY=$awhy
 	job_why_finish
 
@@ -3326,6 +3413,7 @@ fi
 
 login=                                          # what "--me" means to squeue,
 me=${SQ_BELL_USER:-$(id -un)}                   # resolved only if --me asks
+scrub_var me                                    # compared with Slurm's users, as they read
 bellall=${SQ_BELL_ALL:-0}
 
 # how many finished rows to show.  0 = work it out from what the screen has
@@ -3379,6 +3467,7 @@ for f in CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp CPUsLoad A
 done
 SLURM_TIME_FORMAT=standard collect nodes sinfo -hN -O "$nfmt"
 why_of nerr $? "$tmp/nodes" sinfo
+scrub_answer nodes
 
 # MemSpecLimit, the memory Slurm keeps from jobs on a node, is the one figure
 # the memory bar needs that sinfo cannot print (23.11.4 has no -O field for
@@ -3399,6 +3488,7 @@ fi
 
 SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT=$fmt collect jobs squeue -h -S t,i "${args[@]+"${args[@]}"}"
 why_of jerr $? "$tmp/jobs" squeue
+scrub_answer jobs
 
 # ---- memory use of the caller's own running jobs: JOBMEM, above -----------
 : > "$tmp/memalloc"; : > "$tmp/memread"
@@ -3561,6 +3651,7 @@ if [ "$recent" != 0 ] && [ "$rsrc" = none ] && [ -z "$jerr" ]; then
 	else why_of rerr $fe "$tmp/recent" squeue; : > "$tmp/recent"
 	fi
 fi
+scrub_answer recent                              # sacct's, or the fallback's
 
 # "CANCELLED by <uid>" is the only state carrying a number, and a uid means
 # nothing to a reader.  Resolved here, not in gawk, which has no passwd access.

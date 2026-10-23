@@ -1246,6 +1246,76 @@ c_scrub_sigpipe() {
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: the first line$"'
 }
 
+# The scrub's stream mode (scrub -s), which every answer of Slurm's that holds
+# a byte above 127 passes before it is read, run on its own (cut out of sq
+# between "the scrub" and "scrub end"): it changes no ASCII byte and moves
+# none, so S(x a y) = S(x) a S(y) for any ASCII byte a, checked on random lines
+# of broken pieces, bidi controls and their neighbours, controls and NUL; each
+# broken piece reads one ␚ and the 12 bidi controls go, as whole characters,
+# also from the normal mode, while their neighbours stay.  Then a job name
+# holding \001 and \002 around a Latin-1 byte, which the pass must not take for
+# its own marks: the table reads a?␚?b.
+scrub_is() {   # scrub_is IN OUT [ARG...]: printf IN through scrub ARG... gives printf OUT
+	cmp -s <(printf "$1" | scrub "${@:3}") <(printf "$2")
+}
+c_scrub_stream() {
+	T_TITLE="scrub -s: no ASCII byte changed or moved (S(x a y) = S(x) a S(y)), a ␚ per broken piece, the 12 bidi controls dropped as characters (also by the normal scrub), their neighbours kept; \\001 \\002 survive: a job name a\\001\\xe9\\002b reads a?␚?b"
+	local d=$T_DIR/fx-marks in=$T_DIR/prop.in out=$T_DIR/prop.out bytes=$T_DIR/prop.a
+	eval "$(sed -n '/^# ---- the scrub/,/^# ---- scrub end/p' "$sq")"
+	need "the scrub is cut out of sq" eval '[ "$(type -t scrub)" = function ] && [ -n "${chars_awk-}" ]'
+	# 3000 triples x, y, x a y: random tokens, no newline (a line is the unit)
+	LC_ALL=C gawk -v n=3000 -v afile="$bytes" 'BEGIN {
+		srand(20261024)
+		nt = split("\330\234|\342\200\216|\342\200\217|\342\200\252|\342\200\253|\342\200\254|\342\200\255|\342\200\256|\342\201\246|\342\201\247|\342\201\250|\342\201\251|" \
+		  "\342\200\247|\342\200\250|\342\200\251|\342\200\257|\342\201\245|\342\200\215|\357\273\277|\302\233|\302\200|\302\237|\303\251|\360\237\221\250|" \
+		  "\340\200\256|\300\256|\360\202\200\256|\355\240\200|\342\200|\342|\200\256|\342\220\232|N0123abc|\001|\002|\r|\000", T, "|")
+		for (i = 0; i < 256; i++) B[i] = sprintf("%c", i)
+		for (k = 0; k < n; k++) {
+			x = rnd(); y = rnd(); do a = int(rand() * 128); while (a == 10)
+			printf "%s\n%s\n%s%s%s\n", x, y, x, B[a], y; print a > afile
+		}
+	}
+	function rnd(   s, m, j, b) {
+		m = int(rand() * 9)
+		for (j = 0; j < m; j++) {
+			if (rand() < 0.5) s = s T[int(rand() * nt) + 1]
+			else { do b = int(rand() * 256); while (b == 10); s = s B[b] }
+		}
+		return s
+	}' > "$in"
+	scrub -s < "$in" > "$out"
+	need "3000 random triples: S(x a y) = S(x) a S(y), line for line" eval '
+		LC_ALL=C gawk -v afile="$bytes" "NR % 3 == 1 { x = \$0; next } NR % 3 == 2 { y = \$0; next }
+			{ getline a < afile; if (\$0 != x sprintf(\"%c\", a) y) bad++ } END { exit bad || NR != 9000 }" "$out"'
+	need "the ASCII bytes of the output are the input's, in order" \
+		eval 'cmp -s <(LC_ALL=C tr -d "\200-\377" < "$in") <(LC_ALL=C tr -d "\200-\377" < "$out")'
+	need "the output is valid UTF-8 (NUL aside)" eval 'LC_ALL=C tr -d "\000" < "$out" > "$out.nonul"; OUT=$out.nonul utf8_valid'
+	need "-s: each of the 12 bidi controls goes, the newline stays" \
+		scrub_is 'a\330\234b\342\200\216c\342\200\217d\342\200\252e\342\200\253f\342\200\254g\342\200\255h\342\200\256i\342\201\246j\342\201\247k\342\201\250l\342\201\251m\n' 'abcdefghijklm\n' -s
+	need "the normal scrub: each of the 12 goes too" \
+		scrub_is 'a\330\234b\342\200\216c\342\200\217d\342\200\252e\342\200\253f\342\200\254g\342\200\255h\342\200\256i\342\201\246j\342\201\247k\342\201\250l\342\201\251m\n' 'abcdefghijklm'
+	need "-s and normal: ZWJ emoji, U+2028, U+2029, U+FEFF, U+202F, U+2065 kept" eval '
+		scrub_is "\360\237\221\251\342\200\215\360\237\222\273 \342\200\250\342\200\251\357\273\277\342\200\257\342\201\245\n" "\360\237\221\251\342\200\215\360\237\222\273 \342\200\250\342\200\251\357\273\277\342\200\257\342\201\245\n" -s &&
+		scrub_is "\360\237\221\251\342\200\215\360\237\222\273 \342\200\250\342\200\251\357\273\277\342\200\257\342\201\245\n" "\360\237\221\251\342\200\215\360\237\222\273 \342\200\250\342\200\251\357\273\277\342\200\257\342\201\245"'
+	need "-s: a bidi control inside a broken piece joins nothing (E2 80 [RLO] AE reads ␚␚), an overlong one is 3 ␚" eval '
+		scrub_is "\342\200\342\200\256\256\n" "␚␚\n" -s && scrub_is "\340\200\256\n" "␚␚␚\n" -s && scrub_is "\342\200\342\200\256\256" "␚␚"'
+	need "-s: the input's \\001 and \\002 survive beside broken and whole characters" eval '
+		scrub_is "a\001\351\002b\n" "a\001␚\002b\n" -s && scrub_is "\001\303\251\002\001\n" "\001\303\251\002\001\n" -s'
+	need "-s: NUL passes, a last line without a newline gets none" scrub_is 'a\000\351b' 'a\000␚b' -s
+	need "-s: C1 stays (the tables' own rule reads it), the normal scrub drops it" eval '
+		scrub_is "x\302\233y\n" "x\302\233y\n" -s && scrub_is "x\302\233y\n" "xy"'
+	need "-s: CR and controls stay, a newline ends a piece" eval '
+		scrub_is "a\351\r\n" "a␚\r\n" -s && scrub_is "\342\n\200\256\n" "␚\n␚␚\n" -s && scrub_is "a\033[2J\tb\n" "a\033[2J\tb\n" -s'
+	need "the normal scrub counts MAX once the bidi controls are out" scrub_is 'a\342\200\256bcd' 'abc' 3
+	mkdir -p "$d"
+	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
+	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
+	printf '@include %s\ni=3001; j=a\\x01\\xe9\\x02b\n' "$fixtures/_common/squeue-defaults" > "$d/squeue"
+	sq_run "$d" --
+	need "a job name a\\001\\xe9\\002b: rc 0, stderr empty, valid UTF-8, the row reads a?␚?b" \
+		eval 'rc_is 0 && err_empty && utf8_valid && rows queue | grep -qE "^ +3001 +a\?␚\?b +alice "'
+}
+
 # What only the bell reads takes the same road: a user name and a cache path
 # that -v would have unescaped reach gawk as given.  The bell rings only with a
 # terminal, so these run on a pty with the bell left on.
@@ -5922,7 +5992,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe silent_failure real_reason_wins bell_text bell_statedir centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream silent_failure real_reason_wins bell_text bell_statedir centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
