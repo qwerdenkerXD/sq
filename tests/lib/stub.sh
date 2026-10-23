@@ -31,7 +31,30 @@
 #                   partition), as a line of the figures sinfo has, in
 #                   scontrol's order: NodeName, CPUAlloc, CPUTot, CPULoad,
 #                   RealMemory, AllocMem, FreeMem.  No MemSpecLimit, so a node
-#                   reads as one without (scontrol prints it only when set)
+#                   reads as one without (scontrol prints it only when set).
+#                   scontrol --json show node reads <dir>/scontrol-node.json,
+#                   printed verbatim (every line but a directive, blank ones
+#                   too, no escape decoded); without it, ONE document is made
+#                   in json-c's pretty layout from the NodeName= records of
+#                   scontrol-node (decoded, each to its first newline and its
+#                   first " Reason=", " Comment=" or " Extra="; the first key
+#                   of a name counts): NodeName -> name, CPUTot -> cpus,
+#                   CPUEfctv -> effective_cpus, CPUAlloc -> alloc_cpus,
+#                   RealMemory -> real_memory, AllocMem -> alloc_memory,
+#                   MemSpecLimit -> specialized_memory (0 when absent), State
+#                   split on "+" and Partitions on "," into arrays; a figure
+#                   that is no number becomes a string, a key absent no member.
+#                   Without scontrol-node, from the lines derived from sinfo as
+#                   for -o.  The file's directives act on it as on -o (the
+#                   document is printed where the file ends or at @exit)
+#   SQSTUB_JSONC    the json-c whose pretty layout a made document has: 0.17
+#                   (the default, as bioserver: an empty [] on one line), 0.16
+#                   (json-c 0.14-0.16: an empty array as "[" and "]" lines) or
+#                   0.13 (json-c 0.13 and older: depth d indented 2d+1, the
+#                   last line " }")
+#   SQSTUB_NOJSON   1: scontrol --json fails as Slurm 22.05's does, before
+#                   any directive: "scontrol: unrecognized option '--json'",
+#                   exit 1
 #   SQSTUB_LOG      file every invocation is appended to, one line per call:
 #                   CALL <tool> <argv, %q-quoted> <VAR=%q value | VAR(unset)>...
 #                   (the fixed list below, then every other SQUEUE_* and SACCT_*
@@ -55,6 +78,7 @@
 #   scontrol -o show node: each record line of the file printed as written
 #                                        (escapes decoded), as scontrol's one
 #                                        line per node has no format to render
+#   scontrol --json show node: see SQSTUB_FIXTURE
 # Anything the stub cannot render exactly the way Slurm would (field widths,
 # headers, unsized -O fields, an unknown option) is refused with exit 97 and a
 # STUBERROR line, never approximated.
@@ -123,7 +147,7 @@ refuse() {
 # once and their lines must not mix
 line=$(printf 'CALL\t%s\t' "$tool"; [ $# -gt 0 ] && printf '%q ' "$@"
 	for v in SQUEUE_FORMAT SQUEUE_FORMAT2 SLURM_TIME_FORMAT SLURM_BITSTR_LEN \
-	         SQ_NONCE SQ_NONCE2 SQ_NONCE3 SLURM_CLUSTERS; do
+	         SQ_NONCE SQ_NONCE2 SQ_NONCE3 SLURM_CLUSTERS SLURM_JSON; do
 		if [ -n "${!v+set}" ]; then printf '\t%s=%q' "$v" "${!v}"
 		else printf '\t%s(unset)' "$v"; fi
 	done
@@ -133,7 +157,7 @@ line=$(printf 'CALL\t%s\t' "$tool"; [ $# -gt 0 ] && printf '%q ' "$@"
 printf '%s\n' "$line" >> "$SQSTUB_LOG"
 
 # ---- argv: every option sq can send, nothing else --------------------------
-mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0 derive=0
+mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0 derive=0 json=0
 cmd_o=; cmd_O=; states=; jobs=; show=
 need_value() { [ $# -ge 2 ] || refuse "$1 needs a value"; }
 while [ $# -gt 0 ]; do
@@ -206,8 +230,9 @@ while [ $# -gt 0 ]; do
 		sstat:-o|sstat:--format|sstat:--fields) take "$@"; cmd_o=$val ;;
 		sstat:-j|sstat:--jobs)       take "$@" ;;   # a filter: logged above, never applied
 
-		# scontrol as sq asks it: -o, then show node (or nodes)
+		# scontrol as sq asks it: --json or -o, then show node (or nodes)
 		scontrol:-o|scontrol:--oneliner) noheader=1; shift_n=1 ;;
+		scontrol:--json)             [ "$has" = 0 ] || refuse "--json=PARSER is not emulated"; json=1; shift_n=1 ;;
 		scontrol:show)               [ -z "$show" ] || refuse "show twice"; show=what; shift_n=1 ;;
 		scontrol:node|scontrol:nodes) [ "$show" = what ] || refuse "'$a' without show"; show=node; shift_n=1 ;;
 
@@ -267,9 +292,23 @@ case $tool in
 		mode=sacct; fmt=$cmd_o; file=sstat ;;
 	scontrol)
 		[ "$show" = node ]  || refuse "only 'show node' is emulated"
-		[ $noheader = 1 ]   || refuse "only the one-line form (-o) is emulated"
-		mode=raw; fmt="show node"; file=scontrol-node
-		[ -f "$SQSTUB_FIXTURE/scontrol-node" ] || { file=sinfo; derive=1; } ;;
+		if [ $json = 1 ]; then
+			[ $noheader = 0 ] || refuse "--json and -o together are not emulated"
+			if [ "${SQSTUB_NOJSON:-}" = 1 ]; then   # Slurm 22.05's getopt, then its hint
+				printf '%s\n' "scontrol: unrecognized option '--json'" 'Try "scontrol --help" for more information' >&2
+				exit 1
+			fi
+			case ${SQSTUB_JSONC:-0.17} in 0.13|0.16|0.17) ;; *) refuse "SQSTUB_JSONC is not 0.13, 0.16 or 0.17" ;; esac
+			mode=json; fmt="--json show node"; file=scontrol-node.json
+			if [ -f "$SQSTUB_FIXTURE/scontrol-node.json" ]; then mode=jsonfile
+			elif [ -f "$SQSTUB_FIXTURE/scontrol-node" ]; then file=scontrol-node
+			else file=sinfo; derive=1
+			fi
+		else
+			[ $noheader = 1 ]   || refuse "only the one-line form (-o) or --json is emulated"
+			mode=raw; fmt="show node"; file=scontrol-node
+			[ -f "$SQSTUB_FIXTURE/scontrol-node" ] || { file=sinfo; derive=1; }
+		fi ;;
 	*) refuse "unknown tool" ;;
 esac
 

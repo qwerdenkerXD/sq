@@ -1,6 +1,6 @@
 # Renders a fixture in the format a Slurm client was asked for; driven by
 # tests/lib/stub.sh, which documents the fixture format.  Input comes from the
-# environment: STUB_TOOL, STUB_MODE (pct | long | sacct | raw), STUB_FMT, STUB_DELIM,
+# environment: STUB_TOOL, STUB_MODE (pct | long | sacct | raw | json | jsonfile), STUB_FMT, STUB_DELIM,
 # STUB_TRAIL, STUB_FILE, SQSTUB_LOG, STUB_MIRROR=1 when the queue's own file
 # answers sq's mirror call (stub.sh says how), STUB_DERIVE=1 when the sinfo
 # file answers scontrol (ditto), STUB_CALL (which call of this
@@ -18,7 +18,7 @@ function where() { return cur_file " line " cur_line }
 # the format, as tokens: lit[0] val[1] lit[1] val[2] ... val[nf] lit[nf]
 function parse_format(   i, c, d, m, items, p, name, spec) {
   nf = 0; lit[0] = ""
-  if (mode == "raw") return                   # scontrol -o: each line as written
+  if (mode == "raw" || mode ~ /^json/) return   # scontrol: each line as written, or one JSON document
   if (mode == "pct") {                        # squeue -o / SQUEUE_FORMAT, sinfo -o:
     for (i = 1; i <= length(fmt); i++) {      # %<letter>, then literal text up to
       c = substr(fmt, i, 1)                   # the next %
@@ -185,11 +185,11 @@ function slurm_value(k, v,   len) {
 }
 
 # scontrol -o show node from a sinfo record: each node once, the figures sinfo
-# has, in scontrol's order (stub.sh says why)
+# has, in scontrol's order (stub.sh says why); "" for a record that adds none
 function derive_node(   rec, k, cpus, out) {
   parse_fields(cur_text, rec)
   for (k in DEF) if (!(k in rec)) rec[k] = DEF[k]
-  if (!("nodelist" in rec) || rec["nodelist"] in DERIVED) return
+  if (!("nodelist" in rec) || rec["nodelist"] in DERIVED) return ""
   DERIVED[rec["nodelist"]] = 1
   out = "NodeName=" rec["nodelist"]
   if (split(rec["cpusstate"], cpus, "/") == 4) out = out " CPUAlloc=" cpus[1] " CPUTot=" cpus[4]
@@ -197,10 +197,86 @@ function derive_node(   rec, k, cpus, out) {
   if ("memory" in rec)   out = out " RealMemory=" rec["memory"]
   if ("allocmem" in rec) out = out " AllocMem=" rec["allocmem"]
   if ("freemem" in rec)  out = out " FreeMem=" rec["freemem"]
-  printf "%s\n", out
+  return out
+}
+
+# ---- scontrol --json show node, made from -o lines: json-c's pretty layout ----
+# (SPACED|PRETTY, as Slurm prints it) in the dialect of SQSTUB_JSONC: 0.17
+# indents depth d by 2d spaces and prints an empty container as [] on one
+# line, 0.16 (0.14-0.16) prints it as "[" and "]" lines, 0.13 (and older)
+# indents by 2d+1 and ends with " }".  A string is escaped as json-c does it
+function jind(d) { return sprintf("%*s", 2 * d + (JSONC == "0.13"), "") }
+function jstr(s,   out, i, c) {
+  out = ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (c == "\"" || c == "\\" || c == "/") out = out "\\" c
+    else if (c == "\b") out = out "\\b"
+    else if (c == "\f") out = out "\\f"
+    else if (c == "\n") out = out "\\n"
+    else if (c == "\r") out = out "\\r"
+    else if (c == "\t") out = out "\\t"
+    else if (c in CTRL) out = out sprintf("\\u%04x", CTRL[c])
+    else out = out c
+  }
+  return "\"" out "\""
+}
+# a member at depth d: KEY's value, a number if it is one, else a string
+function jnum(d, key, v) { return jind(d) "\"" key "\": " (v ~ /^[0-9]+$/ ? v : jstr(v)) }
+# a member at depth d whose value is the array of LIST's strings, split on SEP
+function jarr(d, key, list, sep,   n, a, i, out) {
+  n = (list == "") ? 0 : split(list, a, sep)
+  out = jind(d) "\"" key "\": ["
+  if (!n) return out (JSONC == "0.17" ? "]" : "\n" jind(d) "]")
+  for (i = 1; i <= n; i++) out = out "\n" jind(d + 1) jstr(a[i]) (i < n ? "," : "")
+  return out "\n" jind(d) "]"
+}
+# one node of the document from an -o line, as node_read reads that line: up
+# to its first newline and its first " Reason=", " Comment=" or " Extra=",
+# the first key of a name counting
+function json_node(ln,   KV, s, m, M, mn, out, i) {
+  sub(/\n.*/, "", ln)
+  if (ln !~ /^NodeName=/) return
+  if (match(ln, / (Reason|Comment|Extra)=/)) ln = substr(ln, 1, RSTART - 1)
+  s = ln
+  while (match(s, /(^| )([A-Za-z_]+)=([^ ]*)/, m)) { if (!(m[2] in KV)) KV[m[2]] = m[3]; s = substr(s, RSTART + RLENGTH) }
+  if ("Arch" in KV) M[++mn] = jind(3) "\"architecture\": " jstr(KV["Arch"])
+  M[++mn] = jind(3) "\"boot_time\": {\n" jind(4) "\"set\": true,\n" jind(4) "\"infinite\": false,\n" jind(4) "\"number\": 0\n" jind(3) "}"
+  if ("CPUTot" in KV) M[++mn] = jnum(3, "cpus", KV["CPUTot"])
+  if ("CPUEfctv" in KV) M[++mn] = jnum(3, "effective_cpus", KV["CPUEfctv"])
+  M[++mn] = jarr(3, "features", "", ",")
+  M[++mn] = jnum(3, "specialized_memory", ("MemSpecLimit" in KV) ? KV["MemSpecLimit"] : 0)
+  M[++mn] = jind(3) "\"name\": " jstr(KV["NodeName"])
+  M[++mn] = jarr(3, "next_state_after_reboot", "INVALID", ",")
+  M[++mn] = jarr(3, "state", KV["State"], "+")
+  M[++mn] = jarr(3, "partitions", KV["Partitions"], ",")
+  if ("RealMemory" in KV) M[++mn] = jnum(3, "real_memory", KV["RealMemory"])
+  M[++mn] = jind(3) "\"reason\": \"\""
+  if ("AllocMem" in KV) M[++mn] = jnum(3, "alloc_memory", KV["AllocMem"])
+  if ("CPUAlloc" in KV) M[++mn] = jnum(3, "alloc_cpus", KV["CPUAlloc"])
+  M[++mn] = jnum(3, "weight", 1)
+  out = jind(2) "{"
+  for (i = 1; i <= mn; i++) out = out "\n" M[i] (i < mn ? "," : "")
+  JNODE[++JNODES] = out "\n" jind(2) "}"
+}
+# the document of every node so far, once
+function json_doc(   i) {
+  if (mode != "json" || JDONE++) return
+  printf "{\n"
+  if (!JNODES) printf "%s\n", (JSONC == "0.17" ? jind(1) "\"nodes\": []," : jind(1) "\"nodes\": [\n" jind(1) "],")
+  else {
+    printf "%s\"nodes\": [\n", jind(1)
+    for (i = 1; i <= JNODES; i++) printf "%s%s\n", JNODE[i], (i < JNODES ? "," : "")
+    printf "%s],\n", jind(1)
+  }
+  printf "%s\"last_update\": {\n%s\"set\": true,\n%s\"infinite\": false,\n%s\"number\": 0\n%s},\n", jind(1), jind(2), jind(2), jind(2), jind(1)
+  printf "%s\"meta\": {\n%s\"slurm\": {\n%s\"release\": \"23.11.4\"\n%s}\n%s},\n", jind(1), jind(2), jind(3), jind(2), jind(1)
+  printf "%s,\n%s\n%s}\n", jarr(1, "errors", "", ","), jarr(1, "warnings", "", ","), jind(0)
 }
 function render(   rec, i, out, k, src) {
-  if (derive) { derive_node(); return }
+  if (mode == "jsonfile") { printf "%s\n", cur_text; return }
+  if (mode == "json") { json_node(derive ? derive_node() : decode(cur_text)); return }
+  if (derive) { out = derive_node(); if (out != "") printf "%s\n", out; return }
   if (mode == "raw") { printf "%s\n", decode(cur_text); return }
   parse_fields(cur_text, rec)
   out = lit[0]
@@ -252,7 +328,7 @@ function run_file(path, depth,   line, rc, saved_file, saved_line, dir, d, arg, 
   cur_file = path; cur_line = 0; on = 1
   while ((rc = (getline line < path)) > 0) {
     cur_line++
-    if (line ~ /^[ \t]*(#|$)/) continue
+    if (line ~ /^[ \t]*(#|$)/ && mode != "jsonfile") continue
     if (line ~ /^@step[ \t]/) {
       if (depth) refuse(where() ": @step only in the tool's own file, never in an @include")
       step = trim(substr(line, 6)) + 0; on = (step == served); continue
@@ -275,7 +351,7 @@ function run_file(path, depth,   line, rc, saved_file, saved_line, dir, d, arg, 
     else if (d == "@stderr")  printf "%s\n", decode(arg) > "/dev/stderr"
     else if (d == "@exit")    {
       if (trim(arg) !~ /^[0-9]+$/) refuse(where() ": @exit needs a number")
-      fflush(); exit trim(arg) + 0
+      json_doc(); fflush(); exit trim(arg) + 0
     }
     else if (d == "@hang")    {
       arg = trim(arg); if (arg == "") arg = 30
@@ -296,6 +372,9 @@ BEGIN {
   call = ENVIRON["STUB_CALL"] + 0
   parse_format()
   steps_of(ENVIRON["STUB_FILE"])
+  JSONC = ("SQSTUB_JSONC" in ENVIRON) ? ENVIRON["SQSTUB_JSONC"] : "0.17"
+  for (i = 1; i < 32; i++) if (i != 8 && i != 9 && i != 10 && i != 12 && i != 13) CTRL[sprintf("%c", i)] = i
   run_file(ENVIRON["STUB_FILE"], 0)
+  json_doc()
   exit 0
 }
