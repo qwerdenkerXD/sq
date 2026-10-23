@@ -4160,9 +4160,12 @@ END{
   }
 
   # ---- agree on a common right edge -----------------------------------
+  # BAR_MIN counts both bars together, 2 cells each at least: no width draws a
+  # bar of 1 to 3 cells.  With bar 0 both gaps before the percentages go too,
+  # so the node line is nfix - 2 wide
   if (nfix + bar > budget) bar = budget - nfix
   if (bar < BAR_MIN) bar = 0
-  nodew  = nfix + bar - (bar ? 0 : 1)           # the bars gap collapses when bar==0
+  nodew  = nfix + bar - (bar ? 0 : 2)
   target = (tabw > nodew) ? tabw : nodew
   if (rtabw > target) target = rtabw
   if (target > budget) target = budget
@@ -4171,7 +4174,10 @@ END{
     bar = target - nfix                         # nfix + bar.  "+= target - nodew" left
                                                 # out the gap of bars that had collapsed
                                                 # and ran one column past the edge
-    if (bar > BAR_MAX) { npad = bar - BAR_MAX; bar = BAR_MAX }
+    # bars too narrow to draw go, and the line is padded before the state
+    # instead, so the state column still ends on the shared edge
+    if (bar < BAR_MIN) { npad = target - (nfix - 2); bar = 0 }
+    else if (bar > BAR_MAX) { npad = bar - BAR_MAX; bar = BAR_MAX }
   }
   gap[1] = 0                                    # table grows: gaps first, capped, then
   for (i=2; i<=n; i++) gap[i] = 1               # the widest text column soaks up the rest

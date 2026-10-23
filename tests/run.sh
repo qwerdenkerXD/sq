@@ -3062,33 +3062,41 @@ c_bars_edges() {
 # they end the node block on the shared right edge, the queue header's, not
 # short of it: the widest node line, as the state column is left-aligned.
 node_width() { plain | LC_ALL=$utf8 gawk '/ cpu .* mem / { if (length($0) > m) m = length($0) } END { print m+0 }'; }
-bars_edge() {   # bars_edge: "-" without bars, else the widest node line with bars "/" the queue header
+# node_edge: "NODE HEADER BARS DRAWN": the widest node line, the queue header
+# (0 without one), "ok" when every node line draws no bar or two of 2 cells at
+# least (else "small"), and 1 when some node line draws bars (else 0)
+node_edge() {
 	plain | LC_ALL=$utf8 gawk 'hw == "" && /^ *[A-Z][A-Z\/_()]*( +[A-Z][A-Z\/_()]*)* *$/ { hw = length($0) }
-		/ cpu .* mem / && /[█▒▓░·]/ && length($0) > nw { nw = length($0) }
-		END { print nw ? nw "/" hw : "-" }'
+		/ cpu .* mem / { if (length($0) > nw) nw = length($0); s = $0; n = 0
+			while (match(s, /[█▒▓░·]+/)) { n++; if (RLENGTH < 2) bad = 1; s = substr(s, RSTART + RLENGTH) }
+			if (n != 0 && n != 2) bad = 1; if (n) drawn = 1 }
+		END { print nw + 0, hw + 0, bad ? "small" : "ok", drawn + 0 }'
 }
 c_bars_width_sweep() {
-	T_TITLE="at every width 21..140 no node line is wider than the screen (or than with its bars collapsed), and bars end on the queue's right edge"
-	local fx w nmin over short edge drawn
-	for fx in array-running busy24 bars-busy mix30; do
-		sq_run "$fx" SQ_WIDTH=21 -- --full
-		nmin=$(node_width)
-		need "$fx at 21: rc 0, node lines drawn" eval 'rc_is 0 && [ "$nmin" -gt 0 ]'
-		over= short= drawn=0
-		for w in $(seq 21 140); do
-			sq_run "$fx" SQ_WIDTH="$w" -- --full
-			[ "$(node_width)" -le $(( w > nmin ? w : nmin )) ] || over="$over $w"
-			edge=$(bars_edge)
-			[ "$edge" = - ] && continue
-			drawn=$((drawn + 1))
-			[ "${edge%/*}" = "${edge#*/}" ] || short="$short $w($edge)"
+	T_TITLE="FULL and COMPACT at every width 21..140: no node line wider than the screen (or than with its bars collapsed), no bar of 1-3 cells, and the node lines end on the queue header's edge (the screen's where the table is wider), bars or none"
+	local fx mode w nmin over short small drawn bare nw hw bars any
+	for fx in array-running busy24 bars-busy mix30 membar-busy bars-over; do
+		for mode in --full --compact; do
+			sq_run "$fx" SQ_WIDTH=21 -- "$mode"
+			nmin=$(node_width)
+			need "$fx $mode at 21: rc 0, node lines drawn" eval 'rc_is 0 && [ "$nmin" -gt 0 ]'
+			over= short= small= drawn=0 bare=0
+			for w in $(seq 21 140); do
+				sq_run "$fx" SQ_WIDTH="$w" -- "$mode"
+				read -r nw hw bars any <<< "$(node_edge)"
+				[ "$nw" -le $(( w > nmin ? w : nmin )) ] || over="$over $w"
+				[ "$bars" = ok ] || small="$small $w"
+				if [ "$any" = 1 ]; then drawn=$((drawn + 1)); else bare=$((bare + 1)); fi
+				[ "$nw" -le "$w" ] || continue          # past the screen: the bar-less line, checked above
+				[ "$nw" = $(( hw <= w ? hw : w )) ] || short="$short $w($nw/$hw)"
+			done
+			need "$fx $mode: no node line past the screen (past it at W =${over:- none})" test -z "$over"
+			need "$fx $mode: every bar 0 or at least 2 cells (not at W =${small:- none})" test -z "$small"
+			need "$fx $mode: bars drawn at some width, none at some other" eval '[ "$drawn" -gt 0 ] && [ "$bare" -gt 0 ]'
+			need "$fx $mode: node lines end on the queue header's edge, or the screen's (not at W =${short:- none})" test -z "$short"
 		done
-		need "$fx: no node line past the screen (past it at W =${over:- none})" test -z "$over"
-		need "$fx: bars drawn at some width" test "$drawn" -gt 0
-		need "$fx: bars end on the queue header's edge (node/header not equal at W =${short:- none})" test -z "$short"
 	done
 }
-
 # ---- the memory bar: allocated where Slurm schedules memory (MEMBAR v1/v2) ----
 # fixtures/membar-{idle,busy,crcore,down} are bioserver after Stage B
 # (RealMemory 1031000/80000, MemSpecLimit 31000/3200 in their scontrol-node):
