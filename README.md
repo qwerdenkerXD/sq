@@ -53,13 +53,13 @@ watch -tc -n 1 'sq -C'
   bar and figure count allocated memory the same way, `█` allocated and `░` free, against what
   jobs can be given: RealMemory less the node's MemSpecLimit, `265/977G`, which one more call,
   `scontrol --json show node` (`scontrol -o show node` on a Slurm without JSON), reads. Should
-  that call fail, RealMemory counts and a dim line under the nodes says why. Where Slurm does not schedule memory (`CR_CORE`: no node has any memory
-  allocated, but some node has CPUs), the memory bar shows memory in use instead, from the node's
-  own free-memory reading, which is exactly when you most need to watch it: all of it draws as
-  `▓`, in use beyond the (absent) allocation. With nothing allocated anywhere, the bar is the
-  allocated one, `0/977G`. The one-line node summary of a small screen adds up the allocated
-  memory too, `335/1052G mem`. Bars turn yellow past 85%, memory in use red past 95%, and a down
-  node's filled cells are red.
+  that call fail, RealMemory counts and a dim line under the nodes says why. Where Slurm does not
+  schedule memory (`CR_CORE`: no node has any memory allocated, but some node has CPUs), the
+  memory bar shows memory in use instead, from the node's own free-memory reading, which is
+  exactly when you most need to watch it: all of it draws as `▓`, in use beyond the (absent)
+  allocation. With nothing allocated anywhere, the bar is the allocated one, `0/977G`. The
+  one-line node summary of a small screen adds up the allocated memory too, `335/1052G mem`. Bars
+  turn yellow past 85%, memory in use red past 95%, and a down node's filled cells are red.
   Two caveats. CPU in use is the node's 5-minute load average (`CPULoad`), refreshed only with
   slurmctld's node pings, so it trails the node by minutes, and it counts processes outside Slurm
   too. Memory in use (`CR_CORE` only) is RealMemory − FreeMem, and FreeMem follows the kernel's
