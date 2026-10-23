@@ -1,0 +1,4 @@
+# a node named in Latin-1, a drain reason with a Latin-1 byte and a U+202E
+CPUsState=0/32/0/32; NodeList=node01; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0
+CPUsState=1/31/0/32; NodeList=n\xe9ode02; FreeMem=121000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=1.00; AllocMem=0
+CPUsState=0/0/32/32; NodeList=node03; FreeMem=121000; Memory=128000; StateLong=drained; Reason=disk \xe9chec \xe2\x80\xaeok; TimeStamp=2026-10-01T12:00:00; CPUsLoad=0.00; AllocMem=0

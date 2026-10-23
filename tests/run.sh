@@ -476,7 +476,9 @@ c_drain_reason() {
 # ---- 4b. a node in more than one partition ------------------------------------
 # sinfo -N prints one record per node and partition, all alike: sq lists each
 # node once, where its first record came, and a dropped record is no unreadable
-# one.  A node is its raw name, so names only the scrub makes alike stay apart.
+# one.  A node is its name as the pass (scrub -s) leaves it, controls and all,
+# so names only the control rule makes alike stay apart; names alike once
+# decoded are one (nodes_not_utf8).
 # Most fixtures repeat a record of _common/sinfo-two-idle (which `empty` shows),
 # of drained/sinfo or of node-one byte for byte; nodes-cntrl, nodes-dup-unreadable
 # and nodes-dup-differ say in their sinfo what they hold.
@@ -1316,6 +1318,146 @@ c_scrub_stream() {
 		eval 'rc_is 0 && err_empty && utf8_valid && rows queue | grep -qE "^ +3001 +a\?␚\?b +alice "'
 }
 
+# Slurm's own tables take the same rule as outside text (scrub -s on each
+# answer): bytes that are no UTF-8 used to cut a name, made gawk warn on sq's
+# stderr and reached the terminal raw, and a U+202E in a job name turned the
+# rest of its row around.  Now each broken piece reads ␚ and the bidi controls
+# go, in the queue, the nodes, a drain reason and the finished block, under a
+# UTF-8 caller and under LC_ALL=C (whose gawk runs in C.UTF-8).
+bidi_inert() {   # bidi_inert [FILE]: none of the 12 bidi controls in FILE, else stdout
+	! LC_ALL=C grep -qE $'\330\234|\342\200[\216\217\252-\256]|\342\201[\246-\251]' "${1:-$OUT}"
+}
+c_tables_not_utf8() {
+	T_TITLE="Latin-1 bytes and U+202E in a job name, a user, a node name, a drain reason and a finished job's name: M␚ller-run, b␚a, n␚ode02, the bidi controls gone, a ZWJ emoji kept, valid UTF-8, no gawk warning, columns aligned; under UTF-8 and LC_ALL=C"
+	local l
+	for l in "$utf8" C; do
+		sq_run not-utf8 LC_ALL=$l -- --full
+		need "$l: rc 0, stderr empty (no gawk warning), valid UTF-8, no bidi control" \
+			eval 'rc_is 0 && err_empty && utf8_valid && bidi_inert && calls_are 1 1 0 1 && no_skips'
+		need "$l: the queue rows: M␚ller-run, b␚a, ab-run of cd, the ZWJ emoji whole, n␚ode02" eval '
+			rows queue | grep -qE "^ +3001 +M␚ller-run +alice " && rows queue | grep -qE "^ +3002 +ok-run +b␚a " &&
+			rows queue | grep -qE "^ +3003 +ab-run +cd " && rows queue | grep -qE "^ +3004 +👩‍💻-run +alice " &&
+			rows queue | grep -qE "^ +3005 +on-node .* n␚ode02$"'
+		need "$l: USER, STATE and NODE/REASON line up" eval 'column_aligned USER && column_aligned STATE && column_aligned NODE/REASON'
+		need "$l: the node n␚ode02, node03's reason 'disk ␚chec ok'" eval '
+			matches "^ +n␚ode02 .* 1/32 +cpu .* mixed$" && plain | grep -A1 -E "^ +node03 " | tail -1 | grep -qE "^ +↳ disk ␚chec ok · since 2026-10-01$"'
+		need "$l: the finished rows f␚nf and rlo" eval 'rows recent | grep -qE "^ +2001 +f␚nf +COMPLETED " && rows recent | grep -qE "^ +2002 +rlo +COMPLETED "'
+	done
+}
+# The pass costs a gawk only where an answer has a byte above 127: grep says
+# so first (rc 1: none), so an ASCII screen starts no scrub (counted by a gawk
+# first on PATH that logs each call with -v stream=1).  A cut stream is still
+# cut once a broken byte is decoded: its record is never made whole.  Its work
+# is linear (CPU time, as the suite may run under load).
+gawk_wrapper() {   # gawk_wrapper DIR LOG: DIR/gawk, the real one, logging "call LC_ALL" for each call, "stream" for a scrub -s
+	local real; real=$(command -v gawk)
+	mkdir -p "$1"
+	printf '#!/bin/sh\nfor a; do [ "$a" != stream=1 ] || echo stream >> %q; done\necho "call ${LC_ALL-}" >> %q\nexec %q "$@"\n' "$2" "$2" "$real" > "$1/gawk"
+	chmod +x "$1/gawk"
+}
+cpu_secs() {   # cpu_secs CMD...: the CPU seconds (user + sys) CMD took, children included
+	local TIMEFORMAT='%3U %3S' t
+	t=$( { time "$@" > /dev/null 2>&1; } 2>&1 )
+	gawk -v t="$t" 'BEGIN { split(t, a, " "); printf "%.3f", a[1] + a[2] }'
+}
+c_tables_pass_cost() {
+	T_TITLE="the pass: no scrub where an answer is ASCII (grep alone), one where it is not; a cut queue with a broken byte still 'queue output incomplete'; 27 MB of 100k rows with a broken byte each and a 1 MB line of \\xfc each within 1 s CPU"
+	local gbin=$T_DIR/gbin glog=$T_DIR/gawk.log d=$T_DIR/fx-cut big=$T_DIR/big t
+	gawk_wrapper "$gbin" "$glog"
+	: > "$glog"; sq_run mixed PATH="$gbin:$here/bin:$PATH" --
+	need "an ASCII screen: rc 0, gawk ran, no scrub -s" eval 'rc_is 0 && err_empty && grep -q call "$glog" && ! grep -q stream "$glog"'
+	: > "$glog"; sq_run not-utf8 PATH="$gbin:$here/bin:$PATH" --
+	need "not-utf8: rc 0, a scrub -s for each answer with a high byte (sinfo, squeue, sacct; nodes JSON is made from sinfo)" \
+		eval 'rc_is 0 && err_empty && [ "$(grep -c stream "$glog")" -ge 3 ]'
+	mkdir -p "$d"
+	printf '@include %s\n' "$fixtures/busy24/sacct" > "$d/sacct"; printf '@include %s\n' "$fixtures/busy24/sinfo" > "$d/sinfo"
+	printf '@include %s\n@raw 4999\\x00M\\xfcller\n' "$fixtures/busy24/squeue" > "$d/squeue"
+	sq_run "$d" --
+	need "a queue cut in a record holding a Latin-1 byte: 'queue output incomplete', footer ? jobs" \
+		eval 'rc_is 0 && err_empty && has "⚠ queue output incomplete" && footer_unknown'
+	eval "$(sed -n '/^# ---- the scrub/,/^# ---- scrub end/p' "$sq")"
+	LC_ALL=C gawk 'BEGIN { for (i = 0; i < 100000; i++) printf "%06d|M\374ller-run|%0255d|%0010d\n", i, 0, i }' > "$big"
+	t=$(cpu_secs scrub -s < "$big")
+	need "27 MB, 100k rows, a broken byte each: within 1 s CPU ($t s), a ␚ each" eval '
+		[ "$(wc -c < "$big")" -gt 27000000 ] && gawk -v t="$t" "BEGIN { exit !(t < 1) }" && [ "$(scrub -s < "$big" | LC_ALL=C grep -c "|M␚ller-run|")" = 100000 ]'
+	LC_ALL=C gawk 'BEGIN { for (i = 0; i < 1048576; i++) printf "\374"; printf "\n" }' > "$big"
+	t=$(cpu_secs scrub -s < "$big")
+	need "a 1 MB line of \\xfc: within 1 s CPU ($t s), a ␚ each" eval '
+		gawk -v t="$t" "BEGIN { exit !(t < 1) }" && [ "$(scrub -s < "$big" | wc -c)" = $((1048576 * 3 + 1)) ]'
+	rm -f "$big"
+}
+# C1 (U+0080-U+009F, \302\233 is CSI) is a whole character, which the pass
+# keeps; the tables' control rule makes it "?" as it does C0, now in every
+# locale: under a gawk in C (a host with no UTF-8 locale, made here by a
+# locale tool that knows none) [[:cntrl:]] missed it, and a CSI in a job name
+# reached the terminal raw.  As the rule acts after the names are compared,
+# node\302\201 and node? stay two nodes.
+c1_off() {   # c1_off [FILE]: no C1 character in FILE, else stdout
+	! LC_ALL=C grep -q $'\302[\200-\237]' "${1:-$OUT}"
+}
+c_tables_c1() {
+	T_TITLE="C1 in a job name, a drain reason and a node name reads ? under UTF-8 and under a gawk in C; node\\302\\201 and node? stay two nodes"
+	local d=$T_DIR/fx-c1 gbin=$T_DIR/gbin nobin=$T_DIR/nobin glog=$T_DIR/gawk.log loc
+	mkdir -p "$d" "$nobin"
+	gawk_wrapper "$gbin" "$glog"
+	# a locale tool that knows no UTF-8 locale: gawk then runs in the caller's C
+	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
+	printf '@include %s\ni=3001; j=a\\xc2\\x9b2Jb\n' "$fixtures/_common/squeue-defaults" > "$d/squeue"
+	{ printf '@include %s\n' "$fixtures/_common/sinfo-two-idle"
+	  printf 'CPUsState=0/0/32/32; NodeList=node03; FreeMem=121000; Memory=128000; StateLong=drained; Reason=x\\xc2\\x9b2Jy; TimeStamp=2026-10-01T12:00:00; CPUsLoad=0.00; AllocMem=0\n'
+	  printf 'CPUsState=0/32/0/32; NodeList=node\\xc2\\x81; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0\n'
+	  printf 'CPUsState=0/32/0/32; NodeList=node?; FreeMem=120000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0\n'; } > "$d/sinfo"
+	for loc in utf8 C; do
+		: > "$glog"
+		if [ $loc = utf8 ]; then sq_run "$d" PATH="$gbin:$here/bin:$PATH" -- --full
+		else sq_run "$d" LC_ALL=C PATH="$gbin:$nobin:$here/bin:$PATH" -- --full; fi
+		need "$loc: rc 0, stderr empty, no C1 on the screen" eval 'rc_is 0 && err_empty && c1_off'
+		need "$loc: the job name a?2Jb, the reason x?2Jy" eval '
+			rows queue | grep -qE "^ +3001 +a\?2Jb +alice " && plain | grep -A1 -E "^ +node03 " | tail -1 | grep -qE "^ +↳ x\?2Jy · since 2026-10-01$"'
+		need "$loc: node\\302\\201 and node? two nodes" eval '[ "$(plain | grep -cE "^ +node\? ")" = 2 ]'
+	done
+	need "C: every gawk ran in C, none in a UTF-8 locale" eval 'grep -qx "call C" "$glog" && ! grep -qi "utf" "$glog"'
+}
+
+# U+202E (RLO) turns around what a terminal shows after it, up to the end of
+# the line: no text sq draws or says may carry one, nor any other bidi
+# control.  Each site that echoes outside text: a usage error, the filter on
+# the caption, squeue's stderr on the banner, and the five refusals that
+# echoed the word as typed (-o.../--format=, -s..., -i..., a word after
+# letters run together, a field letter squeue does not have), which also
+# passed a terminal escape raw.
+c_bidi_sites() {
+	T_TITLE="U+202E goes from every echo: -u's usage error, the caption's filter, squeue's stderr on the banner; the five refusals that echoed the word raw (-o…, --format=…, -s…, -i…, the word after -ab…, a field letter) are scrubbed, an ESC too"
+	local rlo=$'\342\200\256' w
+	sq_run wide -- -u "-a${rlo}b"
+	need "-u -a+RLO+b: refused, the value echoed as '-ab'" eval 'rc_is 2 && grep -qF "not '"'"'-ab'"'"'" "$ERR" && bidi_inert "$ERR"'
+	sq_run wide -- -u "a${rlo}b"
+	need "-u a+RLO+b: rc 0, the caption says user=ab" eval 'rc_is 0 && err_empty && has "recently finished · last 2h · user=ab" && bidi_inert'
+	sq_run "$(stderr_fixture squeue 'no a\xe2\x80\xaeb here')" --
+	need "squeue's stderr with RLO: rc 0, the banner reads 'no ab here'" \
+		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: no ab here$" && bidi_inert'
+	for w in "-o${rlo}x" "--format=${rlo}x" "--Format=${rlo}x" "-O${rlo}x"; do
+		sq_run wide -- "$w"
+		need "$w: refused, echoed without the RLO" eval 'rc_is 2 && bidi_inert "$ERR" &&
+			grep -qxF "sq: ${w//$rlo/} would override sq'"'"'s own output format; write the column list as '"'"'sq -o i,j,u'"'"'" "$ERR"'
+	done
+	sq_run wide -- "-o$ESC[2J"
+	need "-o+ESC[2J: refused, the ESC gone" eval 'rc_is 2 && [ "$(LC_ALL=C tr -cd "\033" < "$ERR" | wc -c)" = 0 ] && grep -qF "sq: -o[2J would override" "$ERR"'
+	sq_run wide -- "-s${rlo}"
+	need "-s+RLO: refused as -s" eval 'rc_is 2 && bidi_inert "$ERR" && grep -qxF "sq: -s lists job steps, which sq cannot frame safely; sq shows jobs" "$ERR"'
+	sq_run wide -- "-i${rlo}5"
+	need "-i+RLO+5: refused as -i5" eval 'rc_is 2 && bidi_inert "$ERR" && grep -qxF "sq: -i5 repeats squeue'"'"'s own output; sq refreshes with '"'"'watch -tc -n 5 sq'"'"'" "$ERR"'
+	sq_run wide -- "-ab${rlo}" x
+	need "-ab+RLO x: refused, the letters and the example without the RLO" eval 'rc_is 2 && bidi_inert "$ERR" &&
+		grep -qxF "sq: cannot tell what '"'"'x'"'"' belongs to after '"'"'-ab'"'"'; write the options apart, e.g. -a -b - x" "$ERR"'
+	sq_run wide -- -o "i,s${rlo}"
+	need "-o i,s+RLO: %s refused, the list echoed as 'i,s'" eval 'rc_is 2 && bidi_inert "$ERR" &&
+		grep -qxF "sq: %s is not a squeue field letter (in -o '"'"'i,s'"'"')" "$ERR"'
+	sq_run wide SQ_FMT="i,s${rlo}" --
+	need "SQ_FMT=i,s+RLO: refused the same, naming SQ_FMT" eval 'rc_is 2 && bidi_inert "$ERR" &&
+		grep -qxF "sq: %s is not a squeue field letter (in SQ_FMT '"'"'i,s'"'"')" "$ERR"'
+}
 # What only the bell reads takes the same road: a user name and a cache path
 # that -v would have unescaped reach gawk as given.  The bell rings only with a
 # terminal, so these run on a pty with the bell left on.
@@ -1345,6 +1487,22 @@ c_bell_text() {
 	need "bob: rc 0, silent, the job is alice's" eval 'rc_is 0 && [ "$(bels)" -eq 0 ]'
 	bell_run "$fx" SQ_BELL_USER=bob SQ_BELL_ALL=1
 	need "bob with SQ_BELL_ALL=1: rc 0, one bell" eval 'rc_is 0 && [ "$(bels)" -eq 1 ]'
+}
+# The bell's user (SQ_BELL_USER, else id -un) takes the rule Slurm's user
+# names take (scrub -s, then the control rule), so a login that is no UTF-8 or
+# holds a bidi control still matches the User sacct prints for it.
+c_bell_not_utf8() {
+	T_TITLE="the bell rings for a failure of user b\\xe9a, and of a+U+202E+b, with SQ_BELL_USER set to the same bytes; not for another"
+	local fx u
+	for u in 'b\xe9a' 'a\xe2\x80\xaeb'; do
+		fx=$T_DIR/fx-bell-$RANDOM; cp -r "$(bell_fixture)" "$fx"
+		printf '@include %s\nJobID=7001; User=%s; JobName=crash; State=FAILED; ExitCode=1:0; End=\\{now-1m30s}\n' \
+			"$fixtures/_common/sacct-defaults" "$u" > "$fx/sacct"
+		bell_run "$fx" SQ_BELL_USER="$(printf "$u")"
+		need "$u's fresh failure, SQ_BELL_USER the same bytes: rc 0, one bell" eval 'rc_is 0 && [ "$(bels)" -eq 1 ]'
+		bell_run "$fx" SQ_BELL_USER=alice
+		need "$u's failure, SQ_BELL_USER=alice: rc 0, silent" eval 'rc_is 0 && [ "$(bels)" -eq 0 ]'
+	done
 }
 # The bell's state directory is the one JOBMEM's snapshot uses: XDG_CACHE_HOME
 # only when absolute, else HOME's .cache only when HOME is absolute, else none,
@@ -1883,8 +2041,8 @@ c_locale_pinned() {
 # watch shows stderr on the screen.  "LC_ALL=x cmd" in sq's shell made bash
 # warn again each time it put the caller's value back.
 c_locale_missing() {
-	T_TITLE="LC_ALL naming no installed locale: the UTF-8 screen, and on stderr only bash's own warning as it starts"
-	local bad=sq_TEST.UTF-8 want noop=$T_DIR/noop
+	T_TITLE="LC_ALL naming no installed locale: the UTF-8 screen, and on stderr only bash's own warning as it starts; sq log and sq job on a job Slurm forgot, and sq job on one whose parent it forgot, add only their own note"
+	local bad=sq_TEST.UTF-8 want noop=$T_DIR/noop d=$T_DIR/fx-forgot purged
 	sq_run busy24 SQ_WIDTH=100 SQ_HEIGHT=24 --
 	want=$RUN/screen.utf8; without_clock "$OUT" > "$want"
 	printf '#!/usr/bin/env bash\n:\n' > "$noop"; chmod +x "$noop"
@@ -1893,6 +2051,21 @@ c_locale_missing() {
 	need "rc 0, the UTF-8 screen"     eval 'rc_is 0 && cmp -s "$want" <(without_clock "$OUT")'
 	# every line, not the whole: a wrapper given as SQ_UNDER_TEST starts a bash too
 	need "stderr: only the line bash prints starting any script" eval '! grep -qvxFf "$T_DIR/startup" "$ERR"'
+	# the three answers sq reads for "Invalid job id specified" (by env LC_ALL=C grep)
+	mkdir -p "$d"
+	printf '@stderr slurm_load_jobs error: Invalid job id specified\n@exit 1\n' > "$d/squeue-all"
+	printf '@include %s\n' "$fixtures/_common/sacct-defaults" > "$d/sacct"
+	sq_run "$d" LC_ALL=$bad -- log 500
+	purged="sq log: Slurm does not know job 500 (it ended more than about 5 minutes ago, or never existed), so its output path is unknown"
+	need "sq log on a job Slurm forgot: rc 1, stderr bash's line and the note alone" eval '
+		rc_is 1 && [ "$(grep -vxFf "$T_DIR/startup" "$ERR")" = "$purged" ]'
+	sq_run "$d" LC_ALL=$bad -- job 500
+	need "sq job on a job Slurm forgot: rc 1, stderr bash's line and the note alone" eval '
+		rc_is 1 && [ "$(grep -vxFf "$T_DIR/startup" "$ERR")" = "sq job: Slurm does not know job 500 (neither the queue nor accounting has it)" ]'
+	d=$(dep_fx forgot 'afterok:900(unfulfilled)' '@stderr slurm_load_jobs error: Invalid job id specified' '@exit 1')
+	why_run "$d" LC_ALL=$bad -- --no-color job 800
+	need "sq job on a job whose parent Slurm forgot: rc 0, the parent unknown to Slurm, stderr bash's line alone" eval '
+		rc_is 0 && why_has "    900  Slurm no longer knows it" && ! grep -qvxFf "$T_DIR/startup" "$ERR"'
 }
 # A multibyte locale is not a UTF-8 one: under ja_JP.eucJP gawk counts "…" as
 # one character, as UTF-8 does, but "█" as two, and warns of invalid data on
@@ -3447,6 +3620,52 @@ json_unusable() {
 	need "... -o failing too: nothing from the part read, its reason" eval '
 		rc_is 0 && err_empty && membar_real && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (scontrol: error: down)" ]'
 }
+# Node names pass the same rule in sinfo's answer and in scontrol's, so they
+# join as they read: a name in Latin-1 lost its MemSpecLimit under -o, where
+# gawk cut it on one side only.  Names that differ only in a broken byte or a
+# bidi control are one name once decoded (Franz, 2026-10-24, "Accept the
+# merge"): the node block shows the first of the two; scontrol then lists the
+# name twice, so its memory bar counts RealMemory; array tasks named so fold.
+# names_fx NAME A B: membar-busy, its nodes fb2-bioinf and fb2-bioinf-0 renamed
+# A and B (fixture escapes) in sinfo and scontrol-node; prints its directory
+names_fx() {
+	local d=$T_DIR/fx-$1 f
+	mkdir -p "$d"
+	for f in sacct squeue; do printf '@include %s\n' "$fixtures/membar-busy/$f" > "$d/$f"; done
+	for f in sinfo scontrol-node; do
+		sed -e 's/fb2-bioinf-0/@B@/g' -e 's/fb2-bioinf/@A@/g' -e "s/@A@/$2/g" -e "s/@B@/$3/g" "$fixtures/membar-busy/$f" > "$d/$f"
+	done
+	printf '%s' "$d"
+}
+c_nodes_not_utf8() {
+	T_TITLE="node names in Latin-1 join sinfo and scontrol (--json and -o): MemSpecLimit counts; names alike once decoded (n\\xe9x, n\\xe8x; fb2-bioinf and fb2-bioinf+U+202E) are one: one row, the first node's figures, RealMemory; array tasks named so fold"
+	local d how fx name a b shown
+	d=$(names_fx join 'fb2-bio\\xe9nf' fb2-bioinf-0)
+	for how in json -o; do
+		if [ $how = json ]; then sq_run "$d" SQSTUB_HOST=FranzGB -- --full --no-color; else sq_run "$d" SQSTUB_HOST=FranzGB SQSTUB_NOJSON=1 -- --full --no-color; fi
+		need "fb2-bio␚nf, $how: rc 0, stderr empty, both nodes at RealMemory less MemSpecLimit" eval '
+			rc_is 0 && err_empty && mem_part_is "fb2-bio␚nf" "████░░░░░░░░░░░░ 27% 265/977G mem mixed" &&
+			mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated"'
+	done
+	for fx in 'twobad:n\\xe9x:n\\xe8x:n␚x' 'rlo:fb2-bioinf:fb2-bioinf\\xe2\\x80\\xae:fb2-bioinf'; do
+		IFS=: read -r name a b shown <<< "$fx"
+		d=$(names_fx "$name" "$a" "$b")
+		for how in json -o; do
+			if [ $how = json ]; then sq_run "$d" SQSTUB_HOST=FranzGB -- --full --no-color; else sq_run "$d" SQSTUB_HOST=FranzGB SQSTUB_NOJSON=1 -- --full --no-color; fi
+			need "$name, $how: rc 0, stderr empty, one row $shown, the first node's CPUs, its memory at RealMemory" eval '
+				rc_is 0 && err_empty && [ "$(plain | grep -cE "^ +$shown ")" = 1 ] && ! matches "^ +$shown .* 24/24 +cpu" &&
+				matches "^ +$shown .* 58/128 +cpu" && mem_part_is "$shown" "████░░░░░░░░░░░░ 26% 265/1007G mem mixed"'
+		done
+	done
+	d=$T_DIR/fx-fold; mkdir -p "$d"
+	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
+	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
+	printf '@include %s\ni=5200_0; j=r\\xe9n\ni=5200_1; j=r\\xe8n\ni=5300_0; j=x\\xe2\\x80\\xaey\ni=5300_1; j=xy\n' "$fixtures/_common/squeue-defaults" > "$d/squeue"
+	sq_run "$d" --
+	need "tasks named r\\xe9n and r\\xe8n fold into one row r␚n, x+U+202E+y and xy into one xy" eval '
+		rc_is 0 && err_empty && rows queue | grep -qE "^ +5200_\[0-1\] ×2 +r␚n " && rows queue | grep -qE "^ +5300_\[0-1\] ×2 +xy " && [ "$(nrows queue)" = 2 ]'
+}
+
 c_membar_fallback() {
 	T_TITLE="scontrol --json unusable (no --json, exit 0 but unreadable: empty, garbage, compact, cut, two documents, a BOM, trailing text, errors, no errors, a name not decodable; in an otherwise whole document an errors element, a closer of the wrong kind, a nodes element no object, a raw quote in a name): -o once more, read by node_read, nothing kept from the part read; a timeout asks no more; the -o call gets what is left of the bound; the last call's reason, FULL and COMPACT"
 	local d p why='slurm_load_node error: Unable to contact slurm controller (connect failure)' start v i
@@ -4634,6 +4853,41 @@ c_log_paths() {   # L3: the path the job's slurmstepd computes
 	path_is relbackslash "STDOUT=r\\\\_%j.out; STDERR=r\\\\_%j.out" /data/wdr_%j.out
 	path_is spaces "WorkDir=/data/my wd; STDOUT=/data/my wd/a b %j.out; STDERR=/data/my wd/a b %j.out" "/data/my wd/a b 11875.out"
 }
+# sq log opens the file by the path the job wrote it under, from its record as
+# Slurm sent it (sq log's facts take no pass), and passes its bytes on as they
+# are (Franz, 2026-10-24: "Leave the file as is"); its notes are outside text,
+# so the path they show reads ␚ for a broken byte and loses a bidi control.
+c_log_not_utf8() {
+	T_TITLE="sq log: o_M\\xfcller.log and o_a+RLO+b.log opened and passed on byte for byte; the notes show o_M␚ller.log and o_ab.log: waiting for it to appear, never written"
+	local nm shown fx late body='l\xfcne \xe2\x80\xae1\n'
+	for nm in 'M\xfcller:M␚ller' 'a\xe2\x80\xaeb:ab'; do
+		shown=${nm#*:} nm=${nm%%:*}
+		fx=$(log_fx "now-$RANDOM" <<EOF
+StateCompact=R; Name=$nm; STDOUT=\\{run}/wd/o_%x.log; STDERR=\\{run}/wd/o_%x.log
+@file create wd/o_$nm.log $body
+EOF
+)
+		sq_run "$fx" -- log --no-follow 500
+		need "$nm: rc 0, no note, the file's bytes as they are" eval 'rc_is 0 && err_empty && cmp -s "$OUT" <(printf "$body")'
+		sq_run "$(log_fx "end-$RANDOM" <<<"StateCompact=CD; Name=$nm; STDOUT=\\{run}/wd/o_%x.log; STDERR=\\{run}/wd/o_%x.log")" -- log 500
+		need "$nm, ended, no file: rc 1, the path decoded" eval 'rc_is 1 && out_empty && err_is "sq log: job 500 ended; $(wd "o_$shown.log") was never written"'
+	done
+	sq_start "$(log_fx late <<'EOF'
+@defaults Name=M\xfcller; STDOUT=\{run}/wd/o_%x.log; STDERR=\{run}/wd/o_%x.log
+@step 1
+StateCompact=R
+@step 3
+StateCompact=R
+@file create wd/o_M\xfcller.log one\n
+@step 4
+StateCompact=CD; exit_code=0:0
+EOF
+)" -- log 500; late=$RUN
+	sq_finish "$late"
+	need "a file that appears late (after 10 s): waiting for o_M␚ller.log, then its content, then the end" eval 'rc_is 0 && out_is "one
+" && err_is "sq log: waiting for $(wd o_M␚ller.log) to appear (job 500 runs on node01.cluster)
+sq log: job 500 ended: COMPLETED (exit code 0:0)"'
+}
 
 c_log_stream() {   # L5, L7: a gone reader, a full disk, signals, SIGKILL
 	T_TITLE="sq log's processes: | head -n 3 and > /dev/full end it, INT/TERM/HUP give 128+N, also during a poll, SIGKILL leaves nothing within a poll"
@@ -5437,6 +5691,65 @@ c_why_tail_file() {   # W3, V1-V3
 	why_run "$d" -- --no-color job 11836
 	need "another user's job: its tail too" eval 'rc_is 0 && tail_lines_are theirs'
 }
+# sq job reads its answers as the dashboard reads its tables (scrub -s), all
+# but the plan, which reads the queue answer as Slurm sent it: the output file
+# it opens is the job's own path, while the path shown is decoded (the files
+# section, the notes).  A partition or node name in Latin-1 joins its nodes
+# under -o as under --json; names alike once decoded are one node, which
+# scontrol then lists twice; the tail's lines are outside text, so broken bytes
+# read ␚ and bidi controls go; the plan's batch host is compared as it reads.
+c_why_not_utf8() {
+	T_TITLE="sq job: a Latin-1 or RLO job name, path and partition: the file opened by the job's own path, shown decoded; the partition verdict and the node table under --json and -o; nodes alike once decoded listed twice; tail lines with ␚ and no RLO; the batch host as it reads"
+	local d p shown how nm want src=$jfx/badconstraints-11955 rlo=$'\342\200\256'
+	for p in 'Loc\xe9lQ:Loc␚lQ' 'Loc\xe2\x80\xaelQ:LoclQ'; do
+		shown=${p#*:} p=${p%%:*}
+		d=$T_DIR/fx-part-$RANDOM; mkdir -p "$d"
+		sed "s/LocalQ/${p//\\/\\\\}/g" "$src/scontrol-node" > "$d/scontrol-node"
+		sed -e "s|^@include ../../_common/|@include $fixtures/_common/|" -e "s/^JobID=11955;/JobID=11955; Partition=${p//\\/\\\\};/" "$src/squeue-all" > "$d/squeue-all"
+		sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$src/sacct" > "$d/sacct"
+		sed "s/LocalQ/$shown/" "$jfx/screens/why__pending-badconstraints.txt" > "$d/want"
+		for how in json -o; do
+			if [ $how = json ]; then why_run "$d" -- --no-color job 11955; else why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11955; fi
+			need "partition $p, $how: rc 0, stderr empty, the pinned screen with $shown" eval 'rc_is 0 && err_empty && job_is "$d/want"'
+		done
+	done
+	for nm in 'n\xe9x:n\xe8x:n␚x' "fb2-bioinf:fb2-bioinf\\xe2\\x80\\xae:fb2-bioinf"; do
+		IFS=: read -r p want shown <<< "$nm"
+		d=$T_DIR/fx-twice-$RANDOM; mkdir -p "$d"
+		sed -e 's/fb2-bioinf-0/@B@/g' -e 's/fb2-bioinf/@A@/g' -e "s/@A@/${p//\\/\\\\}/g" -e "s/@B@/${want//\\/\\\\}/g" "$src/scontrol-node" > "$d/scontrol-node"
+		for f in squeue-all sacct; do sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$src/$f" > "$d/$f"; done
+		for how in json -o; do
+			if [ $how = json ]; then why_run "$d" -- --no-color job 11955; else why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11955; fi
+			need "nodes $p and $want, $how: one row $shown, 'scontrol listed it twice'" eval '
+				rc_is 0 && err_empty && [ "$(why_lines | grep -cE "^    $shown +\\?")" = 1 ] && why_lines | grep -qE "^    $shown +\\? +\\? +unknown: scontrol listed it twice$"'
+		done
+	done
+	for nm in 'M\xfcller:M␚ller' 'a\xe2\x80\xaeb:ab'; do
+		shown=${nm#*:} nm=${nm%%:*}
+		d=$(tail_fx "path-$RANDOM" "Name=$nm" 'STDOUT=\{run}/media/o_%x.log' 'STDERR=\{run}/media/o_%x.log' -- \
+			"create media/o_$nm.log last-words\\n" "touch media/o_$nm.log \\{now-200s}")
+		why_run "$d" -- --no-color job 11836
+		need "job name $nm, its stdout o_$nm.log: opened (its tail shown), the title, the files section and the screen decoded" eval '
+			rc_is 0 && err_empty && utf8_valid && bidi_inert && tail_lines_are last-words &&
+			plain | head -n 1 | grep -qxF "▌ 11836  $shown · fsill" && unrooted | grep -qxF "  stdout    /media/o_$shown.log"'
+		d=$(tail_fx "gone-$RANDOM" "Name=$nm" 'STDOUT=\{run}/media/o_%x.log' 'STDERR=\{run}/media/o_%x.log')
+		why_run "$d" -- --no-color job 11836
+		need "job name $nm, no such file: 'its output is not there', the path decoded" eval '
+			rc_is 0 && err_empty && [ "$(why_notes)" = "its output is not there" ] && unrooted | grep -qxF "  stdout    /media/o_$shown.log"'
+	done
+	d=$(tail_fx lines -- "$(out_file 'a\xe2\x80\xaeb\nM\xfcller \xe2\x81\xa6x\n')" "$(dated 200s)")
+	why_run "$d" -- --no-color job 11836
+	need "tail lines with RLO, a Latin-1 byte and U+2066: 'ab', 'M␚ller x'" eval 'rc_is 0 && err_empty && bidi_inert && tail_lines_are ab "M␚ller x"'
+	d=$(tail_fx host 'BatchHost=fb2-bi\xe9nf.bioinf.local')
+	why_run "$d" -- --no-color job 11836
+	need "a batch host in Latin-1, read elsewhere: the note names it decoded" eval '
+		rc_is 0 && err_empty && [ "$(why_notes)" = "its output is not there; the job wrote it on fb2-bi␚nf" ]'
+	why_run "$d" SQSTUB_HOST="$(printf 'fb2-bi\351nf.bioinf.local')" -- --no-color job 11836
+	need "... read on that host: the same name, no host in the note" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "its output is not there" ]'
+	d=$(tail_fx hostrlo "BatchHost=fb2-bio${rlo}inf.bioinf.local")
+	why_run "$d" -- --no-color job 11836
+	need "a batch host with RLO, read on fb2-bioinf: its decoded name is this host's" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "its output is not there" ]'
+}
 c_why_tail_hung() {   # V2
 	T_TITLE="a reader that does not answer (a hung NFS read, here a tail that sleeps): sq says so after 2 s, kills it, and leaves nothing behind"
 	local d
@@ -5509,7 +5822,7 @@ c_why_forged() {   # V14
 }
 
 c_why_nodes_json() {
-	T_TITLE="sq job's nodes from scontrol --json: names and partitions decoded (\\b \\f \\n \\r \\t as ?, a surrogate pair as its character, a lone surrogate as U+FFFD, \\u0026 as &), a member twice is 'did not say', a name twice 'listed it twice'; -o where --json is unusable, within what the --json call left of its bound however long sacct takes; the reason of the last call, a timeout named by its bound"
+	T_TITLE="sq job's nodes from scontrol --json: names and partitions decoded (\\b \\f \\n \\r \\t as ?, a surrogate pair as its character, a lone surrogate as ␚, \\u0026 as &, U+202E raw or as \\u202e gone, \\u009b as ? also under a gawk in C), a member twice is 'did not say', a name twice 'listed it twice'; -o where --json is unusable, within what the --json call left of its bound however long sacct takes; the reason of the last call, a timeout named by its bound"
 	local d u v start why='scontrol: error: Unable to contact slurm controller (connect failure)' bfx=$jfx/badconstraints-11955
 	u=$(printf '\134u')     # a backslash and u
 	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"fb2\\/x\\\"y\\\\z${u}0007\"")
@@ -5522,8 +5835,21 @@ c_why_nodes_json() {
 		rc_is 0 && err_empty && why_has "    fb2?????x     24              75G  too few CPUs, too little memory"'
 	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"a${u}d83d${u}de00b${u}d800c${u}dfffd\"")
 	why_run "$d" -- --no-color job 11955
-	need "a name with a surrogate pair (U+1F600), a lone high and a lone low surrogate: 😀, then U+FFFD for each lone one" eval '
-		rc_is 0 && err_empty && why_has "    a😀b�c�d       24              75G  too few CPUs, too little memory"'
+	need "a name with a surrogate pair (U+1F600), a lone high and a lone low surrogate: 😀, then ␚ for each lone one" eval '
+		rc_is 0 && err_empty && why_has "    a😀b␚c␚d       24              75G  too few CPUs, too little memory"'
+	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J=$'"fb2\342\200\256x"')
+	why_run "$d" -- --no-color job 11955
+	need "a name with a raw U+202E: gone" eval 'rc_is 0 && err_empty && bidi_inert && why_has "    fb2x          24              75G  too few CPUs, too little memory"'
+	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"fb2${u}202ex${u}2066\"")
+	why_run "$d" -- --no-color job 11955
+	need "a name with the escapes \\u202e and \\u2066: gone" eval 'rc_is 0 && err_empty && bidi_inert && why_has "    fb2x          24              75G  too few CPUs, too little memory"'
+	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"fb2${u}009bx\"")
+	why_run "$d" -- --no-color job 11955
+	need "a name with \\u009b (CSI): a ?" eval 'rc_is 0 && err_empty && c1_off && why_has "    fb2?x         24              75G  too few CPUs, too little memory"'
+	mkdir -p "$T_DIR/nobin"
+	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$T_DIR/nobin/locale"; chmod +x "$T_DIR/nobin/locale"
+	why_run "$d" LC_ALL=C PATH="$T_DIR/nobin:$here/bin:$PATH" -- --no-color job 11955
+	need "... under a gawk in C (no UTF-8 locale known): a ? too, no C1 on the screen" eval 'rc_is 0 && err_empty && c1_off && why_lines | grep -qE "^    fb2\?x +24 "'
 	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"fb2${u}0026x\"")
 	why_run "$d" -- --no-color job 11955
 	need "a name with \\u0026: an &" eval '
@@ -5992,7 +6318,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream silent_failure real_reason_wins bell_text bell_statedir centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
@@ -6018,14 +6344,14 @@ cases=(
 	compact_no_size compact_error_screens
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
-	membar_screens membar_detect membar_call membar_fail membar_over membar_down membar_forged membar_json membar_fallback
+	membar_screens membar_detect membar_call membar_fail membar_over membar_down membar_forged membar_json membar_fallback nodes_not_utf8
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
 	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
-	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_stream
+	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
-	why_screens why_clock_step why_calls why_tail why_tail_file why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
+	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
 	why_resources why_ended why_array why_budget why_parallel why_signals
 )
 start=$(date +%s%N)

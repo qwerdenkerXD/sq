@@ -178,13 +178,19 @@ fi
 # ---- scontrol show node: --json through the stub, and both readers of sq -------
 # The --json answer, as the fixture scontrol-node.json, must come back from the
 # stub byte for byte.  And sq's own readers, cut out of sq (between its "the
-# node readers" and "node readers end" lines), must agree: node_json_read on
-# --json with node_read on -o, asked before and after it (the figures move
-# between two calls, so either may match), the state compared as its base word
-# and the set of its flags (JSON lists the flags in another order).
+# node readers" and "node readers end" lines, after its character classes,
+# which they use), must agree: node_json_read on --json with node_read on -o,
+# asked before and after it (the figures move between two calls, so either may
+# match), the state compared as its base word and the set of its flags (JSON
+# lists the flags in another order).  Each answer reaches them as it reaches
+# sq's: through sq's scrub -s, cut out of sq too (between "the scrub" and
+# "scrub end").
+eval "$(sed -n '/^# ---- the scrub/,/^# ---- scrub end/p' "$here/../sq")"
 nodes_dump() {   # nodes_dump json|text FILE: what sq's reader keeps, a node a line
-	sed -n '/^# ---- the node readers/,/^# ---- node readers end/p' "$here/../sq" > "$work/readers.awk"
-	LC_ALL=C.UTF-8 gawk -v how="$1" -v f="$2" -f "$work/readers.awk" -e '
+	sed -n -e '/^# ---- the character classes/,/^# ---- character classes end/p' \
+		-e '/^# ---- the node readers/,/^# ---- node readers end/p' "$here/../sq" > "$work/readers.awk"
+	scrub -s < "$2" > "$2.scrubbed"
+	LC_ALL=C.UTF-8 gawk -v how="$1" -v f="$2.scrubbed" -f "$work/readers.awk" -e '
 	function flags(st,   n, a, i, j, t) {     # the base word, then the flags sorted
 		n = split(st, a, "+")
 		for (i = 2; i <= n; i++) for (j = i + 1; j <= n; j++) if (a[j] < a[i]) { t = a[i]; a[i] = a[j]; a[j] = t }

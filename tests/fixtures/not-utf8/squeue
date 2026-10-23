@@ -1,0 +1,9 @@
+# Slurm's tables holding bytes that are no UTF-8 (Latin-1, as a submit host
+# in ISO-8859-1 leaves them), bidi controls (U+202E, \xe2\x80\xae) and an
+# emoji joined by a ZWJ, which stays
+@include ../_common/squeue-defaults
+i=3001; j=M\xfcller-run
+i=3002; j=ok-run; u=b\xe9a
+i=3003; j=a\xe2\x80\xaeb-run; u=c\xe2\x80\xaed
+i=3004; j=\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x92\xbb-run
+i=3005; j=on-node; R=n\xe9ode02

@@ -1,0 +1,4 @@
+# finished jobs named in Latin-1 and with a U+202E, one of a Latin-1 user's
+@include ../_common/sacct-defaults
+JobID=2001; JobName=f\xfcnf; End=\{now-30m30s}
+JobID=2002; JobName=r\xe2\x80\xaelo; User=b\xe9a; End=\{now-20m30s}

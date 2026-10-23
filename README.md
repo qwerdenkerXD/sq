@@ -341,9 +341,15 @@ efficiency
 - **Clock times are the server's,** in its time zone, which the title names (`UTC` on many
   clusters). Set `TZ`, e.g. `TZ=Europe/Berlin sq`, to read the title and the start estimates
   in your own. A start estimate names its month in English whatever your locale (`Oct23 14:05`).
-- **A `␚` stands for bytes that are not valid UTF-8,** one per broken piece, in error messages,
-  in filters and `SQ_SINCE` on captions, in usage errors and in the host name in the title.
-  What Slurm's tables print (job names, node names, reasons) never gets one.
+- **A `␚` stands for bytes that are not valid UTF-8,** one per broken piece, wherever sq draws
+  text: in what Slurm's tables print (job, user and node names, reasons, `sq job`'s fields), in
+  error messages, in filters and `SQ_SINCE` on captions, in usage errors and in the host name in
+  the title. Bidi controls (U+202A-202E, U+2066-2069, U+200E/F, U+061C), which would turn around
+  what follows them on a line, are dropped; every other character stays, emoji joiners too. Two
+  names that differ only in such bytes or controls read the same and are one: the node block
+  shows the first of two such nodes, scontrol then lists that name twice, so its memory bar
+  counts all of RealMemory and `sq job` calls it unknown, and array tasks named so fold
+  together. `sq log` passes a job's output file on as it is.
 - **Refused:** `-O`/`--Format`, `-s`/`--steps`, `-i`/`--iterate`, `-l`, `-v`, `-V`, `--json` and
   `--yaml`. Each would replace or defeat the output sq parses; sq exits with code 2 and says
   why. (`-o`/`--format` are sq's own column list.)

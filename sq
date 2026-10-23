@@ -810,13 +810,16 @@ function node_json_add(nm, seen, V,   n) {
 # A JSON string token, decoded into a plain string; JSTR_BAD 1 when it is no
 # string or holds an escape JSON does not have (a backslash before anything
 # but " \\ / b f n r t, or \u without 4 hex digits).  Its control characters
-# become "?", as on the sinfo side; invalid UTF-8 stays as it is.  Only gsub works on
-# it, so a 128 KB run of backslashes costs a few passes, not one per escape
+# become "?" (CNTRL, as on the sinfo side, C1 too) and its bidi controls go,
+# also those an escape spells.  Invalid UTF-8 it holds no more: the answer
+# passed scrub -s first (scrub_answer), which made each broken piece a ␚ (were
+# that pass to fail, it would stay as it is).  Only gsub works on it, so a
+# 128 KB run of backslashes costs a few passes, not one per escape
 function json_str(tok,   s, t) {
   JSTR_BAD = 1
   if (tok !~ /^"/ || tok !~ /"$/ || tok == "\"") return ""
   s = tok; sub(/^"/, "", s); sub(/"$/, "", s)
-  gsub(/[[:cntrl:]]/, "?", s)                 # none in a string of json-c; frees \001 as a mark
+  gsub(CNTRL, "?", s)                         # none in a string of json-c; frees \001 as a mark
   gsub(/\\\\/, "\001", s)                     # each \\ out of the way first
   t = s; gsub(/\\"/, "", t); if (t ~ /"/) return ""      # a quote no backslash escapes
   gsub(/\\"/, "\"", s); gsub(/\\\//, "/", s); gsub(/\\[bfnrt]/, "?", s)
@@ -824,15 +827,16 @@ function json_str(tok,   s, t) {
     t = s; gsub(/\\u[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/, "", t); if (t ~ /\\/) return ""
     s = json_u(s)
   }
-  gsub(/\001/, "\\", s); gsub(/[[:cntrl:]]/, "?", s)
+  gsub(/\001/, "\\", s); gsub(CNTRL, "?", s); gsub(BIDI, "", s)
   JSTR_BAD = 0
   return s
 }
 # its \uXXXX escapes as UTF-8, built byte by byte (%c would print a character
 # of the locale): a surrogate pair as its code point, a lone surrogate as
-# U+FFFD.  json-c writes \u only for a control character, "?" at once; any
-# other escape (never from json-c) is replaced by a gsub of its own, one per
-# distinct escape, the ones there are named by split
+# ␚, U+241A, as a broken piece reads elsewhere.  json-c writes \u only for a
+# control character, "?" at once; any other escape (never from json-c) is
+# replaced by a gsub of its own, one per distinct escape, the ones there are
+# named by split
 function json_u(s,   n, P, E, i, h, cp, did) {
   gsub(/\\u00[01][0-9A-Fa-f]/, "?", s); gsub(/\\u007[Ff]/, "?", s)
   n = split(s, P, /\\u[Dd][89ABab][0-9A-Fa-f][0-9A-Fa-f]\\u[Dd][C-Fc-f][0-9A-Fa-f][0-9A-Fa-f]/, E)
@@ -843,7 +847,7 @@ function json_u(s,   n, P, E, i, h, cp, did) {
     cp = 65536 + (strtonum("0x" h[2]) - 55296) * 1024 + strtonum("0x" h[3]) - 56320
     gsub("\\\\u" h[2] "\\\\u" h[3], json_utf8(cp), s)
   }
-  gsub(/\\u[Dd][89A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/, "\357\277\275", s)
+  gsub(/\\u[Dd][89A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/, "\342\220\232", s)
   n = split(s, P, /\\u[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/, E)
   for (i = 1; i < n; i++) if (!(E[i] in did)) {
     did[E[i]]
@@ -1135,7 +1139,7 @@ log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, the record HOW names in
 	log_verdict= log_why=
 	if [ $rc -ne 0 ]; then
 		# a job Slurm no longer knows is rc 1 and this text (23.11.4, measured)
-		if [ $rc = 1 ] && LC_ALL=C grep -q 'Invalid job id specified' "$tmp/facts.err" 2>/dev/null
+		if [ $rc = 1 ] && env LC_ALL=C grep -q 'Invalid job id specified' "$tmp/facts.err" 2>/dev/null
 		then log_verdict=none
 		else log_verdict=fail; why_of log_why $rc "$tmp/facts" squeue
 		fi
@@ -1710,7 +1714,7 @@ function read_stream(file, nonce, names, ARR, anchor,   saved, n, nn, N, ln, f, 
   saved = RS; RS = nonce "\n"
   while ((getline ln < file) > 0) {
     if (split(ln, f, nonce) != nn || RT == "" || f[1] !~ anchor) { bad = 1; break }
-    n++; for (i = 1; i <= nn; i++) { gsub(/[[:cntrl:]]/, "?", f[i]); ARR[n, N[i]] = f[i] }
+    n++; for (i = 1; i <= nn; i++) { gsub(CNTRL, "?", f[i]); ARR[n, N[i]] = f[i] }
   }
   close(file); RS = saved
   return bad ? -1 : n + 0
@@ -2835,7 +2839,7 @@ job_why_finish() {
 		case $name:$rc in
 			*:0) printf -v "w_${name#w}_stat" ok ;;
 			# a parent Slurm forgot: rc 1 and this text, as for the job itself
-			wparents:1) LC_ALL=C grep -q 'Invalid job id specified' "$tmp/wparents.err" 2>/dev/null &&
+			wparents:1) env LC_ALL=C grep -q 'Invalid job id specified' "$tmp/wparents.err" 2>/dev/null &&
 			              w_parents_stat=none || w_parents_stat=fail ;;
 			*) printf -v "w_${name#w}_stat" fail ;;
 		esac
@@ -2955,7 +2959,7 @@ sub_job() {
 	rc=$?
 	# a job Slurm no longer knows is rc 1 and this text (23.11.4, measured)
 	if [ $rc = 0 ]; then qstat=ok
-	elif [ $rc = 1 ] && LC_ALL=C grep -q 'Invalid job id specified' "$tmp/queue.err" 2>/dev/null; then qstat=none
+	elif [ $rc = 1 ] && env LC_ALL=C grep -q 'Invalid job id specified' "$tmp/queue.err" 2>/dev/null; then qstat=none
 	else qstat=fail; why_of qwhy $rc "$tmp/queue" squeue
 	fi
 	[ "$qstat" = ok ] || scrub_answer queue          # no plan reads it (job_why_start)
@@ -3119,7 +3123,7 @@ stray() {   # stray WORD: a word sq cannot place, refused with the hint that fit
 	shown=$(printf '%s' "$w" | scrub 40)
 	if [ -n "$after_cluster" ]; then   # -ao i: is i -o's value, or -a's?
 		for ((i = 1; i < ${#after_cluster}; i++)); do ex="$ex -${after_cluster:i:1}"; done
-		die "cannot tell what '$shown' belongs to after '$after_cluster'; write the options apart, e.g.$ex $shown"
+		die "cannot tell what '$shown' belongs to after '$(printf '%s' "$after_cluster" | scrub 40)'; write the options apart, e.g.$(printf '%s' "$ex" | scrub) $shown"
 	fi
 	low=${w,,}
 	if is_subcommand "$low"; then hint="sq $low"
@@ -3175,7 +3179,7 @@ while [ $# -gt 0 ]; do
 		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
 		# the nonce-framed format below and collapse every record into one field
 		-O|-O?*|--Format|--Format=*|--format=*|-o?*)
-			die "$1 would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
+			die "$(printf '%s' "$1" | scrub 40) would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
 		-l)         # squeue's own long format replaces the framed one
 			die "-l replaces the output format sq parses; sq -o i,j,u picks columns" ;;
 		-v)         # the parameter dump contains SQUEUE_FORMAT itself, nonce and
@@ -3187,7 +3191,7 @@ while [ $# -gt 0 ]; do
 		              # no step-format env var, so the framing cannot be delivered there.
 		              # The "=" spelling has to be here too: without it --steps=x walked
 		              # past this guard into exactly the mode it exists to refuse
-			die "${1%%=*} lists job steps, which sq cannot frame safely; sq shows jobs" ;;
+			die "$(printf '%s' "${1%%=*}" | scrub 40) lists job steps, which sq cannot frame safely; sq shows jobs" ;;
 		--help=*) die "--help takes no value; write it on its own, e.g. sq --help" ;;
 		# sq's own long flags take no value: "--color=never" is what every other
 		# CLI accepts, and squeue answered it with a fake "slurm unreachable"
@@ -3197,7 +3201,7 @@ while [ $# -gt 0 ]; do
 		# -i reprints the queue every N seconds, so a collector would run until
 		# SQ_TIMEOUT and the screen would read "no response after 5s"
 		-i|-i?*|--iterate|--iterate=*)
-			die "$1 repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" ;;
+			die "$(printf '%s' "$1" | scrub 40) repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" ;;
 		# squeue ignores SQUEUE_FORMAT in these modes and answers with one whole
 		# document instead of rows, so the framing never arrives and the screen
 		# could only say "queue output unreadable".  Both take an OPTIONAL value,
@@ -3360,7 +3364,7 @@ for f in $fl; do                 # start even when the user did not ask for it
 	[ -n "$k" ] || continue
 	case $squeue_letters in
 		*"$k"*) ;;
-		*) die "%$k is not a squeue field letter (in $fsrc '$fields')" ;;
+		*) die "%$k is not a squeue field letter (in $fsrc '$(printf '%s' "$fields" | scrub 40)')" ;;
 	esac
 	qfield "$k"; keys="$keys$k,"
 done
@@ -3413,7 +3417,7 @@ fi
 
 login=                                          # what "--me" means to squeue,
 me=${SQ_BELL_USER:-$(id -un)}                   # resolved only if --me asks
-scrub_var me                                    # compared with Slurm's users, as they read
+scrub_var me                                    # read as Slurm's user names are (the pass)
 bellall=${SQ_BELL_ALL:-0}
 
 # how many finished rows to show.  0 = work it out from what the screen has
@@ -4020,6 +4024,7 @@ function qrow(r,   js, jc, line, i, x, fw, cc) {         # one queue row, colour
 BEGIN{
   split(sqv, sqvar, " ")                                  # each SQV_<name> the shell
   for (i in sqvar) SYMTAB[sqvar[i]] = ENVIRON["SQV_" sqvar[i]]   # exported, by its name
+  gsub(CNTRL, "?", me)                                    # as a user name reads below
   NONCE = ENVIRON["SQ_NONCE"]                             # the shell minted and
   if (NONCE !~ /^[A-Za-z][A-Za-z0-9]{16,}$/) {            # validated it; refuse to
     print "sq: internal field separator missing" > "/dev/stderr"   # guess at a
@@ -4144,8 +4149,8 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     anf = 0; delete ACC                         # -s emits step ids, say): lose that
     next                                        # record, never the rest of the stream
   }
-  if (ARGIND == 1) rawnode = ACC[2]             # the name as sinfo sent it, unscrubbed
-  for (i=1; i<=need; i++) { F[i] = ACC[i]; gsub(/[[:cntrl:]]/, "?", F[i]) }
+  if (ARGIND == 1) rawnode = ACC[2]             # the name as the pass left it, controls and all
+  for (i=1; i<=need; i++) { F[i] = ACC[i]; gsub(CNTRL, "?", F[i]) }
   anf = 0; delete ACC           # scrubbed before any width or colour is read
 
   # ---- sinfo: CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp
