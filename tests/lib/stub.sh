@@ -43,7 +43,8 @@
 #                   RealMemory -> real_memory, AllocMem -> alloc_memory,
 #                   MemSpecLimit -> specialized_memory (0 when absent), State
 #                   split on "+" and Partitions on "," into arrays; a figure
-#                   that is no number becomes a string, a key absent no member.
+#                   that is no number becomes a string, a key absent no member,
+#                   and the rest of the record (the free text) the reason.
 #                   Without scontrol-node, from the lines derived from sinfo as
 #                   for -o.  The file's directives act on it as on -o (the
 #                   document is printed where the file ends or at @exit)
@@ -338,4 +339,4 @@ if [ -n "$sig" ]; then
 	kill -"$sig" $$; refuse "still alive after @signal $sig"
 fi
 STUB_TOOL=$tool STUB_MODE=$mode STUB_FMT=$fmt STUB_DELIM=$delim STUB_TRAIL=$trail \
-STUB_FILE=$path STUB_MIRROR=$mirror STUB_DERIVE=$derive STUB_CALL=$call STUB_RUN=$rundir LC_ALL=C exec gawk -f "$stubdir/render.awk"
+STUB_FILE=$path STUB_MIRROR=$mirror STUB_DERIVE=$derive STUB_CALL=$call STUB_RUN=$rundir LC_ALL=C exec gawk -f "$stubdir/json.awk" -f "$stubdir/render.awk"

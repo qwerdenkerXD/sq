@@ -205,22 +205,8 @@ function derive_node(   rec, k, cpus, out) {
 # indents depth d by 2d spaces and prints an empty container as [] on one
 # line, 0.16 (0.14-0.16) prints it as "[" and "]" lines, 0.13 (and older)
 # indents by 2d+1 and ends with " }".  A string is escaped as json-c does it
+# (jstr, tests/lib/json.awk)
 function jind(d) { return sprintf("%*s", 2 * d + (JSONC == "0.13"), "") }
-function jstr(s,   out, i, c) {
-  out = ""
-  for (i = 1; i <= length(s); i++) {
-    c = substr(s, i, 1)
-    if (c == "\"" || c == "\\" || c == "/") out = out "\\" c
-    else if (c == "\b") out = out "\\b"
-    else if (c == "\f") out = out "\\f"
-    else if (c == "\n") out = out "\\n"
-    else if (c == "\r") out = out "\\r"
-    else if (c == "\t") out = out "\\t"
-    else if (c in CTRL) out = out sprintf("\\u%04x", CTRL[c])
-    else out = out c
-  }
-  return "\"" out "\""
-}
 # a member at depth d: KEY's value, a number if it is one, else a string
 function jnum(d, key, v) { return jind(d) "\"" key "\": " (v ~ /^[0-9]+$/ ? v : jstr(v)) }
 # a member at depth d whose value is the array of LIST's strings, split on SEP
@@ -233,11 +219,13 @@ function jarr(d, key, list, sep,   n, a, i, out) {
 }
 # one node of the document from an -o line, as node_read reads that line: up
 # to its first newline and its first " Reason=", " Comment=" or " Extra=",
-# the first key of a name counting
-function json_node(ln,   KV, s, m, M, mn, out, i) {
-  sub(/\n.*/, "", ln)
+# the first key of a name counting.  The rest, free text with whatever it
+# holds (a newline and a forged line too), is its reason, a string
+function json_node(ln,   KV, s, m, M, mn, out, i, free) {
   if (ln !~ /^NodeName=/) return
-  if (match(ln, / (Reason|Comment|Extra)=/)) ln = substr(ln, 1, RSTART - 1)
+  free = ""
+  if (match(ln, /\n/)) { free = substr(ln, RSTART); ln = substr(ln, 1, RSTART - 1) }
+  if (match(ln, / (Reason|Comment|Extra)=/)) { free = substr(ln, RSTART + 1) free; ln = substr(ln, 1, RSTART - 1) }
   s = ln
   while (match(s, /(^| )([A-Za-z_]+)=([^ ]*)/, m)) { if (!(m[2] in KV)) KV[m[2]] = m[3]; s = substr(s, RSTART + RLENGTH) }
   if ("Arch" in KV) M[++mn] = jind(3) "\"architecture\": " jstr(KV["Arch"])
@@ -251,7 +239,7 @@ function json_node(ln,   KV, s, m, M, mn, out, i) {
   M[++mn] = jarr(3, "state", KV["State"], "+")
   M[++mn] = jarr(3, "partitions", KV["Partitions"], ",")
   if ("RealMemory" in KV) M[++mn] = jnum(3, "real_memory", KV["RealMemory"])
-  M[++mn] = jind(3) "\"reason\": \"\""
+  M[++mn] = jind(3) "\"reason\": " jstr(free)
   if ("AllocMem" in KV) M[++mn] = jnum(3, "alloc_memory", KV["AllocMem"])
   if ("CPUAlloc" in KV) M[++mn] = jnum(3, "alloc_cpus", KV["CPUAlloc"])
   M[++mn] = jnum(3, "weight", 1)
@@ -373,7 +361,6 @@ BEGIN {
   parse_format()
   steps_of(ENVIRON["STUB_FILE"])
   JSONC = ("SQSTUB_JSONC" in ENVIRON) ? ENVIRON["SQSTUB_JSONC"] : "0.17"
-  for (i = 1; i < 32; i++) if (i != 8 && i != 9 && i != 10 && i != 12 && i != 13) CTRL[sprintf("%c", i)] = i
   run_file(ENVIRON["STUB_FILE"], 0)
   json_doc()
   exit 0
