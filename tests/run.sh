@@ -5452,15 +5452,15 @@ c_why_nodes_json() {
 	printf '@hang 1\n@exit 1\n' > "$d/scontrol-node.json"
 	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=2.5 -- --no-color job 11955
 	need "--json failing after 1 s, -o hanging: -o bounded by about 1.5 s, 'no response after 2.5s'" eval '
-		rc_is 0 && [ "$(calls scontrol)" = 2 ] && [ "$(timeout_of scontrol)" = 2.500000 ] && v=$(timeout_of scontrol 2) && [ "${v%%.*}" = 1 ] &&
+		rc_is 0 && [ "$(calls scontrol)" = 2 ] && [ "$(timeout_of scontrol)" = 2.500000 ] && v=$(timeout_of scontrol 2) && gawk -v v="$v" "BEGIN { exit !(v >= 0.5 && v <= 1.5) }" &&
 		why_notes | head -n 1 | grep -qxF "the nodes are unknown: scontrol failed (no response after 2.5s)"'
 	# the -o call's bound is what the --json call left, not what sacct did
 	d=$T_DIR/fx-slowacct; mkdir -p "$d"
 	for v in squeue-all scontrol-node; do printf '@include %s\n' "$bfx/$v" > "$d/$v"; done
 	printf '@hang 4\n@include %s\n' "$bfx/sacct" > "$d/sacct"
 	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQSTUB_NOJSON=1 SQ_TIMEOUT=3 -- --no-color job 11955
-	need "sacct taking 3 s, --json failing at once: -o gets nearly all of 3 s, the table drawn" eval '
-		rc_is 0 && [ "$(calls scontrol)" = 2 ] && v=$(timeout_of scontrol 2) && [ "${v%%.*}" = 2 ] &&
+	need "sacct taking 3 s, --json failing at once: -o gets nearly all of 3 s (2.5 to 3: /proc/uptime counts in 1/100 s), the table drawn" eval '
+		rc_is 0 && [ "$(calls scontrol)" = 2 ] && v=$(timeout_of scontrol 2) && gawk -v v="$v" "BEGIN { exit !(v >= 2.5 && v <= 3) }" &&
 		why_has "    fb2-bioinf     128           976.5G  too few CPUs, too little memory"'
 }
 
