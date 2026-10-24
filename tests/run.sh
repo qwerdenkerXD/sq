@@ -2150,6 +2150,23 @@ c_bell_statedir() {
 	need "nothing written in the working directory" eval '[ -z "$(ls -A "$cwd")" ]'
 	popd > /dev/null || return
 }
+# The bell's probe of its state directory is the temp file itself, made and
+# removed at once: one left behind would be renamed over the bell's memory by
+# a run that never writes that memory, one without a terminal (NOTTY: no
+# controlling terminal, so /dev/tty cannot be opened)
+c_bell_notty() {
+	T_TITLE="the bell on without a terminal: no bell, the bell's memory as it was, no probe file left beside it"
+	local fx home=$T_DIR/home
+	fx=$(bell_fixture)
+	bell_run "$fx" SQ_BELL_USER=alice HOME="$home"
+	need "on a terminal: one bell, remembered" eval 'rc_is 0 && [ "$(bels)" -eq 1 ] && [ -s "$home/.cache/sq/alerted" ]'
+	cp "$home/.cache/sq/alerted" "$T_DIR/alerted.before"
+	BELL=1 NOTTY=1 sq_run "$fx" SQ_BELL_USER=alice HOME="$home" --
+	need "no terminal: rc 0, no bell, the memory unchanged, nothing else in its directory" \
+		eval 'rc_is 0 && [ "$(bels)" -eq 0 ] && cmp -s "$T_DIR/alerted.before" "$home/.cache/sq/alerted" && [ "$(ls -A "$home/.cache/sq")" = alerted ]'
+	BELL=1 NOTTY=1 sq_run "$fx" SQ_BELL_USER=alice --
+	need "no terminal, no memory yet: none written, nothing left" eval 'rc_is 0 && [ -z "$(ls -A "$RUN/home/.cache/sq" 2>/dev/null)" ]'
+}
 # -c centres the screen in the width, -C in the height too, but only on a
 # screen (a terminal, or COLUMNS and LINES set): the screen moves as a whole
 # and nothing in it changes.  At 140 columns "mixed" is 80 wide.
@@ -2645,6 +2662,26 @@ c_locale_pinned() {
 			need "$args, $how, the locale tool failing: rc 0, stderr empty, the UTF-8 screen" \
 				eval 'rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT")'
 		done
+	done
+}
+# Where the locale tool fails (musl has none) gawk's own count alone judges a
+# locale, and a caller's ja_JP.eucJP counts "…" as one character too: only
+# "…█" (3 there, 2 under UTF-8) tells it apart, so sq pins C.UTF-8 and draws
+# the UTF-8 screen.  The locale is built as wide_c_mode builds it
+c_locale_eucjp_notool() {
+	T_TITLE="LC_ALL=ja_JP.eucJP with the locale tool failing: the UTF-8 screen byte for byte, stderr empty"
+	local loc=$T_DIR/loc nolocale=$T_DIR/nolocale want args fx
+	mkdir -p "$loc" "$nolocale"
+	printf '#!/bin/sh\necho "locale: not found" >&2\nexit 127\n' > "$nolocale/locale"; chmod +x "$nolocale/locale"
+	localedef -i ja_JP -f EUC-JP "$loc/ja_JP.eucJP" > /dev/null 2>&1
+	if ! [ "$(LOCPATH=$loc LC_ALL=ja_JP.eucJP locale charmap 2>/dev/null)" = EUC-JP ]; then
+		T_FAIL+=("localedef could not build ja_JP.eucJP (needs glibc's locale sources)"); sq_run mixed --; return
+	fi
+	for args in "shrink-pending SLURM_BITSTR_LEN=0 SQ_WIDTH=79" "bars-busy SQ_WIDTH=60"; do
+		set -- $args; fx=$1; shift
+		sq_run "$fx" "$@" -- --color --compact; want=$RUN/screen.utf8; without_clock "$OUT" > "$want"
+		sq_run "$fx" "$@" LC_ALL=ja_JP.eucJP LOCPATH="$loc" "PATH=$nolocale:$here/bin:$PATH" -- --color --compact
+		need "$args: rc 0, stderr empty, the UTF-8 screen byte for byte" eval 'rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT")'
 	done
 }
 # A caller's LC_ALL may name a locale that is not installed.  bash says so
@@ -4085,6 +4122,26 @@ c_membar_fail() {
 	need "CR_CORE: no line, the screen as accepted" eval '
 		rc_is 0 && [ -z "$(membar_note)" ] && cmp -s <(without_clock "$fixtures/membar-crcore/full-w120.txt") <(without_clock "$OUT")'
 }
+# A failing scontrol may have printed some nodes before it failed (a dump cut
+# off, a controller lost mid-answer): what it printed is no answer, so the
+# bars count RealMemory as for a failure with nothing printed, and no
+# MemSpecLimit of the half answer is taken (fb2-bioinf's 31000 would make it
+# 265/977G)
+c_membar_partial() {
+	T_TITLE="scontrol printing a node, then failing: no figure of it used, the screen of a failure that printed nothing"
+	local d why='slurm_load_node error: Unable to contact slurm controller (connect failure)' first want
+	first=$(grep -m1 '^NodeName=fb2-bioinf ' "$fixtures/membar-busy/scontrol-node")
+	d=$(mem_fixture membar-busy scontrol-node "@stderr $why\n@exit 1")
+	sq_run "$d" -- --full --color; want=$RUN/screen; without_clock "$OUT" > "$want"
+	d=$(mem_fixture membar-busy scontrol-node "$first\n@stderr $why\n@exit 1")
+	sq_run "$d" -- --full --color
+	need "a node printed, then exit 1: rc 0, 265 of 1007G, the screen of the silent failure byte for byte" eval '
+		rc_is 0 && [ "$(calls scontrol)" = 2 ] && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" && cmp -s "$want" <(without_clock "$OUT")'
+	d=$(mem_fixture membar-busy scontrol-node "$first\n@stderr $why\n@exit 1")
+	sq_run "$d" SQSTUB_NOJSON=1 -- --full --color
+	need "... the same where --json is refused and only -o printed the node" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" && cmp -s "$want" <(without_clock "$OUT")'
+}
 c_membar_over() {
 	T_TITLE="allocated beyond what jobs can be given (RealMemory less MemSpecLimit): the bar full, the figure as it is, yellow, never bold red"
 	local d
@@ -4783,6 +4840,21 @@ c_memalloc_screens() {
 	need "S4 as fsill at 80 on a screen: rc 0, stderr empty, the accepted screen; own form a in the unit rule (salmon 15G, fastqc 8G, multiqc ?4G) beside whole totals" eval '
 		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/fsill__full-w80-h30.ansi") <(without_clock "$OUT") &&
 		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_[0-2…" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
+}
+# MEM is cut last under -M too, but cut: with the feature off (-M, MEM is %m)
+# a screen narrower than every column at its floor takes MEM down to 5 as
+# well, never wider, never below
+c_memalloc_floor_M() {
+	T_TITLE="-M at 21 and 30 in a pipe: every column at its floor of 5, MEM too (1023.9G cut to 1023…), never below"
+	local d q w
+	q=$(sed 's/^\(i=11890;.*\) m=7800M;/\1 m=1048575M;/' "$fixtures/memalloc/squeue" | sed "s|^@include \.\./|@include $fixtures/|")
+	d=$(mem_fixture memalloc sinfo "@include $fixtures/_common/sinfo-two-idle")
+	printf '%s\n' "$q" > "$d/squeue"
+	for w in 21 30; do
+		mem_run "$d" SQ_WIDTH=$w -- --full --no-recent -M bioinf
+		need "-M at $w: rc 0, no mirror call, the header at the floor, busco's MEM cut to 5" eval '
+			rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(section queue | head -n 1)" = "  JOBID NAME  USER  STATE TIME  LEFT  CPU MEM   NODE/" ] && [ "$(mem_of 11890)" = "1023…" ]'
+	done
 }
 c_memalloc_narrow() {
 	T_TITLE="MEM is cut last, down to 5: whole while any other column can give, also under -M where it is the widest, so COMPACT keeps its height on a screen just wide enough; %m in the unit rule, decimal or whole, own ?%m and !%m cells too"
@@ -7086,7 +7158,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
@@ -7095,7 +7167,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale locale_pinned locale_missing locale_missing_screens locale_not_utf8 month_english posixly_correct clock_step ago_days cancel_names shrink_name shrink_extent
+	shrink_locale locale_pinned locale_eucjp_notool locale_missing locale_missing_screens locale_not_utf8 month_english posixly_correct clock_step ago_days cancel_names shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40
@@ -7112,11 +7184,11 @@ cases=(
 	compact_no_size compact_error_screens
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
-	membar_screens membar_detect membar_call membar_fail membar_over membar_down membar_forged membar_json membar_fallback nodes_not_utf8 nodes_ctl_o
+	membar_screens membar_detect membar_call membar_fail membar_partial membar_over membar_down membar_forged membar_json membar_fallback nodes_not_utf8 nodes_ctl_o
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
-	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
+	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow memalloc_floor_M
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
