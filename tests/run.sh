@@ -2068,6 +2068,28 @@ c_locale_missing() {
 	need "sq job on a job whose parent Slurm forgot: rc 0, the parent unknown to Slurm, stderr bash's line alone" eval '
 		rc_is 0 && why_has "    900  Slurm no longer knows it" && ! grep -qvxFf "$T_DIR/startup" "$ERR"'
 }
+# The same, over every screen: the dashboard on each fixture and sq job's tail
+# of a failed job (its reader of the last bytes ran as "LC_ALL=C gawk" inside
+# $(...), which bash answered with a setlocale warning): nothing on stderr names
+# setlocale but the line bash prints as it starts.
+c_locale_missing_screens() {
+	T_TITLE="LC_ALL naming no installed locale: the dashboard on every fixture and sq job's tail of failed1, failed127 and sigill-recent print no setlocale warning of sq's own"
+	local bad=xx_YY.UTF-8 noop=$T_DIR/noop dir fx id
+	printf '#!/usr/bin/env bash\n:\n' > "$noop"; chmod +x "$noop"
+	env -i PATH="$here/bin:$PATH" LC_ALL=$bad "$noop" 2> "$T_DIR/startup"
+	for dir in "$fixtures"/*/; do
+		fx=${dir%/}; fx=${fx##*/}
+		case $fx in _common|sqjob) continue ;; esac
+		sq_run "$fx" LC_ALL=$bad -- --full
+		need "$fx: no setlocale on stderr but bash's own line" eval '! grep -vxFf "$T_DIR/startup" "$ERR" | grep -q setlocale'
+	done
+	for fx in failed1-11837 failed127-11836 sigill-recent-11353; do
+		id=${fx##*-}
+		why_run "$fx" LC_ALL=$bad -- --no-color job "$id"
+		need "sq job $id: its tail read, no setlocale on stderr but bash's own line" eval '
+			why_lines | grep -q " ends with:$" && ! grep -vxFf "$T_DIR/startup" "$ERR" | grep -q setlocale'
+	done
+}
 # A multibyte locale is not a UTF-8 one: under ja_JP.eucJP gawk counts "…" as
 # one character, as UTF-8 does, but "█" as two, and warns of invalid data on
 # stderr: that locale passed a probe that only measured "…".
@@ -6406,7 +6428,7 @@ cases=(
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
 	more_sacct more_fallback more_repeated bitstr
 	shrink_pending shrink_fold shrink_finished shrink_floor
-	shrink_locale locale_pinned locale_missing locale_not_utf8 month_english posixly_correct clock_step ago_days cancel_names shrink_name shrink_extent
+	shrink_locale locale_pinned locale_missing locale_missing_screens locale_not_utf8 month_english posixly_correct clock_step ago_days cancel_names shrink_name shrink_extent
 	pty_xterm pty_unknown_term pty_stdin_null pty_columns_wins pty_env_both pty_unsized no_tty
 	compact_tiny_h10 compact_busy24_h8 compact_busy24_h12 compact_busy24_h16
 	compact_busy24_h20 compact_busy24_h24 compact_busy24_h30 compact_busy24_h40

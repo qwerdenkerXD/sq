@@ -2766,7 +2766,7 @@ job_tail_wait() {
 # character.  w_tailinfo ok, or blank when no line is left
 job_tail_lines() {
 	local n k line
-	n=$(LC_ALL=C gawk -v out="$tmp/tailline" 'BEGIN { RS = "^$" }
+	n=$(env LC_ALL=C gawk -v out="$tmp/tailline" 'BEGIN { RS = "^$" }
 	END {
 		data = $0; cut = (length(data) > 4096)
 		if (cut) { cut = (substr(data, 1, 1) != "\n"); data = substr(data, 2) }
