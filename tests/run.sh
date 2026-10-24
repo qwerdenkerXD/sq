@@ -220,7 +220,8 @@ stub_calls() { grep -c '^CALL' "$LOG"; }                   # how often a stub wa
 # The pty variant: sq on a pseudo-terminal of PTY_ROWS x PTY_COLS made by
 # util-linux script, so [ -t 1 ] and tput see a terminal.  stdout of script is
 # the terminal's output, so OUT gets CRs and colour; plain() takes them out.
-# PTY_STDIN=FILE gives sq that stdin instead of the terminal.
+# PTY_STDIN=FILE gives sq that stdin instead of the terminal, PTY_VMEM_KB=N
+# caps its virtual memory (ulimit -v), for a run that may grow without end.
 pty_exec() {
 	local -a envlist=()
 	while [ "$1" != -- ]; do envlist+=("$1"); shift; done; shift
@@ -228,7 +229,7 @@ pty_exec() {
 		T_FAIL+=("util-linux script is not installed (needed for the pty cases)"); RC=127; : > "$OUT"; return
 	fi
 	local inner
-	inner="stty rows $PTY_ROWS cols $PTY_COLS; exec $(printf '%q ' "$sq" "$@")"
+	inner="${PTY_VMEM_KB:+ulimit -v $PTY_VMEM_KB; }stty rows $PTY_ROWS cols $PTY_COLS; exec $(printf '%q ' "$sq" "$@")"
 	[ -n "${PTY_STDIN:-}" ] && inner="$inner < $(printf '%q' "$PTY_STDIN")"
 	# --foreground: without it timeout stops script's child with SIGTTOU in the pty
 	env -i "${envlist[@]}" SHELL=/bin/sh \
@@ -2166,6 +2167,48 @@ c_bell_notty() {
 		eval 'rc_is 0 && [ "$(bels)" -eq 0 ] && cmp -s "$T_DIR/alerted.before" "$home/.cache/sq/alerted" && [ "$(ls -A "$home/.cache/sq")" = alerted ]'
 	BELL=1 NOTTY=1 sq_run "$fx" SQ_BELL_USER=alice --
 	need "no terminal, no memory yet: none written, nothing left" eval 'rc_is 0 && [ -z "$(ls -A "$RUN/home/.cache/sq" 2>/dev/null)" ]'
+}
+# The bell's memory is a regular file or none: one that was a directory read
+# as nothing (the bell rang on every run, and a temp file piled up in it each
+# time), a FIFO blocked sq for good, and /dev/zero behind a symlink took all
+# memory (capped here at 1 GB).  And a run that writes no memory never renames
+# an alerted.PID over it: a stray one of another process that had sq's pid,
+# planted here by a wrapper that execs sq and so hands it its pid
+c_bell_state_odd() {
+	T_TITLE="the bell's memory a directory, a FIFO or a symlink to /dev/zero: no bell, sq ends, nothing grows or piles up; with the bell off a stray alerted.PID never replaces the memory"
+	local fx home cache kind n before=$T_DIR/alerted.before real=$sq
+	fx=$(bell_fixture)
+	for kind in directory fifo zero; do
+		home=$T_DIR/home-$kind cache=$T_DIR/home-$kind/.cache/sq; mkdir -p "$cache"
+		case $kind in
+			directory) mkdir "$cache/alerted" ;; fifo) mkfifo "$cache/alerted" ;; zero) ln -s /dev/zero "$cache/alerted" ;;
+		esac
+		for n in 1 2; do
+			PTY_VMEM_KB=1000000 bell_run "$fx" SQ_BELL_USER=alice HOME="$home"
+			need "alerted a $kind, run $n: rc 0, no bell, the screen drawn, nothing beside it or in it" eval '
+				rc_is 0 && [ "$(bels)" -eq 0 ] && has 7001 && [ "$(ls -A "$cache")" = alerted ] &&
+				{ [ $kind != directory ] || [ -z "$(ls -A "$cache/alerted")" ]; }'
+		done
+	done
+	home=$T_DIR/home cache=$T_DIR/home/.cache/sq
+	bell_run "$fx" SQ_BELL_USER=alice HOME="$home"
+	need "on a terminal: one bell, remembered" eval 'rc_is 0 && [ "$(bels)" -eq 1 ] && [ -s "$cache/alerted" ]'
+	cp "$cache/alerted" "$before"
+	printf '#!/bin/sh\nprintf "STRAY\\tpartial\\n" > "$HOME/.cache/sq/alerted.$$"\nexec "$PLANT_SQ" "$@"\n' > "$T_DIR/plant"
+	chmod +x "$T_DIR/plant"
+	local sq=$T_DIR/plant          # sq_run and pty_exec start the wrapper
+	sq_run "$fx" SQ_BELL_USER=alice HOME="$home" PLANT_SQ="$real" --
+	need "--no-bell, a stray alerted.PID: rc 0, the memory unchanged, the stray gone" eval '
+		rc_is 0 && cmp -s "$before" "$cache/alerted" && [ "$(ls -A "$cache")" = alerted ]'
+	PTY=1 PTY_ROWS=40 PTY_COLS=100 sq_run "$fx" TERM=xterm-256color SQ_BELL_USER=alice HOME="$home" PLANT_SQ="$real" --
+	need "--no-bell on a terminal, a stray alerted.PID: rc 0, no bell, the memory unchanged, the stray gone" eval '
+		rc_is 0 && [ "$(bels)" -eq 0 ] && cmp -s "$before" "$cache/alerted" && [ "$(ls -A "$cache")" = alerted ]'
+	BELL=1 sq_run "$fx" SQ_BELL=0 SQ_BELL_USER=alice HOME="$home" PLANT_SQ="$real" --
+	need "SQ_BELL=0, a stray alerted.PID: rc 0, the memory unchanged, the stray gone" eval '
+		rc_is 0 && cmp -s "$before" "$cache/alerted" && [ "$(ls -A "$cache")" = alerted ]'
+	BELL=1 PTY=1 PTY_ROWS=40 PTY_COLS=100 sq_run "$fx" TERM=xterm-256color SQ_BELL=0 SQ_BELL_USER=alice HOME="$home" PLANT_SQ="$real" --
+	need "SQ_BELL=0 on a terminal, a stray alerted.PID: rc 0, no bell, the memory unchanged, the stray gone" eval '
+		rc_is 0 && [ "$(bels)" -eq 0 ] && cmp -s "$before" "$cache/alerted" && [ "$(ls -A "$cache")" = alerted ]'
 }
 # -c centres the screen in the width, -C in the height too, but only on a
 # screen (a terminal, or COLUMNS and LINES set): the screen moves as a whole
@@ -7174,7 +7217,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty bell_state_odd centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column

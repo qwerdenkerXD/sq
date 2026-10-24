@@ -3628,12 +3628,15 @@ rmax=${SQ_RECENT_MAX:-0}
 case $rmax in ''|*[!0-9]*|?????????*) rmax=0 ;; esac
 [ "$rmax" -gt 0 ] 2>/dev/null || rmax=0
 # no state directory turns the bell off, as one that cannot be made or written
-# in does (a read-only ~/.cache/sq killed gawk as it wrote the state).  The
-# probe is the temp file itself, made and removed at once: left there empty,
-# it would be renamed over the bell's memory by a run without a terminal
+# in does (a read-only ~/.cache/sq killed gawk as it wrote the state), and so
+# does a memory that is there but no regular file, as jobmem_snapshot judges
+# memuse: gawk reads nothing from a directory (the bell rang every run and the
+# temp files piled up in it), blocks on a FIFO and reads /dev/zero until
+# memory runs out.  The probe is the temp file itself, made and removed at once
 cache_dir statedir
 statetmp=${statedir:+$statedir/alerted.$$}      # renamed over alerted at the end
 [ "$bell" = 0 ] || { [ -n "$statedir" ] && mkdir -p "$statedir" &&
+	{ [ ! -e "$statedir/alerted" ] || [ -f "$statedir/alerted" ]; } &&
 	: > "$statetmp" && rm -f "$statetmp"; } 2>/dev/null || bell=0
 
 # writing to /dev/tty is a gawk FATAL without a controlling terminal (ssh
@@ -4955,6 +4958,8 @@ rc=$?
 
 # rename(2), so a second instance can never read or leave a torn state file.
 # Only on success: a gawk that died mid-write leaves a partial temp, and
-# promoting that would wipe the bell memory and re-ring everything.
-[ "$rc" -eq 0 ] && [ -f "$statetmp" ] && mv -f "$statetmp" "$statedir/alerted"
+# promoting that would wipe the bell memory and re-ring everything.  And only
+# where gawk wrote it, with the bell on and a terminal: an alerted.PID of
+# another process that had this pid is no memory (cleanup removes it)
+[ "$rc" -eq 0 ] && [ "$bell" != 0 ] && [ "$hastty" = 1 ] && [ -f "$statetmp" ] && mv -f "$statetmp" "$statedir/alerted"
 exit $rc
