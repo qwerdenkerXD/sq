@@ -1,0 +1,3 @@
+# ASCII nodes and queue, the finished jobs of wide-text: the finished
+# records alone hold bytes above 127
+@include ../_common/sinfo-two-idle

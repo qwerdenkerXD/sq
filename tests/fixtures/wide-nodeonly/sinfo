@@ -1,0 +1,3 @@
+# the nodes of wide-text, an ASCII queue and finished block: the node
+# records alone hold bytes above 127
+@include ../wide-text/sinfo

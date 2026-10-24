@@ -1,0 +1,8 @@
+# The newest failure named in han and kana alone (COMPACT's one finished
+# line cuts it), and a name with one ASCII letter before han, so a cut of it
+# by columns can leave a gap of one after "…" (an odd boundary)
+@include ../_common/sacct-defaults
+JobID=4000; JobName=解析パイプライン; User=田中; NodeList=ノード01
+JobID=4001; JobName=x日本語のとても長いジョブ名前です; User=müller; End=\{now-1h30m}
+JobID=4002; JobName=失敗した解析ジョブの名前; User=👍🏽bob; State=FAILED; ExitCode=1:0; End=\{now-50m30s}; NodeList=노드🇩🇪4
+JobID=4003; JobName=日本語のとても長いジョブ名前です; User=김민수; End=\{now-40m30s}

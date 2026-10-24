@@ -1669,18 +1669,20 @@ twin_check() {
 	TWIN_MAP=$T_DIR/twin.map ORACLE_MAP=$work/oracle.map WC=$w.cells TC=$t.cells WP=$w.plain COLS=$3 LINES=$4 LC_ALL=$utf8 gawk "$oracle_awk$unit_awk"'
 	function rows_of(s) { return length(s) > COLS ? int((length(s) + COLS - 1) / COLS) : 1 }
 	function bad(why) { if (++nbad <= 6) print why > "/dev/stderr" }
-	function aligned(L, n,   i, r, nh, H, P, p, q, j, e, E, x, RIGHT) {
-		split("CPU MIN_CPU NODES LEFT LIMIT TIME MEM PRIO Y EXIT ELAPSED AGO", x, " "); for (j in x) RIGHT[x[j]]
+	function aligned(L, n,   i, r, nh, H, P, p, q, j, e, E, x, nx, RIGHT, k) {
+		nx = split("CPU MIN_CPU NODES LEFT LIMIT TIME MEM PRIO Y EXIT ELAPSED AGO", x, " ")
 		for (i = 1; i <= n; i++) {
 			if (L[i] !~ /^ *[A-Z][A-Z\/_()]*( +[A-Z][A-Z\/_()]*)* *$/) continue
-			nh = split(L[i], H, " "); p = 0
-			for (j = 1; j <= nh; j++) { q = index(substr(L[i], p + 1), H[j]); P[j] = p + q; p = P[j] + length(H[j]) - 1 }
+			nh = split(L[i], H, " "); p = 0; delete RIGHT
+			for (j = 1; j <= nh; j++) { q = index(substr(L[i], p + 1), H[j]); P[j] = p + q; p = P[j] + length(H[j]) - 1
+				for (k = 1; k <= nx; k++) if (index(x[k], H[j]) == 1) RIGHT[j]     # a header cut short too: ELAPSE
+			}
 			delete E
 			for (r = i + 1; r <= n && L[r] != ""; r++) {
 				if (L[r] ~ /^ *(…|↳|\+[0-9]+ more$)/) continue
 				for (j = 1; j <= nh; j++) {
 					q = (j < nh) ? P[j + 1] : length(L[r]) + 2
-					if (H[j] in RIGHT) {
+					if (j in RIGHT) {
 						e = q - 1; while (e >= P[j] && substr(L[r], e, 1) == " ") e--
 						if (e < P[j]) continue
 						if (!(j in E)) E[j] = e; else if (E[j] != e) bad(sprintf("%s ends at %d, not %d: %s", H[j], e, E[j], L[r]))
@@ -1780,6 +1782,59 @@ c_wide_twin_ascii() {
 	twin_sweep wide-ascii -p "$wide_part"
 }
 
+# COMPACT's one finished line, the newest failure's name in han and kana
+# (wide-fin): cut by columns, so it fits, at every width around the cut, as
+# its twin does
+c_wide_compact_fin() {
+	T_TITLE="COMPACT's one finished line with the newest failure named in han and kana: cut by columns (4002 失敗した解析…), at widths 36-48 every screen as its ASCII twin"
+	twin_fx wide-text wide-fin
+	sq_run wide-fin SQ_WIDTH=40 SQ_HEIGHT=20 -- --compact --no-color
+	need "40x20: rc 0, the one line, cut within 40 columns" eval '
+		rc_is 0 && matches "^  recently finished: 4002 失敗した解析…$" && [ "$(oracle_width "$(lines_matching "^  recently finished: ")")" -le 40 ]'
+	WIDTHS="36 38 40 42 44 46 48" twin_sweep wide-fin "${wide_cols[@]}"
+}
+# a finished NAME cut by columns with a gap after "…": x and han, cut at an
+# odd boundary (x日本語のとても長いジョ… at 60 is 24 of 25 columns), padded
+# from its cut width, so STATE stays in its column
+c_wide_fin_cut() {
+	T_TITLE="a finished NAME cut one column short (an ASCII letter before han): padded from its cut width, STATE in its column, at 40 and 60 as its twin"
+	twin_fx wide-text wide-fin
+	sq_run wide-fin SQ_WIDTH=60 -- --full --no-color
+	need "60: rc 0, x日本語のとても長いジョ… cut, STATE in one column on every finished row" eval '
+		rc_is 0 && rows recent | grep -qE "^  4001  x日本語のとても長いジョ…  COMPLETED " &&
+		[ "$(SRC=cplain section recent | gawk "/ (COMPLETED|FAILED) / { print match(\$0, / (COMPLETED|FAILED) /) }" | sort -u | wc -l)" = 1 ]'
+	WIDTHS="40 60" twin_sweep wide-fin "${wide_cols[@]}"
+}
+# wide text in one input alone: the finished jobs (wide-reconly) or the node
+# names (wide-nodeonly), the other answers ASCII: that input alone sets WIDE
+c_wide_twin_parts() {
+	T_TITLE="wide text in the finished jobs alone, then in the node names alone (the other answers ASCII): every screen at 50, 80 and 120 as its ASCII twin"
+	twin_fx mixed wide-text wide-reconly wide-nodeonly
+	WIDTHS="50 80 120" twin_sweep wide-reconly
+	WIDTHS="50 80 120" twin_sweep wide-nodeonly
+}
+# no UTF-8 locale (gawk in C) where the id floor and digest() decide: the
+# finished JOBID shaved to its floor (shrink-finished at 50) and the one
+# summary node line cut (COMPACT, narrow): the screen of a UTF-8 caller,
+# byte for byte, the clock aside
+c_wide_c_floor() {
+	T_TITLE="gawk in C (no UTF-8 locale): shrink-finished at 50 (the id floor, 600_[1,…] ×67) and COMPACT's one node line (digest) at narrow widths draw the UTF-8 screen byte for byte"
+	local nobin=$T_DIR/nobin want spec fx mode w h
+	mkdir -p "$nobin"
+	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	for spec in shrink-finished:full:50:30 shrink-finished:compact:50:20 \
+	            busy24:compact:30:8 busy24:compact:40:8 busy24:compact:50:8 busy24:compact:60:6 \
+	            mix30:compact:30:8 mix30:compact:40:8 mix30:compact:50:8 mix30:compact:60:6 \
+	            manystuck:compact:30:8 manystuck:compact:40:8 manystuck:compact:50:8 manystuck:compact:60:6; do
+		IFS=: read -r fx mode w h <<< "$spec"
+		sq_run "$fx" SLURM_BITSTR_LEN=0 SQ_WIDTH=$w SQ_HEIGHT=$h -- --color --$mode
+		want=$RUN/screen.utf8; without_clock "$OUT" > "$want"
+		sq_run "$fx" SLURM_BITSTR_LEN=0 SQ_WIDTH=$w SQ_HEIGHT=$h LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --color --$mode
+		need "$fx $mode ${w}x$h: under C rc 0, stderr empty, the UTF-8 screen" eval 'rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT")'
+	done
+	sq_run shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=50 SQ_HEIGHT=30 LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --full
+	need "shrink-finished at 50 under C: the id at its floor, 600_[1,…] ×67" has "600_[1,…] ×67"
+}
 # ---- display width: sq job's tables and its tail (AC2) ----------------------
 # A node named in han and kana with an emoji and a combining mark, users in
 # han and Hangul with a combining mark and a skin tone: node_table (the free
@@ -1825,6 +1880,19 @@ c_wide_job() {
 		tail_lines | LC_ALL=$utf8 gawk "{ w = length(\$0) + 4; if (w > 100 || w < 99) bad = 1 } END { exit bad }"'
 }
 
+# why_res with two jobs ahead whose users are wider than 9 columns and of
+# different widths (13, 16): both padded to the widest, the columns after
+# them aligned
+c_wide_job_ahead() {
+	T_TITLE="sq job's why_res, two jobs ahead owned by longusername1 and abcdefghijklmnop: the user column 16 wide, CPUs and memory aligned"
+	local d
+	d=$(res_fx ahead2 pending-est 's/UserName=amadvi/UserName=longusername1/')
+	printf '%s\n' 'JobID=11959; ArrayJobID=11959; StateCompact=PD; UserName=abcdefghijklmnop; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=500G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-16200s}; Reason=Resources' >> "$d/squeue-queue"
+	why_run "$d" -- --no-color job 11962
+	need "rc 0, both jobs ahead, each user padded to 16, then the CPUs: the same column" eval '
+		rc_is 0 && err_empty && why_has "    11958  longusername1     64 CPUs    500G  PENDING (Resources), submitted 4h ago" &&
+		why_has "    11959  abcdefghijklmnop  64 CPUs    500G  PENDING (Resources), submitted 4h ago"'
+}
 # ---- display width without a UTF-8 locale (W7, AC6) ---------------------------
 # A locale tool that knows no UTF-8 locale leaves gawk in C, where length()
 # counts bytes: sq measures by the UTF-8 bytes themselves.  The twin sweeps at
@@ -6978,7 +7046,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
@@ -7012,7 +7080,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	why_resources wide_job why_ended why_array why_budget why_parallel why_signals
+	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do
