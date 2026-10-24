@@ -1866,6 +1866,27 @@ c_wide_c_mode() {
 	done
 }
 
+# BIG5 (and BIG5-HKSCS, CP949, JOHAB) counts "…█" as two characters, as UTF-8
+# does, so without a locale tool that answers, gawk's count alone took it for
+# UTF-8: a garbled screen, then (with the wide classes) an invalid regexp and
+# no screen.  utf8_ok also asks gawk to write U+2026 U+2588 as "…█": a BIG5
+# caller gets what LC_ALL=C gets, rc 0
+c_locale_big5() {
+	T_TITLE="LC_ALL=zh_TW.BIG5 with no locale tool answering: no UTF-8 locale to gawk, the LC_ALL=C screen byte for byte, rc 0, stderr empty"
+	local loc=$T_DIR/loc nobin=$T_DIR/nobin want
+	mkdir -p "$loc" "$nobin"
+	localedef -i zh_TW -f BIG5 "$loc/zh_TW.BIG5" > /dev/null 2>&1
+	if ! [ "$(LOCPATH=$loc LC_ALL=zh_TW.BIG5 locale charmap 2>/dev/null)" = BIG5 ]; then
+		T_FAIL+=("localedef could not build zh_TW.BIG5 (needs glibc's locale sources)"); return
+	fi
+	printf '#!/bin/sh\nexit 127\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	sq_run wide-text SQ_WIDTH=80 LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --color "${wide_cols[@]}"
+	want=$RUN/screen.C; without_clock "$OUT" > "$want"
+	need "LC_ALL=C: rc 0" rc_is 0
+	sq_run wide-text SQ_WIDTH=80 LC_ALL=zh_TW.BIG5 LOCPATH="$loc" "PATH=$nobin:$here/bin:$PATH" -- --color "${wide_cols[@]}"
+	need "LC_ALL=zh_TW.BIG5: rc 0, stderr empty, the LC_ALL=C screen byte for byte" eval 'rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT")'
+}
+
 # ---- display width: what a terminal draws (AC7) ------------------------------
 # The rows a terminal takes for a screen: tmux (3.4 measured), on a private
 # socket, no config, UTF-8 (-u, a UTF-8 locale), a pane of COLUMNS x LINES
@@ -6957,7 +6978,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_c_mode wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column

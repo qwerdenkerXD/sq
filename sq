@@ -974,8 +974,8 @@ BEGIN {
     "1FA6E-1FAFF:2 1FC00-1FFFD:2 20000-2FFFD:2 30000-3FFFD:2 E0001:0 E0020-E007F:0 E0100-E01EF:0"
 }
 # ---- width table end
-# the classes, UTF8 the mode: length("…█") is 2 only under UTF-8 (6 under C;
-# a locale tool that knows no UTF-8 locale leaves gawk in C)
+# the classes, UTF8 the mode: gawk runs under a UTF-8 locale or C (utf8_ok,
+# gawk_locale), where length("…█") is 2 or 6
 function width_classes(   R, nr, i, p, lo, hi, w, cls) {
   UTF8 = (length("…█") == 2)
   if (!(128 in JSON_BYTE)) json_bytes()
@@ -1109,9 +1109,11 @@ color_resolve() {
 # themselves (a caller's eucJP or Latin-1 would take UTF-8 bytes for its own
 # characters, and its [[:cntrl:]] eat a byte of "…").  A locale is UTF-8 when its
 # charmap says so and gawk, which does the counting, counts "…█" as two
-# characters (ja_JP.eucJP counts "…" as one, but "█" as two).  Without a
-# locale tool that answers (musl, a minimal image) gawk's count alone decides:
-# under C it is 6, under eucJP 3, though a GB18030 locale would pass it too.
+# characters (ja_JP.eucJP counts "…" as one, but "█" as two) and writes
+# U+2026 U+2588 as "…█", their UTF-8.  Without a locale tool that answers
+# (musl, a minimal image) gawk alone decides: under C the count is 6, under
+# eucJP 3; BIG5, BIG5-HKSCS, CP949 and JOHAB count 2 but write other bytes
+# (of every charmap glibc ships, UTF-8 alone passes both).
 # Set through env, never as "LC_ALL=x cmd": bash applies that to itself too,
 # and restoring a caller's LC_ALL that names no installed locale puts a
 # setlocale warning on the screen each time.
@@ -1120,7 +1122,7 @@ utf8_ok() {
 	if charmap=$(env LC_ALL="$1" locale charmap 2>/dev/null); then
 		[ "$charmap" = UTF-8 ] || return 1
 	fi
-	env LC_ALL="$1" gawk 'BEGIN { exit length("…█") != 2 }' 2>/dev/null
+	env LC_ALL="$1" gawk 'BEGIN { exit !(length("…█") == 2 && sprintf("%c", 8230) sprintf("%c", 9608) == "…█") }' 2>/dev/null
 }
 gawk_locale() {   # the locale gawk runs in, into gloc
 	gloc=${LC_ALL:-}                 # empty: gawk reads LC_CTYPE and LANG as before
