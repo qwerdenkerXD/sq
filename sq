@@ -2,24 +2,42 @@
 # sq - auto-fitting Slurm dashboard
 #
 #   sq                      default columns
-#   sq -o i,j,T,M,P,N       custom columns (squeue field letters, %/widths ignored)
-#   sq -u "$USER" -p gpu    filters go to squeue, by the names squeue documents
-#                           also forwarded: --all --hide --array --noconvert
-#                           --noheader --priority --federation --local --sibling
+#   sq -o i,j,T,M,P,N       custom columns (squeue field letters, %/widths
+#                           ignored); also -oLIST, --format LIST, --format=LIST
+#   sq -u "$USER" -p gpu    squeue's filters, read by their full long name and
+#                           passed on in squeue's short spelling:
+#                           -u --user --users, --me, -p --partition --partitions,
+#                           -A -U --account --accounts, -q --qos, -j --job --jobs
+#                           (job ids: 12345 or 12345_4), -M --cluster --clusters,
+#                           -n --name, -t --state --states, -w --node --nodes
+#                           --nodelist, -L --license --licenses, -R --reservation,
+#                           -S --sort; the value attached (-pgpu, --partition=gpu)
+#                           or the next word, whatever it looks like (-n -x is
+#                           the job name -x); none empty, none twice
+#   sq -a -r                squeue's flags: -a --all, -r --array, -P --priority,
+#                           --hide, --noconvert, --federation, --local, --sibling
+#                           --sib.  squeue's -h is --noheader, which sq always
+#                           passes, so --noheader is accepted and changes
+#                           nothing, and -h is sq's help
+#                           short options are written apart (-a -r, not -ar),
+#                           and a long name keeps both dashes: -partition is
+#                           refused, so a job named "ame" is -n ame, not -name
 #                           refused: -O --Format -s --steps -i --iterate -l -v
 #                           -V --json --yaml, each of which would replace or
 #                           defeat the output sq parses
-#   sq -c / -C              centre horizontally / in both axes; vertically
+#   sq -c / -C              centre horizontally / in both axes (--center
+#                           --centre / --center-all --centre-all); vertically
 #                           only on a screen (a terminal, or watch), and only
 #                           while the dashboard is at least two lines shorter
-#   sq -x                   expand array tasks instead of folding them; a pending
-#                           bracket squeue prints (9008_[4-9] x6) stays one row,
-#                           which only --array splits
+#   sq -x                   expand array tasks instead of folding them (--expand);
+#                           a pending bracket squeue prints (9008_[4-9] x6) stays
+#                           one row, which only --array splits
 #   sq --no-recent          hide the recently-finished block
 #   sq --no-bell            never ring the terminal bell on a new failure
-#   sq --color / --no-color force colour on or off
+#   sq --color / --no-color force colour on or off (--colour, --no-colour)
 #   sq --compact / --full   fit the screen / show everything (see below)
 #   sq --reserve N          COMPACT leaves N lines of the screen unused
+#   sq -h / --help          this help
 #   watch -tc -n 5 sq       live dashboard; keep -t, or watch's own header
 #                           pushes the footer off screen (or --reserve 2)
 #   sq log JOBID            a job's output file, followed while the job runs
@@ -63,6 +81,12 @@
 #      SQ_COMPACT 1 = always COMPACT, 0 = always FULL, else auto-detect
 #      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect; they
 #                     never choose the mode
+# squeue's own variables count as the flags they stand for, a flag winning:
+#      SQUEUE_USERS -u, SQUEUE_PARTITION -p, SQUEUE_ACCOUNT -A, SQUEUE_QOS -q,
+#      SQUEUE_STATES -t, SQUEUE_NAMES -n, SQUEUE_LICENSES -L, SLURM_CLUSTERS -M,
+#      and, set at all, SQUEUE_ALL -a, SQUEUE_ARRAY -r, SQUEUE_PRIORITY -P,
+#      SQUEUE_LOCAL, SQUEUE_FEDERATION, SQUEUE_SIB/SQUEUE_SIBLING; one set but
+#      empty is refused, as squeue would show no job
 #
 # Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4,
 # and a bracket Slurm prints reads 9008_[4-9] x6 with or without -x: the
@@ -72,8 +96,9 @@
 # MinJobAge: a job that ended while nobody watched is still seen.  Step rows
 # are read along with it, because the allocation row of a signalled job
 # reports plain success and only its step carries the signal.  With no
-# accounting, or with a filter that has no sacct equivalent, the block falls
-# back to squeue -t all and its caption says so.  A state filter (-t) filters
+# accounting, or with a filter sq does not translate for sacct (-n -w -L -R
+# --sibling, so SQUEUE_NAMES, SQUEUE_LICENSES, SQUEUE_SIB and SQUEUE_SIBLING
+# too), the block falls back to squeue -t all and its caption says so.  A state filter (-t) filters
 # the queue only: the block shows every finished job either way.
 # A new failure rings the bell once, and only while it is
 # younger than SQ_BELL_HORIZON, so a first run, a cleared cache and a week of
@@ -3236,10 +3261,21 @@ recent=${SQ_RECENT:-1}
 bell=${SQ_BELL:-1}
 eta=${SQ_ETA:-1}
 color=${SQ_COLOR:-auto}
-args=()
-seen=                            # the filters already set, for the repeat check
+# The normal form (NF): after the argument loop and the environment, ONE
+# ordered list of entries is all the squeue calls, the sacct call, the caption
+# and the cluster check read; nothing later looks at argv or a SQUEUE_*
+# variable again.  An entry is a key (a filter -u -p -A -q -j -M -n -t -w -L
+# -R -S, or a flag -a -r -P --hide --noconvert --federation --local
+# --sibling), its value (filters only, the bytes as written) and its source,
+# what messages and the caption name it by: the option as spelled, without
+# its value, or the variable's name.  --me is an entry of key -u, its value
+# the login, resolved only when sacct needs it; -U is one of key -A.  The
+# argument loop fills nfk/nfv/nfs with argv's entries in order; the
+# environment's go before and after them, below the loop (squeue's order).
+nfk=() nfv=() nfs=()
+nf_add() { nfk+=("$1"); nfv+=("$2"); nfs+=("$3"); }
+seen=                            # the filter keys argv set, for the repeat check
 modeflag=                        # --compact or --full, as given
-clustersel=0                     # --federation or --sibling given (-M is in $seen)
 reserve=0                        # lines COMPACT leaves alone, e.g. for watch's header
 
 # One example per option, because "sq -j NAME" would read wrong: a usage error
@@ -3260,16 +3296,18 @@ opt_hint() {
 		-L) vnoun='a license name';     vex=matlab ;;
 		-R) vnoun='a reservation name'; vex=maint ;;
 		-S) vnoun='a sort key list';    vex=-i ;;
+		-o) vnoun='a column list';      vex=i,j,u ;;
 	esac
 }
 
-# the one spelling a filter is tracked and reported under: squeue accepts up to
-# three for most of them, and --me is -u with the login already filled in
+# the one key a filter is tracked and reported under: squeue accepts up to
+# three spellings for most of them (and -U for -A), and sq's own column list
+# is -o's
 canon_opt() {
 	case $1 in
 		-u|--user|--users)       kopt=-u ;;
 		-p|--partition|--partitions) kopt=-p ;;
-		-A|--account|--accounts) kopt=-A ;;
+		-A|-U|--account|--accounts) kopt=-A ;;
 		-q|--qos)                kopt=-q ;;
 		-j|--job|--jobs)         kopt=-j ;;
 		-M|--cluster|--clusters) kopt=-M ;;
@@ -3279,6 +3317,7 @@ canon_opt() {
 		-L|--licenses|--license) kopt=-L ;;
 		-R|--reservation)        kopt=-R ;;
 		-S|--sort)               kopt=-S ;;
+		-o|--format)             kopt=-o ;;
 		*)                       kopt= ;;
 	esac
 }
@@ -3287,7 +3326,7 @@ canon_opt() {
 # so "sq -u fsill -u root" showed an empty queue beside a finished block full of
 # root's jobs: the two halves of the screen disagreeing about what they show.
 # Both tools accept the list form, so the error has somewhere to point.
-mark_filter() {                  # $1 the filter's own spelling, $2 as written
+mark_filter() {                  # $1 the filter's key, $2 as written
 	case " $seen " in
 		*" $1 "*) opt_hint "$1"
 			die "$2 sets the same filter twice; squeue would keep only the last one, so write one list instead, e.g. sq $1 $vlist" ;;
@@ -3295,50 +3334,168 @@ mark_filter() {                  # $1 the filter's own spelling, $2 as written
 	seen="$seen $1"
 }
 
+# ---- the checks on a value (N3) -------------------------------------------
+# A blank is a space, tab, newline, CR, VT or FF.  The character classes are
+# spelled out, as a range like [a-z] is the locale's in bash patterns
+blanks=$' \t\n\r\v\f'
+alnum=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+safe_chars="${alnum}._,:@%+/-"   # what an example taken from the user's own value may hold
+# %s is the only letter that is not a squeue field, and squeue reports it on
+# stderr with rc 0, so without the check below it renders as a column of "%s"
+squeue_letters=abcdefghijklmnopqrtuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
+# fmt_letters LIST: the field letter of each item of a column list ("%.10i,
+# j" -> "i j") into fletters; the first one squeue does not have into fbad,
+# and then rc 1
+fmt_letters() {
+	local f k
+	fletters= fbad=
+	for f in $(printf '%s' "$1" | tr ',' ' ' | tr -s ' '); do
+		k=$(printf '%s' "$f" | tr -cd 'A-Za-z' | cut -c1)
+		[ -n "$k" ] || continue
+		case $squeue_letters in *"$k"*) fletters="$fletters $k" ;; *) fbad=$k; return 1 ;; esac
+	done
+}
+# jobid_ok LIST: every comma item a job id squeue takes, N or N_T, digits
+# only, N in 1..2147483647 (squeue's int), T in 0..2147483647, neither with a
+# leading zero.  squeue reads "5abc" as 5, "123+1" as 123 and exits on 0,
+# where sacct reads "-j 0" and "-j ," as every job
+jobid_ok() {
+	local rest=$1, item
+	while [ -n "$rest" ]; do
+		item=${rest%%,*} rest=${rest#*,}
+		[[ $item =~ ^([123456789][0123456789]*)(_(0|[123456789][0123456789]*))?$ ]] || return 1
+		[ ${#BASH_REMATCH[1]} -le 10 ] && [ $((10#${BASH_REMATCH[1]})) -le 2147483647 ] || return 1
+		[ -z "${BASH_REMATCH[3]}" ] ||
+			{ [ ${#BASH_REMATCH[3]} -le 10 ] && [ $((10#${BASH_REMATCH[3]})) -le 2147483647 ]; } || return 1
+	done
+}
+# value_fault KEY VALUE: the first of N3's checks 3-5 VALUE fails, into
+# vfault: empty, hollow (only blanks and commas), sortblank, shape, jobid;
+# empty when it passes.  EMPTY and BLANK: an empty or hollow value is never
+# what anyone meant, and neither tool says so: "squeue -t ''" exits 0 with no
+# rows, so "sq -t ''" drew "queue is empty" with four jobs queued, and an
+# empty -j makes sacct return every job.  -S may be empty or a lone comma
+# (squeue's default order), but squeue refuses a blank in it.  SHAPE, for the
+# six whose values are Slurm entity names or ids: none begins with "-" (after
+# blanks), while a job name legally may, as may a state list, node list,
+# license, reservation or sort key
+value_fault() {
+	vfault=
+	case $2 in
+		'') [ "$1" = -S ] || vfault=empty ;;
+		*[!"$blanks",]*) ;;
+		*)  [ "$1" = -S ] || vfault=hollow ;;
+	esac
+	[ -z "$vfault" ] || return 0
+	case $1 in
+		-S) case $2 in *["$blanks"]*) vfault=sortblank ;; esac ;;
+		-u|-p|-A|-q|-j|-M)
+			case ${2#"${2%%[!"$blanks"]*}"} in -*) vfault=shape; return 0 ;; esac
+			[ "$1" != -j ] || jobid_ok "$2" || vfault=jobid ;;
+	esac
+}
+# value_checks KEY OPT VALUE ATTACHED: N3's checks 2-5 on the value of OPT
+# (as written), each refusal rc 2.  ATTACHED is 1 for a value written right
+# after a short letter, where a leading "=" is a typo (EQUALS): its example is
+# the user's own value when that is short, plain and itself passes, else the
+# option's own
+value_checks() {
+	local key=$1 opt=$2 val=$3 ex
+	if [ "$4" = 1 ] && [ "${val:0:1}" = = ]; then
+		ex=${val#=}
+		case $ex in ''|*[!"$safe_chars"]*) ex= ;; esac
+		[ ${#ex} -le 40 ] || ex=
+		[ -z "$ex" ] || { value_fault "$key" "$ex"; [ -z "$vfault" ]; } || ex=
+		[ -z "$ex" ] || [ "$key" != -o ] || fmt_letters "$ex" || ex=
+		opt_hint "$key"
+		die "$opt takes its value without '='; e.g. sq $opt ${ex:-$vex}"
+	fi
+	value_fault "$key" "$val"
+	[ -n "$vfault" ] || return 0
+	opt_hint "$key"
+	case $vfault:$key in
+		empty:-o)    die "$opt needs a column list, e.g. -o i,j,u" ;;
+		hollow:-o)   die "$opt needs a column list, not just blanks or commas; e.g. -o i,j,u" ;;
+		empty:*)     die "$opt needs $vnoun, e.g. sq $opt $vex" ;;
+		hollow:*)    die "$opt needs $vnoun, not just blanks or commas; e.g. sq $opt $vex" ;;
+		sortblank:*) die "$opt needs a sort key list without blanks; e.g. sq $opt $vex" ;;
+		shape:*)     die "$opt needs $vnoun, not '$(printf '%s' "$val" | scrub 40)'; e.g. sq $opt $vex" ;;
+		jobid:*)     die "$opt needs job ids like 12345 or 12345_4, not '$(printf '%s' "$val" | scrub 40)'; e.g. sq -j 12345" ;;
+	esac
+}
+# value_opt OPT KEY HAVE VALUE ATTACHED WORD NEXT...: one option that takes a
+# value, OPT as written, KEY its canon_opt, VALUE the one in the word when
+# HAVE is 1.  ROLE: else the NEXT word is its value, whatever it looks like,
+# so sq can never match a value against one of its own flags ("sq -u -x" used
+# to switch on --expand and leave -u bare, and the screen then blamed slurm
+# for a typo).  nshift: the words it took
+value_opt() {
+	local opt=$1 key=$2 have=$3 val=$4 attached=$5; shift 5
+	subpos=0 valued=1 nshift=1
+	if [ "$have" = 0 ]; then
+		[ $# -ge 2 ] || { opt_hint "$key"
+			[ "$key" != -o ] || die "$opt needs a column list, e.g. -o i,j,u"
+			die "$opt needs $vnoun, e.g. sq $opt $vex"; }
+		val=$2 nshift=2
+	fi
+	value_checks "$key" "$opt" "$val" "$attached"
+	case $key in
+		-o) fields=$val fsrc=-o; return ;;
+		-S) ;;                    # a second sort key refines the order, it contradicts nothing
+		*)  mark_filter "$key" "$opt" ;;   # REPEAT
+	esac
+	case $key in
+		-M) clustercause=${clustercause:-$opt} ;;
+		-j) j_seen=$val ;;        # `sq -j 5 6` means -j 5,6
+	esac
+	nf_add "$key" "$val" "$opt"
+}
+
 # ---- where a subcommand stands, and words sq cannot place ------------------
 # A subcommand is the first word after nothing but options that take no value
 # and at most one "--", so `alias sq='sq --me'` still reaches `sq log 123`,
 # while in `sq -n log` the word is a job name: the next word after an option
-# that takes a value is that value, whatever it looks like (ROLE, below).  Its
+# that takes a value is that value, whatever it looks like (ROLE, above).  Its
 # name is matched exactly as written, never abbreviated or case-folded.
 # Every other bare word is a usage error: squeue takes none, and used to answer
 # one with a fake "slurm unreachable".  The loop below keeps what this needs:
 # subpos stays 1 while a subcommand may still stand at the next word (valued
-# says whether an option that takes a value is what ended that), and
-# after_j / after_cluster hold the word before it when that was a -j value or
-# an unparsed short-option cluster (-ao); clustercause the first -M, --cluster(s),
-# --federation or --sibling, which both subcommands refuse.
+# says whether an option that takes a value is what ended that), after_j
+# holds the word before it when that was a -j value, and clustercause the
+# first -M, --cluster(s), --federation, --sib or --sibling, which both
+# subcommands refuse.
 subcommands="log job"
 is_subcommand() { case " $subcommands " in *" $1 "*) return 0 ;; esac; return 1; }
-subpos=1 valued=0 after_j= after_cluster= j_seen= cluster_seen= clustercause=
-# the hint for a word that is no subcommand: a fixed table, never a guess
-# from edit distance.  The long options sq knows, for one written without "--"
-long_names=" me all hide array noconvert noheader priority local federation sibling
+subpos=1 valued=0 after_j= j_seen= clustercause=
+# every long name sq knows, by what it does with one written with a single
+# dash (N2a), and the hint for a bare word that is one: a fixed table, never
+# a guess from edit distance.  long_refused: the names sq refuses, by name
+# (the first six) or as unknown (squeue 23.11's other six)
+long_valued=" user users partition partitions account accounts qos job jobs cluster clusters
+	name state states node nodes nodelist license licenses reservation sort format reserve "
+long_flags=" me all hide array noconvert noheader priority local federation sibling sib
 	expand no-recent no-bell color colour no-color no-colour compact full center centre
-	center-all centre-all reserve format help user users partition partitions account
-	accounts qos job jobs cluster clusters name state states node nodes nodelist
-	license licenses reservation sort "
-long_names=${long_names//[$'\t\n']/ }
+	center-all centre-all help "
+long_refused=" steps step iterate json yaml Format autocomplete long start usage verbose version "
+long_valued=${long_valued//[$'\t\n']/ } long_flags=${long_flags//[$'\t\n']/ }
+long_names="$long_flags$long_valued"
 stray() {   # stray WORD: a word sq cannot place, refused with the hint that fits
-	local w=$1 shown low hint= ex= i
+	local w=$1 shown low hint=
 	case $w in *[![:space:]]*) ;; *) die "an empty argument (an unset variable?)" ;; esac
 	shown=$(printf '%s' "$w" | scrub 40)
-	if [ -n "$after_cluster" ]; then   # -ao i: is i -o's value, or -a's?
-		for ((i = 1; i < ${#after_cluster}; i++)); do ex="$ex -${after_cluster:i:1}"; done
-		die "cannot tell what '$shown' belongs to after '$(printf '%s' "$after_cluster" | scrub 40)'; write the options apart, e.g.$(printf '%s' "$ex" | scrub) $shown"
-	fi
 	low=${w,,}
 	if is_subcommand "$low"; then hint="sq $low"
 	elif is_subcommand "${low%s}"; then hint="sq ${low%s}"
 	elif [ "$low" = help ]; then hint="sq -h"
 	elif case $long_names in *" $low "*) true ;; *) false ;; esac; then hint="sq --$low"
-	elif [ -n "$after_j" ] && [[ $w =~ ^[0-9]+([_+][0-9]+)?$ ]]; then hint="sq -j $after_j,$w"
+	elif [ -n "$after_j" ]; then   # only where the list would be a valid -j value
+		! jobid_ok "$after_j,$w" || hint="sq -j $after_j,$w"
 	elif [[ $w =~ ^[0-9]+$ ]]; then hint="sq job $w"
 	fi
 	die "'$shown' is not a subcommand; sq -h lists them${hint:+ (did you mean $hint?)}"
 }
 place_word() {   # place_word WORD REST...: run the subcommand WORD names, else refuse it
-	if [ -z "$after_cluster" ] && is_subcommand "$1"; then
+	if is_subcommand "$1"; then
 		# both subcommands refuse a cluster selection, also where they would
 		# otherwise only be told to come first
 		[ -z "$clustercause" ] || "$1_refuse_cluster" "$clustercause"
@@ -3350,66 +3507,224 @@ place_word() {   # place_word WORD REST...: run the subcommand WORD names, else 
 	stray "$1"
 }
 
-while [ $# -gt 0 ]; do
-	after_j=$j_seen after_cluster=$cluster_seen; j_seen= cluster_seen=
+show_help() { awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; exit 0; }
+
+# refused_long WORD: the refusal of a long option sq refuses by name, if WORD
+# is one.  A squeue format flag beats SQUEUE_FORMAT, so it would silently
+# replace the nonce-framed format below and collapse every record into one
+# field.  squeue ignores SQUEUE_FORMAT in step mode and has no step-format env
+# var, so the framing cannot be delivered there (the "=" spelling has to be
+# here too: without it --steps=x walked past this guard into exactly the mode
+# it exists to refuse).  --iterate reprints the queue every N seconds, so a
+# collector would run until SQ_TIMEOUT and the screen would read "no response
+# after 5s".  --json and --yaml answer with one whole document instead of
+# rows, so the framing never arrives; both take an OPTIONAL value, so the "="
+# spelling has to be here too
+refused_long() {
 	case $1 in
-		-o|--format) [ $# -ge 2 ] || die "$1 needs a column list, e.g. -o i,j,u"
-			fields=$2; fsrc=-o; subpos=0 valued=1; shift 2 ;;
-		-c|--center|--centre) center=1; shift ;;
-		-C|--center-all|--centre-all) center=2; shift ;;
-		-x|--expand) fold=0; shift ;;
-		--no-recent) recent=0; shift ;;
-		--no-bell) bell=0; shift ;;
-		--color|--colour) color=1; shift ;;
-		--no-color|--no-colour) color=0; shift ;;
+		--Format|--Format=*)
+			die "$(printf '%s' "$1" | scrub 40) would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
+		--step|--step=*|--steps|--steps=*)
+			die "$(printf '%s' "${1%%=*}" | scrub 40) lists job steps, which sq cannot frame safely; sq shows jobs" ;;
+		--iterate|--iterate=*)
+			die "$(printf '%s' "$1" | scrub 40) repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" ;;
+		--json|--json=*|--yaml|--yaml=*)
+			die "${1%%=*} asks squeue for a machine-readable document, which sq cannot render; run 'squeue ${1%%=*}' for that" ;;
+	esac
+}
+
+# char_name TEXT: TEXT's first character as a refusal names it, read as UTF-8
+# whatever the locale: '=' for printable ASCII, "a space", "a tab", U+XXXX for
+# any other character, "byte 0xNN" for a byte that starts none
+char_name() {
+	local -a b; local cp n i
+	b=($(printf '%s' "$1" | LC_ALL=C od -An -tu1 -N4 -v))
+	cp=${b[0]}
+	if [ "$cp" -lt 128 ]; then
+		case $cp in
+			32) printf 'a space' ;; 9) printf 'a tab' ;;
+			*)  if [ "$cp" -gt 32 ] && [ "$cp" -lt 127 ]; then printf "'%s'" "${1:0:1}"
+			    else printf 'U+%04X' "$cp"; fi ;;
+		esac
+		return
+	fi
+	if   [ "$cp" -ge 194 ] && [ "$cp" -le 223 ]; then n=1 cp=$((cp & 31))
+	elif [ "$cp" -ge 224 ] && [ "$cp" -le 239 ]; then n=2 cp=$((cp & 15))
+	elif [ "$cp" -ge 240 ] && [ "$cp" -le 244 ]; then n=3 cp=$((cp & 7))
+	else n=0
+	fi
+	for ((i = 1; i <= n; i++)); do
+		[ -n "${b[i]-}" ] && [ "${b[i]}" -ge 128 ] && [ "${b[i]}" -le 191 ] || { n=0; break; }
+		cp=$(( (cp << 6) | (b[i] & 63) ))
+	done
+	# no overlong form, surrogate or code point beyond U+10FFFF
+	case $n in
+		2) [ "$cp" -ge 2048 ] && { [ "$cp" -lt 55296 ] || [ "$cp" -gt 57343 ]; } || n=0 ;;
+		3) [ "$cp" -ge 65536 ] && [ "$cp" -le 1114111 ] || n=0 ;;
+	esac
+	if [ "$n" -gt 0 ]; then printf 'U+%04X' "$cp"; else printf 'byte 0x%02X' "${b[0]}"; fi
+}
+
+# short_word WORD NEXT...: a word "-X…" that is no long option (N2), by its
+# first letter; nshift the words it took.  The checks read the whole word,
+# every echo is the word scrubbed and cut to 40 characters
+short_word() {
+	local w=$1 c=${1:1:1} rest=${1:2} name base shown body ex i
+	nshift=1
+	shown=$(printf '%s' "$w" | scrub 40)
+	# N2a, first: a long name written with one dash, "-partition" for
+	# "--partition", is refused, for every long name sq knows; it would
+	# otherwise be -p with the value "artition"
+	name=${w:1} base=${w:1}; base=${base%%=*}
+	case $base in ''|*[!"$alnum"-]*) ;; *)
+		if case $long_valued in *" $base "*) true ;; *) false ;; esac; then
+			die "'$shown' is not an option; did you mean -$shown?"
+		elif case $long_flags in *" $base "*) true ;; *) false ;; esac; then
+			[ "$name" = "$base" ] || die "'$shown' is not an option; did you mean --$base? (it takes no value)"
+			die "'$shown' is not an option; did you mean -$shown?"
+		elif case $long_refused in *" $base "*) true ;; *) false ;; esac; then
+			refused_long "-$w"
+			die "$(printf '%s' "--$base" | scrub 40) is not one of the long options sq forwards; sq -h lists them"
+		fi ;;
+	esac
+	case $c in
+		# squeue's filters and sq's column list: the rest of the word is the
+		# value, else the next word
+		[upAUqMntwLRSjo])
+			canon_opt "-$c"
+			if [ -n "$rest" ]; then value_opt "-$c" "$kopt" 1 "$rest" 1 "$@"
+			else value_opt "-$c" "$kopt" 0 "" 0 "$@"; fi
+			return ;;
+		# refused, and they take a value, so they never ask for one: squeue's
+		# -O replaces sq's format, -i reprints, -s lists steps (see refused_long)
+		O) die "$shown would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
+		i) die "$shown repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" ;;
+		s) die "$(printf '%s' "${w%%=*}" | scrub 40) lists job steps, which sq cannot frame safely; sq shows jobs" ;;
+	esac
+	if [ -z "$rest" ]; then           # one letter alone
+		case $c in
+			a|r|P) nf_add "-$c" "" "-$c"; return ;;
+			c) center=1; return ;;
+			C) center=2; return ;;
+			x) fold=0; return ;;
+			h) show_help ;;
+			# squeue's own long format replaces the framed one
+			l) die "-l replaces the output format sq parses; sq -o i,j,u picks columns" ;;
+			# the parameter dump contains SQUEUE_FORMAT itself, nonce and all, so
+			# one dump line parses as a record: a real job vanishes from the
+			# table and the counts lie
+			v) die "-v prints squeue's own parameters into the output sq parses" ;;
+			V) die "-V asks squeue for its version; run 'squeue -V' for that" ;;
+		esac
+	fi
+	# N2b: "=" right after a letter that takes no value
+	case $c in [arPcCxhlvV])
+		if [ "${rest:0:1}" = = ]; then
+			case $c in l|v|V) short_word "-$c" ;; esac
+			die "-$c takes no value; write it on its own, e.g. sq -$c"
+		fi ;;
+	esac
+	# N2c: no option letter at all
+	case $alnum in *"$c"*) ;; *) die "'$shown' holds $(char_name "${w:1}"), which is not an option letter" ;; esac
+	# N2d: a letter or digit squeue has but sq does not forward, or none has;
+	# before a subcommand, the subcommand's own refusal
+	if [ -z "$rest" ]; then
+		[ $# -lt 2 ] || ! is_subcommand "$2" || { subpos=0; place_word "${@:2}"; }
+		die "$shown is not one of the short options sq forwards; sq -h lists them"
+	fi
+	# N2e: letters run together are refused, whatever follows the first: a
+	# split table would drift from squeue's, and -ah is squeue's no-header
+	# habit, not a request for help.  Where every letter but the last takes no
+	# value and a bare word follows (-ao i, -xn log), the word may be the last
+	# letter's value or a subcommand, which SUBCMD-v3 answers in its own words
+	body=${w:1}
+	if [ $# -ge 2 ] && [ -n "$2" ] && [[ $2 == *[!"$blanks"]* ]] && [ "${2:0:1}" != - ] &&
+	   [[ ${body%?} != *[!arPcCx]* ]] && [[ ${body: -1} == [arPcCxupAUqMntwLRSjo] ]]; then
+		ex=; for ((i = 0; i < ${#body}; i++)); do ex="$ex -${body:i:1}"; done
+		die "cannot tell what '$(printf '%s' "$2" | scrub 40)' belongs to after '$shown'; write the options apart, e.g.$(printf '%s' "$ex" | scrub) $(printf '%s' "$2" | scrub 40)"
+	fi
+	die "'$shown' runs options together; write each option as its own word"
+}
+
+# long_word WORD NEXT...: a word "--…" (sq's own long options and the closed
+# list of squeue's); nshift the words it took
+long_word() {
+	local opt=${1%%=*} have=0 val=
+	nshift=1
+	case $1 in *=*) have=1 val=${1#*=} ;; esac
+	case $1 in
+		--center|--centre) center=1; return ;;
+		--center-all|--centre-all) center=2; return ;;
+		--expand) fold=0; return ;;
+		--no-recent) recent=0; return ;;
+		--no-bell) bell=0; return ;;
+		--color|--colour) color=1; return ;;
+		--no-color|--no-colour) color=0; return ;;
 		--compact|--full)       # repeating one is harmless, giving both is not
 			[ -z "$modeflag" ] || [ "$modeflag" = "$1" ] \
 				|| die "--compact and --full contradict each other; give one of them"
-			modeflag=$1; shift ;;
+			modeflag=$1; return ;;
 		--reserve|--reserve=*)  # the value attached, or the next word
 			subpos=0 valued=1
 			case $1 in
-				--reserve=*) reserve=${1#*=}; shift ;;
+				--reserve=*) reserve=${1#*=} ;;
 				*) [ $# -ge 2 ] || die "--reserve needs a number of lines, e.g. sq --reserve 2"
-				   reserve=$2; shift 2 ;;
+				   reserve=$2 nshift=2 ;;
 			esac
 			case $reserve in
 				''|*[!0-9]*) die "--reserve needs a number of lines, not '$(printf '%s' "$reserve" \
 					| scrub 40)'; e.g. sq --reserve 2" ;;
-			esac ;;
-		-h|--help) awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
-		# a squeue format flag beats SQUEUE_FORMAT, so it would silently replace
-		# the nonce-framed format below and collapse every record into one field
-		-O|-O?*|--Format|--Format=*|--format=*|-o?*)
-			die "$(printf '%s' "$1" | scrub 40) would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
-		-l)         # squeue's own long format replaces the framed one
-			die "-l replaces the output format sq parses; sq -o i,j,u picks columns" ;;
-		-v)         # the parameter dump contains SQUEUE_FORMAT itself, nonce and
-			    # all, so one dump line parses as a record: a real job
-			    # vanishes from the table and the counts lie
-			die "-v prints squeue's own parameters into the output sq parses" ;;
-		-V)         die "-V asks squeue for its version; run 'squeue -V' for that" ;;
-		-s|-s?*|--step|--step=*|--steps|--steps=*)   # squeue ignores SQUEUE_FORMAT in step mode and has
-		              # no step-format env var, so the framing cannot be delivered there.
-		              # The "=" spelling has to be here too: without it --steps=x walked
-		              # past this guard into exactly the mode it exists to refuse
-			die "$(printf '%s' "${1%%=*}" | scrub 40) lists job steps, which sq cannot frame safely; sq shows jobs" ;;
+			esac
+			return ;;
+		--help) show_help ;;
 		--help=*) die "--help takes no value; write it on its own, e.g. sq --help" ;;
 		# sq's own long flags take no value: "--color=never" is what every other
 		# CLI accepts, and squeue answered it with a fake "slurm unreachable"
 		# banner.  --me is here too, because --me IS the value.
 		--me=*|--expand=*|--no-recent=*|--no-bell=*|--color=*|--colour=*|--no-color=*|--no-colour=*|--center=*|--centre=*|--center-all=*|--centre-all=*|--compact=*|--full=*)
 			die "${1%%=*} takes no value; write it on its own, e.g. sq ${1%%=*}" ;;
-		# -i reprints the queue every N seconds, so a collector would run until
-		# SQ_TIMEOUT and the screen would read "no response after 5s"
-		-i|-i?*|--iterate|--iterate=*)
-			die "$(printf '%s' "$1" | scrub 40) repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" ;;
-		# squeue ignores SQUEUE_FORMAT in these modes and answers with one whole
-		# document instead of rows, so the framing never arrives and the screen
-		# could only say "queue output unreadable".  Both take an OPTIONAL value,
-		# so the "=" spelling has to be here too, exactly as for --steps=
-		--json|--json=*|--yaml|--yaml=*)
-			die "${1%%=*} asks squeue for a machine-readable document, which sq cannot render; run 'squeue ${1%%=*}' for that" ;;
+		--me)   # a user filter carrying its own value, so it collides with -u
+			mark_filter -u "$1"; nf_add -u "" --me; return ;;
+	esac
+	refused_long "$1"
+	# THE CLOSED LIST.  squeue parses its long options with getopt_long, which
+	# honours any unambiguous ABBREVIATION, so every guard above was walkable:
+	# "--iter=5" reached -i and stalled for the whole timeout, "--part="
+	# reached an empty -p and drew an empty queue, "--forma=%i" reached -o.  sq
+	# cannot see that without carrying squeue's own option table AND getopt's
+	# ambiguity rules, which drift between releases, so it carries the
+	# opposite: the full names it knows, and nothing else, and passes each on
+	# in its short spelling.  canon_opt holds the value-taking ones; these are
+	# the flags that take none.  Enumerated from squeue 23.11's --help, its
+	# man page and every prefix of every name probed against the binary
+	# (--sib is a name of its own there).  Left off deliberately: --long and
+	# --start replace SQUEUE_FORMAT, --verbose prints its parameters into the
+	# stream, --version/--usage/--autocomplete answer instead of querying.
+	canon_opt "$opt"
+	if [ -n "$kopt" ]; then value_opt "$opt" "$kopt" "$have" "$val" 0 "$@"; return; fi
+	case $opt in
+		--all|--hide|--array|--noconvert|--noheader|--priority|--federation|--local|--sibling|--sib)
+			# none of them takes a value, and "--all=x" forwarded raw came back
+			# as a fake outage
+			[ "$have" = 0 ] || die "$opt takes no value; write it on its own, e.g. sq $opt" ;;
+		*) die "$(printf '%s' "$opt" | scrub 40) is not one of the long options sq forwards; sq -h lists them" ;;
+	esac
+	case $opt in
+		--federation|--sibling|--sib) clustercause=${clustercause:-$opt} ;;
+	esac
+	case $opt in
+		--noheader) ;;            # squeue's -h, which sq always passes
+		--all) nf_add -a "" "$opt" ;;
+		--array) nf_add -r "" "$opt" ;;
+		--priority) nf_add -P "" "$opt" ;;
+		--sib|--sibling) nf_add --sibling "" "$opt" ;;
+		*) nf_add "$opt" "" "$opt" ;;
+	esac
+}
+
+while [ $# -gt 0 ]; do
+	after_j=$j_seen; j_seen=
+	case $1 in
 		# "--" ends sq's options: what follows is a subcommand or nothing, so it
 		# can neither carry a value nor smuggle an option past the guards above.
 		# The filters whose value may legitimately begin with "-" (-n -t -w -L
@@ -3418,97 +3733,13 @@ while [ $# -gt 0 ]; do
 			# a wrapper writing `sq -- "$@"` with nothing to pass produces a
 			# bare "--", so swallow that
 			[ $# -gt 0 ] || break
-			after_j= after_cluster=; place_word "$@" ;;
+			after_j=; place_word "$@" ;;
 		''|-|[!-]*)   # a bare word: a subcommand where one may stand, else refused
 			place_word "$@" ;;
-		--me)   # a user filter carrying its own value, so it collides with -u
-			mark_filter -u "$1"; args+=("$1"); shift ;;
-		*)
-			# ROLE, for every value-taking option sq forwards: the NEXT TOKEN IS
-			# ITS VALUE, whatever it looks like, so sq can never match a value
-			# against one of its own flags.  "sq -u -x" used to switch on
-			# --expand and leave -u bare, and the screen then blamed slurm for a
-			# typo.  A value with nothing after it is still a usage error, and a
-			# value is still forwarded exactly as written.
-			opt=$1; val=; have=0
-			case $opt in                        # a value may be attached already
-				--*=*)             val=${opt#*=}; have=1; opt=${opt%%=*} ;;
-				-[upAqjMntwLRS]?*) val=${opt#??}; have=1; opt=${opt:0:2} ;;
-			esac
-			canon_opt "$opt"
-			# THE CLOSED LIST.  squeue parses its long options with getopt_long,
-			# which honours any unambiguous ABBREVIATION, so every guard above was
-			# walkable: "--iter=5" reached -i and stalled for the whole timeout,
-			# "--part=" reached an empty -p and drew an empty queue, "--forma=%i"
-			# reached -o.  sq cannot see that without carrying squeue's own option
-			# table AND getopt's ambiguity rules, which drift between releases, so
-			# it carries the opposite: the full names it knows, and nothing else.
-			# canon_opt above holds the value-taking ones; these are the flags that
-			# take none.  Enumerated from squeue 23.11's --help, its man page and
-			# every prefix of every name probed against the binary.  Left off
-			# deliberately: --long and --start replace SQUEUE_FORMAT, --verbose
-			# prints its parameters into the stream, --version/--usage/--autocomplete
-			# answer instead of querying, --json/--yaml are refused by name above,
-			# and --format/--help/--me/--iterate/--steps are read by sq itself.
-			if [ -z "$kopt" ]; then
-				case $opt in
-					--all|--hide|--array|--noconvert|--noheader|\
-					--priority|--federation|--local|--sibling)
-						# the name is on the list, but none of them takes a
-						# value, and "--all=x" forwarded raw came back as a
-						# fake outage
-						[ "$1" = "$opt" ] || die "$opt takes no value; write it on its own, e.g. sq $opt"
-						case $opt in --federation|--sibling) clustersel=1; clustercause=${clustercause:-$opt} ;; esac ;;
-					--*) die "$(printf '%s' "$opt" | scrub 40) is not one of the long options sq forwards; sq -h lists them" ;;
-					# a short option squeue may know, forwarded as written: no
-					# subcommand after it, and after letters run together (-ao)
-					# sq cannot tell whose value the next word is
-					*)  subpos=0
-					    case $1 in -[A-Za-z][A-Za-z]*) cluster_seen=$1 ;; esac ;;
-				esac
-				args+=("$1"); shift; continue
-			fi
-			subpos=0 valued=1
-			case $kopt in -M) clustercause=${clustercause:-$opt} ;; esac
-			[ $have -eq 1 ] || [ $# -ge 2 ] || { opt_hint "$kopt"
-				die "$opt needs $vnoun, e.g. sq $opt $vex"; }
-			[ $have -eq 1 ] || val=$2
-			# EMPTY, for every filter: an empty value is never what anyone meant,
-			# and neither tool says so.  "squeue -t ''" exits 0 with no rows and
-			# no message, so "sq -t ''" drew "queue is empty" with four jobs
-			# queued - the same lie the six were taught to refuse, reaching the
-			# screen through the five filters that still forwarded it.  sacct is
-			# no better: an empty -u exits 1 with zero bytes of stderr, and an
-			# empty -j quietly returns every job.  -S is excluded: an empty sort
-			# key only leaves squeue's default order, and sq -S "$SORT" with
-			# SORT unset is a fair thing for a wrapper to write.
-			case $kopt in
-				-S) ;;
-				*)  [ -n "$val" ] || { opt_hint "$kopt"
-						die "$opt needs $vnoun, e.g. sq $opt $vex"; } ;;
-			esac
-			# SHAPE, only for the six whose values are Slurm entity names or
-			# ids: no user, partition, account, QoS, job id or cluster begins
-			# with "-", while a job name legally may (and a state list, node
-			# list, license or reservation is forwarded as written), as may
-			# -S/--sort's key, which is why none of them is in this set.
-			case $kopt in
-				-u|-p|-A|-q|-j|-M)
-					case $val in
-						-*) opt_hint "$kopt"
-							die "$opt needs $vnoun, not '$(printf '%s' "$val" \
-								| scrub 40)'; e.g. sq $opt $vex" ;;
-					esac ;;
-			esac
-			# REPEAT, for every filter and not only the six: squeue keeps the LAST
-			# of a repeated filter while sacct unions them, so "-t R -t PD" showed
-			# "0 running" with four jobs running.  -S is excluded: a second sort
-			# key refines the order, it does not contradict a filter.
-			case $kopt in -S) ;; *) mark_filter "$kopt" "$opt" ;; esac
-			case $kopt in -j) j_seen=$val ;; esac   # `sq -j 5 6` means -j 5,6
-			if [ $have -eq 1 ]; then args+=("$1"); shift
-			else args+=("$1" "$2"); shift 2; fi ;;
+		--*) long_word "$@" ;;
+		*)   short_word "$@" ;;
 	esac
+	shift "$nshift"
 done
 
 # the mode: a flag beats SQ_COMPACT, and anything else in SQ_COMPACT means
@@ -3549,27 +3780,16 @@ unset SQUEUE_FORMAT SQUEUE_FORMAT2 SINFO_FORMAT   # each collector exports or pa
                                      # one it needs, so an inherited setting can never
                                      # win over ours
 
-# %s is the only letter that is not a squeue field, and squeue reports it on
-# stderr with rc 0, so without this check it renders as a column of "%s"
-squeue_letters=abcdefghijklmnopqrtuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
-
-# normalise "%.10i, j" -> "i j"
-fl=$(printf '%s' "$fields" | tr ',' ' ' | tr -s ' ')
 # qfield appends one field to the queue format and counts it, so a hidden field
 # is found by the position recorded as it is added, never by arithmetic on
 # what came before it
 fmt= qfields=0
 qfield() { fmt="$fmt%$1$nonce"; qfields=$((qfields + 1)); }
 qfield i; keys=""                # hidden leading field: the job id anchors a record
-for f in $fl; do                 # start even when the user did not ask for it
-	k=$(printf '%s' "$f" | tr -cd 'A-Za-z' | cut -c1)
-	[ -n "$k" ] || continue
-	case $squeue_letters in
-		*"$k"*) ;;
-		*) die "%$k is not a squeue field letter (in $fsrc '$(printf '%s' "$fields" | scrub 40)')" ;;
-	esac
-	qfield "$k"; keys="$keys$k,"
-done
+                                 # start even when the user did not ask for it
+fmt_letters "$fields" ||
+	die "%$fbad is not a squeue field letter (in $fsrc '$(printf '%s' "$fields" | scrub 40)')"
+for k in $fletters; do qfield "$k"; keys="$keys$k,"; done
 qfield t; qpos_state=$qfields        # hidden trailing fields: state, limit, start;
 qfield l; qfield S
 keys=${keys%,}                       # the last nonce leaves an empty field that only
@@ -3577,24 +3797,98 @@ keys=${keys%,}                       # the last nonce leaves an empty field that
 # COMPACT sorts jobs by their reason code and their elapsed time, which must not
 # depend on the columns shown, so it asks for both itself; FULL never reads them
 [ "$compact" = 0 ] || { qfield r; qfield M; }
+
+# ---- squeue's environment, read as the flags it stands for (N4) ------------
+# squeue 23.11 reads these itself: the flag ones when set at all (empty too)
+# before its argument loop, the filters after it, each only where no flag set
+# that filter.  sq reads them the same way into the NF, in squeue's order:
+# the pre-loop ones, argv's, then the post-loop ones, so squeue, sacct and the
+# caption all see one filter set, and then unsets them, so squeue sees the NF
+# alone.  SLURM_CLUSTERS stays exported: sinfo and scontrol read it, and
+# squeue reads it itself, before the loop; an argv -M then wins.  SQUEUE_SORT
+# makes no entry, sq's own -S t,i stands.  An unknown SQUEUE_* name is inert
+# in squeue and left alone.  Subcommands and -h never get here.
+nf_key=() nf_val=() nf_src=()
+nf_env() { nf_key+=("$1"); nf_val+=("$2"); nf_src+=("$3"); }
+argv_sets() { case " $seen " in *" $1 "*) return 0 ;; esac; return 1; }   # argv_sets KEY
+is_set() { [ -n "${!1+set}" ]; }                                              # is_set VAR
+[ -z "${SQUEUE_ALL+set}" ]        || nf_env -a "" SQUEUE_ALL
+[ -z "${SQUEUE_ARRAY+set}" ]      || nf_env -r "" SQUEUE_ARRAY
+[ -z "${SLURM_CLUSTERS+set}" ] || argv_sets -M || nf_env -M "$SLURM_CLUSTERS" SLURM_CLUSTERS
+[ -z "${SQUEUE_FEDERATION+set}" ] || nf_env --federation "" SQUEUE_FEDERATION
+[ -z "${SQUEUE_LOCAL+set}" ]      || nf_env --local "" SQUEUE_LOCAL
+[ -z "${SQUEUE_PRIORITY+set}" ]   || nf_env -P "" SQUEUE_PRIORITY
+if [ -n "${SQUEUE_SIB+set}" ]; then nf_env --sibling "" SQUEUE_SIB
+elif [ -n "${SQUEUE_SIBLING+set}" ]; then nf_env --sibling "" SQUEUE_SIBLING
+fi
+for ((i = 0; i < ${#nfk[@]}; i++)); do nf_env "${nfk[i]}" "${nfv[i]}" "${nfs[i]}"; done
+env_filters="SQUEUE_ACCOUNT:-A SQUEUE_NAMES:-n SQUEUE_LICENSES:-L SQUEUE_PARTITION:-p SQUEUE_QOS:-q SQUEUE_STATES:-t SQUEUE_USERS:-u"
+for kv in $env_filters; do
+	var=${kv%%:*} key=${kv#*:}
+	! is_set "$var" || argv_sets "$key" || nf_env "$key" "${!var}" "$var"
+done
+# D4: squeue 23.11 (24.05, 24.11 too) reads SQUEUE_LICENSES only without -p,
+# and then lets it replace -L; Slurm's master reads it as -L's fallback, so
+# under either flag the variable means different things in different versions
+if [ -n "${SQUEUE_LICENSES+set}" ]; then
+	for ((i = 0; i < ${#nfk[@]}; i++)); do
+		case ${nfk[i]} in -L|-p)
+			die "SQUEUE_LICENSES together with ${nfs[i]} means different things in different Slurm versions (23.11 ignores it under -p and lets it beat -L); unset it, or give the licenses as -L" ;;
+		esac
+	done
+fi
+# an empty or hollow filter makes squeue build an empty list and silently
+# show no job, so the variable stops sq, as the flag's value would: each that
+# made an entry, and SLURM_CLUSTERS whenever it is set, as squeue (sinfo and
+# scontrol too) reads it even under -M and exits on a cluster it does not know
+for kv in SLURM_CLUSTERS:-M $env_filters; do
+	var=${kv%%:*} key=${kv#*:}
+	case $var in
+		SLURM_CLUSTERS) is_set "$var" || continue ;;
+		*) is_set "$var" && ! argv_sets "$key" || continue ;;
+	esac
+	value_fault "$key" "${!var}"
+	[ -n "$vfault" ] || continue
+	opt_hint "$key"
+	case $vfault in
+		shape) die "$var needs $vnoun, not '$(printf '%s' "${!var}" | scrub 40)'; unset it, or set one, e.g. $var=$vex" ;;
+		*) n=${vnoun#a }; die "$var is set but holds no ${n#an }; unset it, or set one, e.g. $var=$vex" ;;
+	esac
+done
+unset SQUEUE_ALL SQUEUE_ARRAY SQUEUE_FEDERATION SQUEUE_LOCAL SQUEUE_PRIORITY SQUEUE_SIB SQUEUE_SIBLING \
+	SQUEUE_ACCOUNT SQUEUE_NAMES SQUEUE_LICENSES SQUEUE_PARTITION SQUEUE_QOS SQUEUE_STATES SQUEUE_USERS \
+	SQUEUE_SORT
+# What squeue gets (N5): each entry in NF order, in one spelling: a filter as
+# its short letter and the value as the next word (-U as -A, --me as itself),
+# -j as --jobs=VALUE, as squeue's -j takes its value only attached, a flag as
+# -a -r -P or its long name.  No abbreviation ever reaches squeue
+args=()
+for ((i = 0; i < ${#nf_key[@]}; i++)); do
+	case ${nf_src[i]}:${nf_key[i]} in
+		SLURM_CLUSTERS:*) ;;
+		--me:*) args+=(--me) ;;
+		*:-j)   args+=("--jobs=${nf_val[i]}") ;;
+		*:-a|*:-r|*:-P|*:--*) args+=("${nf_key[i]}") ;;
+		*)      args+=("${nf_key[i]}" "${nf_val[i]}") ;;
+	esac
+done
+
 # The caller's own running jobs show the memory they use in MEM (see "memory
 # use" below), which needs MEM on screen and no cluster selection: sstat has no
 # -M, so under one it would ask the local cluster about another's ids.  Then
 # the queue also brings each row's unique job id (%A, what the allocation call
 # and sstat name a job by, never 123_4) and numeric uid (%U, "own" is the uid
 # that `id -u` names, never a login compared as text), hidden and last.
-# SLURM_CLUSTERS counts even when empty: squeue then fails with rc 1 ("No
-# cluster '' known by database."), so there are no rows to measure either.
-# SQUEUE_FEDERATION, SQUEUE_SIB and SQUEUE_SIBLING are squeue's --federation
-# and --sibling when set at all, empty too (squeue 23.11 checks only that).
-# FederationParameters=fed_display in slurm.conf does the same and is not
-# detected: it would take a scontrol call on every refresh.
+# A selection is an NF entry -M (SLURM_CLUSTERS too), --federation or
+# --sibling, from argv or squeue's environment (SQUEUE_FEDERATION, SQUEUE_SIB
+# and SQUEUE_SIBLING count when set at all, empty too, as squeue 23.11 checks
+# only that).  FederationParameters=fed_display in slurm.conf does the same
+# and is not detected: it would take a scontrol call on every refresh.
 memon=0 qpos_jobid= qpos_uid=
 case ",$keys," in *,m,*) memon=1 ;; esac
-case " $seen " in *" -M "*) memon=0 ;; esac
-[ "$clustersel" = 0 ] || memon=0
-[ -z "${SLURM_CLUSTERS+set}" ] || memon=0
-[ -z "${SQUEUE_FEDERATION+set}${SQUEUE_SIB+set}${SQUEUE_SIBLING+set}" ] || memon=0
+for ((i = 0; i < ${#nf_key[@]}; i++)); do
+	case ${nf_key[i]} in -M|--federation|--sibling) memon=0 ;; esac
+done
 [ "$memon" = 0 ] || { qfield A; qpos_jobid=$qfields; qfield U; qpos_uid=$qfields; }
 
 cols=${SQ_WIDTH:-${COLUMNS:-}}
@@ -3759,50 +4053,42 @@ fi
 # ---- the recently-finished block's source --------------------------------
 # sacct and squeue spell the same letters differently and several take a value
 # on one side but not the other (-p partition vs --parsable, -s steps vs
-# --state, -S sort vs --starttime), so nothing is forwarded that is not on this
-# closed list.  An arg that changes WHICH jobs squeue lists is mapped to
-# sacct's, else the block falls back to squeue: dropped, it would leave the
-# queue table and this block disagreeing about what they show (--all, --hide
-# and --local fall back; sacct's --all would mean every user, not every
-# partition).  An arg that only changes how squeue shows its jobs is mapped
-# or dropped (Franz, 2026-10-22): --array (-r) is sacct's --array, which lists
-# a pending array's remainder one row per task as squeue's does, and so is
-# SQUEUE_ARRAY, which squeue reads as --array when set at all; --noconvert and
-# --priority (-P) change nothing about a finished job and are dropped.
+# --state, -S sort vs --starttime), so sacct gets nothing but what this table
+# maps, from the NF.  An entry that changes WHICH jobs squeue lists is mapped
+# to sacct's, else the block falls back to squeue: dropped, it would leave
+# the queue table and this block disagreeing about what they show.  --local
+# is sacct's --local and --federation its --federation (the same meaning in
+# both); -a/--all and --hide only choose whether squeue shows the jobs of
+# hidden partitions and of partitions closed to the caller's groups, which
+# sacct always shows, so they are dropped, as is what only changes how squeue
+# shows its jobs (Franz, 2026-10-22): --noconvert, --priority (-P) and the
+# sort (-S); --array (-r, SQUEUE_ARRAY) is sacct's --array, which lists a
+# pending array's remainder one row per task as squeue's does.
 # -u maps to -u and then suppresses -a, because sacct takes the LAST of the two
 # and "-u x -a" quietly means "everybody".  A state filter (-t) is the queue's
 # alone: the block shows every finished job whatever it says, so sacct never
 # gets it (and needs no fallback for it), and the fallback's own -t all, last,
-# overrides it.
-sargs=(); sfilt=; sskip=; suser=0; ai=0
-sarray=${SQUEUE_ARRAY+--array}                   # sacct's --array, or empty
-while [ $ai -lt ${#args[@]} ]; do
-	a=${args[$ai]}; ai=$((ai+1)); v=; have=0
-	case $a in                                       # all four spellings:
-		--me)        v=${login:=$(id -un)}; have=2 ;;   # carries no value of its own,
-		--*=*)       v=${a#*=}; have=1; a=${a%%=*} ;;   # it supplies one: sacct has
-		-[upAqjMt]?*) v=${a#??}; have=1; a=${a:0:2} ;;  # no --me, only -u <login>
+# overrides it.  The fallback names the first entry sacct has no mapping for.
+sargs=(); sfilt=; sskip=; suser=0; sarray= slocal= sfed=
+for ((i = 0; i < ${#nf_key[@]}; i++)); do
+	v=${nf_val[i]}
+	case ${nf_key[i]} in
+		-u) sf=-u lbl=user
+		    if [ "${nf_src[i]}" = --me ]; then   # sacct has no --me, only -u <login>
+			    v=${login:=$(id -un)}
+			    [ -n "$v" ] || { sskip="--me has no login name to translate"; break; }
+		    fi ;;
+		-p) sf=-r lbl=part ;;
+		-A) sf=-A lbl=acct ;;
+		-q) sf=-q lbl=qos ;;
+		-j) sf=-j lbl=job ;;
+		-M) sf=-M lbl=cluster ;;
+		-r) sarray=--array; continue ;;
+		--local) slocal=--local; continue ;;
+		--federation) sfed=--federation; continue ;;
+		-t|-S|-a|-P|--hide|--noconvert) continue ;;
+		*) sskip="sq does not translate ${nf_src[i]} for sacct"; break ;;   # -n -w -L -R --sibling
 	esac
-	case $a in                                       # -u x and --user x
-		-u|--user)               sf=-u; lbl=user ;;
-		--me)                    sf=-u; lbl=user       # "--me=x" dies in the arg loop
-			[ $have -eq 2 ] || { sskip="$a takes no value"; break; }
-			[ -n "$v" ] || { sskip="$a has no login name to translate"; break; } ;;
-		-p|--partition)          sf=-r; lbl=part ;;
-		-A|--account|--accounts) sf=-A; lbl=acct ;;
-		-q|--qos)                sf=-q; lbl=qos ;;
-		-j|--job|--jobs)         sf=-j; lbl=job ;;
-		-M|--cluster|--clusters) sf=-M; lbl=cluster ;;
-		-t|--states|--state)     sf= ;;
-		-r|--array)              sarray=--array; continue ;;
-		--noconvert|-P|--priority) continue ;;
-		*) sskip="$a has no sacct equivalent"; break ;;
-	esac
-	if [ $have -eq 0 ]; then
-		[ $ai -lt ${#args[@]} ] || { sskip="$a is missing its value"; break; }
-		v=${args[$ai]}; ai=$((ai+1))
-	fi
-	[ -n "$sf" ] || continue                         # -t: the queue's alone
 	sargs+=("$sf" "$v"); sfilt="$sfilt · $lbl=$v"
 	[ "$sf" = -u ] && suser=1
 done
@@ -3834,10 +4120,13 @@ rsrc=none; rwhy=$sskip rwhy_real=$sskip; rerr= rerr_real=; rwhyc=
 # invariant the reassembler asserts.
 if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	aflag=(-a); [ "$suser" = 0 ] || aflag=()
+	# a caller's SACCT_* settings (SACCT_FEDERATION, SACCT_LOCAL,
+	# SACCT_FORMAT) would change the question, as for sq job
+	unset $(exported_names 'SACCT_*')
 	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 collect recent \
 		sacct -p --delimiter="$nonce2" -n -S "$since" -E now \
 		"${aflag[@]+"${aflag[@]}"}" "${sargs[@]+"${sargs[@]}"}" ${sarray:+"$sarray"} \
-		-o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName
+		${slocal:+"$slocal"} ${sfed:+"$sfed"} -o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName
 	se=$?
 	# rc=0 with no rows is not proof of success (-M/-r typos are silent), which
 	# is what the closed whitelist above is for; rc!=0 can still leave a partial

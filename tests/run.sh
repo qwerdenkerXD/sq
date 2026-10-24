@@ -1143,7 +1143,7 @@ c_real_reason_wins() {
 	# the filter no accounting can express is real text too, and outranks the fallback's
 	sq_run "$(silent_fixture squeue-all 1 'squeue: error: the fallback says why')" -- -n x
 	need "-n x, the fallback with stderr: rc 0, the filter on the caption" \
-		eval 'rc_is 0 && calls_are 1 1 1 0 && has "finished jobs unavailable · -n has no sacct equivalent"'
+		eval 'rc_is 0 && calls_are 1 1 1 0 && has "finished jobs unavailable · sq does not translate -n for sacct"'
 }
 
 # Every byte rule of the scrub, on one stderr line: a pair nested in a pair, both
@@ -1152,8 +1152,8 @@ c_real_reason_wins() {
 # which taking C0 out first would join.  The nested pair's outer halves and the
 # split pair's are no UTF-8, so each reads ␚, and the pair inside goes.  Then
 # each site that scrubs, with a C1 byte none of them let through before: the
-# three usage errors that echo a value, the filter on the caption, the skipped
-# filter, SQ_SINCE and the host name.
+# three usage errors that echo a value, the filters on the caption, SQ_SINCE
+# and the host name; the skipped filter is named without its value.
 c1_err_inert() { ! LC_ALL=C grep -q $'\xc2[\x80-\x9f]' "$ERR"; }
 c_scrub_sites() {
 	T_TITLE="the scrub's bytes (nested pair, \\xc2\\x80 and \\x9f, DEL, \\x1f, NUL, C0 inside a pair) and each site that scrubs: usage errors, filters, SQ_SINCE, host"
@@ -1170,8 +1170,11 @@ c_scrub_sites() {
 	sq_run wide -- -u "-${c1}x"
 	need "-u -x: refused, the value echoed as '-x'" eval 'rc_is 2 && grep -qF "not '"'"'-x'"'"'" "$ERR" && c1_err_inert'
 	sq_run "$(stderr_fixture none x)" -- "-nx${c1}y"
-	need "-nx…y (no sacct equivalent): rc 0, the caption names -nxy, no C1" \
-		eval 'rc_is 0 && calls_are 1 1 1 0 && has "recent only (-nxy has no sacct equivalent)" && c1_inert'
+	need "-nx…y (not translated for sacct): rc 0, the caption names -n, no C1" \
+		eval 'rc_is 0 && calls_are 1 1 1 0 && has "recent only (sq does not translate -n for sacct)" && c1_inert'
+	sq_run "$(stderr_fixture none x)" -- -p "x${c1}y"
+	need "-p x…y: rc 0, the caption's filter reads part=xy, no C1" \
+		eval 'rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h · part=xy" && c1_inert'
 	sq_run wide SQ_SINCE="2026-01-01${c1}T00" --
 	need "SQ_SINCE with C1: rc 0, the caption says since 2026-01-01T00, no C1" eval 'rc_is 0 && has "recently finished · since 2026-01-01T00" && c1_inert'
 	# the host name from tests/bin/hostname (SQSTUB_HOST), no script written
@@ -2073,12 +2076,13 @@ c_wide_tmux() {
 # U+202E (RLO) turns around what a terminal shows after it, up to the end of
 # the line: no text sq draws or says may carry one, nor any other bidi
 # control.  Each site that echoes outside text: a usage error, the filter on
-# the caption, squeue's stderr on the banner, and the five refusals that
-# echoed the word as typed (-o.../--format=, -s..., -i..., a word after
-# letters run together, a field letter squeue does not have), which also
-# passed a terminal escape raw.
+# the caption, squeue's stderr on the banner, and the refusals that echoed
+# the word as typed (-O.../--Format=, -s..., -i..., letters run together, a
+# field letter squeue does not have), which also passed a terminal escape
+# raw.  -o... and --format=... are sq's own column list (OPTS-v4 C3), whose
+# letters alone are read.
 c_bidi_sites() {
-	T_TITLE="U+202E goes from every echo: -u's usage error, the caption's filter, squeue's stderr on the banner; the five refusals that echoed the word raw (-o…, --format=…, -s…, -i…, the word after -ab…, a field letter) are scrubbed, an ESC too"
+	T_TITLE="U+202E goes from every echo: -u's usage error, the caption's filter, squeue's stderr on the banner; the refusals that echoed the word raw (-O…, --Format=…, -s…, -i…, -ab…, a field letter) are scrubbed; -o… and --format=… read their letters alone, an ESC too"
 	local rlo=$'\342\200\256' w
 	sq_run wide -- -u "-a${rlo}b"
 	need "-u -a+RLO+b: refused, the value echoed as '-ab'" eval 'rc_is 2 && grep -qF "not '"'"'-ab'"'"'" "$ERR" && bidi_inert "$ERR"'
@@ -2087,20 +2091,26 @@ c_bidi_sites() {
 	sq_run "$(stderr_fixture squeue 'no a\xe2\x80\xaeb here')" --
 	need "squeue's stderr with RLO: rc 0, the banner reads 'no ab here'" \
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: no ab here$" && bidi_inert'
-	for w in "-o${rlo}x" "--format=${rlo}x" "--Format=${rlo}x" "-O${rlo}x"; do
+	for w in "-o${rlo}u" "--format=${rlo}u"; do
+		sq_run wide -- "$w"
+		need "$w: sq's column list, the letter u: rc 0, the USER column alone" eval 'rc_is 0 && err_empty &&
+			[ "$(section queue | head -n 1 | sed "s/^ *//; s/ *$//")" = USER ]'
+	done
+	for w in "--Format=${rlo}x" "-O${rlo}x"; do
 		sq_run wide -- "$w"
 		need "$w: refused, echoed without the RLO" eval 'rc_is 2 && bidi_inert "$ERR" &&
 			grep -qxF "sq: ${w//$rlo/} would override sq'"'"'s own output format; write the column list as '"'"'sq -o i,j,u'"'"'" "$ERR"'
 	done
-	sq_run wide -- "-o$ESC[2J"
-	need "-o+ESC[2J: refused, the ESC gone" eval 'rc_is 2 && [ "$(LC_ALL=C tr -cd "\033" < "$ERR" | wc -c)" = 0 ] && grep -qF "sq: -o[2J would override" "$ERR"'
+	sq_run wide -- -o "i$ESC[2J"
+	need "-o i+ESC[2J: its first letter i, rc 0, the JOBID column alone, no ESC but sq's colours" eval 'rc_is 0 && err_empty && escapes_all_sgr &&
+		[ "$(section queue | head -n 1 | sed "s/^ *//; s/ *$//")" = JOBID ]'
 	sq_run wide -- "-s${rlo}"
 	need "-s+RLO: refused as -s" eval 'rc_is 2 && bidi_inert "$ERR" && grep -qxF "sq: -s lists job steps, which sq cannot frame safely; sq shows jobs" "$ERR"'
 	sq_run wide -- "-i${rlo}5"
 	need "-i+RLO+5: refused as -i5" eval 'rc_is 2 && bidi_inert "$ERR" && grep -qxF "sq: -i5 repeats squeue'"'"'s own output; sq refreshes with '"'"'watch -tc -n 5 sq'"'"'" "$ERR"'
 	sq_run wide -- "-ab${rlo}" x
-	need "-ab+RLO x: refused, the letters and the example without the RLO" eval 'rc_is 2 && bidi_inert "$ERR" &&
-		grep -qxF "sq: cannot tell what '"'"'x'"'"' belongs to after '"'"'-ab'"'"'; write the options apart, e.g. -a -b - x" "$ERR"'
+	need "-ab+RLO x: refused as letters run together, the word without the RLO" eval 'rc_is 2 && bidi_inert "$ERR" &&
+		grep -qxF "sq: '"'"'-ab'"'"' runs options together; write each option as its own word" "$ERR"'
 	sq_run wide -- -o "i,s${rlo}"
 	need "-o i,s+RLO: %s refused, the list echoed as 'i,s'" eval 'rc_is 2 && bidi_inert "$ERR" &&
 		grep -qxF "sq: %s is not a squeue field letter (in -o '"'"'i,s'"'"')" "$ERR"'
@@ -2303,20 +2313,24 @@ c_sacct_fallback() {
 # finished block on sacct (Franz, 2026-10-22, "Map/drop, keep 3"): --array and
 # -r become sacct's --array, as SQUEUE_ARRAY does when set at all (squeue
 # reads it so, empty too); --noconvert, --priority and -P are not passed on.
-# One that changes which jobs squeue lists still falls back: --hide, --all,
-# --local.  Each reaches the queue call as written.
+# OPTS-v4's R-D7: --hide and --all only choose whether squeue shows hidden
+# partitions' jobs, which sacct always shows, so they are dropped too, and
+# --local is sacct's --local.  Each reaches the queue call in its short
+# spelling (--array -r, --priority -P).
 c_sacct_flags() {
-	T_TITLE="--array/-r and SQUEUE_ARRAY map to sacct --array, --noconvert/--priority/-P are dropped, --hide/--all/--local fall back"
+	T_TITLE="--array/-r and SQUEUE_ARRAY map to sacct --array, --noconvert/--priority/-P/--hide/--all are dropped, --local reaches sacct"
 	local f
 	for f in --array -r; do
 		sq_run empty -- "$f"
 		need "$f: rc 0, the block from sacct, which got --array, the queue call $f" eval '
-			rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && argv_has sacct --array && argv_lacks sacct -r && argv_has squeue -h -S t,i "$f"'
+			rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && argv_has sacct --array && argv_lacks sacct -r && argv_has squeue -h -S t,i -r'
 	done
-	for f in --noconvert --priority -P; do
+	local q
+	for f in --noconvert:--noconvert --priority:-P -P:-P; do
+		q=${f#*:} f=${f%%:*}
 		sq_run empty -- "$f"
-		need "$f: rc 0, the block from sacct, which got neither it nor --array, the queue call $f" eval '
-			rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && argv_lacks sacct "$f" && argv_lacks sacct --array && argv_has squeue -h -S t,i "$f"'
+		need "$f: rc 0, the block from sacct, which got neither it nor --array, the queue call $q" eval '
+			rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && argv_lacks sacct "$f" && argv_lacks sacct "$q" && argv_lacks sacct --array && argv_has squeue -h -S t,i "$q"'
 	done
 	for f in SQUEUE_ARRAY=1 SQUEUE_ARRAY=; do
 		sq_run empty "$f" --
@@ -2325,11 +2339,15 @@ c_sacct_flags() {
 	done
 	sq_run empty --
 	need "neither: sacct without --array" eval 'rc_is 0 && calls_are 1 1 0 1 && argv_lacks sacct --array'
-	for f in --hide --all --local; do
+	for f in --hide:--hide --all:-a; do
+		q=${f#*:} f=${f%%:*}
 		sq_run empty -- "$f"
-		need "$f: rc 0, the squeue fallback, which says why" eval '
-			rc_is 0 && calls_are 1 1 1 0 && has "recent only ($f has no sacct equivalent)"'
+		need "$f: rc 0, the block from sacct as without it, the queue call $q" eval '
+			rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && argv_lacks sacct "$f" && argv_has squeue -h -S t,i "$q"'
 	done
+	sq_run empty -- --local
+	need "--local: rc 0, the block from sacct, which got --local" eval '
+		rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && argv_has sacct --local && argv_has squeue -h -S t,i --local'
 }
 
 # ---- 9. option refusals ------------------------------------------------------
@@ -2356,7 +2374,7 @@ c_refuse_t_empty() {
 c_refuse_states_eq() {
 	T_TITLE="--states= refused (rc 2, empty stdout); --states=R accepted"
 	refusal empty "--states=" "--states=R"
-	need "--states=R forwarded"       argv_has squeue -h -S t,i --states=R
+	need "--states=R forwarded as -t R" argv_has squeue -h -S t,i -t R
 }
 # A state filter is the queue's alone (Franz's decision): the finished block
 # shows every finished job.  sacct never gets it, and the fallback puts its own
@@ -2372,24 +2390,24 @@ c_state_filter_queue_only() {
 	for t in "-t R" "-tR" "--states=R" "--state R"; do
 		sq_run mixed -- $t
 		need "$t: rc 0, stderr empty, sacct and no fallback" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
-		need "$t: the queue call has it, sacct not" eval 'argv_has squeue -h -S t,i '"$t"' && ! grep "^CALL	sacct" "$LOG" | grep -qE " (-t|--states?)"'
-		need "$t: finished row 1001, the caption of no filter" eval 'rows recent | grep -qE "^ +1001 +done +COMPLETED " && has "recently finished · last 2h" && lacks "equivalent"'
+		need "$t: the queue call has it as -t R, sacct not" eval 'argv_has squeue -h -S t,i -t R && ! grep "^CALL	sacct" "$LOG" | grep -qE " (-t|--states?)"'
+		need "$t: finished row 1001, the caption of no filter" eval 'rows recent | grep -qE "^ +1001 +done +COMPLETED " && has "recently finished · last 2h" && lacks "translate"'
 	done
 	sq_run noacct -- -t R
 	need "no accounting, -t R: rc 0, the fallback, its -t all after -t R" eval 'rc_is 0 && calls_are 1 1 1 1 && argv_has squeue -h -t R -t all && fallback_t_all_last'
 	need "... and its three finished rows" eval '[ "$(nrows recent)" -eq 3 ] && has "recently finished · recent only (no accounting)"'
 	sq_run noacct -- -t R -n x
 	need "-t R -n x: the fallback for -n, its -t all last, the caption names -n" eval '
-		rc_is 0 && calls_are 1 1 1 0 && fallback_t_all_last && [ "$(nrows recent)" -eq 3 ] && has "recent only (-n has no sacct equivalent)"'
+		rc_is 0 && calls_are 1 1 1 0 && fallback_t_all_last && [ "$(nrows recent)" -eq 3 ] && has "recent only (sq does not translate -n for sacct)"'
 }
 c_accept_S_empty() {
-	T_TITLE="-S '' accepted (rc 0) and forwarded as given"
+	T_TITLE="-S '' accepted (rc 0) and forwarded as given; the sort is squeue's alone, sacct as without it"
 	sq_run empty -- -S ''
 	need "rc 0"                       rc_is 0
 	need "stderr empty"               err_empty
 	need "forwarded after sq's own sort" argv_has squeue -h -S t,i -S ''
-	need "no sacct (-S has no sacct twin), fallback instead" calls_are 1 1 1 0
-	need "caption says why"           has "recent only (-S has no sacct equivalent)"
+	need "sacct as without it, no fallback" calls_are 1 1 0 1
+	need "caption of no filter"       has "recently finished · last 2h"
 }
 c_refuse_s()    { T_TITLE="-s refused; -u alice accepted";      refusal empty "-s" "-u alice"; }
 c_refuse_json() { T_TITLE="--json refused; --all accepted";     refusal empty "--json" "--all"; }
@@ -3365,7 +3383,7 @@ c_compact_filter_line() {   # decision 29
 	need "rc 0, stderr empty, squeue and its -t all fallback, no sacct" eval 'rc_is 0 && err_empty && calls_are 1 1 1 0'
 	need "at most 24 lines, footer last" eval 'lines_within 24 && footer_last 151 128 23 0'
 	need "the one line names the filter and the newest failure" \
-		fin_line_is "recently finished (--reservation has no sacct equivalent): 4188 qc FAILED 1"
+		fin_line_is "recently finished (sq does not translate --reservation for sacct): 4188 qc FAILED 1"
 }
 c_compact_quiet40_h40() {
 	T_TITLE="quiet40 at 40 lines: everything fits, so COMPACT is FULL byte for byte, the title's clock aside"
@@ -3815,10 +3833,10 @@ c_reservation_forwarded() {   # decision 23's caveat: no prefix clash with --res
 	T_TITLE="--reservation=x and --reservation x still reach squeue"
 	sq_run empty -- --reservation=x
 	need "=x: rc 0, sacct skipped for the fallback" eval 'rc_is 0 && calls_are 1 1 1 0'
-	need "=x: forwarded"                  argv_has squeue -h -S t,i --reservation=x
+	need "=x: forwarded as -R x"          argv_has squeue -h -S t,i -R x
 	sq_run empty -- --reservation x
 	need "x: rc 0, sacct skipped for the fallback" eval 'rc_is 0 && calls_are 1 1 1 0'
-	need "x: forwarded"                   argv_has squeue -h -S t,i --reservation x
+	need "x: forwarded as -R x"           argv_has squeue -h -S t,i -R x
 }
 # SQ_COMPACT: a CALL (made with decisions 20-23, listed to Franz, overrulable):
 # 0 = always FULL, 1 = always COMPACT, unset = detect; the flags beat it.
@@ -4640,14 +4658,16 @@ c_jobmem_gates() {
 			eval 'rc_is 0 && err_empty && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && cmp -s "$base" <(without_clock "$OUT")'
 	done
 	need "MEM not shown: no %A %U asked for either" eval '! env_of squeue 1 SQUEUE_FORMAT | grep -qE "%[AU]"'
-	# empty too: squeue then fails ("No cluster '' known by database.")
-	for f in bioinf ""; do
-		mem_run jobmem SQSTUB_UID=4242 SQ_WIDTH=110 SLURM_CLUSTERS="$f" -- --color
-		base=$RUN/base; without_clock "$OUT" > "$base"
-		mem_run jobmem SQ_WIDTH=110 SLURM_CLUSTERS="$f" -- --color
-		need "SLURM_CLUSTERS='$f', as fsill: rc 0, no allocation call, no sstat, the screen nobody gets" \
-			eval 'rc_is 0 && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && cmp -s "$base" <(without_clock "$OUT")'
-	done
+	mem_run jobmem SQSTUB_UID=4242 SQ_WIDTH=110 SLURM_CLUSTERS=bioinf -- --color
+	base=$RUN/base; without_clock "$OUT" > "$base"
+	mem_run jobmem SQ_WIDTH=110 SLURM_CLUSTERS=bioinf -- --color
+	need "SLURM_CLUSTERS=bioinf, as fsill: rc 0, no allocation call, no sstat, the screen nobody gets, sacct -M bioinf" \
+		eval 'rc_is 0 && [ "$(calls alloc)" -eq 0 ] && [ "$(calls sstat)" -eq 0 ] && cmp -s "$base" <(without_clock "$OUT") && argv_has sacct -M bioinf'
+	# empty: squeue would fail ("No cluster '' known by database."), so sq
+	# refuses it (OPTS-v4 D10)
+	mem_run jobmem SQ_WIDTH=110 SLURM_CLUSTERS= -- --color
+	need "SLURM_CLUSTERS='': rc 2, no call" eval 'rc_is 2 && out_empty && no_slurm_call &&
+		err_is "sq: SLURM_CLUSTERS is set but holds no cluster name; unset it, or set one, e.g. SLURM_CLUSTERS=mycluster"'
 	# an option's value is no option: a job named --federation selects no cluster
 	mem_run jobmem SQ_WIDTH=110 -- --color -n --federation
 	need "-n --federation (a job name): rc 0, the allocation call and sstat once each" eval 'rc_is 0 && [ "$(calls alloc)" -eq 1 ] && [ "$(calls sstat)" -eq 1 ]'
@@ -4656,17 +4676,20 @@ c_jobmem_gates() {
 	need "filters on the screen: the allocation call is still squeue -h -u 1041 and nothing else, sstat still asks for all 8" eval '
 		rc_is 0 && [ "$(gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"squeue\" && /tres-alloc/ && /StateCompact/ { print \$3 }" "$LOG")" = "-h -u 1041 " ] &&
 		argv_has sstat -j 11895,11898,11902,11903,11904,11905,11906,11908'
-	# ... nor do the filters a caller exports, which the screen's calls still take
+	# ... nor do the filters a caller exports, which the screen's calls take as
+	# their flags (OPTS-v4 N4), in squeue's order, the variables unset
 	local filters="SQUEUE_PARTITION SQUEUE_STATES SQUEUE_ACCOUNT SQUEUE_QOS SQUEUE_NAMES" v
 	mem_run jobmem SQ_WIDTH=110 SQUEUE_PARTITION=main SQUEUE_STATES=R,PD SQUEUE_ACCOUNT=bio SQUEUE_QOS=normal SQUEUE_NAMES=flye -- --color
 	need "SQUEUE_* filters exported: rc 0, the allocation call once, its SQUEUE_FORMAT2 sq's" eval '
 		rc_is 0 && [ "$(calls alloc)" -eq 1 ] && gawk -F"\t" "\$1 == \"CALL\" && /tres-alloc/ && /StateCompact/ && /\tSQUEUE_FORMAT2=JobID/ { f = 1 } END { exit !f }" "$LOG"'
 	for v in $filters; do
-		need "$v: not in the allocation call's environment, in the queue call's and the MEM totals' call" eval '
-			gawk -F"\t" -v v='"$v"' "\$1 == \"CALL\" && \$2 == \"squeue\" { for (i = 4; i <= NF; i++) if (index(\$i, v \"=\") == 1) has = 1
-				if (/tres-alloc/ && /StateCompact/) alloc += has; else if (/tres-alloc/) mirror += has; else queue += has; has = 0 }
-				END { exit !(alloc == 0 && mirror == 1 && queue == 1) }" "$LOG"'
+		need "$v: in no squeue call's environment" eval '
+			gawk -F"\t" -v v='"$v"' "\$1 == \"CALL\" && \$2 == \"squeue\" { for (i = 4; i <= NF; i++) if (index(\$i, v \"=\") == 1) has = 1 }
+				END { exit has }" "$LOG"'
 	done
+	need "the queue call and the MEM totals' call: their pairs in argv, -A bio -n flye -p main -q normal -t R,PD; the allocation call none" eval '
+		argv_has squeue -h -S t,i -A bio -n flye -p main -q normal -t R,PD && argv_has squeue -h -A bio -n flye -p main -q normal -t R,PD &&
+		[ "$(gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"squeue\" && /tres-alloc/ && /StateCompact/ { print \$3 }" "$LOG")" = "-h -u 1041 " ]'
 	# fsill with a pending job only: no call
 	mkdir -p "$d"
 	for f in sinfo sacct; do printf '@include %s\n' "$fixtures/jobmem/$f" > "$d/$f"; done
@@ -5023,8 +5046,8 @@ c_memalloc_call() {
 	mirror=$(gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && /tres-alloc/ && !/StateCompact/ { print $3 }' "$LOG")
 	at=$(mirror_at); n=$(env_of squeue 1 SQ_NONCE)
 	need "rc 0, one mirror call, after the queue call and the allocation call" eval 'rc_is 0 && [ "$(calls mirror)" -eq 1 ] && [ "$at" = 3 ]'
-	need "its argv: the queue call's without -S t,i, the filters (and their own -S) as given" eval '
-		[ "$main" = "$(printf "%q " -h -S t,i -p main -n blastp,prokka --all -S i)" ] && [ "$mirror" = "$(printf "%q " -h -p main -n blastp,prokka --all -S i)" ]'
+	need "its argv: the queue call's without -S t,i, the filters (and their own -S) in the queue call's spelling" eval '
+		[ "$main" = "$(printf "%q " -h -S t,i -p main -n blastp,prokka -a -S i)" ] && [ "$mirror" = "$(printf "%q " -h -p main -n blastp,prokka -a -S i)" ]'
 	need "its env: the queue call's pins, SLURM_TIME_FORMAT=standard and SLURM_BITSTR_LEN=0" eval '
 		[ "$(env_of squeue "$at" SLURM_TIME_FORMAT)" = standard ] && [ "$(env_of squeue 1 SLURM_TIME_FORMAT)" = standard ] &&
 		[ "$(env_of squeue "$at" SLURM_BITSTR_LEN)" = 0 ] && [ "$(env_of squeue 1 SLURM_BITSTR_LEN)" = 0 ]'
@@ -5037,10 +5060,11 @@ c_memalloc_call() {
 		need "$args: rc 0, no mirror call, busco and hal's ×4 their %m (7800M per CPU), in the unit rule: 7.6G" eval '
 			rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7.6G ] && [ "$(mem_of "11920_[0-3]")" = 7.6G ]'
 	done
-	for f in bioinf ""; do
-		mem_run memalloc SQ_WIDTH=110 SLURM_CLUSTERS="$f" -- --color
-		need "SLURM_CLUSTERS='$f': rc 0, no mirror call, busco its %m in the unit rule" eval 'rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7.6G ]'
-	done
+	mem_run memalloc SQ_WIDTH=110 SLURM_CLUSTERS=bioinf -- --color
+	need "SLURM_CLUSTERS=bioinf: rc 0, no mirror call, busco its %m in the unit rule, sacct -M bioinf" eval '
+		rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(mem_of 11890)" = 7.6G ] && argv_has sacct -M bioinf'
+	mem_run memalloc SQ_WIDTH=110 SLURM_CLUSTERS= -- --color
+	need "SLURM_CLUSTERS='': refused (OPTS-v4 D10), rc 2, no call" eval 'rc_is 2 && out_empty && no_slurm_call'
 	# squeue's --federation and --sibling as settings, which squeue reads when
 	# set at all: as fsill, whose fastqc runs, so JOBMEM's calls would come too
 	mem_run memalloc SQ_WIDTH=110 -- --color
@@ -5206,7 +5230,12 @@ c_sub_stray() {   # D3, D6
 	sub_refused "sq: subcommands come first, before any option that takes a value: sq log …" -o i,j log 500
 	sub_refused "sq: subcommands come first, before any option that takes a value: sq log …" --reserve 2 log 500
 	sub_refused "sq: subcommands come first: sq log …" -Z log 500
-	sub_refused "sq: subcommands come first: sq log …" -a log 500
+	sq_run "$(log_fx done <<'EOF'
+StateCompact=CD
+@file create wd/out_500.log done\n
+EOF
+)" -- -a log --no-follow 500
+	need "-a log 500: -a takes no value, so sq log runs (OPTS-v4 N8)" eval 'rc_is 0 && [ "$(cat "$OUT")" = done ]'
 	sub_refused "sq: subcommands come first, before any option that takes a value: sq log …" -p main -- log 500
 	sub_refused "sq log: job output files are read on this machine; drop -M" -M other log 500
 	sub_refused "sq log: job output files are read on this machine; drop --clusters" --clusters=other log 500
@@ -7253,6 +7282,554 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 }
 
 # ============================================================================
+# the argument normal form (OPTS-v4): how sq reads its command line and
+# squeue's environment, and what squeue and sacct get from them
+# ============================================================================
+# Franz (2026-10-24): "I follow your recommendations"; OPTS-v4's AC1-AC23 and
+# AC27, one case each or a few together.  Q is the queue call, M the mirror
+# call, F the fallback, S the dashboard's sacct call.
+opts_long_ok() {   # no squeue call took a long option but the six sq spells long, and --jobs=
+	gawk -F'\t' '$1 == "CALL" && $2 == "squeue" { n = split($3, W, " ")
+		for (i = 1; i <= n; i++) if (W[i] ~ /^--/ && W[i] !~ /^--(me|hide|noconvert|federation|local|sibling)$/ && W[i] !~ /^--jobs=/) bad = 1 }
+		END { exit bad }' "$LOG"
+}
+orun() {   # orun FIXTURE [VAR=value | -VAR]... -- [sq args]: sq_run, and squeue got no other long option (AC14)
+	sq_run "$@"
+	need "sq ${*}: no long option reaches squeue but --me --hide --noconvert --federation --local --sibling --jobs=" opts_long_ok
+}
+o_args() { local a=; while [ $# -gt 0 ] && [ "$1" != -- ]; do a="$a $1"; shift; done; shift; printf '%s' "${a# }${a:+ }sq${*:+ }$*"; }
+o_refused() {   # o_refused TEXT [VAR=value | -VAR]... -- ARGS...: rc 2, nothing on stdout, no Slurm call, stderr exactly "sq: TEXT"
+	local text=$1; shift
+	sq_run empty "$@"
+	need "$(o_args "$@"): rc 2, nothing on stdout, no Slurm call, says '$text'" eval '
+		rc_is 2 && out_empty && no_slurm_call && err_is "sq: $text"'
+}
+o_twin() {   # o_twin: an accepted run, so a case of refusals alone still proves the stubs answer
+	orun empty --
+	need "the accepted twin, sq alone: rc 0, the stubs called" eval 'rc_is 0 && [ "$(calls queue)" = 1 ]'
+}
+q_argv() { gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) !~ / -t all / && $0 !~ /tres-alloc/ { print $3 }' "$LOG"; }
+q_is() { [ "$(calls queue)" = 1 ] && [ "$(q_argv)" = "$(printf '%q ' -h -S t,i "$@")" ]; }   # q_is ARGS...: Q got exactly -h -S t,i ARGS
+f_is() {   # f_is ARGS...: the fallback got exactly -h ARGS -t all
+	[ "$(calls fallback)" = 1 ] &&
+	[ "$(gawk -F'\t' '$1 == "CALL" && $2 == "squeue" && (" " $3) ~ / -t all / { print $3 }' "$LOG")" = "$(printf '%q ' -h "$@" -t all)" ]
+}
+s_is() {   # s_is ARGS...: S got exactly ARGS between "-E now" and "-o JobID,…"
+	local got want=
+	[ "$(calls sacct)" = 1 ] || return 1
+	got=$(gawk -F'\t' '$1 == "CALL" && $2 == "sacct" { print $3 }' "$LOG")
+	got=${got#*"-E now "} got=${got%%"-o JobID"*}
+	[ $# = 0 ] || want=$(printf '%q ' "$@")
+	[ "$got" = "$want" ]
+}
+caption_is() { [ "$(section recent | head -n 1 | sed 's/^ *//; s/ *$//')" = "$1" ]; }
+n4_vars=" SQUEUE_ALL SQUEUE_ARRAY SQUEUE_FEDERATION SQUEUE_LOCAL SQUEUE_PRIORITY SQUEUE_SIB SQUEUE_SIBLING SQUEUE_ACCOUNT SQUEUE_NAMES SQUEUE_LICENSES SQUEUE_PARTITION SQUEUE_QOS SQUEUE_STATES SQUEUE_USERS SQUEUE_SORT "
+squeue_env_clean() {   # no squeue call had one of N4's variables, nor SQUEUE_SORT, in its environment
+	gawk -F'\t' -v vars="$n4_vars" '$1 == "CALL" && $2 == "squeue" { n++
+		for (i = 4; i <= NF; i++) { v = $i; if (sub(/=.*/, "", v) && index(vars, " " v " ")) bad = 1 } }
+		END { exit !(n && !bad) }' "$LOG"
+}
+login_of_stub() { env -i PATH="$here/bin:$PATH" id -un; }   # what the runs' `id -un` answers
+
+c_opts_env_values() {   # AC1
+	T_TITLE="squeue's environment filters are their flags: in the queue call's argv in squeue's order, in sacct's, on the caption; F for -n -L"
+	orun empty SQUEUE_USERS=bob --
+	need "SQUEUE_USERS=bob: Q -u bob, S -u bob without -a, user=bob" eval '
+		rc_is 0 && q_is -u bob && s_is -u bob && caption_is "recently finished · last 2h · user=bob · nothing in this window" && squeue_env_clean'
+	orun empty SQUEUE_PARTITION=gpu --
+	need "SQUEUE_PARTITION=gpu: Q -p gpu, S -a -r gpu, part=gpu" eval '
+		rc_is 0 && q_is -p gpu && s_is -a -r gpu && caption_is "recently finished · last 2h · part=gpu · nothing in this window" && squeue_env_clean'
+	orun empty SQUEUE_ACCOUNT=acct1 --
+	need "SQUEUE_ACCOUNT=acct1: Q -A acct1, S -a -A acct1, acct=acct1" eval '
+		rc_is 0 && q_is -A acct1 && s_is -a -A acct1 && caption_is "recently finished · last 2h · acct=acct1 · nothing in this window" && squeue_env_clean'
+	orun empty SQUEUE_QOS=long --
+	need "SQUEUE_QOS=long: Q -q long, S -a -q long, qos=long" eval '
+		rc_is 0 && q_is -q long && s_is -a -q long && caption_is "recently finished · last 2h · qos=long · nothing in this window" && squeue_env_clean'
+	orun empty SLURM_CLUSTERS=c1 --
+	need "SLURM_CLUSTERS=c1: no -M word in Q, the variable in its env; S -a -M c1, cluster=c1" eval '
+		rc_is 0 && q_is && [ "$(env_of squeue 1 SLURM_CLUSTERS)" = c1 ] && s_is -a -M c1 &&
+		caption_is "recently finished · last 2h · cluster=c1 · nothing in this window" && squeue_env_clean'
+	orun empty SQUEUE_STATES=R --
+	need "SQUEUE_STATES=R: Q -t R, S without it, no filter on the caption" eval '
+		rc_is 0 && q_is -t R && s_is -a && caption_is "recently finished · last 2h · nothing in this window" && squeue_env_clean'
+	orun noacct SQUEUE_NAMES=x --
+	need "SQUEUE_NAMES=x, noacct: Q -n x, no S, F -h -n x -t all, the caption names the variable" eval '
+		rc_is 0 && q_is -n x && calls_are 1 1 1 0 && f_is -n x &&
+		caption_is "recently finished · recent only (sq does not translate SQUEUE_NAMES for sacct)" && squeue_env_clean'
+	orun noacct SQUEUE_LICENSES=m --
+	need "SQUEUE_LICENSES=m, noacct: Q -L m, no S, F -h -L m -t all, the caption names the variable" eval '
+		rc_is 0 && q_is -L m && calls_are 1 1 1 0 && f_is -L m &&
+		caption_is "recently finished · recent only (sq does not translate SQUEUE_LICENSES for sacct)" && squeue_env_clean'
+	orun empty SQUEUE_PARTITION=gpu SQUEUE_USERS=bob --
+	need "SQUEUE_PARTITION=gpu SQUEUE_USERS=bob: Q -p gpu -u bob, S -r gpu -u bob, part=gpu · user=bob (squeue's order)" eval '
+		rc_is 0 && q_is -p gpu -u bob && s_is -r gpu -u bob &&
+		caption_is "recently finished · last 2h · part=gpu · user=bob · nothing in this window" && squeue_env_clean'
+}
+c_opts_env_flags() {   # AC2
+	T_TITLE="squeue's environment flags, set at all, are their flags, before argv's (squeue's order): -a -r -P --local --federation --sibling"
+	local f
+	for f in SQUEUE_ALL=1 SQUEUE_ALL=; do
+		orun empty "$f" --
+		need "$f: Q -S t,i -a, S as without it, last 2h" eval 'rc_is 0 && q_is -a && s_is -a && caption_is "recently finished · last 2h · nothing in this window" && squeue_env_clean'
+	done
+	orun empty SQUEUE_LOCAL= --
+	need "SQUEUE_LOCAL=: Q --local, S --local, last 2h" eval 'rc_is 0 && q_is --local && s_is -a --local && has "recently finished · last 2h" && squeue_env_clean'
+	orun empty SQUEUE_FEDERATION= --
+	need "SQUEUE_FEDERATION=: Q --federation, S --federation, last 2h" eval 'rc_is 0 && q_is --federation && s_is -a --federation && has "recently finished · last 2h" && squeue_env_clean'
+	for f in SQUEUE_SIB SQUEUE_SIBLING; do
+		orun noacct "$f=1" --
+		need "$f=1, noacct: Q --sibling, F --sibling, no S, the caption names $f" eval '
+			rc_is 0 && q_is --sibling && f_is --sibling && calls_are 1 1 1 0 &&
+			caption_is "recently finished · recent only (sq does not translate $f for sacct)" && squeue_env_clean'
+	done
+	orun noacct SQUEUE_SIB=1 SQUEUE_SIBLING=1 --
+	need "both set: one --sibling, SQUEUE_SIB named" eval '
+		rc_is 0 && q_is --sibling && f_is --sibling && caption_is "recently finished · recent only (sq does not translate SQUEUE_SIB for sacct)"'
+	orun empty SQUEUE_PRIORITY=1 --
+	need "SQUEUE_PRIORITY=1: Q -P, S without it" eval 'rc_is 0 && q_is -P && s_is -a && squeue_env_clean'
+	orun empty SQUEUE_ARRAY= --
+	need "SQUEUE_ARRAY=: Q -r, S --array" eval 'rc_is 0 && q_is -r && s_is -a --array && squeue_env_clean'
+	orun empty SQUEUE_ALL=1 -- --hide
+	need "SQUEUE_ALL=1 with --hide: Q -a --hide, the variable first" eval 'rc_is 0 && q_is -a --hide'
+	orun empty SQUEUE_PARTITION=main -- --hide
+	need "SQUEUE_PARTITION=main with --hide: Q --hide -p main, the variable after argv" eval 'rc_is 0 && q_is --hide -p main'
+	orun empty -- --all --hide --all
+	need "--all --hide --all: Q -a --hide -a, every one" eval 'rc_is 0 && q_is -a --hide -a'
+}
+c_opts_flag_beats_env() {   # AC3
+	T_TITLE="a flag beats its environment variable: only the flag reaches squeue, sacct and the caption"
+	local login; login=$(login_of_stub)
+	orun empty SQUEUE_USERS=bob -- -u alice
+	need "SQUEUE_USERS=bob -u alice: Q -u alice only, S -u alice, user=alice" eval '
+		rc_is 0 && q_is -u alice && s_is -u alice && has "recently finished · last 2h · user=alice ·"'
+	orun empty SQUEUE_USERS=bob -- --me
+	need "SQUEUE_USERS=bob --me: Q --me, S -u <login>" eval 'rc_is 0 && q_is --me && s_is -u "$login"'
+	orun empty SQUEUE_ACCOUNT=a -- -U b
+	need "SQUEUE_ACCOUNT=a -U b: Q -A b" eval 'rc_is 0 && q_is -A b && s_is -a -A b'
+	orun empty SQUEUE_PARTITION=a -- --partition=b
+	need "SQUEUE_PARTITION=a --partition=b: Q -p b" eval 'rc_is 0 && q_is -p b && s_is -a -r b'
+	orun empty SLURM_CLUSTERS=c1 -- -M c2
+	need "SLURM_CLUSTERS=c1 -M c2: Q -M c2, S -M c2, cluster=c2" eval '
+		rc_is 0 && q_is -M c2 && s_is -a -M c2 && has "recently finished · last 2h · cluster=c2 ·"'
+	orun empty SQUEUE_STATES=PD -- -t R
+	need "SQUEUE_STATES=PD -t R: Q -t R" eval 'rc_is 0 && q_is -t R'
+}
+c_opts_env_refused() {   # AC4
+	T_TITLE="squeue's environment stops sq where squeue would show no job or fail: empty or hollow filters, SHAPE, D4, SLURM_CLUSTERS under -M too; argv first, subcommands and -h never"
+	local login; login=$(login_of_stub)
+	o_refused "SQUEUE_USERS is set but holds no user name; unset it, or set one, e.g. SQUEUE_USERS=$login" SQUEUE_USERS= --
+	o_refused "SQUEUE_USERS is set but holds no user name; unset it, or set one, e.g. SQUEUE_USERS=$login" "SQUEUE_USERS= " --
+	o_refused "SQUEUE_PARTITION is set but holds no partition name; unset it, or set one, e.g. SQUEUE_PARTITION=batch" SQUEUE_PARTITION=, --
+	o_refused "SQUEUE_STATES is set but holds no state list; unset it, or set one, e.g. SQUEUE_STATES=R,PD" SQUEUE_STATES=$'\t' --
+	o_refused "SLURM_CLUSTERS is set but holds no cluster name; unset it, or set one, e.g. SLURM_CLUSTERS=mycluster" SLURM_CLUSTERS= --
+	o_refused "SQUEUE_ACCOUNT is set but holds no account name; unset it, or set one, e.g. SQUEUE_ACCOUNT=myaccount" "SQUEUE_ACCOUNT= , " --
+	o_refused "SQUEUE_QOS is set but holds no QoS name; unset it, or set one, e.g. SQUEUE_QOS=normal" SQUEUE_QOS= --
+	o_refused "SQUEUE_NAMES is set but holds no job name; unset it, or set one, e.g. SQUEUE_NAMES=myjob" SQUEUE_NAMES= --
+	o_refused "SQUEUE_LICENSES is set but holds no license name; unset it, or set one, e.g. SQUEUE_LICENSES=matlab" SQUEUE_LICENSES=, --
+	o_refused "SQUEUE_USERS needs a user name, not '-x'; unset it, or set one, e.g. SQUEUE_USERS=$login" SQUEUE_USERS=-x --
+	o_refused "SQUEUE_PARTITION needs a partition name, not ' -x'; unset it, or set one, e.g. SQUEUE_PARTITION=batch" "SQUEUE_PARTITION= -x" --
+	orun empty SQUEUE_NAMES=-x --
+	need "SQUEUE_NAMES=-x: accepted, Q -n -x" eval 'rc_is 0 && q_is -n -x'
+	local d4="means different things in different Slurm versions (23.11 ignores it under -p and lets it beat -L); unset it, or give the licenses as -L"
+	o_refused "SQUEUE_LICENSES together with -L $d4" SQUEUE_LICENSES=x -- -L y
+	o_refused "SQUEUE_LICENSES together with -p $d4" SQUEUE_LICENSES=x -- -p main
+	o_refused "SQUEUE_LICENSES together with --partitions $d4" SQUEUE_LICENSES=x -- --partitions=main
+	o_refused "SQUEUE_LICENSES together with -L $d4" SQUEUE_LICENSES= -- -L y
+	o_refused "SQUEUE_LICENSES together with -p $d4" SQUEUE_LICENSES=x -- -p main -L y
+	orun empty SQUEUE_LICENSES=x SQUEUE_PARTITION=main --
+	need "SQUEUE_LICENSES=x SQUEUE_PARTITION=main: rc 0, Q -L x -p main" eval 'rc_is 0 && q_is -L x -p main'
+	o_refused "SLURM_CLUSTERS is set but holds no cluster name; unset it, or set one, e.g. SLURM_CLUSTERS=mycluster" SLURM_CLUSTERS= -- -M c2
+	o_refused "SLURM_CLUSTERS needs a cluster name, not '-x'; unset it, or set one, e.g. SLURM_CLUSTERS=mycluster" SLURM_CLUSTERS=-x --
+	o_refused "SLURM_CLUSTERS needs a cluster name, not '-x'; unset it, or set one, e.g. SLURM_CLUSTERS=mycluster" SLURM_CLUSTERS=-x -- -M c2
+	# not refused, as at 1eb0218: a flag overrides it, or nothing reads it
+	orun empty SQUEUE_USERS= -- -u alice
+	need "SQUEUE_USERS= -u alice: rc 0, Q -u alice" eval 'rc_is 0 && q_is -u alice'
+	orun empty SQUEUE_USERS= -- --me
+	need "SQUEUE_USERS= --me: rc 0, Q --me" eval 'rc_is 0 && q_is --me'
+	local h
+	for h in -h --help; do
+		sq_run empty SQUEUE_USERS= -- "$h"
+		need "SQUEUE_USERS= $h: the help, rc 0" eval 'rc_is 0 && has "auto-fitting Slurm dashboard" && err_empty'
+	done
+	sq_run "$(log_fx envdone <<'EOF'
+StateCompact=CD
+@file create wd/out_500.log done\n
+EOF
+)" SQUEUE_USERS= -- log --no-follow 500
+	need "SQUEUE_USERS= log 500: sq log runs, the file" eval 'rc_is 0 && [ "$(cat "$OUT")" = done ]'
+	job_run running-own SQUEUE_USERS= -- --no-color job 11950
+	need "SQUEUE_USERS= job 11950: sq job runs, rc 0" eval 'rc_is 0 && has "11950" && ! grep -q SQUEUE_USERS "$ERR"'
+	o_refused "-v prints squeue's own parameters into the output sq parses" SQUEUE_USERS= -- -v
+}
+c_opts_env_inert() {   # AC5, AC6, AC7
+	T_TITLE="unknown SQUEUE_* names stay with squeue, SQUEUE_SORT is unset, SACCT_* leave the dashboard's sacct, --noheader keeps sacct and reaches no call"
+	orun empty SQUEUE_FOO=1 SQUEUE_USER=bob --
+	need "SQUEUE_FOO=1 SQUEUE_USER=bob: S called, last 2h, no fallback, Q carries both" eval '
+		rc_is 0 && calls_are 1 1 0 1 && s_is -a && has "recently finished · last 2h" &&
+		[ "$(env_of squeue 1 SQUEUE_FOO)" = 1 ] && [ "$(env_of squeue 1 SQUEUE_USER)" = bob ]'
+	orun empty SQUEUE_SORT=x --
+	need "SQUEUE_SORT=x: rc 0, last 2h, no call carries it" eval '
+		rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && ! grep "^CALL" "$LOG" | grep -q SQUEUE_SORT'
+	orun empty SACCT_FEDERATION=1 SACCT_LOCAL=1 SACCT_FORMAT=x --
+	need "SACCT_FEDERATION SACCT_LOCAL SACCT_FORMAT: S carries none, last 2h" eval '
+		rc_is 0 && s_is -a && has "recently finished · last 2h" && ! grep "^CALL	sacct" "$LOG" | grep -q SACCT_'
+	job_run running-own SACCT_FEDERATION=1 SACCT_LOCAL=1 SACCT_FORMAT=x -- --no-color job 11950
+	need "... sq job 11950 as at 1eb0218: rc 0, its sacct calls without them" eval '
+		rc_is 0 && [ "$(calls sacct)" -ge 1 ] && ! grep "^CALL	sacct" "$LOG" | grep -q SACCT_'
+	orun empty -- --noheader
+	need "--noheader: S called, last 2h, no call holds --noheader" eval '
+		rc_is 0 && calls_are 1 1 0 1 && q_is && has "recently finished · last 2h" && ! grep "^CALL" "$LOG" | grep -q -- --noheader'
+}
+c_opts_sort() {   # AC8
+	T_TITLE="-S reaches squeue after sq's own sort and keeps sacct; '' and , accepted, a blank anywhere refused"
+	local v
+	for v in -i '' ,; do
+		orun empty -- -S "$v"
+		need "-S '$v': S called, last 2h, Q -S t,i -S '$v'" eval 'rc_is 0 && calls_are 1 1 0 1 && s_is -a && has "recently finished · last 2h" && q_is -S "$v"'
+	done
+	for v in ' ' $'\t' $'\n' ' ,' 'i, j'; do
+		o_refused "-S needs a sort key list without blanks; e.g. sq -S -i" -- -S "$v"
+	done
+	o_refused "--sort needs a sort key list without blanks; e.g. sq --sort -i" -- --sort='a b'
+}
+c_opts_rd7_flags() {   # AC9
+	T_TITLE="-a, --all, --hide, SQUEUE_ALL keep sacct as without them; --local and --federation reach sacct; MEM %m under --federation"
+	local f
+	for f in --all -a --hide SQUEUE_ALL=1; do
+		case $f in -*) orun empty -- "$f" ;; *) orun empty "$f" -- ;; esac
+		need "$f: S as without it (its own -a for all users only), last 2h" eval 'rc_is 0 && calls_are 1 1 0 1 && s_is -a && has "recently finished · last 2h"'
+	done
+	for f in --local SQUEUE_LOCAL=; do
+		case $f in -*) orun empty -- "$f" ;; *) orun empty "$f" -- ;; esac
+		need "$f: S holds --local, last 2h" eval 'rc_is 0 && calls_are 1 1 0 1 && s_is -a --local && has "recently finished · last 2h"'
+	done
+	for f in --federation SQUEUE_FEDERATION=; do
+		case $f in -*) orun empty -- "$f" ;; *) orun empty "$f" -- ;; esac
+		need "$f: S holds --federation, last 2h" eval 'rc_is 0 && calls_are 1 1 0 1 && s_is -a --federation && has "recently finished · last 2h"'
+		case $f in -*) mem_run jobmem SQ_WIDTH=110 -- --color "$f" ;; *) mem_run jobmem SQ_WIDTH=110 "$f" -- --color ;; esac
+		need "$f, jobmem as fsill: MEM %m, no allocation, mirror or sstat call, S with --federation" eval '
+			rc_is 0 && [ "$(calls alloc)$(calls mirror)$(calls sstat)" = 000 ] && s_is -a --federation'
+	done
+	orun empty -- --local --federation --array
+	need "--local --federation --array: S … --array --local --federation -o …" eval 'rc_is 0 && s_is -a --array --local --federation && q_is --local --federation -r'
+}
+c_opts_clusters() {   # AC10
+	T_TITLE="letters run together are refused with one sentence, no advice; SUBCMD-v3's 'cannot tell' only where it pins it"
+	local w apart="runs options together; write each option as its own word"
+	for w in -ar -ah -av -al -aV -xc -cC -Pr -vx -vh -az -zx -foo -atR -aufsill -atPD,R -aupeter.smith -ai5 -as -a-u -ab=c; do
+		o_refused "'$w' $apart" -- "$w"
+	done
+	o_refused "'-atR' $apart" -- -atR foo
+	o_refused "'-ah' $apart" -- -ah x
+	o_refused "'-hu' $apart" -- -hu fsill
+	o_refused "'-ar' $apart" -- -ar -u x
+	o_refused "'-ar' $apart" -- -ar ''
+	o_refused "'-ar' $apart" -- -ar ' '
+	o_refused "'-ab' $apart" -- "-a"$'\342\200\256'"b"
+	o_refused "'-arrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr' $apart" -- "-a$(printf 'r%.0s' {1..200})"
+	o_refused "cannot tell what 'i' belongs to after '-ao'; write the options apart, e.g. -a -o i" -- -ao i
+	o_refused "cannot tell what '5' belongs to after '-aj'; write the options apart, e.g. -a -j 5" -- -aj 5
+	o_refused "cannot tell what 'log' belongs to after '-xn'; write the options apart, e.g. -x -n log" -- -xn log
+	o_refused "cannot tell what 'log' belongs to after '-xc'; write the options apart, e.g. -x -c log" -- -xc log 500
+	o_twin
+}
+c_opts_short_words() {   # AC11
+	T_TITLE="other short words: unknown letters, long names with one dash (N2a first), '=' after a valueless letter, no option letter at all"
+	local w
+	for w in -z -e -5; do o_refused "$w is not one of the short options sq forwards; sq -h lists them" -- "$w"; done
+	o_refused "subcommands come first: sq log …" -- -Z log 500
+	for w in all me hide full color; do o_refused "'-$w' is not an option; did you mean --$w?" -- "-$w"; done
+	o_refused "'-all=1' is not an option; did you mean --all? (it takes no value)" -- -all=1
+	o_refused "'-me=x' is not an option; did you mean --me? (it takes no value)" -- -me=x
+	o_refused "'-color=never' is not an option; did you mean --color? (it takes no value)" -- -color=never
+	o_refused "'-help=x' is not an option; did you mean --help? (it takes no value)" -- -help=x
+	for w in partition users qos noheader no-recent nodelist priority sib sort states jobs format; do
+		o_refused "'-$w' is not an option; did you mean --$w?" -- "-$w"
+	done
+	o_refused "'-partition=gpu' is not an option; did you mean --partition=gpu?" -- -partition=gpu
+	o_refused "'-name' is not an option; did you mean --name?" -- -name x
+	o_refused "--steps lists job steps, which sq cannot frame safely; sq shows jobs" -- -steps
+	o_refused "--iterate repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" -- -iterate
+	o_refused "--json asks squeue for a machine-readable document, which sq cannot render; run 'squeue --json' for that" -- -json
+	for w in usage autocomplete long verbose version start; do
+		o_refused "--$w is not one of the long options sq forwards; sq -h lists them" -- "-$w"
+	done
+	orun empty -- -n -name
+	need "-n -name: ROLE took the word, rc 0, Q -n -name" eval 'rc_is 0 && q_is -n -name'
+	o_refused "-u needs a user name, not '-users'; e.g. sq -u $(login_of_stub)" -- -u -users
+	o_refused "-x takes no value; write it on its own, e.g. sq -x" -- -x=
+	o_refused "-a takes no value; write it on its own, e.g. sq -a" -- -a=b
+	o_refused "-v prints squeue's own parameters into the output sq parses" -- -v=
+	o_refused "'- a' holds a space, which is not an option letter" -- "- a"
+	o_refused "'-x' holds U+202E, which is not an option letter" -- "-"$'\342\200\256'"x"
+	o_refused "'-ä' holds U+00E4, which is not an option letter" LC_ALL=C -- "-ä"
+	o_refused "'-␚' holds byte 0xE4, which is not an option letter" -- "-"$'\xe4'
+	o_refused "-i repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" -- -i
+	o_refused "-s lists job steps, which sq cannot frame safely; sq shows jobs" -- -s
+}
+c_opts_equals() {   # AC12
+	T_TITLE="a value attached with '=' is refused, its example the value when short, plain and valid, else the option's own"
+	local login; login=$(login_of_stub)
+	o_refused "-p takes its value without '='; e.g. sq -p batch" -- -p=batch
+	o_refused "-p takes its value without '='; e.g. sq -p batch" -- -p=
+	o_refused "-u takes its value without '='; e.g. sq -u fsill" -- -u=fsill
+	o_refused "-u takes its value without '='; e.g. sq -u $login" -- -u=-x
+	o_refused "-p takes its value without '='; e.g. sq -p batch" -- "-p=a b"
+	o_refused "-j takes its value without '='; e.g. sq -j 5" -- -j=5
+	o_refused "-S takes its value without '='; e.g. sq -S -i" -- -S=-i
+	o_refused "-S takes its value without '='; e.g. sq -S -i" -- -S=
+	o_refused "-o takes its value without '='; e.g. sq -o i" -- -o=i
+	o_refused "-o takes its value without '='; e.g. sq -o i,j,u" -- -o=
+	o_refused "-o takes its value without '='; e.g. sq -o i,j,u" -- -o=%s
+	o_refused "-p takes its value without '='; e.g. sq -p batch" -- "-p=x;id"
+	o_refused "-p takes its value without '='; e.g. sq -p batch" -- "-p=$(printf 'a%.0s' {1..41})"
+	o_refused "-p takes its value without '='; e.g. sq -p batch" -- "-p="$'\342\200\256'"x"
+	local w
+	for w in "-n =x" "--name==x"; do
+		orun empty -- $w
+		need "$w: accepted, Q -n =x" eval 'rc_is 0 && q_is -n =x'
+	done
+}
+c_opts_empty_blank() {   # AC13
+	T_TITLE="an empty value, or one of only blanks and commas, is refused for every filter in every spelling, and for -o/--format"
+	local spec key long v opt sp
+	local -A vex=([-u]=$(login_of_stub) [-p]=batch [-A]=myaccount [-U]=myaccount [-q]=normal [-j]=12345 [-M]=mycluster
+	              [-n]=myjob [-t]=R,PD [-w]=node01 [-L]=matlab [-R]=maint)
+	local -A noun=([-u]='a user name' [-p]='a partition name' [-A]='an account name' [-U]='an account name' [-q]='a QoS name'
+	               [-j]='a job id' [-M]='a cluster name' [-n]='a job name' [-t]='a state list' [-w]='a node list'
+	               [-L]='a license name' [-R]='a reservation name')
+	for spec in -u:--user -p:--partition -A:--accounts -U: -q:--qos -j:--jobs -M:--clusters -n:--name -t:--states \
+	            -w:--nodelist -L:--license -R:--reservation; do
+		key=${spec%%:*} long=${spec#*:}
+		for v in '' ' ' $'\t' ',' ' , ' $'\n' $' \t,\r'; do
+			for sp in short attached longeq longsp; do
+				case $sp in
+					short) opt=$key; set -- "$key" "$v" ;;
+					attached) [ -n "$v" ] || continue; opt=$key; set -- "$key$v" ;;
+					longeq) [ -n "$long" ] || continue; opt=$long; set -- "$long=$v" ;;
+					longsp) [ -n "$long" ] || continue; opt=$long; set -- "$long" "$v" ;;
+				esac
+				if [ -z "$v" ]; then o_refused "$opt needs ${noun[$key]}, e.g. sq $opt ${vex[$key]}" -- "$@"
+				else o_refused "$opt needs ${noun[$key]}, not just blanks or commas; e.g. sq $opt ${vex[$key]}" -- "$@"; fi
+			done
+		done
+	done
+	o_refused "-o needs a column list, e.g. -o i,j,u" -- -o ''
+	o_refused "--format needs a column list, e.g. -o i,j,u" -- --format=
+	o_refused "--format needs a column list, e.g. -o i,j,u" -- --format ''
+	o_refused "-o needs a column list, not just blanks or commas; e.g. -o i,j,u" -- -o ' , '
+	o_twin
+}
+c_opts_canonical() {   # AC14
+	T_TITLE="every spelling reaches squeue as its short letter and the value as the next word (-j as --jobs=), sacct and the caption as the short form"
+	local spec spelling canon short
+	# spelling|the queue call's words|the short form, which gives sacct and the caption
+	for spec in "--partition=gpu|-p gpu|-p gpu" "--partitions gpu|-p gpu|-p gpu" "-pgpu|-p gpu|-p gpu" \
+	            "--account x|-A x|-A x" "--accounts=x|-A x|-A x" "-U x|-A x|-A x" "-Ux|-A x|-A x" \
+	            "--job 5|--jobs=5|-j 5" "--jobs=5|--jobs=5|-j 5" "-j5|--jobs=5|-j 5" "-j 5|--jobs=5|-j 5" \
+	            "--state R|-t R|-t R" "--states=R|-t R|-t R" "-tR|-t R|-t R" \
+	            "--license m|-L m|" "--node n1|-w n1|" "--nodes=n1|-w n1|" "--nodelist n1|-w n1|" "--name=x|-n x|" \
+	            "--reservation=x|-R x|" "--reservation x|-R x|" "--sort=-i|-S -i|-S -i" \
+	            "--user x|-u x|-u x" "--users=x|-u x|-u x" "--cluster c|-M c|-M c" "--clusters=c|-M c|-M c" "--qos=q|-q q|-q q" \
+	            "--all|-a|-a" "--array|-r|-r" "--priority|-P|-P" "--sib|--sibling|" "--sibling|--sibling|" \
+	            "--me|--me|--me" "--hide|--hide|--hide" "--noconvert|--noconvert|--noconvert" \
+	            "--federation|--federation|--federation" "--local|--local|--local"; do
+		IFS='|' read -r spelling canon short <<< "$spec"
+		local -a sw cw ow; read -r -a sw <<< "$spelling"; read -r -a cw <<< "$canon"; read -r -a ow <<< "$short"
+		orun empty -- "${sw[@]}"
+		need "$spelling: Q -h -S t,i $canon" eval 'rc_is 0 && q_is "${cw[@]}"'
+		if [ -n "$short" ]; then
+			local sline cap; sline=$(gawk -F'\t' '$1 == "CALL" && $2 == "sacct" { print $3 }' "$LOG" | sed -E 's/N[0-9a-f]{24}//'); cap=$(section recent | head -n 1)
+			orun empty -- "${ow[@]}"
+			need "$spelling: S and the caption as for $short" eval '
+				[ "$sline" = "$(gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"sacct\" { print \$3 }" "$LOG" | sed -E "s/N[0-9a-f]{24}//")" ] &&
+				[ "$cap" = "$(section recent | head -n 1)" ]'
+		else
+			need "$spelling: the fallback, the caption naming ${sw[0]%%=*}" eval '
+				calls_are 1 1 1 0 && caption_is "recently finished · recent only (sq does not translate ${sw[0]%%=*} for sacct)"'
+		fi
+	done
+}
+c_opts_dash_values() {   # AC15
+	T_TITLE="-n -t -w -L -R -S take a value beginning with '-', which reaches squeue as its own word, byte for byte"
+	local spec
+	for spec in "-n -foo" "-t -x" "-w -n1" "-L -m" "-R -r" "-S -i"; do
+		orun empty -- $spec
+		need "$spec: rc 0, Q $spec" eval 'rc_is 0 && q_is $spec'
+	done
+	orun empty -- --sort=-i
+	need "--sort=-i: rc 0, Q -S -i" eval 'rc_is 0 && q_is -S -i'
+}
+c_opts_kept_pins() {   # AC16
+	T_TITLE="the refusals that stand: SHAPE (blanks first too), --me=x, --partition=, a value that looks like an option"
+	local login; login=$(login_of_stub)
+	o_refused "-u needs a user name, not '-x'; e.g. sq -u $login" -- -u -x
+	o_refused "-u needs a user name, not ' -x'; e.g. sq -u $login" -- '-u -x'
+	o_refused "--me takes no value; write it on its own, e.g. sq --me" -- --me=x
+	o_refused "--partition needs a partition name, e.g. sq --partition batch" -- --partition=
+	o_refused "-u needs a user name, not '--me'; e.g. sq -u $login" -- -u --me
+	o_refused "-u needs a user name, not '--expand'; e.g. sq -u $login" -- -u --expand
+	o_refused "-U needs an account name, not '-x'; e.g. sq -U myaccount" -- -U -x
+	o_twin
+}
+c_opts_jobid() {   # AC17
+	T_TITLE="-j takes job ids squeue takes, N or N_T, no leading zero, up to 2147483647; the -j N M hint only where N,M would be one"
+	local v
+	for v in 0 a 5, 5,,6 5abc '5 ' '123_[1-3]' 123+1 2147483648 05 6_03; do
+		o_refused "-j needs job ids like 12345 or 12345_4, not '$v'; e.g. sq -j 12345" -- -j "$v"
+	done
+	o_refused "-j needs job ids like 12345 or 12345_4, not 'a'; e.g. sq -j 12345" -- -ja
+	o_refused "--jobs needs job ids like 12345 or 12345_4, not '0'; e.g. sq -j 12345" -- --jobs=0
+	o_refused "-j needs a job id, not just blanks or commas; e.g. sq -j 12345" -- -j ,
+	for v in 5 5,6_3 2147483647 6_0; do
+		orun empty -- -j "$v"
+		need "-j $v: rc 0, Q --jobs=$v, S -j $v" eval 'rc_is 0 && q_is --jobs="$v" && s_is -a -j "$v"'
+	done
+	o_refused "'6' is not a subcommand; sq -h lists them (did you mean sq -j 5,6?)" -- -j 5 6
+	o_refused "'6+1' is not a subcommand; sq -h lists them" -- -j 5 6+1
+	o_refused "'0' is not a subcommand; sq -h lists them" -- -j 5 0
+}
+c_opts_repeat() {   # AC18
+	T_TITLE="a filter set twice in any spelling is refused naming the second; -u/--me and -A/-U are one key; the environment never repeats, -S may"
+	local login; login=$(login_of_stub) tail="squeue would keep only the last one, so write one list instead, e.g. sq"
+	o_refused "-u sets the same filter twice; $tail -u $login,alice" -- -u a -ub
+	o_refused "--partition sets the same filter twice; $tail -p batch,gpu" -- -p a --partition=b
+	o_refused "--states sets the same filter twice; $tail -t " -- -t R --states PD
+	o_refused "--me sets the same filter twice; $tail -u $login,alice" -- --me --me
+	o_refused "--me sets the same filter twice; $tail -u $login,alice" -- -u b --me
+	o_refused "-u sets the same filter twice; $tail -u $login,alice" -- --me -u b
+	o_refused "-U sets the same filter twice; $tail -A acct1,acct2" -- -A a -U b
+	orun empty SQUEUE_USERS=a -- -u b
+	need "SQUEUE_USERS=a -u b: no repeat, Q -u b" eval 'rc_is 0 && q_is -u b'
+	orun empty -- -S a -S b
+	need "-S a -S b: no repeat, Q -S t,i -S a -S b" eval 'rc_is 0 && q_is -S a -S b'
+}
+c_opts_check_order() {   # AC19
+	T_TITLE="each word is checked as it is read, so the first bad one wins; the environment after the column letters"
+	o_refused "-u needs a user name, e.g. sq -u $(login_of_stub)" -- -u '' -h
+	sq_run empty -- -h -u ''
+	need "-h -u '': the help, rc 0" eval 'rc_is 0 && has "auto-fitting Slurm dashboard" && err_empty'
+	o_refused "-p needs a partition name, e.g. sq -p batch" -- -p '' -z
+	o_refused "-z is not one of the short options sq forwards; sq -h lists them" -- -z -p ''
+	o_refused "-u needs a user name, e.g. sq -u $(login_of_stub)" -- -u '' log 5
+	o_refused "%s is not a squeue field letter (in -o 'i,%s')" SQUEUE_USERS= -- -o i,%s
+	o_twin
+}
+c_opts_sub_placement() {   # AC20
+	T_TITLE="-a -r -P take no value, so a subcommand may follow them, as after --all; -U takes one"
+	local fx f; fx=$(log_fx done <<'EOF'
+StateCompact=CD
+@file create wd/out_500.log done\n
+EOF
+)
+	for f in -a --all -r -P; do
+		sq_run "$fx" -- "$f" log --no-follow 500
+		need "$f log 500: sq log runs, the file" eval 'rc_is 0 && [ "$(cat "$OUT")" = done ] && argv_has squeue -h --jobs=500 -t all'
+	done
+	o_refused "subcommands come first, before any option that takes a value: sq log …" -- -U x log 500
+	o_refused "'6' is not a subcommand; sq -h lists them (did you mean sq -j 5,6?)" -- --jobs=5 6
+}
+c_opts_o_attached() {   # AC21
+	T_TITLE="-oLIST and --format=LIST are sq's -o; -O and --Format stay refused"
+	local rlo=$'\342\200\256' base
+	orun wide -- -o i,j,u; base=$RUN/base; without_clock "$OUT" > "$base"
+	orun wide -- -oi,j,u
+	need "-oi,j,u: the screen of -o i,j,u" eval 'rc_is 0 && cmp -s "$base" <(without_clock "$OUT")'
+	orun wide -- --format i,j; without_clock "$OUT" > "$base"
+	orun wide -- --format=i,j
+	need "--format=i,j: the screen of --format i,j" eval 'rc_is 0 && cmp -s "$base" <(without_clock "$OUT")'
+	orun wide -- -o i; without_clock "$OUT" > "$base"
+	orun wide -- -o%.10i
+	need "-o%.10i: the screen of -o i" eval 'rc_is 0 && cmp -s "$base" <(without_clock "$OUT")'
+	orun wide -- -o u; without_clock "$OUT" > "$base"
+	orun wide -- "-o${rlo}u"
+	need "-o+RLO+u: the screen of -o u" eval 'rc_is 0 && err_empty && cmp -s "$base" <(without_clock "$OUT")'
+	o_refused "-Oi would override sq's own output format; write the column list as 'sq -o i,j,u'" -- -Oi
+	o_refused "--Format=i would override sq's own output format; write the column list as 'sq -o i,j,u'" -- --Format=i
+	o_refused "-O would override sq's own output format; write the column list as 'sq -o i,j,u'" -- -O i
+}
+c_opts_fallback_source() {   # AC22
+	T_TITLE="the fallback's caption names the first entry sacct has no mapping for, by its source, without its value"
+	local spec args src
+	for spec in "-nxy|-n" "--name=x|--name" "-n x --sibling|-n" "--sibling -n x|--sibling"; do
+		IFS='|' read -r args src <<< "$spec"
+		orun noacct -- $args
+		need "noacct, $args: the caption names $src" eval '
+			rc_is 0 && calls_are 1 1 1 0 && caption_is "recently finished · recent only (sq does not translate $src for sacct)"'
+	done
+	orun noacct SQUEUE_SIB=1 -- -n x
+	need "noacct, SQUEUE_SIB=1 -n x: the pre-loop variable comes first" eval '
+		rc_is 0 && caption_is "recently finished · recent only (sq does not translate SQUEUE_SIB for sacct)"'
+	sq_run noacct SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --reservation=x
+	need "COMPACT, --reservation=x: its one line names --reservation" \
+		fin_line_is "recently finished (sq does not translate --reservation for sacct): 4188 qc FAILED 1"
+	sq_run "$(silent_fixture squeue-all 1 'squeue: error: the fallback says why')" -- -n x
+	need "both paths gone, -n x: 'finished jobs unavailable · sq does not translate -n for sacct'" \
+		eval 'rc_is 0 && has "finished jobs unavailable · sq does not translate -n for sacct"'
+}
+c_opts_mem() {   # AC23
+	T_TITLE="a cluster selection from any source keeps MEM at %m: SQUEUE_FEDERATION, SQUEUE_SIBLING, SLURM_CLUSTERS, -M"
+	local f
+	for f in SQUEUE_FEDERATION= SQUEUE_SIBLING=1 SLURM_CLUSTERS=c1; do
+		mem_run jobmem SQ_WIDTH=110 "$f" -- --color
+		need "jobmem, $f: no allocation, mirror or sstat call" eval 'rc_is 0 && [ "$(calls alloc)$(calls mirror)$(calls sstat)" = 000 ]'
+		mem_run memalloc SQ_WIDTH=110 "$f" -- --color
+		need "memalloc, $f: no allocation, mirror or sstat call" eval 'rc_is 0 && [ "$(calls alloc)$(calls mirror)$(calls sstat)" = 000 ]'
+	done
+	mem_run jobmem SQ_WIDTH=110 -- --color -M c1
+	need "jobmem, -M c1: no allocation, mirror or sstat call" eval 'rc_is 0 && [ "$(calls alloc)$(calls mirror)$(calls sstat)" = 000 ]'
+	mem_run memalloc SQ_WIDTH=110 -- --color -M c1
+	need "memalloc, -M c1: no allocation, mirror or sstat call" eval 'rc_is 0 && [ "$(calls alloc)$(calls mirror)$(calls sstat)" = 000 ]'
+}
+c_opts_docs() {   # AC27
+	T_TITLE="sq -h names every short letter and long name sq accepts as a word, the README each of OPTS's notes, and the help's examples run"
+	local w missing= readme=${here%/*}/README.md
+	sq_run empty -- -h
+	for w in -u -p -A -U -q -j -M -n -t -w -L -R -S -a -r -P -o -c -C -x -h \
+	         --user --users --partition --partitions --account --accounts --qos --job --jobs --cluster --clusters \
+	         --name --state --states --node --nodes --nodelist --license --licenses --reservation --sort \
+	         --all --hide --array --noconvert --noheader --priority --federation --local --sibling --sib --me \
+	         --format --center --centre --center-all --centre-all --expand --no-recent --no-bell --color --colour \
+	         --no-color --no-colour --compact --full --reserve --help; do
+		plain | grep -qE -- "(^|[^-[:alnum:]])$w([^-[:alnum:]]|$)" || missing="$missing $w"
+	done
+	need "sq -h names each as a word${missing:+ (missing:$missing)}" eval 'rc_is 0 && [ -z "$missing" ]'
+	need "sq -h: options are written apart, -h is --noheader, the environment counts, an empty one is refused, the one-dash cost" eval '
+		has "short options are written apart (-a -r, not -ar)" && has "squeue'"'"'s -h is --noheader, which sq always" &&
+		has "squeue'"'"'s own variables count as the flags they stand for, a flag winning" && has "empty is refused" &&
+		has "a job named \"ame\" is -n ame, not -name" && has "SQUEUE_SIB and SQUEUE_SIBLING"'
+	need "README: Usage, the flag table, Good to know (default view, sacct's unknown user, squeue's environment), Refused" eval '
+		grep -qF "read by their full long" "$readme" && grep -qF "in squeue'"'"'s short spelling" "$readme" &&
+		grep -qF "| \`-u\`, \`-p\`, \`-A\` (\`-U\`)" "$readme" && grep -qF "squeue'"'"'s default view (no \`--all\`, no \`-p\`)" "$readme" &&
+		grep -qF "refuses an unknown user or QoS that squeue only warns about" "$readme" &&
+		grep -qF "squeue'"'"'s environment may stop sq with a" "$readme" && grep -qF "sq'"'"'s own \`SQ_*\` variables" "$readme" &&
+		grep -qF "costs the" "$readme" && grep -qF "Options run together are refused" "$readme" &&
+		grep -qF "a job named \"ame\" is written \`-n ame\`" "$readme" && grep -qF "in any spelling" "$readme"'
+	# the help's own examples
+	orun empty -- -o i,j,T,M,P,N
+	need "sq -o i,j,T,M,P,N: rc 0" eval 'rc_is 0 && err_empty'
+	orun empty -- -u alice -p gpu
+	need "sq -u alice -p gpu: rc 0, both filters" eval 'rc_is 0 && q_is -u alice -p gpu'
+	orun empty -- -pgpu --partition=gpu
+	need "-pgpu --partition=gpu: one filter twice, refused" eval 'rc_is 2'
+	orun empty -- -a -r
+	need "sq -a -r: rc 0, Q -a -r" eval 'rc_is 0 && q_is -a -r'
+	o_refused "'-ar' runs options together; write each option as its own word" -- -ar
+	o_refused "'-partition' is not an option; did you mean --partition?" -- -partition
+	orun empty -- -n ame
+	need "sq -n ame: the job name ame" eval 'rc_is 0 && q_is -n ame'
+	orun empty -- -n -x
+	need "sq -n -x: the job name -x" eval 'rc_is 0 && q_is -n -x'
+	orun empty -- --noheader
+	need "sq --noheader: rc 0, changes nothing" eval 'rc_is 0 && q_is'
+	o_refused "SQUEUE_USERS is set but holds no user name; unset it, or set one, e.g. SQUEUE_USERS=$(login_of_stub)" SQUEUE_USERS= --
+	for w in -c -C -x --center --centre --center-all --centre-all --expand --colour --no-colour --no-recent --no-bell --color --no-color --compact --full; do
+		orun empty -- "$w"
+		need "sq $w: rc 0" eval 'rc_is 0 && err_empty'
+	done
+}
+
+# ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
@@ -7291,6 +7868,9 @@ cases=(
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
+	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
+	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
+	opts_jobid opts_repeat opts_check_order opts_sub_placement opts_o_attached opts_fallback_source opts_mem opts_docs
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,

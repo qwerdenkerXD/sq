@@ -194,7 +194,7 @@ while [ $# -gt 0 ]; do
 		squeue:-n|squeue:--name|squeue:-w|squeue:--nodelist|squeue:--node|squeue:--nodes|\
 		squeue:-L|squeue:--licenses|squeue:--license|squeue:-R|squeue:--reservation)
 			take "$@" ;;              # a filter: logged above, never applied
-		squeue:--me|squeue:--all|squeue:--hide|\
+		squeue:--me|squeue:-a|squeue:--all|squeue:--hide|\
 		squeue:-P|squeue:--priority|squeue:--federation|squeue:--local|squeue:--sibling)
 			[ "$has" = 0 ] || refuse "$a takes no value"; shift_n=1 ;;
 		# these change what squeue prints (one row per task; unconverted sizes):
@@ -210,6 +210,8 @@ while [ $# -gt 0 ]; do
 		# fixture writes them that way; --array (a pending array's remainder one
 		# row per task) is rendered as written too
 		sacct:--noconvert|sacct:--array) shift_n=1 ;;
+		# which cluster's jobs: logged, never applied, as a filter
+		sacct:--local|sacct:--federation) shift_n=1 ;;
 		# refused like any option the stub does not render: sacct -X drops the
 		# step rows, the only ones carrying a signal (seen live)
 		sacct:--delimiter)           take "$@"; delim=$val ;;

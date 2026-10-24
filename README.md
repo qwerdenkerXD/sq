@@ -122,11 +122,13 @@ watch -tc -n 5 sq         # live; keep -t, or watch's own header pushes the
                           #  footer off screen (or leave it room with
                           #  --reserve 2); -c for colour
 sq -o i,j,T,M,P,N         # choose columns by squeue field letter
-sq -u "$USER" -p gpu      # squeue's filters are passed on, by full long name from
-                          #  a fixed list (sq -h names it) - never an abbreviation,
+sq -u "$USER" -p gpu      # squeue's filters and flags, read by their full long
+                          #  name from a fixed list (sq -h names it) and passed on
+                          #  in squeue's short spelling - never an abbreviation,
                           #  because squeue's own getopt would read "--iter=5" as
-                          #  -i and "--forma=%i" as -o.  Some full names are refused
-                          #  too, where they would replace the output sq parses
+                          #  -i and "--forma=%i" as -o.  Short options are written
+                          #  apart (-a -r, not -ar).  Some names are refused too,
+                          #  where they would replace the output sq parses
 sq -C                     # centred in both axes
 sq log 12345              # a job's output file, followed while it runs (below)
 sq job 12345              # one job, and its efficiency once it ended (below)
@@ -134,7 +136,9 @@ sq job 12345              # one job, and its efficiency once it ended (below)
 
 | Flag | Effect |
 |---|---|
-| `-o LIST` | Columns as squeue field letters, e.g. `i,j,u,T,M,L,C,m,R` (the default). `%` and widths are ignored, since widths are automatic. |
+| `-u`, `-p`, `-A` (`-U`), `-q`, `-j`, `-M`, `-n`, `-t`, `-w`, `-L`, `-R`, `-S`, `--me` | squeue's filters, also by their long names (`--user`, `--partition`, `--account`, …, `sq -h` lists them). The value follows the letter (`-pgpu`, `--partition=gpu`) or is the next word, whatever it looks like (`-n -x` is the job name `-x`). An empty value, one of only blanks and commas, and `-p=gpu` are refused; `-j` takes job ids, `12345` or `12345_4`; a filter given twice is refused, as squeue would keep only the last: write one list. |
+| `-a`, `-r`, `-P`, `--hide`, `--noconvert`, `--federation`, `--local`, `--sibling` | squeue's flags, also as `--all`, `--array`, `--priority`, `--sib`. `--noheader` is accepted and changes nothing: squeue's `-h` is `--noheader`, which sq always passes, and so `-h` is sq's help. |
+| `-o LIST` | Columns as squeue field letters, e.g. `i,j,u,T,M,L,C,m,R` (the default), also `-oLIST`, `--format LIST`, `--format=LIST`. `%` and widths are ignored, since widths are automatic. |
 | `-c` / `-C` | Centre horizontally / in both axes. Vertical centring happens only on a screen (a terminal, or `watch`; into a file or a pipe `-C` centres horizontally only) and shows only while the dashboard is at least two lines shorter than the screen. With `-C`, keep `watch -t`, or watch's header pushes the bottom off screen. |
 | `-x` | Show array tasks one per row instead of folding them. |
 | `--no-recent` | Hide the recently-finished block. |
@@ -142,7 +146,7 @@ sq job 12345              # one job, and its efficiency once it ended (below)
 | `--color` / `--no-color` | Force colour on or off. |
 | `--compact` / `--full` | Fit the screen / show every job, whatever the output goes to. Giving both is an error. |
 | `--reserve N` | COMPACT leaves N lines of the screen unused, e.g. for `watch`'s own header. If only the footer fits, only the footer is drawn. |
-| `-h` | Help. |
+| `-h`, `--help` | Help. |
 
 | Variable | Effect |
 |---|---|
@@ -275,13 +279,34 @@ efficiency
 - **Finished jobs come from the accounting database** (`sacct`), so a job that ended while
   nobody was watching is still shown, for as long as `SQ_SINCE` reaches back. Step rows are read
   too, because a signalled job's own row reports success and only its step carries the signal.
-  Without accounting, or with a filter `sacct` has no equivalent for, the block falls back to
-  `squeue -t all`, which only remembers jobs for `MinJobAge` (often 300 s), and the caption says so.
+  Without accounting, or with a filter sq does not translate for sacct (`-n`, `-w`, `-L`, `-R`,
+  `--sibling`), the block falls back to `squeue -t all`, which only remembers jobs for
+  `MinJobAge` (often 300 s), and the caption says so (`sq does not translate -n for sacct`).
   A state filter (`-t`) filters the queue only: the block shows every finished job either way.
-  `--array` (`-r`, or `SQUEUE_ARRAY` set) becomes sacct's `--array`, one row per task of a
-  pending array's remainder; `--noconvert` and `--priority` (`-P`) only change how squeue shows
-  its jobs and are not passed to sacct; `--all`, `--hide` and `--local` change which jobs squeue
-  lists, which sacct cannot follow, so they fall back.
+  `--array` (`-r`) becomes sacct's `--array`, one row per task of a pending array's remainder,
+  and `--local` and `--federation` are sacct's own; `--noconvert`, `--priority` (`-P`) and `-S`
+  only change how squeue shows its jobs, and `--all` (`-a`) and `--hide` only whether it shows
+  the jobs of hidden partitions and of partitions closed to your groups, which sacct always
+  shows, so none of them is passed to sacct. So in squeue's default view (no `--all`, no `-p`)
+  the queue leaves out those partitions' jobs while the finished block lists them. sacct also
+  refuses an unknown user or QoS that squeue only warns about: `-u alice,typo` shows alice's
+  queue beside a fallback block that names sacct's error.
+- **squeue's environment counts as its flags.** `SQUEUE_USERS`, `SQUEUE_PARTITION`,
+  `SQUEUE_ACCOUNT`, `SQUEUE_QOS`, `SQUEUE_STATES`, `SQUEUE_NAMES`, `SQUEUE_LICENSES` and
+  `SLURM_CLUSTERS` are read as `-u`, `-p`, `-A`, `-q`, `-t`, `-n`, `-L` and `-M`, the flag on the
+  command line winning, and `SQUEUE_ALL`, `SQUEUE_ARRAY`, `SQUEUE_PRIORITY`, `SQUEUE_LOCAL`,
+  `SQUEUE_FEDERATION`, `SQUEUE_SIB` and `SQUEUE_SIBLING` (set at all, even empty) as `-a`, `-r`,
+  `-P`, `--local`, `--federation` and `--sibling`, all in squeue's own order, so the queue, the
+  finished block and its caption see the same filters. squeue's environment may stop sq with a
+  usage error naming the variable, because squeue would silently show no job (or fail): one set
+  but empty or of only blanks and commas, a user, partition, account, QoS or cluster beginning
+  with `-` (`SLURM_CLUSTERS` even under `-M`, as squeue reads it first), and `SQUEUE_LICENSES`
+  together with `-L` or `-p`, which Slurm versions read differently. sq's own `SQ_*` variables
+  never stop it, except `SQ_FMT`, whose letters are checked like `-o`'s; any other invalid one
+  keeps its default. `SQUEUE_SORT` is ignored, as sq sorts the queue itself, other `SQUEUE_*`
+  names are left to squeue, which ignores them too, and the finished block's `sacct` runs
+  without your `SACCT_*` settings. A `SQUEUE_SIB` or `SQUEUE_SIBLING` set in a profile costs the
+  accounting block, as `--sibling` does: sacct has no sibling view.
 - **Reading EXIT:** the exit code, then what ExitCode's second field says, taken from the job
   and its steps (the first non-zero one, except that an out-of-memory always wins): `rc/sigN`
   is signal N as Slurm records it, `rc/oom` out of memory, and `rc/errN` the low 7 bits of a
@@ -351,8 +376,13 @@ efficiency
   counts all of RealMemory and `sq job` calls it unknown, and array tasks named so fold
   together. `sq log` passes a job's output file on as it is.
 - **Refused:** `-O`/`--Format`, `-s`/`--steps`, `-i`/`--iterate`, `-l`, `-v`, `-V`, `--json` and
-  `--yaml`. Each would replace or defeat the output sq parses; sq exits with code 2 and says
-  why. (`-o`/`--format` are sq's own column list.)
+  `--yaml`, in any spelling (`-Oi`, `--steps=5`, `-aO`). Each would replace or defeat the output
+  sq parses; sq exits with code 2 and says why. (`-o`/`--format` are sq's own column list.)
+  Options run together are refused (`-ar`, `-atR`: write `-a -r`, `-a -t R`), and so is any
+  short option sq does not forward (`-z`). A long name written with one dash is refused with a
+  hint, `-partition` is no `-p artition`; the cost: a job named "ame" is written `-n ame`, not
+  `-name`, a user "sers" `-u sers`, a partition "artition" `-p artition`. Slurm's development
+  branch adds `-J`/`--job-name` (= `-n`), which sq refuses until it is listed.
 
 ## Tests
 
