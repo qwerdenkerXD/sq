@@ -1102,11 +1102,12 @@ color_resolve() {
 	fi
 }
 
-# gawk measures every width with length(), which counts characters only under
-# a UTF-8 locale: under LC_ALL=C (cron, systemd, containers) it counts bytes,
-# and the whole layout changes meaning.  So gawk runs under the caller's locale
-# if that is UTF-8, else C.UTF-8, else the first UTF-8 locale installed; with
-# none at all, under the caller's as before.  A locale is UTF-8 when its
+# gawk counts characters with length() only under a UTF-8 locale: under
+# LC_ALL=C (cron, systemd, containers) it counts bytes.  So gawk runs under the
+# caller's locale if that is UTF-8, else C.UTF-8, else the first UTF-8 locale
+# installed; with none at all, under C, where wide_awk measures by the bytes
+# themselves (a caller's eucJP or Latin-1 would take UTF-8 bytes for its own
+# characters, and its [[:cntrl:]] eat a byte of "…").  A locale is UTF-8 when its
 # charmap says so and gawk, which does the counting, counts "…█" as two
 # characters (ja_JP.eucJP counts "…" as one, but "█" as two).  Without a
 # locale tool that answers (musl, a minimal image) gawk's count alone decides:
@@ -1127,7 +1128,7 @@ gawk_locale() {   # the locale gawk runs in, into gloc
 		gloc=C.UTF-8
 		utf8_ok "$gloc" || gloc=$(locale -a 2>/dev/null | LC_ALL=C grep -i '\.utf-\{0,1\}8' |
 			while read -r l; do utf8_ok "$l" && { printf '%s' "$l"; break; }; done)
-		[ -n "$gloc" ] || gloc=${LC_ALL:-}
+		[ -n "$gloc" ] || gloc=C
 	fi
 }
 
@@ -2284,7 +2285,6 @@ function vword(kind, text,   word, hue) {
   hue = (kind == "wait") ? "32" : (kind == "never" || kind == "will") ? "31" : "33"
   return paint(hue, word) ": " text
 }
-function wclip(s, wd) { return (length(s) > wd) ? substr(s, 1, wd - 1) "…" : s }
 # a uid as the reader knows it: you, root, a name (the owner's said so), the
 # owner when getent named no one but the uid is the job's own, else the number
 function who(uid, owner, owner_uid,   nm) {
@@ -2540,7 +2540,7 @@ function node_fits(i, rq_c, rq_m) { return node_cpufree(i) >= rq_c && (rq_m <= 0
 # the table: "free" (free now, of what jobs can get) or "total" (what jobs can get)
 function node_table(q, how, rq_c, rq_m,   i, k, w, cw, mw, CT, MT, VT, hc, hm, fc, fm, fits_c, fits_m) {
   w = length("it asks")
-  for (k = 1; k <= nuse; k++) { i = USE[k]; if (length(NODE_NAME[i]) > w) w = length(NODE_NAME[i]) }
+  for (k = 1; k <= nuse; k++) { i = USE[k]; if (colw(NODE_NAME[i]) > w) w = colw(NODE_NAME[i]) }   # in columns
   CT[0] = rq_c ""; MT[0] = (rq_m > 0) ? memsize(rq_m, 0) : "-"; VT[0] = ""
   for (k = 1; k <= nuse; k++) {
     i = USE[k]
@@ -2561,7 +2561,7 @@ function node_table(q, how, rq_c, rq_m,   i, k, w, cw, mw, CT, MT, VT, hc, hm, f
   if (length(hc) > cw) cw = length(hc); if (length(hm) > mw) mw = length(hm)
   wl2(paint("2", sprintf("%-*s  %*s  %*s", w, "", cw, hc, mw, hm)))
   wl2(sprintf("%-*s  %*s  %*s", w, "it asks", cw, CT[0], mw, MT[0]))
-  for (k = 1; k <= nuse; k++) wl2(sprintf("%-*s  %*s  %*s  %s", w, NODE_NAME[USE[k]], cw, CT[k], mw, MT[k], VT[k]))
+  for (k = 1; k <= nuse; k++) wl2(sprintf("%s  %*s  %*s  %s", colpad(NODE_NAME[USE[k]], -w), cw, CT[k], mw, MT[k], VT[k]))
 }
 function nodes_unknown_note(q) { wn(ENVIRON["SQJ_WNODESTAT"] == "ok" ? "no node is in partition " R[q, "Partition"] : "the nodes are unknown: scontrol failed (" ENVIRON["SQJ_WNODEWHY"] ")") }
 # Slurm's queue order (V9): the higher priority first, then the earlier
@@ -2571,7 +2571,7 @@ function before(p, prio, submit, id) {
   if (RQ[p, "SubmitTime"] + 0 != submit) return RQ[p, "SubmitTime"] + 0 < submit
   return RQ[p, "JobID"] + 0 < id + 0
 }
-function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio, submit, later, lead, nbig, nbigdown, fitnow, idw) {
+function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio, submit, later, lead, nbig, nbigdown, fitnow, idw, uw) {
   rq_c = R[q, "NumCPUs"] + 0; rq_m = tres_mem(R[q, "tres-alloc"])
   usable_nodes(q)
   if (reason == "Priority") {
@@ -2592,10 +2592,14 @@ function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio,
     for (k = 1; k <= ahead; k++) if (RQ[AH[k], "SubmitTime"] + 0 > submit) later = 1
     if (ahead) wl(vword("wait", plural(ahead, "job") (later ? " ahead of it in the queue " : " submitted before it ") (ahead == 1 ? "comes" : "come") " first"))
     else wl(vword("wait", "a job ahead of it in the queue comes first"))
-    for (k = 1; k <= ahead && k <= 3; k++) if (length(qjob(AH[k])) > idw) idw = length(qjob(AH[k]))
+    uw = 9                                      # the user: 9 columns, or its widest
+    for (k = 1; k <= ahead && k <= 3; k++) {
+      if (length(qjob(AH[k])) > idw) idw = length(qjob(AH[k]))
+      if (colw(RQ[AH[k], "UserName"]) > uw) uw = colw(RQ[AH[k], "UserName"])
+    }
     for (k = 1; k <= ahead && k <= 3; k++) {
       p = AH[k]
-      wl2(sprintf("%-*s  %-9s %3s CPUs  %6s  %s (%s), submitted %s ago", idw, qjob(p), RQ[p, "UserName"], RQ[p, "NumCPUs"],
+      wl2(sprintf("%-*s  %s %3s CPUs  %6s  %s (%s), submitted %s ago", idw, qjob(p), colpad(RQ[p, "UserName"], -uw), RQ[p, "NumCPUs"],
                   memsize(tres_mem(RQ[p, "tres-alloc"]), 0), paint(stcolour("PD"), "PENDING"), RQ[p, "Reason"], ago(NOW - RQ[p, "SubmitTime"])))
     }
     if (ahead > 3) wl2("… and " (ahead - 3) " more")
@@ -2655,12 +2659,12 @@ function why_blockers(q, rq_c, rq_m,   k, i, p, nj, J, E, a, b, t, fc, fm, best,
   if (best == "") return
   wl("it needs " (nbl == 1 ? "this job" : "these jobs") " to end first, on " NODE_NAME[best] ":")
   for (a = 1; a <= nbl; a++) {
-    p = BL[a]; if (length(RQ[p, "UserName"]) > w) w = length(RQ[p, "UserName"]); if (length(qjob(p)) > idw) idw = length(qjob(p))
+    p = BL[a]; if (colw(RQ[p, "UserName"]) > w) w = colw(RQ[p, "UserName"]); if (length(qjob(p)) > idw) idw = length(qjob(p))
   }
   for (a = 1; a <= nbl; a++) {
     p = BL[a]
     if (RQ[p, "TimeLimit"] == "UNLIMITED") { unl = unl (unl == "" ? "" : ", ") qjob(p); if (isepoch(RQ[p, "EndTime"]) && (unlend == "" || RQ[p, "EndTime"] + 0 < unlend)) unlend = RQ[p, "EndTime"] + 0 }
-    wl2(sprintf("%-*s  %-*s %3s CPUs  %6s  %s", idw, qjob(p), w, RQ[p, "UserName"], RQ[p, "NumCPUs"], memsize(tres_mem(RQ[p, "tres-alloc"]), 0),
+    wl2(sprintf("%-*s  %s %3s CPUs  %6s  %s", idw, qjob(p), colpad(RQ[p, "UserName"], -w), RQ[p, "NumCPUs"], memsize(tres_mem(RQ[p, "tres-alloc"]), 0),
                 RQ[p, "TimeLimit"] == "UNLIMITED" ? "no time limit" : elap(dur(RQ[p, "TimeLeft"])) " left"))
   }
   est = R[q, "StartTime"]
@@ -2761,7 +2765,7 @@ function why_tail(   info, which, me, host, k) {
   if (info == "") return
   if (info == "ok") {
     wl(paint("2", "its " which " ends with:"))
-    for (k = 1; k <= ntail; k++) wl2(wclip(TAIL[k], COLS - 4))
+    for (k = 1; k <= ntail; k++) wl2(clip(TAIL[k], COLS - 4))
   }
   else if (info == "empty")      wn("its " which " is empty")
   else if (info == "blank")      wn("its " which " holds only blank lines")
@@ -3067,7 +3071,7 @@ job_run() {   # job_run PHASE: the report's gawk, PHASE plan (what more the why 
 	[ "$1" != plan ] || as=pending                   # to show) or show
 	env LC_ALL="$gloc" gawk -v phase="$1" -v job="$job" -v task="$task" -v myuid="$myuid" -v qstat="$qstat" \
 		-v astat="$as" -v memfail="$memfail" -v pss="$job_pss" -v tmo="$job_atmo" \
-		-v qfields="$job_qfields" -v afields="$job_afields" "$shared_awk$fname_awk$job_awk"
+		-v qfields="$job_qfields" -v afields="$job_afields" "$shared_awk$fname_awk$wide_awk$job_awk"
 }
 
 sub_job() {
@@ -3875,11 +3879,15 @@ uwhy=$(first_why nerr jerr) fwhy=$(first_why rwhy rerr jerr)
 memallocf=$tmp/memalloc memreadf=$tmp/memread memtotalf=$tmp/memtotal nodespecf=$tmp/nodespec
 sqv="center fold color bell eta recent bellall me statef statetmp uwhy jerr rwhy fwhy wtxt sfilt host now memallocf memreadf memtotalf nodespecf nodespecfmt serr"
 for v in $sqv; do export "SQV_$v=${!v}"; done
-env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" \
+# wide: some record of the three answers the tables read holds a byte above
+# 127 (grep's rc 1: none), so their cells are measured, cut and padded by
+# columns; an ASCII screen keeps the plain length() and printf of a cell
+wide=1; high_bytes "$tmp/nodes" "$tmp/jobs" "$tmp/recent"; [ $? != 1 ] || wide=0
+env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" -v wide="$wide" \
                       -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
                       -v compact="$compact" -v reserve="$reserve" -v uidmap="$uidmap" -v sqv="$sqv" \
                       -v screen="$screen" -v memon="$memon" -v myuid="$myuid" -v memfail="$memfail" -v totfail="$totfail" \
-                      -v qfields="$qfields" -v qpos_jobid="$qpos_jobid" -v qpos_uid="$qpos_uid" "$shared_awk"'
+                      -v qfields="$qfields" -v qpos_jobid="$qpos_jobid" -v qpos_uid="$qpos_uid" "$shared_awk$wide_awk"'
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
   m = split(list, a, ",")
   for (i=1; i<=m; i++) a[i] = a[i]+0
@@ -3899,13 +3907,15 @@ function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
 # concurrency, not membership.
 # Below BASE_[…] ×N the cell is returned whole, for the plain right cut:
 # the base id is in this cell alone, the footer and "+N more" still count.
+# Widths in columns (colw) where WIDE: under C "…" and "×" are 3 and 2 bytes.
 function idfloor(x,   b) {                  # the narrowest idfit() can go
-  return match(x, BRACKET, b) ? length(b[1] b[3] "…") : length(x)
+  if (!match(x, BRACKET, b)) return WIDE ? colw(x) : length(x)
+  return WIDE ? colw(b[1] b[3] "…") : length(b[1] b[3] "…")
 }
 function idfit(x, wd,   b, keep) {
-  if (length(x) <= wd || wd < idfloor(x)) return x
+  if ((WIDE ? colw(x) : length(x)) <= wd || wd < idfloor(x)) return x
   match(x, BRACKET, b)
-  keep = substr(b[2], 1, wd - length(b[1] b[3] "…"))   # "…" is 3 under LC_ALL=C
+  keep = substr(b[2], 1, wd - (WIDE ? colw(b[1] b[3] "…") : length(b[1] b[3] "…")))   # b[2] is ASCII
   sub(/[^,]*$/, "", keep)
   return b[1] keep "…" b[3]
 }
@@ -4090,7 +4100,6 @@ function membar(   r, anyalloc, anycpu, i, spec) {
     if (length(memt[r]) > wm) wm = length(memt[r])
   }
 }
-function clip(x, wd) { return (length(x) > wd) ? substr(x, 1, wd-1) "…" : x }
 # the JOBID and EXIT cells of a finished group, for its row and for the one-line form
 function fid(g) {
   return (gcnt[g] > 1) ? sprintf("%s_[%s] ×%d", gbase2[g], compress(gtsk[g]), gcnt[g]) \
@@ -4150,7 +4159,8 @@ function memform(form,   g, r, f) {   # every MEM cell to FORM; MEM measured aga
     if ((g, f) in other_coloured) mem_coloured[g] = other_coloured[g, f]
   }
   tabw -= w[mc]; w[mc] = length(hd[mc])
-  for (r=1; r<=rows; r++) if (QSHOW[r] && length(v[r,mc]) > w[mc]) w[mc] = length(v[r,mc])
+  if (!WIDE) { for (r=1; r<=rows; r++) if (QSHOW[r] && length(v[r,mc]) > w[mc]) w[mc] = length(v[r,mc]) }
+  else for (r=1; r<=rows; r++) if (QSHOW[r] && (CW[r,mc] = colw(v[r,mc])) > w[mc]) w[mc] = CW[r,mc]
   tabw += w[mc]
 }
 
@@ -4190,18 +4200,27 @@ function othercells(g,   f, text) {   # its text in each form, once the group is
   v[g,mc] = other_text[g, "decimal"]
 }
 
-function qrow(r,   js, jc, line, i, x, fw, cc) {         # one queue row, coloured
+# Where WIDE, a cell is cut and padded by columns: from the width the measure
+# took (CW) while it is whole, the pad done here and printf given width 0
+function qrow(r,   js, jc, line, i, x, fw, cc, xw) {     # one queue row, coloured
   js = state[r]
   jc = (js=="R") ? "32" : (js=="PD") ? "33" : (js ~ /^(F|CA|TO|NF|OOM|ST|BF|DL)/) ? "31" : "36"
   line = lm
   for (i=1; i<=n; i++) {
     x = (i == idc) ? idfit(v[r,i], w[i]) : v[r,i]
-    if (length(x) > w[i]) x = substr(x, 1, w[i]-1) "…"
-    fw = RIGHT[k[i]] ? w[i] : (i==n ? -length(x) : -w[i])
+    if (!WIDE) {
+      if (length(x) > w[i]) x = substr(x, 1, w[i]-1) "…"
+      fw = RIGHT[k[i]] ? w[i] : (i==n ? -length(x) : -w[i])
+    } else {
+      xw = (x == v[r,i]) ? CW[r,i] : colw(x)
+      if (xw > w[i]) { x = clip(x, w[i]); xw = colw(x) }
+      fw = 0
+    }
     if (i == mc && (r in mem_coloured) && x == v[r,i]) {   # an own MEM cell, whole:
-      line = line sprintf("%*s%*s%s", gap[i], "", w[i] - length(x), "", mem_coloured[r])   # its own
+      line = line sprintf("%*s%*s%s", gap[i], "", w[i] - (WIDE ? xw : length(x)), "", mem_coloured[r])   # its own
       continue                                      # colours, right-aligned
     }
+    if (WIDE && (i < n || RIGHT[k[i]])) x = colpad(x, RIGHT[k[i]] ? w[i] : -w[i], xw)   # the last left-aligned unpadded
     cc = ""
     if (i == mc && (r in cell_colour)) cc = cell_colour[r]
     else if (i == idc)               cc = jc
@@ -4238,6 +4257,9 @@ BEGIN{
     fatal = 1; exit 1
   }
   BAR_PREF = 32; BAR_MAX = 56; BAR_MIN = 4; GAP_MAX = 4
+  # the tables measure, cut and pad by columns where a record holds a byte
+  # above 127, and always under C, where length() counts the bytes of "…"
+  WIDE = wide || !UTF8
   n = split(keys, k, ",")
   FQ = qfields + 1              # every field qfield added (%i, n displayed, %t %l %S,
                                 # COMPACT: %r %M, MEM: %A %U), and the empty sentinel
@@ -4370,8 +4392,8 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     memt[nn] = sprintf("%.0fG", F[4]/1024)
     nreason[nn] = (F[6] == "none" || F[6] == "") ? "" : F[6]
     if (nreason[nn] != "" && F[7] ~ /^[0-9]{4}-/) nreason[nn] = nreason[nn] " · since " substr(F[7], 1, 10)
-    if (length(F[2])     > wn) wn = length(F[2])
-    if (length(F[5])     > ws) ws = length(F[5])
+    if ((cw = WIDE ? colw(F[2]) : length(F[2])) > wn) wn = cw
+    if ((cw = WIDE ? colw(F[5]) : length(F[5])) > ws) ws = cw
     if (length(used[nn]) > wu) wu = length(used[nn])
     if (length(tot[nn])  > wt) wt = length(tot[nn])
     if (length(memu[nn]) > wf) wf = length(memu[nn])
@@ -4614,8 +4636,12 @@ END{
 
   # ---- natural widths -------------------------------------------------
   for (i=1; i<=n; i++) w[i] = length(hd[i])
-  for (r=1; r<=rows; r++) if (QSHOW[r])          # the rows SHOWN: a collapsed id
-    for (i=1; i<=n; i++) if (length(v[r,i]) > w[i]) w[i] = length(v[r,i])    # widens nothing
+  if (!WIDE) {
+    for (r=1; r<=rows; r++) if (QSHOW[r])        # the rows SHOWN: a collapsed id
+      for (i=1; i<=n; i++) if (length(v[r,i]) > w[i]) w[i] = length(v[r,i])    # widens nothing
+  } else                                        # in columns, each kept for qrow
+    for (r=1; r<=rows; r++) if (QSHOW[r])
+      for (i=1; i<=n; i++) if ((CW[r,i] = colw(v[r,i])) > w[i]) w[i] = CW[r,i]
 
   nfix = 30 + wn + wu + wt + wf + wm + ws       # node line, bars and margin aside
   bar  = BAR_PREF
@@ -4689,8 +4715,12 @@ END{
                                                  : elap(gmin[g]) "-" elap(gmax[g])
     }
     for (i=1; i<=6; i++) rw[i] = length(rhd[i])
-    for (r=1; r<=shown; r++)
-      for (i=1; i<=6; i++) if (length(rv[ord[r],i]) > rw[i]) rw[i] = length(rv[ord[r],i])
+    if (!WIDE) {
+      for (r=1; r<=shown; r++)
+        for (i=1; i<=6; i++) if (length(rv[ord[r],i]) > rw[i]) rw[i] = length(rv[ord[r],i])
+    } else                                      # in columns, as the last rung keeps them (FCW)
+      for (r=1; r<=shown; r++)
+        for (i=1; i<=6; i++) if ((FCW[ord[r],i] = colw(rv[ord[r],i])) > rw[i]) rw[i] = FCW[ord[r],i]
     rtabw = shown ? 5 : 0
     for (i=1; i<=6; i++) if (shown) rtabw += rw[i]
     while (rtabw > budget && rw[2] > 8) { rw[2]--; rtabw-- }   # NAME first, always
@@ -4785,14 +4815,13 @@ END{
       sm = cells(memalloc[r], meminuse[r], memreal[r], barm,
                  down ? "31" : (mp>95 ? "1;31" : (mp>85 ? "33" : "32")))
     out[++o] = sprintf("%s%s%-*s%s %s%s%3d%%  %s%*d%s/%-*d cpu   %s%s%3s%%  %s%*s%s/%-*s mem  %*s%s%s%s",
-                       lm, e("1"), wn, node[r], e("0"), sc, (bar?" ":""), p,
+                       lm, e("1"), WIDE ? 0 : wn, WIDE ? colpad(node[r], -wn) : node[r], e("0"), sc, (bar?" ":""), p,
                        e("1"), wu, used[r], e("0"), wt, tot[r],
                        sm, (bar?" ":""), (mp<0 ? "-" : sprintf("%d", mp)),
                        e(mp>95 && mp>=0 && !MEMALLOC ? "1;31" : "1"), wf, memu[r], e("0"), wm, memt[r],
                        npad+0, "", e("2"), nst[r], e("0"))
     if (SHOW["reasons"] && nreason[r] != "") {
-      x = nreason[r]
-      if (length(x) + wn + 3 > target) x = substr(x, 1, target - wn - 4) "…"
+      x = clip(nreason[r], target - wn - 3)
       out[++o] = sprintf("%s%*s%s↳ %s%s", lm, wn+1, "", e("2"), x, e("0"))
     }
   }
@@ -4862,8 +4891,13 @@ END{
       line = lm
       for (i=1; i<=6; i++) {
         x = (i == 1) ? idfit(rv[best,i], rw[i]) : rv[best,i]
-        if (length(x) > rw[i]) x = substr(x, 1, rw[i]-1) "…"
         fw = rrt[i]+0 ? rw[i] : -rw[i]
+        if (!WIDE) { if (length(x) > rw[i]) x = substr(x, 1, rw[i]-1) "…" }
+        else {                                  # cut and padded by columns
+          xw = (x == rv[best,i]) ? FCW[best,i] : colw(x)
+          if (xw > rw[i]) { x = clip(x, rw[i]); xw = colw(x) }
+          x = colpad(x, fw, xw); fw = 0
+        }
         if (i==1 || i==3) line = line sprintf("%*s%s%*s%s", rgap[i], "", e(fc),  fw, x, e("0"))
         else              line = line sprintf("%*s%s%*s%s", rgap[i], "", e("2"), fw, x, e("0"))
       }

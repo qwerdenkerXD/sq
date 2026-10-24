@@ -209,6 +209,57 @@ note_run() {   # every run: count the stub calls, and any stub refusal is a FAIL
 # reading the output (plain text; pty output goes through plain() first)
 # ============================================================================
 plain() { gawk '{ gsub(/\033\[[0-9;]*m/, ""); gsub(/\r/, ""); print }' "$OUT"; }
+# The column oracle, independent of sq's width table: each distinct character
+# beyond ASCII is measured by `wc -L` on its own under a UTF-8 locale (glibc's
+# wcwidth), once for the whole suite (in $work/oracle.map), and these
+# deviations of sq's rule from glibc are stated here: U+FE0F counts 1 (glibc
+# 0), a regional indicator 2 (glibc 1), the nine emoji tmux draws wide (☝ ⛹ ✌
+# ✍ and U+1F3CB, 1F3CC, 1F574, 1F575, 1F590; glibc 1) 2, and the -1 characters
+# the fixtures hold, U+2028 and U+2029, 1 (wc -L 0).  A fixture holds no
+# character whose glibc width changed between versions.
+# cplain: the screen as plain() prints it, cellified: a 2-column character
+# followed by a U+E000 filler, a 0-column one dropped, so a helper counting
+# characters counts columns.  oracle_width TEXT: TEXT's columns by it.
+# oracle_fill FILE first measures what the map lacks (a gawk running wc -L
+# itself would ignore SIGPIPE, and a reader that stops early made it fail)
+oracle_awk='
+BEGIN {
+	map = ENVIRON["ORACLE_MAP"]
+	while ((getline ln < map) > 0) { t = index(ln, "\t"); OW[substr(ln, 1, t - 1)] = substr(ln, t + 1) + 0 }
+	close(map)
+	OW["\357\270\217"] = 1                                   # U+FE0F
+	OW["\342\200\250"] = OW["\342\200\251"] = 1             # U+2028, U+2029
+	n = split("\342\230\235 \342\233\271 \342\234\214 \342\234\215 \360\237\217\213 \360\237\217\214 \360\237\225\264 \360\237\225\265 \360\237\226\220", E, " ")
+	for (i = 1; i <= n; i++) OW[E[i]] = 2
+	n = split("\246 \247 \250 \251 \252 \253 \254 \255 \256 \257 \260 \261 \262 \263 \264 \265 \266 \267 \270 \271 \272 \273 \274 \275 \276 \277", E, " ")
+	for (i = 1; i <= n; i++) OW["\360\237\207" E[i]] = 2     # the regional indicators
+	FILL = "\356\200\200"                                   # U+E000
+}
+function cellify(s,   n, C, i, out, w) {
+	n = split(s, C, ""); out = ""
+	for (i = 1; i <= n; i++) {
+		if (C[i] ~ /^[\001-\177]$/) { out = out C[i]; continue }
+		if (!(C[i] in OW)) { print "oracle: no width for " C[i] > "/dev/stderr"; exit 2 }
+		w = OW[C[i]]; out = out (w == 0 ? "" : w == 1 ? C[i] : C[i] FILL)
+	}
+	return out
+}'
+oracle_fill() {   # oracle_fill FILE: each character of FILE beyond ASCII the map lacks, by wc -L
+	local c
+	ORACLE_MAP=$work/oracle.map LC_ALL=$utf8 gawk "$oracle_awk"' { n = split($0, C, "")
+		for (i = 1; i <= n; i++) if (C[i] !~ /^[\001-\177]$/ && !(C[i] in OW) && !(C[i] in seen)) { seen[C[i]]; print C[i] } }' "$1" |
+	while IFS= read -r c; do
+		printf '%s\t%s\n' "$c" "$(printf '%s' "$c" | LC_ALL=$utf8 wc -L)" >> "$work/oracle.map"
+	done
+}
+cplain() {
+	oracle_fill "$OUT"
+	ORACLE_MAP=$work/oracle.map LC_ALL=$utf8 gawk "$oracle_awk"' { gsub(/\033\[[0-9;]*m/, ""); gsub(/\r/, ""); print cellify($0) }' "$OUT"
+}
+oracle_width() {
+	printf '%s\n' "$1" > "$work/oracle.text"; oracle_fill "$work/oracle.text"
+	ORACLE_MAP=$work/oracle.map T=$1 LC_ALL=$utf8 gawk "$oracle_awk"' BEGIN { print length(cellify(ENVIRON["T"])) }'
+}
 has()   { plain | grep -qF -- "$1"; }
 lacks() { ! has "$1"; }
 lines_matching() { plain | grep -E -- "$1"; }          # ERE over whole lines
@@ -221,11 +272,11 @@ escapes_all_sgr() {
 	[ "$sgr" -eq "$(escapes)" ]
 }
 # the widest line in characters, colour and CRs removed
-width() { plain | LC_ALL=$utf8 gawk '{ if (length($0) > m) m = length($0) } END { print m+0 }'; }
+width() { cplain | LC_ALL=$utf8 gawk '{ if (length($0) > m) m = length($0) } END { print m+0 }'; }   # in columns
 
 # the blocks of sq's screen, found by what they start with
-section() {   # section queue|recent|footer: that block's lines
-	plain | LC_ALL=$utf8 gawk -v want="$1" '
+section() {   # section queue|recent|footer: that block's lines (SRC=cplain: cellified)
+	${SRC:-plain} | LC_ALL=$utf8 gawk -v want="$1" '
 		BEGIN { RS = ""; HDR = "^ *[A-Z][A-Z/_()]*( +[A-Z][A-Z/_()]*)* *$" }   # a table header
 		{ split($0, L, "\n"); first = L[1] }
 		want == "queue"  && first ~ /^ *(queue is empty|job list unavailable|no readable rows|⚠ queue output)/ { print; exit }
@@ -263,8 +314,8 @@ xmark_counted_in_footer() {   # xmark_counted_in_footer BASE N: ×N shown -> foo
 }
 # a left-aligned column lines up: in every queue row a cell starts exactly where
 # the header names it (after a space), so no name can shift the columns after it
-column_aligned() {   # column_aligned HEADER, e.g. USER
-	section queue | H=$1 LC_ALL=$utf8 gawk 'NR == 1 { p = index($0 " ", " " ENVIRON["H"] " ") + 1; if (p < 2) exit 1; next }
+column_aligned() {   # column_aligned HEADER, e.g. USER (in columns)
+	SRC=cplain section queue | H=$1 LC_ALL=$utf8 gawk 'NR == 1 { p = index($0 " ", " " ENVIRON["H"] " ") + 1; if (p < 2) exit 1; next }
 		{ n++; if (substr($0, p-1, 1) != " " || substr($0, p, 1) == " " || substr($0, p, 1) == "") bad++ }
 		END { exit !(p >= 2 && n > 0 && !bad) }'
 }
@@ -1611,7 +1662,7 @@ c_centre() {
 	T_TITLE="-c moves the whole screen to the middle of the width, -C also of the height on a screen, not in a pipe"
 	local margin top centred
 	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 --
-	margin=$(( (140 - $(section queue | head -n 1 | gawk '{ print length($0) - 2 }')) / 2 ))
+	margin=$(( (140 - $(SRC=cplain section queue | head -n 1 | gawk '{ print length($0) - 2 }')) / 2 ))
 	need "uncentred: rc 0, narrower than the screen" eval 'rc_is 0 && [ "$margin" -gt 2 ]'
 	local plain=$RUN/uncentred; without_clock "$OUT" > "$plain"
 	sq_run mixed SQ_WIDTH=140 SQ_HEIGHT=30 -- -c
@@ -3403,12 +3454,12 @@ c_bars_edges() {
 # is the screen or that line, whichever is wider.  Where the bars are drawn
 # they end the node block on the shared right edge, the queue header's, not
 # short of it: the widest node line, as the state column is left-aligned.
-node_width() { plain | LC_ALL=$utf8 gawk '/ cpu .* mem / { if (length($0) > m) m = length($0) } END { print m+0 }'; }
+node_width() { cplain | LC_ALL=$utf8 gawk '/ cpu .* mem / { if (length($0) > m) m = length($0) } END { print m+0 }'; }
 # node_edge: "NODE HEADER BARS DRAWN": the widest node line, the queue header
 # (0 without one), "ok" when every node line draws no bar or two of 2 cells at
 # least (else "small"), and 1 when some node line draws bars (else 0)
 node_edge() {
-	plain | LC_ALL=$utf8 gawk 'hw == "" && /^ *[A-Z][A-Z\/_()]*( +[A-Z][A-Z\/_()]*)* *$/ { hw = length($0) }
+	cplain | LC_ALL=$utf8 gawk 'hw == "" && /^ *[A-Z][A-Z\/_()]*( +[A-Z][A-Z\/_()]*)* *$/ { hw = length($0) }
 		/ cpu .* mem / { if (length($0) > nw) nw = length($0); s = $0; n = 0
 			while (match(s, /[█▒▓░·]+/)) { n++; if (RLENGTH < 2) bad = 1; s = substr(s, RSTART + RLENGTH) }
 			if (n != 0 && n != 2) bad = 1; if (n) drawn = 1 }
@@ -3515,7 +3566,7 @@ c_membar_fail() {
 		mem_part_is fb2-bioinf-0 "██████████████░░ 89% 70/78G mem allocated"'
 	need "... the line right under the nodes, dim, naming the error of the -o call that followed, cut with … to the node lines' width" eval '
 		[ "$(calls scontrol)" = 2 ] && plain | sed -n 5p | grep -q "^  ↳ memory counts RealMemory: scontrol failed (slurm_load_node error: Unable to .*…\$" &&
-		sed -n 5p "$OUT" | grep -q "^  $ESC\[2m↳ .*…$ESC\[0m\$" && [ "$(plain | sed -n 5p | LC_ALL=$utf8 gawk "{ print length(\$0) }")" -le "$(node_width)" ]'
+		sed -n 5p "$OUT" | grep -q "^  $ESC\[2m↳ .*…$ESC\[0m\$" && [ "$(cplain | sed -n 5p | LC_ALL=$utf8 gawk "{ print length(\$0) }")" -le "$(node_width)" ]'
 	sq_run "$d" SQ_WIDTH=80 -- --full
 	need "... at 80 columns too" eval 'rc_is 0 && membar_note | grep -q "…\$" && [ "$(width)" -le 80 ]'
 	d=$(mem_fixture membar-busy scontrol-node "@exit 1")
@@ -5629,7 +5680,7 @@ why_cases=(
 # why_run FIXTURE [VAR=value | -VAR]... -- [sq args]: job_run on bioserver's
 # head node, 100 columns wide, as the renders were made
 why_run() { local fx=$1; shift; job_run "$fx" SQSTUB_HOST=fb2-bioinf.bioinf.local COLUMNS=100 "$@"; }
-why_lines() { plain | gawk '/^why$/ { on = 1; next } on && /^[a-z]/ { exit } on'; }   # the why section, its caption left out
+why_lines() { ${SRC:-plain} | gawk '/^why$/ { on = 1; next } on && /^[a-z]/ { exit } on'; }   # the why section, its caption left out
 why_has() { why_lines | grep -qxF -- "$1"; }      # why_has LINE: the section has this line, whole
 why_lacks_section() { ! plain | grep -qx why; }
 c_why_screens() {   # W1, AC1
@@ -5713,7 +5764,7 @@ tail_fx() {
 }
 out_file() { printf 'create media/out.log %s' "$1"; }   # out_file CONTENT: the @file line making it (fixture escapes)
 dated() { printf 'touch media/out.log \\{now-%s}' "$1"; }  # dated AGO: the @file line dating it, e.g. 200s
-tail_lines() { why_lines | gawk 'f && /^    / { sub(/^    /, ""); print } /ends with:$/ { f = 1 }'; }   # the lines shown
+tail_lines() { SRC=cplain why_lines | gawk 'f && /^    / { sub(/^    /, ""); print } /ends with:$/ { f = 1 }'; }   # the lines shown
 tail_lines_are() { [ "$(tail_lines)" = "$(printf '%s\n' "$@")" ]; }
 why_notes() { why_lines | gawk '/^  ↳ / { sub(/^  ↳ /, ""); print }'; }
 c_why_tail() {   # W3, V2-V4, V12
@@ -6058,8 +6109,8 @@ c_why_nodes_json() {
 		rc_is 0 && err_empty && why_has "    fb2?????x     24              75G  too few CPUs, too little memory"'
 	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"a${u}d83d${u}de00b${u}d800c${u}dfffd\"")
 	why_run "$d" -- --no-color job 11955
-	need "a name with a surrogate pair (U+1F600), a lone high and a lone low surrogate: 😀, then ␚ for each lone one" eval '
-		rc_is 0 && err_empty && why_has "    a😀b␚c␚d       24              75G  too few CPUs, too little memory"'
+	need "a name with a surrogate pair (U+1F600), a lone high and a lone low surrogate: 😀 (2 columns), then ␚ for each lone one" eval '
+		rc_is 0 && err_empty && why_has "    a😀b␚c␚d      24              75G  too few CPUs, too little memory"'
 	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J=$'"fb2\342\200\256x"')
 	why_run "$d" -- --no-color job 11955
 	need "a name with a raw U+202E: gone" eval 'rc_is 0 && err_empty && bidi_inert && why_has "    fb2x          24              75G  too few CPUs, too little memory"'
