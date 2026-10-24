@@ -1,0 +1,5 @@
+# squeue failing, its stderr holding U+2028 (LINE SEPARATOR, which the scrub
+# keeps and glibc calls -1) beside kana and han: the banner, where no control
+# rule makes it "?", as in the MEMNOTE (scontrol-node) and a caption (-p)
+@stderr squeue: error: 制御装置 に接続できません (接続の失敗)   もう一度試してください
+@exit 1

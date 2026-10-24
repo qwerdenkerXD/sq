@@ -1,0 +1,2 @@
+@include ../_common/sacct-defaults
+JobID=1001; JobName=done; End=\{now-30m30s}

@@ -1,0 +1,20 @@
+# Text that is wider or narrower in columns than in characters in every
+# column it can reach: CJK, kana, Hangul, U+1F600, combining marks (U+0301,
+# U+0308), ZWJ sequences, a flag, a lone regional indicator, VS16 and a skin
+# tone, in the job name, user, account, partition, node list, node name and
+# work dir; pending rows with a start estimate (" → est"), an array that
+# folds, names long enough to be cut.  Shown with -o i,j,u,a,P,T,M,L,C,m,N,R,Z
+@include ../_common/squeue-defaults
+i=5000; j=解析パイプライン; u=田中; a=研究室; P=長い; N=ノード01; R=ノード01; Z=/home/田中/データ/実験
+i=5001; j=😀analyse; u=müller; a=lab; P=main; N=node02; R=node02; Z=/scratch/run
+i=5002; j=café-run; u=👍🏽bob; a=ラボ二; P=gpu区; N=노드🇩🇪4; R=노드🇩🇪4; Z=/home/müller/é́
+i=5003; j=👩‍💻-run; u=田中; a=研究室; P=長い; Z=/home/田中/データ/実験; t=PD; T=PENDING; M=0:00; R=(Resources); S=\{now+3h}; r=Resources; N=
+i=5004; j=⚠️warn; u=김민수; a=🇯🇵proj; P=🇩x; N=node02; R=node02; Z=/data/👨‍👩‍👧/x
+i=5005; j=분석작업; u=👍🏽bob; a=ラボ二; P=gpu区; N=노드🇩🇪4; R=노드🇩🇪4; Z=/home/müller/é́
+i=5006; j=日本語のとても長いジョブ名前です; u=田中; a=研究室; P=長い; N=ノード01; R=ノード01; Z=/home/田中/データ/実験/とても長いディレクトリ名
+i=5007; j=👨‍👩‍👧 family; u=müller; a=lab; P=main; Z=/scratch/run; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority; N=
+i=7000_1; j=配列ジョブ; u=김민수; a=🇯🇵proj; P=🇩x; N=node02; R=node02; Z=/data/👨‍👩‍👧/x
+i=7000_2; j=配列ジョブ; u=김민수; a=🇯🇵proj; P=🇩x; N=node02; R=node02; Z=/data/👨‍👩‍👧/x
+i=7000_3; j=配列ジョブ; u=김민수; a=🇯🇵proj; P=🇩x; N=node02; R=node02; Z=/data/👨‍👩‍👧/x
+i=5008; j=🇯🇵 flag run; u=田中; a=研究室; P=長い; Z=/home/田中/データ/実験; t=PD; T=PENDING; M=0:00; R=(Resources); S=\{now+5h}; r=Resources; N=
+i=5009; j=xyz; u=👍🏽bob; a=ラボ二; P=gpu区; N=ノード01,노드🇩🇪4; R=ノード01,노드🇩🇪4; Z=/home/müller/é́; C=4; m=16G

@@ -1,0 +1,7 @@
+# Nodes named in kana, han, Hangul with a flag; a drain reason in kana and
+# han with a combining mark, a ZWJ family and VS16, long enough to be cut.
+# AllocMem > 0: the memory bar counts allocated memory (scontrol answers)
+CPUsState=4/28/0/32; NodeList=ノード01; FreeMem=100000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=4.00; AllocMem=40000
+CPUsState=8/24/0/32; NodeList=node02; FreeMem=90000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=30000
+CPUsState=0/0/32/32; NodeList=节点三; FreeMem=120000; Memory=128000; StateLong=drained; Reason=ディスク故障 é (再起動待ち) 👨‍👩‍👧 ⚠️ 交換部品の到着を待っています; TimeStamp=2026-10-01T12:00:00; CPUsLoad=0.00; AllocMem=0
+CPUsState=2/30/0/32; NodeList=노드🇩🇪4; FreeMem=110000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=2.00; AllocMem=8000

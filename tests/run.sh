@@ -1535,6 +1535,369 @@ c_width_table() {
 		LC_ALL=C gawk -f "$awk" -e "BEGIN { n = split(\"· … × ↳ █ ⚠ ␚ ▒ ▌ ▓ ░ ≥ →\", G, \" \"); for (i = 1; i <= n; i++) if (colw(G[i]) != 1) exit 1; exit n != 13 }"'
 }
 
+# The cut (W4): clip(s, cols) is s when it fits; "…" when cols <= 1 (1
+# column even at cols <= 0); else whole units of at most cols - 1 columns,
+# then "…" and nothing after it: cols - g wide, 0 <= g < the width of the
+# first unit left out.  A unit starts at every character but a 0-width one,
+# U+FE0F, an emoji modifier and the one after a ZWJ.  Checked on random
+# strings of CJK, kana, Hangul, emoji, marks, ZWJ, VS16, modifiers, regional
+# indicators and ASCII, at every cols from -1 to 2 past their width, in UTF-8
+# and in C, measured by the oracle, the units by this rule written here again
+clip_check_awk='
+BEGIN { FS = "\t" }
+{	c = $1; s = $2; x = $3
+	if (length(cellify(s)) <= c) { if (x != s) bad("fits, yet changed"); next }
+	if (c <= 1) { if (x != "…") bad("cols <= 1, not \"…\""); next }
+	if (substr(x, length(x)) != "…") { bad("no \"…\" at its end"); next }
+	p = substr(x, 1, length(x) - 1)
+	if (index(s, p) != 1) { bad("not a start of the string, then \"…\""); next }
+	nu = units(s, U, UW); wp = 0
+	for (j = 1; j <= nu && U[j] - 1 < length(p); j++) wp += UW[j]
+	if (j > nu || U[j] - 1 != length(p)) { bad("a unit split"); next }
+	if (wp + 1 > c) bad("over cols")
+	g = c - (wp + 1); if (g < 0 || g >= UW[j]) bad("g = " g ", the unit left out " UW[j] " wide")
+}
+function bad(why) { if (++nbad <= 5) printf "%s at cols %d: %s -> %s\n", why, c, s, x > "/dev/stderr" }
+END { exit nbad > 0 }'
+c_wide_clip() {
+	T_TITLE="clip by columns, UTF-8 and C: never over cols (cols >= 1), \"…\" at cols <= 1, the text up to \"…\" cols - g wide with 0 <= g < the first unit left out, whole units only, nothing after \"…\"; 600 random strings at every cols"
+	local awk=$T_DIR/wide.awk strs=$T_DIR/strings mode
+	sq_run mixed --
+	need "the dashboard: rc 0" rc_is 0
+	wide_awk_file "$awk"
+	LC_ALL=$utf8 gawk 'BEGIN {
+		srand(20261024)
+		n = split("中 文 名 前 あ カ 한 글 😀 👍 👨 👩 👧 ⚠ ☺ é ü \314\201 \314\210 \342\200\215 \357\270\217 \360\237\217\275 \360\237\217\273 \360\237\207\251 \360\237\207\252 a b c - _ / · …", T, " ")
+		for (k = 0; k < 600; k++) { m = 1 + int(rand() * 12); s = ""; for (j = 0; j < m; j++) s = s T[1 + int(rand() * n)]; print s }
+	}' > "$strs"
+	oracle_fill "$strs"
+	for mode in "$utf8" C; do
+		LC_ALL=$mode gawk -f "$awk" -e '{ s = $0; for (c = -1; c <= colw(s) + 2; c++) printf "%d\t%s\t%s\n", c, s, clip(s, c) }' "$strs" > "$T_DIR/cuts.$mode"
+		need "$mode: every cut as W4 says$(ORACLE_MAP=$work/oracle.map LC_ALL=$utf8 gawk "$oracle_awk$unit_awk$clip_check_awk" "$T_DIR/cuts.$mode" 2> "$T_DIR/cuts.err" || printf ': %s' "$(paste -sd'|' "$T_DIR/cuts.err")")" \
+			eval '[ ! -s "$T_DIR/cuts.err" ] && [ "$(wc -l < "$T_DIR/cuts.$mode")" -gt 6000 ]'
+	done
+}
+# the units of S by W4, measured by the oracle: unit J starts at character
+# U[J] and is UW[J] columns; their count
+unit_awk='
+function units(s, U, UW,   n, C, i, nu) {
+	n = split(s, C, ""); nu = 0
+	for (i = 1; i <= n; i++) {
+		if (i == 1 || !(OW[C[i]] == 0 && C[i] !~ /^[\001-\177]$/ || C[i] == "\357\270\217" || (C[i] >= "\360\237\217\273" && C[i] <= "\360\237\217\277") || C[i - 1] == "\342\200\215"))
+			{ U[++nu] = i; UW[nu] = 0 }
+		UW[nu] += (C[i] ~ /^[\001-\177]$/) ? 1 : OW[C[i]]
+	}
+	return nu
+}'
+
+# ---- display width: a wide screen against its ASCII twin (AC1) --------------
+# A twin is the same fixture with every outside string beyond ASCII, as sq
+# sees it, replaced by a distinct ASCII string of the same oracle width
+# (letters a-w, then x up to the width), so sq lays both out alike: every line
+# as wide, every column at the same place.  The map (orig TAB twin) is the
+# case's own, $T_DIR/twin.map; twin_of STRING prints a string's twin, twin_fx
+# NAME... makes $T_DIR/twin-NAME of each fixture (an @include of another
+# fixture than _common reads its twin)
+twin_awk='
+BEGIN {
+	mapf = ENVIRON["TWIN_MAP"]
+	while ((getline ln < mapf) > 0) { t = index(ln, "\t"); TW[substr(ln, 1, t - 1)] = substr(ln, t + 1); USED[substr(ln, t + 1)]; N++ }
+	close(mapf)
+}
+function twin(s,   w, id, k, t) {
+	if (s !~ /[^\001-\177]/) return s
+	if (s in TW) return TW[s]
+	w = length(cellify(s))
+	do {
+		id = ""; k = ++N
+		while (k > 0) { id = substr("abcdefghijklmnopqrstuvw", (k - 1) % 23 + 1, 1) id; k = int((k - 1) / 23) }
+		t = id; while (length(t) < w) t = t "x"
+	} while ((t in USED) || (t in ASCII))
+	if (length(t) > w) { print "twin: no twin of width " w " left for " s > "/dev/stderr"; exit 2 }
+	TW[s] = t; USED[t]; printf "%s\t%s\n", s, t >> mapf; close(mapf)
+	return t
+}'
+twin_of() {   # twin_of STRING
+	printf '%s\n' "$1" > "$T_DIR/twin.text"; oracle_fill "$T_DIR/twin.text"
+	TWIN_MAP=$T_DIR/twin.map ORACLE_MAP=$work/oracle.map S=$1 LC_ALL=$utf8 gawk "$oracle_awk$twin_awk"' BEGIN { print twin(ENVIRON["S"]) }'
+}
+twin_fx() {   # twin_fx NAME...
+	local name f
+	for name; do
+		mkdir -p "$T_DIR/twin-$name"
+		for f in "$fixtures/$name"/*; do
+			oracle_fill "$f"
+			ASCIIFROM=$(printf '%s\n' "$fixtures/$name"/* "$fixtures"/_common/*) \
+			TWIN_MAP=$T_DIR/twin.map ORACLE_MAP=$work/oracle.map FIXTURES=$fixtures TWINS=$T_DIR LC_ALL=$utf8 gawk "$oracle_awk$twin_awk"'
+				BEGIN { nf = split(ENVIRON["ASCIIFROM"], FL, "\n")   # what a twin must not equal
+					for (k = 1; k <= nf; k++) { while ((getline ln < FL[k]) > 0) { n = split(ln, F, ";")
+						for (i = 1; i <= n; i++) { v = F[i]; sub(/^[^=]*=/, "", v); gsub(/^ +| +$/, "", v); if (v !~ /[^\001-\177]/) ASCII[v] } } close(FL[k]) } }
+				/^[ \t]*(#|$)/ { print; next }
+				/^@include \.\.\// { p = substr($0, 13); d = p; sub(/\/.*/, "", d)
+					print "@include " (d == "_common" ? ENVIRON["FIXTURES"] "/" p : ENVIRON["TWINS"] "/twin-" p); next }
+				/^@stderr / { print "@stderr " twin(substr($0, 9)); next }
+				/^@/ && !/^@defaults / { print; next }
+				{ pre = ""; s = $0; if (s ~ /^@defaults /) { pre = "@defaults "; s = substr(s, 11) }
+				  n = split(s, F, ";"); out = ""
+				  for (i = 1; i <= n; i++) {
+					f = F[i]; eq = index(f, "=")
+					if (!eq) { out = out (i > 1 ? ";" : "") f; continue }
+					v = substr(f, eq + 1); lead = v; sub(/[^ ].*$/, "", lead); trail = v; sub(/^.*[^ ]/, "", trail)
+					core = substr(v, length(lead) + 1, length(v) - length(lead) - length(trail))
+					out = out (i > 1 ? ";" : "") substr(f, 1, eq) lead twin(core) trail
+				  }
+				  print pre out }' "$f" > "$T_DIR/twin-$name/${f##*/}"
+		done
+	done
+}
+# twin_check WIDE TWIN COLS LINES: two runs' screens (their OUT files), the
+# wide one against its twin, by the oracle, escapes stripped: the widest
+# line, the lines over COLS and the terminal rows (each line max(1,
+# ceil(width / COLS))) no more than the twin's; each line as wide as the
+# twin's, but one ending in a cut, which may be g narrower, 0 < g < the width
+# of the first unit the cut left out of the original string (U1 (a): nothing
+# after "…"), that string found where the twin has its twin; every
+# left-aligned column of a table starting, every right-aligned one ending,
+# at the same column on every row, and " cpu " and " mem " of every node
+# line; where the twin fits COLS and LINES, the wide screen too.  Says what
+# failed on stderr
+twin_check() {
+	local w=$1 t=$2
+	OUT=$w cplain > "$w.cells"; OUT=$t cplain > "$t.cells"; OUT=$w plain > "$w.plain"
+	TWIN_MAP=$T_DIR/twin.map ORACLE_MAP=$work/oracle.map WC=$w.cells TC=$t.cells WP=$w.plain COLS=$3 LINES=$4 LC_ALL=$utf8 gawk "$oracle_awk$unit_awk"'
+	function rows_of(s) { return length(s) > COLS ? int((length(s) + COLS - 1) / COLS) : 1 }
+	function bad(why) { if (++nbad <= 6) print why > "/dev/stderr" }
+	function aligned(L, n,   i, r, nh, H, P, p, q, j, e, E, x, RIGHT) {
+		split("CPU MIN_CPU NODES LEFT LIMIT TIME MEM PRIO Y EXIT ELAPSED AGO", x, " "); for (j in x) RIGHT[x[j]]
+		for (i = 1; i <= n; i++) {
+			if (L[i] !~ /^ *[A-Z][A-Z\/_()]*( +[A-Z][A-Z\/_()]*)* *$/) continue
+			nh = split(L[i], H, " "); p = 0
+			for (j = 1; j <= nh; j++) { q = index(substr(L[i], p + 1), H[j]); P[j] = p + q; p = P[j] + length(H[j]) - 1 }
+			delete E
+			for (r = i + 1; r <= n && L[r] != ""; r++) {
+				if (L[r] ~ /^ *(…|↳|\+[0-9]+ more$)/) continue
+				for (j = 1; j <= nh; j++) {
+					q = (j < nh) ? P[j + 1] : length(L[r]) + 2
+					if (H[j] in RIGHT) {
+						e = q - 1; while (e >= P[j] && substr(L[r], e, 1) == " ") e--
+						if (e < P[j]) continue
+						if (!(j in E)) E[j] = e; else if (E[j] != e) bad(sprintf("%s ends at %d, not %d: %s", H[j], e, E[j], L[r]))
+					} else if (substr(L[r], P[j] - 1, 1) != " " && P[j] > 1 || substr(L[r], P[j], 1) == " " && substr(L[r], P[j], q - P[j]) !~ /^ *$/)
+						bad(sprintf("%s does not start at %d: %s", H[j], P[j], L[r]))
+				}
+			}
+		}
+		for (i = 1; i <= n; i++) if (L[i] ~ / cpu .* mem /) {
+			if (cpu == "") { cpu = index(L[i], " cpu "); mem = index(L[i], " mem ") }
+			else if (index(L[i], " cpu ") != cpu || index(L[i], " mem ") != mem) bad("a node line off: " L[i])
+		}
+	}
+	BEGIN {
+		COLS = ENVIRON["COLS"] + 0; LINES = ENVIRON["LINES"] + 0
+		while ((getline x < ENVIRON["WC"]) > 0) W[++nw] = x
+		while ((getline x < ENVIRON["TC"]) > 0) T[++nt] = x
+		while ((getline x < ENVIRON["WP"]) > 0) WP[++np] = x
+		while ((getline x < ENVIRON["TWIN_MAP"]) > 0) { k = index(x, "\t"); ORIG[substr(x, k + 1)] = substr(x, 1, k - 1) }
+		for (i = 1; i <= nw; i++) { l = length(W[i]); if (l > wmax) wmax = l; wover += (l > COLS); wrows += rows_of(W[i]) }
+		for (i = 1; i <= nt; i++) { l = length(T[i]); if (l > tmax) tmax = l; tover += (l > COLS); trows += rows_of(T[i]) }
+		if (wmax > tmax) bad("widest line " wmax ", the twin " tmax)
+		if (wover > tover) bad(wover " lines over " COLS ", the twin " tover)
+		if (wrows > trows) bad(wrows " terminal rows, the twin " trows)
+		if (nw != nt) bad(nw " lines, the twin " nt)
+		for (i = 1; i <= nw && i <= nt; i++) {
+			lw = length(W[i]); lt = length(T[i])
+			if (lw == lt) continue
+			if (lw > lt || WP[i] !~ /…$/) { bad(sprintf("line %d: %d columns, the twin %d:\n  %s\n  %s", i, lw, lt, WP[i], T[i])); continue }
+			u = left_out(i, lw)
+			if (!(lt - lw < u)) bad(sprintf("line %d: %d short of the twin, the unit left out %d wide:\n  %s\n  %s", i, lt - lw, u, WP[i], T[i]))
+		}
+		aligned(W, nw)
+		if (tmax <= COLS && trows <= LINES && !(wmax <= COLS && wrows <= LINES)) bad("the twin fits " COLS "x" LINES ", the wide screen not")
+		exit nbad > 0
+	}
+	# the width of the first unit the cut of line I left out: at column B (the
+	# text before "…" is B - 1 wide) the twin has the twin of string S, from
+	# column ST; the unit of S at B - ST columns into it; 0 when none is found
+	function left_out(i, b,   t, tl, st, m, s, nu, U, UW, j, acc) {
+		tl = T[i]; sub(/…$/, "", tl)
+		for (t in ORIG) {
+			for (st = index(tl, t); st; st = (m = index(substr(tl, st + 1), t)) ? st + m : 0)
+				if (st <= b && b < st + length(t) && substr(tl, st - 1, 1) !~ /[a-x]/ && substr(tl, st + length(t), 1) !~ /[a-x]/) break
+			if (!st) {                              # cut in the twin too: its start at the end
+				for (m = length(t) - 1; m >= 1; m--) if (substr(tl, length(tl) - m + 1) == substr(t, 1, m)) break
+				st = (m >= 1 && length(tl) - m + 1 <= b && substr(tl, length(tl) - m, 1) !~ /[a-x]/) ? length(tl) - m + 1 : 0
+			}
+			if (st) break
+		}
+		if (!st) return 0
+		s = ORIG[t]; nu = units(s, U, UW); acc = 0
+		for (j = 1; j <= nu && acc + UW[j] <= b - st; j++) acc += UW[j]
+		return (acc == b - st && j <= nu) ? UW[j] : 0
+	}'
+}
+# twin_sweep FIXTURE ARGS...: FIXTURE and its twin (twin_fx made it, the
+# args through twin_of: TWINARGS, TWINENV) at every sampled size, colour on:
+# widths 40-200, FULL at height 40 and COMPACT at 12, 20, 40 and 80 (or the
+# widths in WIDTHS); one need per screen.  The caller's array twin_env holds
+# VAR=value for both runs (the value twinned), sweep_env VAR=value for both
+# as it is (C mode, AC6: LC_ALL and a PATH with a locale tool)
+twin_sweep() {
+	local fx=$1 w h mode wo two; shift
+	local -a args=("$@") targs=() env=() tenv=() e
+	for e in "${args[@]}"; do targs+=("$(twin_of "$e")"); done
+	for e in "${twin_env[@]+"${twin_env[@]}"}"; do env+=("$e"); tenv+=("${e%%=*}=$(twin_of "${e#*=}")"); done
+	env+=("${sweep_env[@]+"${sweep_env[@]}"}"); tenv+=("${sweep_env[@]+"${sweep_env[@]}"}")
+	for w in ${WIDTHS:-40 50 60 72 80 100 120 160 200}; do
+		for h in full:40 compact:12 compact:20 compact:40 compact:80; do
+			mode=${h%:*}; h=${h#*:}
+			sq_run "$fixtures/$fx" SQ_WIDTH=$w SQ_HEIGHT=$h "${env[@]+"${env[@]}"}" -- --color --$mode "${args[@]+"${args[@]}"}"; wo=$OUT
+			need "$fx $mode ${w}x$h: rc 0, stderr empty" eval 'rc_is 0 && err_empty'
+			sq_run "$T_DIR/twin-$fx" SQ_WIDTH=$w SQ_HEIGHT=$h "${tenv[@]+"${tenv[@]}"}" -- --color --$mode "${targs[@]+"${targs[@]}"}"; two=$OUT
+			need "$fx $mode ${w}x$h: against its twin$(twin_check "$wo" "$two" "$w" "$h" 2> "$T_DIR/check.err" || printf ': %s' "$(paste -sd'|' "$T_DIR/check.err")")" \
+				eval '[ ! -s "$T_DIR/check.err" ]'
+		done
+	done
+}
+wide_cols=(-o i,j,u,a,P,T,M,L,C,m,N,R,Z)
+c_wide_twin_text() {
+	T_TITLE="CJK, kana, Hangul, U+1F600, combining marks, ZWJ, a flag, a lone RI, VS16 and a skin tone in names, users, accounts, partitions, node lists, nodes, a drain reason, work dirs: every sampled screen as its ASCII twin, by the oracle (widest, over, rows, each line, the columns)"
+	twin_fx wide-text
+	twin_sweep wide-text "${wide_cols[@]}"
+}
+c_wide_twin_seps() {
+	T_TITLE="U+2028 beside kana and han on the banner, the MEMNOTE and the finished caption (-p), the wide nodes and finished jobs: every sampled screen as its ASCII twin"
+	twin_fx wide-text wide-seps
+	twin_sweep wide-seps "${wide_cols[@]}" -p "区画$(printf '\342\200\250')二"
+}
+wide_since=開始時刻を指定しe$(printf '\314\201')た
+wide_part=$(printf '%.0s区画名前長い利用者口座処理e\314\201' {1..12})
+c_wide_twin_ascii() {
+	T_TITLE="ASCII records, so the tables keep length(): han with combining marks on the banner, the MEMNOTE, a -p value (each over 200 columns) and SQ_SINCE, measured by columns all the same: every sampled screen as its ASCII twin"
+	local -a twin_env=("SQ_SINCE=$wide_since")
+	twin_fx wide-ascii
+	twin_sweep wide-ascii -p "$wide_part"
+}
+
+# ---- display width: sq job's tables and its tail (AC2) ----------------------
+# A node named in han and kana with an emoji and a combining mark, users in
+# han and Hangul with a combining mark and a skin tone: node_table (the free
+# and the total table), why_blockers' jobs to end first and why_res's jobs
+# ahead (its UserName padded to the larger of 9 and its widest) line up as
+# their ASCII twins do: each line of the why section, cellified and every
+# such string put back as its twin, is the twin's line.  The output tail,
+# lines of han wider than COLUMNS, each cut to fit: every line within it
+untwin_awk='
+BEGIN { while ((getline x < ENVIRON["TWIN_MAP"]) > 0) { k = index(x, "\t"); CELL[++nm] = cellify(substr(x, 1, k - 1)); TWIN[nm] = substr(x, k + 1) } }
+{ for (m = 1; m <= nm; m++) while ((k = index($0, CELL[m]))) $0 = substr($0, 1, k - 1) TWIN[m] substr($0, k + length(CELL[m])); print }'
+wide_job_node=节点ノード😀e$(printf '\314\201')
+wide_job_user=田中太郎e$(printf '\314\201')
+wide_job_user2=김민수김민수e$(printf '\314\201')
+c_wide_job() {
+	T_TITLE="sq job: node_table, why_blockers and why_res (UserName to the larger of 9 and its widest) with a node and users in han, kana, Hangul, an emoji and combining marks line up as their ASCII twins do; the output tail in han cut to COLUMNS, every line within it"
+	local node user user2 tn tu tu2 fx src d long i
+	tn=$(twin_of "$wide_job_node"); tu=$(twin_of "$wide_job_user"); tu2=$(twin_of "$wide_job_user2")
+	for fx in resources-11964:11964 pending-est:11962; do
+		src=${fx%:*}
+		for d in wide twin; do
+			if [ $d = wide ]; then node=$wide_job_node user=$wide_job_user user2=$wide_job_user2
+			else node=$tn user=$tu user2=$tu2; fi
+			res_fx "$src-$d" "$src" "s/fb2-bioinf(\$|[^-])/$node\\1/g" "s/UserName=schroder/UserName=$user/" "s/UserName=amadvi/UserName=$user2/" > /dev/null
+			why_run "$T_DIR/fx-$src-$d" -- --no-color job "${fx#*:}"
+			need "$src $d: rc 0, stderr empty, a why section" eval 'rc_is 0 && err_empty && [ -n "$(why_lines)" ]'
+			SRC=cplain why_lines > "$T_DIR/why.$src.$d"; why_lines > "$T_DIR/why.$src.$d.plain"
+		done
+		TWIN_MAP=$T_DIR/twin.map ORACLE_MAP=$work/oracle.map LC_ALL=$utf8 gawk "$oracle_awk$untwin_awk" "$T_DIR/why.$src.wide" > "$T_DIR/why.$src.back"
+		need "$src: the why section, every name put back as its twin, is the twin's line for line$(cmp -s "$T_DIR/why.$src.back" "$T_DIR/why.$src.twin" || printf ': %s' "$(diff "$T_DIR/why.$src.back" "$T_DIR/why.$src.twin" | paste -sd'|')")" \
+			cmp -s "$T_DIR/why.$src.back" "$T_DIR/why.$src.twin"
+	done
+	need "the node in node_table and why_blockers, the user in why_blockers and in why_res" eval '
+		[ "$(grep -cF "$wide_job_node" "$T_DIR/why.resources-11964.wide.plain")" = 2 ] && grep -qE "^    11875  $wide_job_user  32 CPUs" "$T_DIR/why.resources-11964.wide.plain" &&
+		grep -qE "^    11958  $wide_job_user2  64 CPUs" "$T_DIR/why.pending-est.wide.plain"'
+	need "pending-est: why_res pads the user to its width, 13 columns, not 9" eval '
+		grep -E "^    11958  " "$T_DIR/why.pending-est.twin" | grep -qE "^    11958  [a-x]{13}  64 CPUs "'
+	long=; for i in 1 2 3; do long="$long行$i: $(printf '%.0s解析結果を出力しましたe\314\201' {1..8})\\n"; done
+	d=$(tail_fx widetail -- "$(out_file "$long")" "$(dated 200s)")
+	why_run "$d" -- --no-color job 11836
+	need "the tail in han: 3 lines, each cut with \"…\", each with its indent within COLUMNS=100 and at most 1 short of it" eval '
+		rc_is 0 && err_empty && [ "$(tail_lines | wc -l)" = 3 ] && [ "$(tail_lines | grep -c "…$")" = 3 ] &&
+		tail_lines | LC_ALL=$utf8 gawk "{ w = length(\$0) + 4; if (w > 100 || w < 99) bad = 1 } END { exit bad }"'
+}
+
+# ---- display width without a UTF-8 locale (W7, AC6) ---------------------------
+# A locale tool that knows no UTF-8 locale leaves gawk in C, where length()
+# counts bytes: sq measures by the UTF-8 bytes themselves.  The twin sweeps at
+# 50, 80 and 120; array-running's JOBID header and ×-rows as under UTF-8;
+# and a caller's ja_JP.eucJP or de_DE.ISO-8859-1 (built as locale_not_utf8
+# does, seen only through LOCPATH) gives the LC_ALL=C screen byte for byte,
+# every gawk in C (it was the caller's locale, whose eucJP read UTF-8 bytes
+# as its own characters and whose [[:cntrl:]] ate a byte of "…")
+c_wide_c_mode() {
+	T_TITLE="no UTF-8 locale (gawk in C): the wide screens as their twins at 50, 80 and 120; array-running's JOBID header and ×-rows as under UTF-8; LC_ALL=ja_JP.eucJP and de_DE.ISO-8859-1 give the LC_ALL=C screen, every gawk in C"
+	local nobin=$T_DIR/nobin loc=$T_DIR/loc gbin=$T_DIR/gbin glog=$T_DIR/gawk.log l want src charmap name
+	mkdir -p "$nobin" "$loc"
+	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	local -a sweep_env=(LC_ALL=C "PATH=$nobin:$here/bin:$PATH") twin_env=()
+	twin_fx wide-text wide-seps wide-ascii
+	WIDTHS="50 80 120" twin_sweep wide-text "${wide_cols[@]}"
+	WIDTHS="50 80 120" twin_sweep wide-seps "${wide_cols[@]}" -p "区画$(printf '\342\200\250')二"
+	twin_env=("SQ_SINCE=$wide_since")
+	WIDTHS="50 80 120" twin_sweep wide-ascii -p "$wide_part"
+	sq_run array-running SQ_WIDTH=80 -- --color; want=$RUN/screen; cp "$OUT" "$want"
+	sq_run array-running SQ_WIDTH=80 "${sweep_env[@]}" -- --color
+	need "array-running: the JOBID header and every ×-row as under UTF-8, byte for byte" eval '
+		rc_is 0 && err_empty && grep -q "×" "$OUT" &&
+		cmp -s <(grep -E "JOBID|×" "$want") <(grep -E "JOBID|×" "$OUT")'
+	for l in ja_JP:EUC-JP:ja_JP.eucJP de_DE:ISO-8859-1:de_DE.ISO-8859-1; do
+		IFS=: read -r src charmap name <<< "$l"
+		localedef -i "$src" -f "$charmap" "$loc/$name" > /dev/null 2>&1
+		if ! [ "$(LOCPATH=$loc LC_ALL=$name locale charmap 2>/dev/null)" = "$charmap" ]; then
+			T_FAIL+=("localedef could not build $name (needs glibc's locale sources)"); return
+		fi
+	done
+	gawk_wrapper "$gbin" "$glog"
+	sq_run wide-text SQ_WIDTH=80 "${sweep_env[@]}" -- --color "${wide_cols[@]}"; want=$RUN/screen.C; without_clock "$OUT" > "$want"
+	for name in ja_JP.eucJP de_DE.ISO-8859-1; do
+		: > "$glog"
+		sq_run wide-text SQ_WIDTH=80 LC_ALL=$name LOCPATH="$loc" "PATH=$gbin:$nobin:$here/bin:$PATH" -- --color "${wide_cols[@]}"
+		need "LC_ALL=$name: rc 0, stderr empty, the LC_ALL=C screen byte for byte, every gawk in C" eval '
+			rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT") && grep -q "^call" "$glog" && ! grep "^call" "$glog" | grep -qvx "call C"'
+	done
+}
+
+# ---- display width: what a terminal draws (AC7) ------------------------------
+# The rows a terminal takes for a screen: tmux (3.4 measured), on a private
+# socket, no config, UTF-8 (-u, a UTF-8 locale), a pane of COLUMNS x LINES
+# that cats it; rows written, history included.  The wide screen takes the
+# twin's rows where the twin fits COLUMNS, at most them where it does not
+tmux_rows() {   # tmux_rows FILE COLUMNS LINES
+	local sock=sq-test-$$-$RANDOM i out
+	env LC_ALL=$utf8 tmux -L "$sock" -f /dev/null -u new-session -d -x "$2" -y "$3" "cat '$1'; exec sleep 20" 2>/dev/null || { echo none; return; }
+	for i in $(seq 100); do
+		[ "$(tmux -L "$sock" display -p '#{pane_current_command}' 2>/dev/null)" = sleep ] && break
+		sleep 0.1
+	done
+	out=$(tmux -L "$sock" display -p '#{history_size} #{cursor_y}' 2>/dev/null)
+	tmux -L "$sock" kill-server 2>/dev/null; rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$UID/$sock"
+	set -- $out; [ $# = 2 ] && echo $(( $1 + $2 )) || echo none
+}
+c_wide_tmux() {
+	T_TITLE="tmux: the wide screen takes as many terminal rows as its twin where the twin fits COLUMNS, at most as many where not (FULL 40, 80 and 120, COMPACT 60x12, 80x20)"
+	local spec mode w h wo two rw rt tw
+	if ! command -v tmux > /dev/null 2>&1; then
+		T_TITLE="$T_TITLE; skipped: no tmux here"; sq_run mixed --; return
+	fi
+	twin_fx wide-text
+	for spec in full:40:40 full:80:40 full:120:40 compact:60:12 compact:80:20; do
+		IFS=: read -r mode w h <<< "$spec"
+		sq_run wide-text SQ_WIDTH=$w SQ_HEIGHT=$h -- --color --$mode "${wide_cols[@]}"; wo=$OUT
+		sq_run "$T_DIR/twin-wide-text" SQ_WIDTH=$w SQ_HEIGHT=$h -- --color --$mode "${wide_cols[@]}"; two=$OUT
+		rw=$(tmux_rows "$wo" "$w" "$h"); rt=$(tmux_rows "$two" "$w" "$h"); tw=$(OUT=$two width)
+		if [ "$tw" -le "$w" ]; then need "$mode ${w}x$h: the twin fits, both take $rt rows (the wide screen $rw)" eval '[ "$rw" != none ] && [ "$rw" = "$rt" ]'
+		else need "$mode ${w}x$h: the twin is $tw wide, the wide screen takes no more rows ($rw) than it ($rt)" eval '[ "$rw" != none ] && [ "$rt" != none ] && [ "$rw" -le "$rt" ]'
+		fi
+	done
+}
+
 # U+202E (RLO) turns around what a terminal shows after it, up to the end of
 # the line: no text sq draws or says may carry one, nor any other bidi
 # control.  Each site that echoes outside text: a usage error, the filter on
@@ -6592,7 +6955,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_c_mode wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
@@ -6626,7 +6989,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	why_resources why_ended why_array why_budget why_parallel why_signals
+	why_resources wide_job why_ended why_array why_budget why_parallel why_signals
 )
 start=$(date +%s%N)
 for c in "${cases[@]}"; do

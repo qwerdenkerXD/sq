@@ -1,0 +1,3 @@
+# scontrol failing: the memory bar counts RealMemory, the MEMNOTE says why
+@stderr scontrol: error: ノード情報 を取得できません
+@exit 1

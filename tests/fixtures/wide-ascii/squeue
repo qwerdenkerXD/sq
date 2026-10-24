@@ -1,0 +1,6 @@
+# records all ASCII (sinfo, sacct), so the tables keep the plain length();
+# han with combining marks only where sq always measures by columns: the
+# banner (squeue stderr), the MEMNOTE (scontrol-node), a -p value and
+# SQ_SINCE (the case passes those), each but SQ_SINCE wider than 200 columns
+@stderr squeue: error: 処理待機資源é計算節点分配割当制御状態情報接続失é敗再試行時間制限超過停止開始終了結é果出力入力経路名前利用者区画口座処é理待機資源計算節点分配割当制御状態é情報接続失敗再試行時間制限超過停止é開始終了結果出力入力経路名前利用者é区画
+@exit 1
