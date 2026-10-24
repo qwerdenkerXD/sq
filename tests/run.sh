@@ -5851,6 +5851,40 @@ c_why_ctl_o() {
 		done
 	done
 }
+# The passes batch L's review found unpinned (F3): each case fails with its
+# mutant.  Accounting's answer alone (squeue forgot the job) with a Latin-1
+# byte and a U+202E in the job name and a work directory in valid UTF-8 (m21:
+# no pass on acct); a parent's node list in Latin-1 (m22: no pass on what
+# job_why_finish joins); a pass that fails, through a gawk that fails scrub -s
+# with half an answer written (m28: the half moved into place); a CSI in a
+# job name under a gawk in C (m29: read_stream's rule back to [[:cntrl:]]).
+c_job_passes() {
+	T_TITLE="sq job: accounting alone with M\\xfcller+RLO and a UTF-8 work dir reads M␚ller-run, the dir whole; a parent on fb2-bio\\xe9nf reads fb2-bio␚nf; the dashboard: a scrub -s that fails leaves the raw answer, nothing emptied; a CSI in a job name under a gawk in C reads ?"
+	local d gbin=$T_DIR/gbin real
+	d=$T_DIR/fx-acct; mkdir -p "$d"
+	printf '@stderr slurm_load_jobs error: Invalid job id specified\n@exit 1\n' > "$d/squeue-all"
+	sed -e 's|^JobID=11912; \(.*\)WorkDir=/media/BioNAS2/fsill/rnaseq; JobName=align-reads$|JobID=11912; \1WorkDir=/media/Bio-\\xc3\\xbc/r; JobName=M\\xfcller-\\xe2\\x80\\xaerun|' \
+		"$jfx/finished-11912/sacct" > "$d/sacct"
+	job_run "$d" -- --no-color job 11912
+	need "accounting alone: rc 0, stderr empty, valid UTF-8, no bidi control, the title M␚ller-run, the work dir /media/Bio-ü/r" eval '
+		rc_is 0 && err_empty && utf8_valid && bidi_inert && plain | head -n 1 | grep -qxF "▌ 11912  M␚ller-run · fsill" &&
+		plain | grep -qxF "  work dir  /media/Bio-ü/r"'
+	d=$(dep_fx nodes 'afterok:900(unfulfilled)' "$(run_rec 900); NodeList=fb2-bio\\xe9nf")
+	why_run "$d" -- --no-color job 800
+	need "a parent running on fb2-bio\\xe9nf: rc 0, stderr empty, its row reads fb2-bio␚nf" eval '
+		rc_is 0 && err_empty && utf8_valid && why_has "    900  RUNNING on fb2-bio␚nf · 1h00m left of 2h00m"'
+	real=$(command -v gawk); mkdir -p "$gbin"
+	printf '#!/bin/sh\nfor a; do [ "$a" != stream=1 ] || { head -c 10; exit 1; }; done\nexec %q "$@"\n' "$real" > "$gbin/gawk"; chmod +x "$gbin/gawk"
+	sq_run not-utf8 PATH="$gbin:$here/bin:$PATH" -- --full
+	need "scrub -s failing after 10 bytes: rc 0, the raw answers read, every queue and finished row there" eval '
+		rc_is 0 && [ "$(row_first_fields queue | paste -sd,)" = 3001,3002,3003,3004,3005 ] && footer_is 5 5 0 0 &&
+		[ "$(row_first_fields recent | paste -sd,)" = 2002,2001 ] && matches "^ +node03 "'
+	no_utf8_locale "$T_DIR/nobin"
+	d=$(tail_fx csi 'Name=a\xc2\x9b2Jb')
+	why_run "$d" LC_ALL=C PATH="$T_DIR/nobin:$here/bin:$PATH" -- --no-color job 11836
+	need "a job name with a CSI under a gawk in C: rc 0, no C1 on the screen, the title a?2Jb" eval '
+		rc_is 0 && err_empty && c1_off && plain | head -n 1 | grep -qxF "▌ 11836  a?2Jb · fsill"'
+}
 c_why_tail_hung() {   # V2
 	T_TITLE="a reader that does not answer (a hung NFS read, here a tail that sleeps): sq says so after 2 s, kills it, and leaves nothing behind"
 	local d
@@ -6452,7 +6486,7 @@ cases=(
 	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
-	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
+	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
 	why_resources why_ended why_array why_budget why_parallel why_signals
 )
 start=$(date +%s%N)
