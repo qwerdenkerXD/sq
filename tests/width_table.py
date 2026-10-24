@@ -13,7 +13,8 @@ LOCALE is a UTF-8 locale for glibc's wcwidth (the suite passes its own).
 The table in SQ is the source of truth: one list of hex ranges, each of width 0
 or 2 (every other code point is 1), between the lines "# ---- the width
 table" and "# ---- width table end", with the Unicode version it was made
-from.  Regenerating takes, per code point, the largest of
+from and the set of glibcs ("glibc 2.39+2.40").  Regenerating takes, per
+code point, the largest of
   - the list as it stands;
   - glibc's wcwidth here, where -1 counts 1;
   - a Unicode rule over python's unicodedata: 0 for Mn, Me, Cf but U+00AD and
@@ -26,11 +27,13 @@ from.  Regenerating takes, per code point, the largest of
   - the fixed set: U+FE0F counts 1, the regional indicators U+1F1E6-1F1FF 2
     each, and the nine Emoji_Modifier_Base characters tmux 3.4 draws wide
     (glibc 1, East Asian N) 2.
-so a regeneration can only widen.  An empty list (or none) is a first
-generation from the sources alone.  check fails exactly where write would
-change something; and where this unicodedata and this glibc are the very
-versions the list records, also where the list is wider than the sources
-alone make it (a stray entry), as it must then equal them exactly.
+so a regeneration only widens, and records this glibc beside the ones the
+list records.  Exact mode: where the list records this glibc alone and this
+unicodedata's version, the list must equal the sources alone (all but the
+list itself) exactly, and write makes it so, narrowing a stray entry too.
+An empty list (or none) is a first generation from the sources alone.
+check fails exactly where write would change something; both say which of
+the two they did.
 """
 import bisect
 import ctypes
@@ -58,7 +61,7 @@ def version(text):
 
 def read_table(path):
     """(lines of SQ, index of the BEGIN line, index of the END line, recorded Unicode version,
-    recorded glibc ("glibc X.Y"), {cp: width})"""
+    the set of recorded glibc versions ({"2.39", ...}), {cp: width})"""
     with open(path, encoding="utf-8") as f:
         lines = f.read().split("\n")
     try:
@@ -68,8 +71,8 @@ def read_table(path):
         die("%s: no width table (%r ... %r)" % (path, BEGIN, END))
     m = re.search(r"Unicode ([0-9.]+)", lines[b])
     recorded = m.group(1) if m else None
-    m = re.search(r"(glibc [0-9.]+)", lines[b])
-    recorded_glibc = m.group(1) if m else None
+    m = re.search(r"glibc ([0-9.]+(?:\+[0-9.]+)*)", lines[b])
+    recorded_glibcs = set(m.group(1).split("+")) if m else set()
     table = {}
     body = " ".join(re.findall(r'"([^"]*)"', "\n".join(lines[b + 1:e])))
     for item in body.split():
@@ -80,7 +83,7 @@ def read_table(path):
         hi = int(m.group(2), 16) if m.group(2) else lo
         for cp in range(lo, hi + 1):
             table[cp] = int(m.group(3))
-    return lines, b, e, recorded, recorded_glibc, table
+    return lines, b, e, recorded, recorded_glibcs, table
 
 
 def glibc_widths(locale):
@@ -93,7 +96,7 @@ def glibc_widths(locale):
     libc.wcwidth.restype = ctypes.c_int
     try:
         libc.gnu_get_libc_version.restype = ctypes.c_char_p
-        name = "glibc " + libc.gnu_get_libc_version().decode()
+        name = libc.gnu_get_libc_version().decode()
     except AttributeError:
         die("no glibc here (gnu_get_libc_version): its wcwidth is the table's reference")
     def width(cp):
@@ -114,16 +117,14 @@ def unicode_width(cp):
     return 1
 
 
-def generate(table, locale, recorded):
-    """the table regenerated, the glibc named, and whether the Unicode part took part"""
+def generate(locale, recorded):
+    """the table the sources alone make, the glibc's version, and whether the Unicode part took part"""
     glibc, gw = glibc_widths(locale)
     local = unicodedata.unidata_version
     with_unicode = recorded is None or version(local) >= version(recorded)
     new = {}
     for cp in SCALARS:
         w = max(gw(cp), FIXED.get(cp, 0))
-        if table is not None:
-            w = max(w, table.get(cp, 1))
         if with_unicode:
             w = max(w, unicode_width(cp))
         if w != 1:
@@ -170,7 +171,7 @@ def main():
     if len(sys.argv) < 3 or sys.argv[1] not in ("check", "write", "lookup"):
         die("usage: width_table.py check|write SQ LOCALE, or lookup SQ < WIDTHS")
     mode, path = sys.argv[1], sys.argv[2]
-    lines, b, e, recorded, recorded_glibc, table = read_table(path)
+    lines, b, e, recorded, recorded_glibcs, table = read_table(path)
     if mode == "lookup":
         seen, bad = set(), []
         for ln in sys.stdin:
@@ -190,31 +191,40 @@ def main():
         die("%s needs the LOCALE for glibc's wcwidth" % mode)
     locale = sys.argv[3]
     first = not table
-    new, glibc, with_unicode = generate(None if first else table, locale, recorded)
+    sources, glibc, with_unicode = generate(locale, recorded)
     local = unicodedata.unidata_version
     if not with_unicode:
         print("the Unicode part was not checked: python's unicodedata %s is older than the list's Unicode %s; "
-              "checked %s and the fixed set only" % (local, recorded, glibc))
+              "checked glibc %s and the fixed set only" % (local, recorded, glibc))
+    # exact: the list records these very sources, this unicodedata and this
+    # glibc alone, so it must be theirs exactly; else it only widens
+    exact = not first and recorded == local and recorded_glibcs == {glibc}
+    if first or exact:
+        new, glibcs = sources, {glibc}
+    else:
+        new = {cp: w for cp in set(table) | set(sources) if (w := max(table.get(cp, 1), sources.get(cp, 1))) != 1}
+        glibcs = recorded_glibcs | {glibc}
+    how = ("a first generation" if first else
+           "exact: the list's own versions, so it equals its sources" if exact else
+           "widening only: the list records glibc %s and Unicode %s" % ("+".join(sorted(recorded_glibcs, key=version)) or "none", recorded))
     diff = changes(table, new)
-    exact = mode == "check" and not first and recorded == local and recorded_glibc == glibc
-    if exact:                                   # the list's own sources: it must be theirs exactly
-        diff = changes(table, generate(None, locale, recorded)[0])
+    narrowed = sum(1 for _, a, z in diff if z < a)
     if mode == "check":
         for cp, a, z in diff[:200]:
             print("U+%04X: the list %d, regenerated %d" % (cp, a, z))
         if len(diff) > 200:
             print("... %d more" % (len(diff) - 200))
-        print("%d code points would change (%s, unicodedata %s%s; %s)" % (len(diff), glibc, local, "" if with_unicode else ", not used",
-              "the list's own versions: it equals the sources exactly" if exact else "regenerating only widens"))
+        print("%d code points would change, %d narrowed (glibc %s, unicodedata %s%s; %s)" % (len(diff), narrowed, glibc, local,
+              "" if with_unicode else ", not used", how))
         sys.exit(1 if diff else 0)
     made = recorded if (recorded and not with_unicode) else local
     if recorded and version(recorded) > version(made):
         made = recorded
-    header = "%s: Unicode %s, %s; tests/width_table.py writes it" % (BEGIN, made, glibc)
+    header = "%s: Unicode %s, glibc %s; tests/width_table.py writes it" % (BEGIN, made, "+".join(sorted(glibcs, key=version)))
     lines[b:e] = table_lines(hexlist(new), header)
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print("%d code points changed; %d ranges" % (len(diff), len(hexlist(new))))
+    print("%d code points changed (%d narrowed); %d ranges (%s)" % (len(diff), narrowed, len(hexlist(new)), how))
 
 
 main()

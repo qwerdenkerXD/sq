@@ -1545,10 +1545,10 @@ allcp_awk='BEGIN {
 # (b) tests/width_table.py, run on this host's glibc and python's
 # unicodedata, leaves the list as it is, so sq never counts less than the
 # local wcwidth or Unicode's width: on a mismatch the code points it would
-# change; with this host's glibc and unicodedata the very versions the list
-# records, the list must equal what they make exactly, so a stray entry wider
-# than that fails too; with a unicodedata older than the list's Unicode,
-# glibc and the fixed set alone, said so.  An empty list builds no class ("" would match
+# change; where the list records this host's glibc alone and this
+# unicodedata's version, the list must equal what they make exactly, so a
+# stray entry wider than that fails too; with a unicodedata older than the
+# list's Unicode, glibc and the fixed set alone, said so.  An empty list builds no class ("" would match
 # everywhere, "[]" is no regex), and every glyph of sq's own, which the
 # UTF-8 fast path counts by length(), is 1 in the list
 c_width_table() {
