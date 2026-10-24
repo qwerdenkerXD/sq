@@ -28,7 +28,9 @@ from.  Regenerating takes, per code point, the largest of
     (glibc 1, East Asian N) 2.
 so a regeneration can only widen.  An empty list (or none) is a first
 generation from the sources alone.  check fails exactly where write would
-change something.
+change something; and where this unicodedata and this glibc are the very
+versions the list records, also where the list is wider than the sources
+alone make it (a stray entry), as it must then equal them exactly.
 """
 import bisect
 import ctypes
@@ -55,7 +57,8 @@ def version(text):
 
 
 def read_table(path):
-    """(lines of SQ, index of the BEGIN line, index of the END line, recorded version, {cp: width})"""
+    """(lines of SQ, index of the BEGIN line, index of the END line, recorded Unicode version,
+    recorded glibc ("glibc X.Y"), {cp: width})"""
     with open(path, encoding="utf-8") as f:
         lines = f.read().split("\n")
     try:
@@ -65,6 +68,8 @@ def read_table(path):
         die("%s: no width table (%r ... %r)" % (path, BEGIN, END))
     m = re.search(r"Unicode ([0-9.]+)", lines[b])
     recorded = m.group(1) if m else None
+    m = re.search(r"(glibc [0-9.]+)", lines[b])
+    recorded_glibc = m.group(1) if m else None
     table = {}
     body = " ".join(re.findall(r'"([^"]*)"', "\n".join(lines[b + 1:e])))
     for item in body.split():
@@ -75,7 +80,7 @@ def read_table(path):
         hi = int(m.group(2), 16) if m.group(2) else lo
         for cp in range(lo, hi + 1):
             table[cp] = int(m.group(3))
-    return lines, b, e, recorded, table
+    return lines, b, e, recorded, recorded_glibc, table
 
 
 def glibc_widths(locale):
@@ -165,7 +170,7 @@ def main():
     if len(sys.argv) < 3 or sys.argv[1] not in ("check", "write", "lookup"):
         die("usage: width_table.py check|write SQ LOCALE, or lookup SQ < WIDTHS")
     mode, path = sys.argv[1], sys.argv[2]
-    lines, b, e, recorded, table = read_table(path)
+    lines, b, e, recorded, recorded_glibc, table = read_table(path)
     if mode == "lookup":
         seen, bad = set(), []
         for ln in sys.stdin:
@@ -191,12 +196,16 @@ def main():
         print("the Unicode part was not checked: python's unicodedata %s is older than the list's Unicode %s; "
               "checked %s and the fixed set only" % (local, recorded, glibc))
     diff = changes(table, new)
+    exact = mode == "check" and not first and recorded == local and recorded_glibc == glibc
+    if exact:                                   # the list's own sources: it must be theirs exactly
+        diff = changes(table, generate(None, locale, recorded)[0])
     if mode == "check":
         for cp, a, z in diff[:200]:
             print("U+%04X: the list %d, regenerated %d" % (cp, a, z))
         if len(diff) > 200:
             print("... %d more" % (len(diff) - 200))
-        print("%d code points would change (%s, unicodedata %s%s)" % (len(diff), glibc, local, "" if with_unicode else ", not used"))
+        print("%d code points would change (%s, unicodedata %s%s; %s)" % (len(diff), glibc, local, "" if with_unicode else ", not used",
+              "the list's own versions: it equals the sources exactly" if exact else "regenerating only widens"))
         sys.exit(1 if diff else 0)
     made = recorded if (recorded and not with_unicode) else local
     if recorded and version(recorded) > version(made):
