@@ -890,6 +890,197 @@ function final_states(   ts, i) {
   split("F TO NF OOM DL BF", ts, " "); for (i in ts) BAD[ts[i]] = 1
 }
 '
+# Display width.  gawk's length(), substr() and printf widths count characters
+# (bytes in C), a terminal counts columns: a CJK character or an emoji takes
+# 2, a combining mark or a ZWJ none.  So every width the dashboard and sq job
+# lay out is measured (colw), cut (clip) and padded (colpad) by columns here,
+# appended to those two programs alone.  A code point counts what the table
+# says, 1 where it says nothing, and a string the sum, per code point, with no
+# grapheme clustering: the largest width a reference draws (glibc 2.39,
+# Unicode 16, tmux 3.4 and xterm 390 measured), so a terminal may draw a
+# line narrower than counted, which moves the rest of its row left, but never
+# wider, which would wrap it and move every line below.  East Asian Ambiguous
+# counts 1, as in glibc, and every glyph of sq's own is 1.  The text measured
+# is plain: colour is added after measuring and cutting.
+# The table is one list of hex ranges of width 0 or 2, the source of truth
+# both modes build their classes from: under a UTF-8 locale a bracket of the
+# characters themselves, under C (no UTF-8 locale) alternations of their
+# UTF-8 bytes, a character found by its lead byte (every text is valid UTF-8
+# once scrubbed), the bytes from octal escapes (json_bytes), as a static
+# byte class is fatal to a gawk under UTF-8.  tests/width_table.py
+# regenerates it from the list, the local glibc and python's unicodedata,
+# and can only widen it
+wide_awk='
+# ---- the width table: Unicode 16.0.0, glibc 2.39; tests/width_table.py writes it
+BEGIN {
+  WIDTHS = \
+    "300-36F:0 483-489:0 591-5BD:0 5BF:0 5C1-5C2:0 5C4-5C5:0 5C7:0 610-61A:0 61C:0 64B-65F:0 670:0 " \
+    "6D6-6DC:0 6DF-6E4:0 6E7-6E8:0 6EA-6ED:0 711:0 730-74A:0 7A6-7B0:0 7EB-7F3:0 7FD:0 816-819:0 " \
+    "81B-823:0 825-827:0 829-82D:0 859-85B:0 898-89F:0 8CA-8E1:0 8E3-902:0 93A:0 93C:0 941-948:0 " \
+    "94D:0 951-957:0 962-963:0 981:0 9BC:0 9C1-9C4:0 9CD:0 9E2-9E3:0 9FE:0 A01-A02:0 A3C:0 A41-A42:0 " \
+    "A47-A48:0 A4B-A4D:0 A51:0 A70-A71:0 A75:0 A81-A82:0 ABC:0 AC1-AC5:0 AC7-AC8:0 ACD:0 AE2-AE3:0 " \
+    "AFA-AFF:0 B01:0 B3C:0 B3F:0 B41-B44:0 B4D:0 B55-B56:0 B62-B63:0 B82:0 BC0:0 BCD:0 C00:0 C04:0 " \
+    "C3C:0 C3E-C40:0 C46-C48:0 C4A-C4D:0 C55-C56:0 C62-C63:0 C81:0 CBC:0 CBF:0 CC6:0 CCC-CCD:0 " \
+    "CE2-CE3:0 D00-D01:0 D3B-D3C:0 D41-D44:0 D4D:0 D62-D63:0 D81:0 DCA:0 DD2-DD4:0 DD6:0 E31:0 " \
+    "E34-E3A:0 E47-E4E:0 EB1:0 EB4-EBC:0 EC8-ECE:0 F18-F19:0 F35:0 F37:0 F39:0 F71-F7E:0 F80-F84:0 " \
+    "F86-F87:0 F8D-F97:0 F99-FBC:0 FC6:0 102D-1030:0 1032-1037:0 1039-103A:0 103D-103E:0 1058-1059:0 " \
+    "105E-1060:0 1071-1074:0 1082:0 1085-1086:0 108D:0 109D:0 1100-115F:2 1160-11FF:0 135D-135F:0 " \
+    "1712-1714:0 1732-1733:0 1752-1753:0 1772-1773:0 17B4-17B5:0 17B7-17BD:0 17C6:0 17C9-17D3:0 " \
+    "17DD:0 180B-180F:0 1885-1886:0 18A9:0 1920-1922:0 1927-1928:0 1932:0 1939-193B:0 1A17-1A18:0 " \
+    "1A1B:0 1A56:0 1A58-1A5E:0 1A60:0 1A62:0 1A65-1A6C:0 1A73-1A7C:0 1A7F:0 1AB0-1ACE:0 1B00-1B03:0 " \
+    "1B34:0 1B36-1B3A:0 1B3C:0 1B42:0 1B6B-1B73:0 1B80-1B81:0 1BA2-1BA5:0 1BA8-1BA9:0 1BAB-1BAD:0 " \
+    "1BE6:0 1BE8-1BE9:0 1BED:0 1BEF-1BF1:0 1C2C-1C33:0 1C36-1C37:0 1CD0-1CD2:0 1CD4-1CE0:0 " \
+    "1CE2-1CE8:0 1CED:0 1CF4:0 1CF8-1CF9:0 1DC0-1DFF:0 200B-200F:0 202A-202E:0 2060-2064:0 " \
+    "2066-206F:0 20D0-20F0:0 231A-231B:2 2329-232A:2 23E9-23EC:2 23F0:2 23F3:2 25FD-25FE:2 " \
+    "2614-2615:2 261D:2 2630-2637:2 2648-2653:2 267F:2 268A-268F:2 2693:2 26A1:2 26AA-26AB:2 " \
+    "26BD-26BE:2 26C4-26C5:2 26CE:2 26D4:2 26EA:2 26F2-26F3:2 26F5:2 26F9-26FA:2 26FD:2 2705:2 " \
+    "270A-270D:2 2728:2 274C:2 274E:2 2753-2755:2 2757:2 2795-2797:2 27B0:2 27BF:2 2B1B-2B1C:2 2B50:2 " \
+    "2B55:2 2CEF-2CF1:0 2D7F:0 2DE0-2DFF:0 2E80-2E99:2 2E9B-2EF3:2 2F00-2FD5:2 2FF0-3029:2 " \
+    "302A-302D:0 302E-303E:2 3041-3096:2 3099-309A:0 309B-30FF:2 3105-312F:2 3131-318E:2 3190-31E5:2 " \
+    "31EF-321E:2 3220-A48C:2 A490-A4C6:2 A66F-A672:0 A674-A67D:0 A69E-A69F:0 A6F0-A6F1:0 A802:0 " \
+    "A806:0 A80B:0 A825-A826:0 A82C:0 A8C4-A8C5:0 A8E0-A8F1:0 A8FF:0 A926-A92D:0 A947-A951:0 " \
+    "A960-A97C:2 A980-A982:0 A9B3:0 A9B6-A9B9:0 A9BC-A9BD:0 A9E5:0 AA29-AA2E:0 AA31-AA32:0 " \
+    "AA35-AA36:0 AA43:0 AA4C:0 AA7C:0 AAB0:0 AAB2-AAB4:0 AAB7-AAB8:0 AABE-AABF:0 AAC1:0 AAEC-AAED:0 " \
+    "AAF6:0 ABE5:0 ABE8:0 ABED:0 AC00-D7A3:2 D7B0-D7C6:0 D7CB-D7FB:0 F900-FAFF:2 FB1E:0 FE00-FE0E:0 " \
+    "FE10-FE19:2 FE20-FE2F:0 FE30-FE52:2 FE54-FE66:2 FE68-FE6B:2 FEFF:0 FF01-FF60:2 FFE0-FFE6:2 " \
+    "FFF9-FFFB:0 101FD:0 102E0:0 10376-1037A:0 10A01-10A03:0 10A05-10A06:0 10A0C-10A0F:0 " \
+    "10A38-10A3A:0 10A3F:0 10AE5-10AE6:0 10D24-10D27:0 10EAB-10EAC:0 10EFD-10EFF:0 10F46-10F50:0 " \
+    "10F82-10F85:0 11001:0 11038-11046:0 11070:0 11073-11074:0 1107F-11081:0 110B3-110B6:0 " \
+    "110B9-110BA:0 110C2:0 11100-11102:0 11127-1112B:0 1112D-11134:0 11173:0 11180-11181:0 " \
+    "111B6-111BE:0 111C9-111CC:0 111CF:0 1122F-11231:0 11234:0 11236-11237:0 1123E:0 11241:0 112DF:0 " \
+    "112E3-112EA:0 11300-11301:0 1133B-1133C:0 11340:0 11366-1136C:0 11370-11374:0 11438-1143F:0 " \
+    "11442-11444:0 11446:0 1145E:0 114B3-114B8:0 114BA:0 114BF-114C0:0 114C2-114C3:0 115B2-115B5:0 " \
+    "115BC-115BD:0 115BF-115C0:0 115DC-115DD:0 11633-1163A:0 1163D:0 1163F-11640:0 116AB:0 116AD:0 " \
+    "116B0-116B5:0 116B7:0 1171D:0 1171F:0 11722-11725:0 11727-1172B:0 1182F-11837:0 11839-1183A:0 " \
+    "1193B-1193C:0 1193E:0 11943:0 119D4-119D7:0 119DA-119DB:0 119E0:0 11A01-11A0A:0 11A33-11A38:0 " \
+    "11A3B-11A3E:0 11A47:0 11A51-11A56:0 11A59-11A5B:0 11A8A-11A96:0 11A98-11A99:0 11C30-11C36:0 " \
+    "11C38-11C3D:0 11C3F:0 11C92-11CA7:0 11CAA-11CB0:0 11CB2-11CB3:0 11CB5-11CB6:0 11D31-11D36:0 " \
+    "11D3A:0 11D3C-11D3D:0 11D3F-11D45:0 11D47:0 11D90-11D91:0 11D95:0 11D97:0 11EF3-11EF4:0 " \
+    "11F00-11F01:0 11F36-11F3A:0 11F40:0 11F42:0 13430-13440:0 13447-13455:0 16AF0-16AF4:0 " \
+    "16B30-16B36:0 16F4F:0 16F8F-16F92:0 16FE0-16FE3:2 16FE4:0 16FF0-16FF1:2 17000-187F7:2 " \
+    "18800-18CD5:2 18CFF-18D08:2 1AFF0-1AFF3:2 1AFF5-1AFFB:2 1AFFD-1AFFE:2 1B000-1B122:2 1B132:2 " \
+    "1B150-1B152:2 1B155:2 1B164-1B167:2 1B170-1B2FB:2 1BC9D-1BC9E:0 1BCA0-1BCA3:0 1CF00-1CF2D:0 " \
+    "1CF30-1CF46:0 1D167-1D169:0 1D173-1D182:0 1D185-1D18B:0 1D1AA-1D1AD:0 1D242-1D244:0 " \
+    "1D300-1D356:2 1D360-1D376:2 1DA00-1DA36:0 1DA3B-1DA6C:0 1DA75:0 1DA84:0 1DA9B-1DA9F:0 " \
+    "1DAA1-1DAAF:0 1E000-1E006:0 1E008-1E018:0 1E01B-1E021:0 1E023-1E024:0 1E026-1E02A:0 1E08F:0 " \
+    "1E130-1E136:0 1E2AE:0 1E2EC-1E2EF:0 1E4EC-1E4EF:0 1E8D0-1E8D6:0 1E944-1E94A:0 1F004:2 " \
+    "1F02C-1F02F:2 1F094-1F09F:2 1F0AF-1F0B0:2 1F0C0:2 1F0CF-1F0D0:2 1F0F6-1F0FF:2 1F18E:2 " \
+    "1F191-1F19A:2 1F1AE-1F320:2 1F32D-1F335:2 1F337-1F37C:2 1F37E-1F393:2 1F3A0-1F3CC:2 " \
+    "1F3CF-1F3D3:2 1F3E0-1F3F0:2 1F3F4:2 1F3F8-1F43E:2 1F440:2 1F442-1F4FC:2 1F4FF-1F53D:2 " \
+    "1F54B-1F54E:2 1F550-1F567:2 1F574-1F575:2 1F57A:2 1F590:2 1F595-1F596:2 1F5A4:2 1F5FB-1F64F:2 " \
+    "1F680-1F6C5:2 1F6CC:2 1F6D0-1F6D2:2 1F6D5-1F6DF:2 1F6EB-1F6EF:2 1F6F4-1F6FF:2 1F777-1F77A:2 " \
+    "1F7DA-1F7FF:2 1F80C-1F80F:2 1F848-1F84F:2 1F85A-1F85F:2 1F888-1F88F:2 1F8AE-1F8AF:2 " \
+    "1F8BC-1F8BF:2 1F8C2-1F8FF:2 1F90C-1F93A:2 1F93C-1F945:2 1F947-1F9FF:2 1FA54-1FA5F:2 " \
+    "1FA6E-1FAFF:2 1FC00-1FFFD:2 20000-2FFFD:2 30000-3FFFD:2 E0001:0 E0020-E007F:0 E0100-E01EF:0"
+}
+# ---- width table end
+# the classes, UTF8 the mode: length("…█") is 2 only under UTF-8 (6 under C;
+# a locale tool that knows no UTF-8 locale leaves gawk in C)
+function width_classes(   R, nr, i, p, lo, hi, w, cls) {
+  UTF8 = (length("…█") == 2)
+  if (!(128 in JSON_BYTE)) json_bytes()
+  W_CONT = "[" JSON_BYTE[128] "-" JSON_BYTE[191] "]"   # a continuation byte (a regex under C only)
+  nr = split(WIDTHS, R, " ")
+  for (i = 1; i <= nr; i++) {
+    w = substr(R[i], length(R[i])); sub(/:.$/, "", R[i])
+    p = index(R[i], "-")
+    lo = strtonum("0x" (p ? substr(R[i], 1, p - 1) : R[i])); hi = p ? strtonum("0x" substr(R[i], p + 1)) : lo
+    if (UTF8) cls[w] = cls[w] json_utf8(lo) (hi > lo ? "-" json_utf8(hi) : "")
+    else      cls[w] = cls[w] width_bytes(lo, hi)
+  }
+  # none of a width matches nothing: never "" (which matches everywhere) nor
+  # "[]" (no regex)
+  if (UTF8) {
+    W_WIDE = (cls[2] == "") ? "" : "[" cls[2] "]"
+    W_ZERO = (cls[0] == "") ? "" : "[" cls[0] "]"
+    W_FAST = "[^\001-\177" "·…×↳█⚠␚▒▌▓░≥→" "]"   # beyond ASCII and the glyphs of sq
+  } else {
+    W_WIDE = substr(cls[2], 2); W_ZERO = substr(cls[0], 2)
+  }
+  W_VS16 = json_utf8(65039); W_ZWJ = json_utf8(8205)    # U+FE0F, U+200D
+  W_MODLO = json_utf8(127995); W_MODHI = json_utf8(127999)   # U+1F3FB-1F3FF
+}
+# code points LO..HI (none below U+0080) as "|"-led alternatives of their
+# UTF-8 bytes, a piece of one encoded length at a time, surrogates skipped
+function width_bytes(lo, hi,   out, s, e) {
+  for (s = lo; s <= hi; s = e + 1) {
+    e = (s < 2048) ? 2047 : (s < 55296) ? 55295 : (s < 57344) ? 57343 : (s < 65536) ? 65535 : 1114111
+    if (e > hi) e = hi
+    if (s < 55296 || s > 57343) out = out width_seqs(s, e)
+  }
+  return out
+}
+# LO..HI of one encoded length N: equal leading bytes, then one byte that
+# ranges, then any continuation byte, splitting where LO or HI is not aligned
+function width_seqs(lo, hi,   n, i, j, m, a, b, s) {
+  n = (lo < 2048) ? 2 : (lo < 65536) ? 3 : 4
+  for (i = 0; i < n - 1; i++) {
+    m = 2 ^ (6 * (n - 1 - i)); a = int(lo / m); b = int(hi / m)
+    if (a == b) continue
+    if (lo % m) return width_seqs(lo, (a + 1) * m - 1) width_seqs((a + 1) * m, hi)
+    if (hi % m != m - 1) return width_seqs(lo, b * m - 1) width_seqs(b * m, hi)
+    break
+  }
+  s = "|"
+  for (j = 0; j < n; j++)
+    s = s (j > i ? W_CONT : width_byte(lo, n, j) == width_byte(hi, n, j) ? width_byte(lo, n, j) \
+                              : "[" width_byte(lo, n, j) "-" width_byte(hi, n, j) "]")
+  return s
+}
+function width_byte(cp, n, j) {   # byte J (from 0) of the N-byte UTF-8 of CP
+  if (j == 0) return JSON_BYTE[(n == 2 ? 192 : n == 3 ? 224 : 240) + int(cp / 2 ^ (6 * (n - 1)))]
+  return JSON_BYTE[128 + int(cp / 2 ^ (6 * (n - 1 - j))) % 64]
+}
+BEGIN { width_classes() }
+# the columns S takes; under UTF-8 a string of ASCII and the glyphs of sq at
+# once, its length
+function colw(s,   t, n) {
+  if (UTF8) {
+    if (s !~ W_FAST) return length(s)
+    n = length(s)
+  } else { t = s; n = length(s) - gsub(W_CONT, "", t) }    # its lead bytes
+  if (W_WIDE != "") { t = s; n += gsub(W_WIDE, "", t) }
+  if (W_ZERO != "") { t = s; n -= gsub(W_ZERO, "", t) }
+  return n
+}
+# S cut to COLS columns: S when it fits; "…" when COLS <= 1 (1 column even at
+# COLS <= 0); else the longest start of whole units of at most COLS - 1
+# columns, then "…", and nothing after it, so the text is COLS - g wide with
+# g below the width of the first unit left out.  A unit starts at every
+# character but a 0-width one, U+FE0F, an emoji modifier (U+1F3FB-1F3FF) and
+# the one right after a ZWJ; the first always starts one.  A start of
+# characters, so a split by characters of what it cut stays one
+function clip(s, cols,   n, C, CW, i, j, k, w, uw, out, lead) {
+  if (colw(s) <= cols) return s
+  if (cols <= 1) return "…"
+  if (UTF8 && s !~ W_FAST) return substr(s, 1, cols - 1) "…"
+  if (UTF8) n = split(s, C, "")
+  else for (i = 1; i <= length(s); i += length(C[n])) {
+    lead = substr(s, i, 1)
+    C[++n] = substr(s, i, lead < "\300" ? 1 : lead < "\340" ? 2 : lead < "\360" ? 3 : 4)
+  }
+  for (i = 1; i <= n; i++) CW[i] = colw(C[i])
+  w = 0; out = ""
+  for (i = 1; i <= n; i = j) {
+    uw = CW[i]
+    for (j = i + 1; j <= n; j++) {
+      if (!(CW[j] == 0 || C[j] == W_VS16 || (C[j] >= W_MODLO && C[j] <= W_MODHI) || C[j - 1] == W_ZWJ)) break
+      uw += CW[j]
+    }
+    if (w + uw > cols - 1) break
+    w += uw
+    for (k = i; k < j; k++) out = out C[k]
+  }
+  return out "…"
+}
+function spaces(k) { return (k > 0) ? sprintf("%*s", k, "") : "" }
+# X padded to |FW| columns as printf "%*s" pads: right-aligned for FW > 0,
+# left-aligned for FW < 0, never cut; XW its width where the caller has it
+function colpad(x, fw, xw) {
+  if (xw == "") xw = colw(x)
+  return (fw < 0) ? x spaces(-fw - xw) : spaces(fw - xw) x
+}
+'
 # The terminal's size, into tty_lines and tty_cols, from stty, which needs no
 # terminfo entry for $TERM as tput does (xterm-kitty, xterm-ghostty).  No
 # controlling terminal leaves both empty, silently; a pty not sized yet says

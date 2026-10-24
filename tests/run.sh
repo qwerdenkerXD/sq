@@ -1420,6 +1420,70 @@ c_tables_c1() {
 	need "C: every gawk ran in C, none in a UTF-8 locale" eval 'grep -qx "call C" "$glog" && ! grep -qi "utf" "$glog"'
 }
 
+# ---- display width: the table, the cut ---------------------------------------
+# sq counts columns, not characters, by one table embedded in it: a list of
+# hex ranges of width 0 or 2 (every other code point 1), from which both
+# modes build their classes, a bracket of the characters under UTF-8 and
+# alternations of their UTF-8 bytes under C (no UTF-8 locale).  The helpers
+# as sq has them, cut out of it: the node readers (json_bytes, the bytes from
+# octal escapes) and wide_awk
+wide_awk_file() {   # wide_awk_file FILE
+	{ sed -n '/^# ---- the node readers/,/^# ---- node readers end/p' "$sq"
+	  sed -n "/^wide_awk='\$/,/^'\$/p" "$sq" | sed '1d;$d'; } > "$1"
+}
+# every scalar value as "HEX WIDTH", encoded by this program itself (its own
+# octal escapes, not sq's encoder) and measured by sq's colw
+allcp_awk='BEGIN {
+	split("\200,\201,\202,\203,\204,\205,\206,\207,\210,\211,\212,\213,\214,\215,\216,\217,\220,\221,\222,\223,\224,\225,\226,\227,\230,\231,\232,\233,\234,\235,\236,\237," \
+	      "\240,\241,\242,\243,\244,\245,\246,\247,\250,\251,\252,\253,\254,\255,\256,\257,\260,\261,\262,\263,\264,\265,\266,\267,\270,\271,\272,\273,\274,\275,\276,\277," \
+	      "\300,\301,\302,\303,\304,\305,\306,\307,\310,\311,\312,\313,\314,\315,\316,\317,\320,\321,\322,\323,\324,\325,\326,\327,\330,\331,\332,\333,\334,\335,\336,\337," \
+	      "\340,\341,\342,\343,\344,\345,\346,\347,\350,\351,\352,\353,\354,\355,\356,\357,\360,\361,\362,\363,\364,\365,\366,\367", b, ",")
+	for (i = 1; i <= 120; i++) B[127 + i] = b[i]
+	for (cp = 0; cp < 1114112; cp++) {
+		if (cp >= 55296 && cp <= 57343) continue
+		if (cp < 128) c = sprintf("%c", cp)
+		else if (cp < 2048) c = B[192 + int(cp / 64)] B[128 + cp % 64]
+		else if (cp < 65536) c = B[224 + int(cp / 4096)] B[128 + int(cp / 64) % 64] B[128 + cp % 64]
+		else c = B[240 + int(cp / 262144)] B[128 + int(cp / 4096) % 64] B[128 + int(cp / 64) % 64] B[128 + cp % 64]
+		printf "%X %d\n", cp, colw(c)
+	}
+}'
+# (a) for every scalar value sq's width in UTF-8 and in C is the list's, as
+# python3 reads it (the machinery: brackets, byte patterns, the lookup);
+# (b) tests/width_table.py, run on this host's glibc and python's
+# unicodedata, leaves the list as it is, so sq never counts less than the
+# local wcwidth or Unicode's width: on a mismatch the code points it would
+# change; with a unicodedata older than the list's Unicode, glibc and the
+# fixed set alone, said so.  An empty list builds no class ("" would match
+# everywhere, "[]" is no regex), and every glyph of sq's own, which the
+# UTF-8 fast path counts by length(), is 1 in the list
+c_width_table() {
+	T_TITLE="the width table: sq's width of every scalar value, in UTF-8 and in C, is the embedded list's as python3 reads it; tests/width_table.py leaves the list unchanged on this host; an empty list builds no class; sq's glyphs are 1"
+	local awk=$T_DIR/wide.awk mode out chk=$T_DIR/check.out rc
+	sq_run mixed --
+	need "the dashboard: rc 0" rc_is 0
+	if ! command -v python3 > /dev/null 2>&1; then
+		T_FAIL+=("python3 is missing: the width table is checked by tests/width_table.py (python3, with ctypes and unicodedata)"); return
+	fi
+	wide_awk_file "$awk"
+	for mode in "$utf8" C; do
+		out=$T_DIR/widths.$mode
+		LC_ALL=$mode gawk -f "$awk" -e "$allcp_awk" > "$out" 2> "$out.err"
+		python3 -I "$here/width_table.py" lookup "$sq" < "$out" > "$out.cmp" 2>&1; rc=$?
+		need "(a) $mode: every scalar value as the list says ($(tail -n 1 "$out.cmp"))$([ $rc = 0 ] || printf ': %s' "$(head -n 20 "$out.cmp" | paste -sd';')")" \
+			eval '[ $rc = 0 ] && [ ! -s "$out.err" ]'
+	done
+	python3 -I "$here/width_table.py" check "$sq" "$utf8" > "$chk" 2>&1; rc=$?
+	need "(b) tests/width_table.py check: the list unchanged ($(tail -n 1 "$chk"))$([ $rc = 0 ] || printf ': %s' "$(head -n 40 "$chk" | paste -sd';')")" eval '[ $rc = 0 ]'
+	! grep -q 'not checked' "$chk" || T_TITLE="$T_TITLE; $(grep 'not checked' "$chk")"
+	for mode in "$utf8" C; do
+		need "$mode: an empty list builds no class, and a CJK character with a combining mark is 1 + 1 + 1" eval '
+			LC_ALL=$mode gawk -f "$awk" -e "BEGIN { WIDTHS = \"\"; width_classes(); exit !(W_WIDE == \"\" && W_ZERO == \"\" && colw(\"a中\314\201\") == 3) }" 2> "$T_DIR/empty.err" && [ ! -s "$T_DIR/empty.err" ]'
+	done
+	need "C, which has no fast path: each of sq's glyphs · … × ↳ █ ⚠ ␚ ▒ ▌ ▓ ░ ≥ → is 1" eval '
+		LC_ALL=C gawk -f "$awk" -e "BEGIN { n = split(\"· … × ↳ █ ⚠ ␚ ▒ ▌ ▓ ░ ≥ →\", G, \" \"); for (i = 1; i <= n; i++) if (colw(G[i]) != 1) exit 1; exit n != 13 }"'
+}
+
 # U+202E (RLO) turns around what a terminal shows after it, up to the end of
 # the line: no text sq draws or says may carry one, nor any other bidi
 # control.  Each site that echoes outside text: a usage error, the filter on
@@ -6477,7 +6541,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
