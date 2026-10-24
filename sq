@@ -3565,23 +3565,23 @@ char_name() {
 	if [ "$n" -gt 0 ]; then printf 'U+%04X' "$cp"; else printf 'byte 0x%02X' "${b[0]}"; fi
 }
 
+word40() { printf '%s' "$1" | scrub 40; }   # word40 WORD: WORD as a refusal echoes it
 # short_word WORD NEXT...: a word "-X…" that is no long option (N2), by its
 # first letter; nshift the words it took.  The checks read the whole word,
 # every echo is the word scrubbed and cut to 40 characters
 short_word() {
-	local w=$1 c=${1:1:1} rest=${1:2} name base shown body ex i
+	local w=$1 c=${1:1:1} rest=${1:2} name base body ex i
 	nshift=1
-	shown=$(printf '%s' "$w" | scrub 40)
 	# N2a, first: a long name written with one dash, "-partition" for
 	# "--partition", is refused, for every long name sq knows; it would
 	# otherwise be -p with the value "artition"
 	name=${w:1} base=${w:1}; base=${base%%=*}
 	case $base in ''|*[!"$alnum"-]*) ;; *)
 		if case $long_valued in *" $base "*) true ;; *) false ;; esac; then
-			die "'$shown' is not an option; did you mean -$shown?"
+			die "'$(word40 "$w")' is not an option; did you mean -$(word40 "$w")?"
 		elif case $long_flags in *" $base "*) true ;; *) false ;; esac; then
-			[ "$name" = "$base" ] || die "'$shown' is not an option; did you mean --$base? (it takes no value)"
-			die "'$shown' is not an option; did you mean -$shown?"
+			[ "$name" = "$base" ] || die "'$(word40 "$w")' is not an option; did you mean --$base? (it takes no value)"
+			die "'$(word40 "$w")' is not an option; did you mean -$(word40 "$w")?"
 		elif case $long_refused in *" $base "*) true ;; *) false ;; esac; then
 			refused_long "-$w"
 			die "$(printf '%s' "--$base" | scrub 40) is not one of the long options sq forwards; sq -h lists them"
@@ -3597,8 +3597,8 @@ short_word() {
 			return ;;
 		# refused, and they take a value, so they never ask for one: squeue's
 		# -O replaces sq's format, -i reprints, -s lists steps (see refused_long)
-		O) die "$shown would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
-		i) die "$shown repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" ;;
+		O) die "$(word40 "$w") would override sq's own output format; write the column list as 'sq -o i,j,u'" ;;
+		i) die "$(word40 "$w") repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" ;;
 		s) die "$(printf '%s' "${w%%=*}" | scrub 40) lists job steps, which sq cannot frame safely; sq shows jobs" ;;
 	esac
 	if [ -z "$rest" ]; then           # one letter alone
@@ -3625,12 +3625,12 @@ short_word() {
 		fi ;;
 	esac
 	# N2c: no option letter at all
-	case $alnum in *"$c"*) ;; *) die "'$shown' holds $(char_name "${w:1}"), which is not an option letter" ;; esac
+	case $alnum in *"$c"*) ;; *) die "'$(word40 "$w")' holds $(char_name "${w:1}"), which is not an option letter" ;; esac
 	# N2d: a letter or digit squeue has but sq does not forward, or none has;
 	# before a subcommand, the subcommand's own refusal
 	if [ -z "$rest" ]; then
 		[ $# -lt 2 ] || ! is_subcommand "$2" || { subpos=0; place_word "${@:2}"; }
-		die "$shown is not one of the short options sq forwards; sq -h lists them"
+		die "$(word40 "$w") is not one of the short options sq forwards; sq -h lists them"
 	fi
 	# N2e: letters run together are refused, whatever follows the first: a
 	# split table would drift from squeue's, and -ah is squeue's no-header
@@ -3641,9 +3641,9 @@ short_word() {
 	if [ $# -ge 2 ] && [ -n "$2" ] && [[ $2 == *[!"$blanks"]* ]] && [ "${2:0:1}" != - ] &&
 	   [[ ${body%?} != *[!arPcCx]* ]] && [[ ${body: -1} == [arPcCxupAUqMntwLRSjo] ]]; then
 		ex=; for ((i = 0; i < ${#body}; i++)); do ex="$ex -${body:i:1}"; done
-		die "cannot tell what '$(printf '%s' "$2" | scrub 40)' belongs to after '$shown'; write the options apart, e.g.$(printf '%s' "$ex" | scrub) $(printf '%s' "$2" | scrub 40)"
+		die "cannot tell what '$(word40 "$2")' belongs to after '$(word40 "$w")'; write the options apart, e.g.$(printf '%s' "$ex" | scrub) $(word40 "$2")"
 	fi
-	die "'$shown' runs options together; write each option as its own word"
+	die "'$(word40 "$w")' runs options together; write each option as its own word"
 }
 
 # long_word WORD NEXT...: a word "--…" (sq's own long options and the closed
