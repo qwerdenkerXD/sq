@@ -334,6 +334,8 @@ rc_is()      { [ "$RC" -eq "$1" ]; }
 # how often sq asked the terminal its size (tests/bin/stty logs every call)
 stty_size_calls() { gawk -F'\t' '$1 == "STTY" && $2 == "size" { n++ } END { print n+0 }' "$LOG"; }
 err_empty()  { [ ! -s "$ERR" ]; }
+# for a need's text: " (the first 200 bytes of stderr)" where there is any
+err_quoted() { [ ! -s "$ERR" ] || printf ' (%s)' "$(head -c 200 "$ERR" | tr '\n' ' ')"; }
 out_empty()  { [ ! -s "$OUT" ]; }
 
 # ---- the stub log: one CALL line per invocation, see tests/lib/stub.sh ------
@@ -991,7 +993,7 @@ c1_inert() { ! LC_ALL=C grep -q $'\xc2[\x80-\x9f]' "$OUT"; }
 ctl_inert() { [ "$(escapes)" -eq 0 ] && ! LC_ALL=C grep -q $'\r' "$OUT"; }   # no ESC, no CR byte
 c_control_text() {
 	T_TITLE="ESC and CR in squeue's, sinfo's, sacct's and the fallback's stderr and in the host name, and C1 controls in stderr and a filter, are scrubbed before they reach the screen"
-	local f fx hbin=$T_DIR/hbin
+	local f fx
 	for f in squeue sinfo sacct squeue-all; do
 		fx=$(stderr_fixture "$f" "$ctl_fixture_text")
 		sq_run "$fx" --
@@ -1013,9 +1015,9 @@ c_control_text() {
 	sq_run wide -- -u "$(printf 'al\xc2\x9bi\xc2\x9dce')"
 	need "-u with C1: rc 0, the caption names user=alice" eval 'rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h · user=alice"'
 	need "-u with C1: no C1 pair in the output" c1_inert
-	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "node\\033[2Jboom\\rX\\n"\n' > "$hbin/hostname"; chmod +x "$hbin/hostname"
-	sq_run wide PATH="$hbin:$here/bin:$PATH" --
-	need "host name: rc 0, on the title without its control characters" eval 'rc_is 0 && plain | head -1 | grep -qF "SLURM node[2JboomX "'
+	sq_run wide SQSTUB_HOST=$'node\033[2Jboom\rX' --
+	need "host name: rc 0, stderr empty$(err_quoted)" eval 'rc_is 0 && err_empty'
+	need "host name: on the title without its control characters" eval 'plain | head -1 | grep -qF "SLURM node[2JboomX "'
 	need "host name: no ESC, no CR in the output" ctl_inert
 }
 
@@ -1099,7 +1101,7 @@ c_real_reason_wins() {
 c1_err_inert() { ! LC_ALL=C grep -q $'\xc2[\x80-\x9f]' "$ERR"; }
 c_scrub_sites() {
 	T_TITLE="the scrub's bytes (nested pair, \\xc2\\x80 and \\x9f, DEL, \\x1f, NUL, C0 inside a pair) and each site that scrubs: usage errors, filters, SQ_SINCE, host"
-	local hbin=$T_DIR/hbin c1=$'\xc2\x9b'
+	local c1=$'\xc2\x9b'
 	sq_run "$(stderr_fixture squeue 'p\xc2\xc2\x9b\x9bq\xc2\x80r\xc2\x9fs\x7ft\x1fu\x00v\xc2\x01\x9bw')" --
 	need "squeue stderr with every byte rule: rc 0, stderr empty, 'p␚␚qrstuv␚␚w' on the banner" \
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: p␚␚qrstuv␚␚w$"'
@@ -1116,11 +1118,12 @@ c_scrub_sites() {
 		eval 'rc_is 0 && calls_are 1 1 1 0 && has "recent only (-nxy has no sacct equivalent)" && c1_inert'
 	sq_run wide SQ_SINCE="2026-01-01${c1}T00" --
 	need "SQ_SINCE with C1: rc 0, the caption says since 2026-01-01T00, no C1" eval 'rc_is 0 && has "recently finished · since 2026-01-01T00" && c1_inert'
-	mkdir -p "$hbin"; printf '#!/bin/sh\nprintf "no\\302\\233de\\n"\n' > "$hbin/hostname"; chmod +x "$hbin/hostname"
-	# three needs, not one: this failed now and then in full runs, and which
-	# part did is the first thing to know
-	sq_run wide PATH="$hbin:$here/bin:$PATH" --
-	need "host name with C1: rc 0" rc_is 0
+	# the host name from tests/bin/hostname (SQSTUB_HOST), no script written
+	# and run in the case; three needs, not one, and stderr quoted: this failed
+	# now and then in full runs, and which part did and why is the first thing
+	# to know
+	sq_run wide SQSTUB_HOST="no${c1}de" --
+	need "host name with C1: rc 0, stderr empty$(err_quoted)" eval 'rc_is 0 && err_empty'
 	need "host name with C1: the title says SLURM node" eval 'plain | head -1 | grep -qF "SLURM node "'
 	need "host name with C1: no C1 on the screen" c1_inert
 }
@@ -4393,9 +4396,8 @@ c_membar_fallback() {
 # screens: TZ=CEST-2 prints "CEST" all year and has no DST hour that mktime
 # could read back wrong, which is why the other cases use UTC.
 mem_run() {   # mem_run FIXTURE [VAR=value | -VAR]... -- [sq args]: sq_run as fsill
-	local fx=$1 hb=$T_DIR/hostbin; shift
-	mkdir -p "$hb"; printf '#!/bin/sh\necho fb2-bioinf\n' > "$hb/hostname"; chmod +x "$hb/hostname"
-	sq_run "$fx" SQSTUB_UID=1041 TZ=CEST-2 PATH="$hb:$here/bin:$PATH" "$@"
+	local fx=$1; shift
+	sq_run "$fx" SQSTUB_UID=1041 TZ=CEST-2 SQSTUB_HOST=fb2-bioinf "$@"
 }
 row_raw() {   # row_raw ID: the queue row whose JOBID is ID, as printed
 	ID=$1 LC_ALL=$utf8 gawk '{ t = $0; gsub(/\033\[[0-9;]*m/, "", t); gsub(/\r/, "", t); split(t, f, " ") }
