@@ -3667,6 +3667,52 @@ c_nodes_not_utf8() {
 		rc_is 0 && err_empty && rows queue | grep -qE "^ +5200_\[0-1\] ×2 +r␚n " && rows queue | grep -qE "^ +5300_\[0-1\] ×2 +xy " && [ "$(nrows queue)" = 2 ]'
 }
 
+# A locale tool that knows no UTF-8 locale, first on PATH in DIR: gawk then runs
+# in the caller's locale, C, as on a host with none installed (glibc's builtin
+# C.UTF-8 makes LOCPATH no way to hide one)
+no_utf8_locale() {   # no_utf8_locale DIR
+	mkdir -p "$1"
+	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$1/locale"; chmod +x "$1/locale"
+}
+# scontrol -o names, states and partitions take the tables' control rule, as
+# the --json answer's do (json_str): a node name holding a control character
+# joins its MemSpecLimit under -o too, and two names alike once the rule has
+# read them are one, "listed twice", on either path.  Each run under -o draws
+# the screen the --json path draws: under C.UTF-8, under a gawk forced to C
+# (LC_ALL=C, no UTF-8 locale known) and with no locale set at all on such a host.
+ctl_run() {   # ctl_run FIXTURE utf8|C|none [VAR=value...]: the dashboard, FULL, no colour
+	local fx=$1 how=$2; shift 2
+	case $how in
+		utf8) sq_run "$fx" SQSTUB_HOST=FranzGB "$@" -- --full --no-color ;;
+		C)    sq_run "$fx" SQSTUB_HOST=FranzGB LC_ALL=C PATH="$T_DIR/nobin:$here/bin:$PATH" "$@" -- --full --no-color ;;
+		none) sq_run "$fx" SQSTUB_HOST=FranzGB -LC_ALL PATH="$T_DIR/nobin:$here/bin:$PATH" "$@" -- --full --no-color ;;
+	esac
+}
+c_nodes_ctl_o() {
+	T_TITLE="under -o a node name with \\001 or \\302\\201 joins its MemSpecLimit, and node\\001 beside node? is 'twice', each screen the --json path's: under C.UTF-8, a gawk forced to C and a host with no UTF-8 locale"
+	local d how fx name a json
+	no_utf8_locale "$T_DIR/nobin"
+	for fx in 'c0:fb2-bio\\x01nf' 'c1:fb2-bio\\xc2\\x81nf'; do
+		IFS=: read -r name a <<< "$fx"
+		d=$(names_fx "ctl-$name" "$a" fb2-bioinf-0)
+		for how in utf8 C none; do
+			ctl_run "$d" $how; json=$RUN/screen; without_clock "$OUT" > "$json"
+			ctl_run "$d" $how SQSTUB_NOJSON=1
+			need "$name in the name, $how, -o: rc 0, stderr empty, fb2-bio?nf at RealMemory less MemSpecLimit (265/977G), the --json screen" eval '
+				rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && matches "^ +fb2-bio\\?nf .* 265/977G +mem" && matches "^ +fb2-bioinf-0 .* 70/75G +mem" &&
+				cmp -s "$json" <(without_clock "$OUT")'
+		done
+	done
+	d=$(names_fx ctl-pair 'fb2-bio\\x01nf' 'fb2-bio?nf')
+	for how in utf8 C none; do
+		ctl_run "$d" $how; json=$RUN/screen; without_clock "$OUT" > "$json"
+		ctl_run "$d" $how SQSTUB_NOJSON=1
+		need "fb2-bio\\x01nf beside fb2-bio?nf, $how, -o: two rows fb2-bio?nf at RealMemory (listed twice), the --json screen" eval '
+			rc_is 0 && err_empty && [ "$(plain | grep -cE "^ +fb2-bio\\?nf ")" = 2 ] && matches "^ +fb2-bio\\?nf .* 265/1007G +mem" &&
+			matches "^ +fb2-bio\\?nf .* 70/78G +mem" && cmp -s "$json" <(without_clock "$OUT")'
+	done
+}
+
 c_membar_fallback() {
 	T_TITLE="scontrol --json unusable (no --json, exit 0 but unreadable: empty, garbage, compact, cut, two documents, a BOM, trailing text, errors, no errors, a name not decodable; in an otherwise whole document an errors element, a closer of the wrong kind, a nodes element no object, a raw quote in a name): -o once more, read by node_read, nothing kept from the part read; a timeout asks no more; the -o call gets what is left of the bound; the last call's reason, FULL and COMPACT"
 	local d p why='slurm_load_node error: Unable to contact slurm controller (connect failure)' start v i
@@ -5751,6 +5797,38 @@ c_why_not_utf8() {
 	why_run "$d" -- --no-color job 11836
 	need "a batch host with RLO, read on fb2-bioinf: its decoded name is this host's" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "its output is not there" ]'
 }
+# sq job reads scontrol -o as the --json answer, control characters too: a
+# partition holding one is the queue's partition (both "?" once read), so the
+# verdict is the --json one; node\001 beside node? is "listed it twice" on both
+# paths.  Under C.UTF-8 and under a gawk forced to C.
+c_why_ctl_o() {
+	T_TITLE="sq job under -o: a partition with \\001 or \\302\\201 gets the --json verdict (the pinned screen, Loc?lQ); node\\001 beside node? 'listed it twice' as under --json; under C.UTF-8 and a gawk in C"
+	local d p how json src=$jfx/badconstraints-11955 f
+	no_utf8_locale "$T_DIR/nobin"
+	for p in 'Loc\x01lQ' 'Loc\xc2\x81lQ' 'pair'; do
+		d=$T_DIR/fx-ctl-$RANDOM; mkdir -p "$d"
+		for f in squeue-all sacct; do sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$src/$f" > "$d/$f"; done
+		if [ "$p" = pair ]; then
+			sed -e 's/fb2-bioinf-0/fb2-bio?nf/g' -e 's/fb2-bioinf /fb2-bio\\x01nf /g' -e 's/=fb2-bioinf$/=fb2-bio\\x01nf/' "$src/scontrol-node" > "$d/scontrol-node"
+		else
+			sed "s/LocalQ/${p//\\/\\\\}/g" "$src/scontrol-node" > "$d/scontrol-node"
+			sed -i "s/^JobID=11955;/JobID=11955; Partition=${p//\\/\\\\};/" "$d/squeue-all"
+			sed "s/LocalQ/Loc?lQ/" "$jfx/screens/why__pending-badconstraints.txt" > "$d/want"
+		fi
+		for how in utf8 C; do
+			if [ $how = utf8 ]; then why_run "$d" -- --no-color job 11955; else why_run "$d" LC_ALL=C PATH="$T_DIR/nobin:$here/bin:$PATH" -- --no-color job 11955; fi
+			json=$RUN/out
+			if [ $how = utf8 ]; then why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11955; else why_run "$d" SQSTUB_NOJSON=1 LC_ALL=C PATH="$T_DIR/nobin:$here/bin:$PATH" -- --no-color job 11955; fi
+			if [ "$p" = pair ]; then
+				need "fb2-bio\\x01nf beside fb2-bio?nf, $how, -o: rc 0, 'listed it twice', the --json screen" eval '
+					rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && why_lines | grep -qE "^    fb2-bio\\?nf +\\? +\\? +unknown: scontrol listed it twice$" && job_is "$json"'
+			else
+				need "partition $p, $how, -o: rc 0, the --json screen$([ $how = C ] || echo ", the pinned one with Loc?lQ")" eval '
+					rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && job_is "$json" && { [ $how = C ] || job_is "$d/want"; }'
+			fi
+		done
+	done
+}
 c_why_tail_hung() {   # V2
 	T_TITLE="a reader that does not answer (a hung NFS read, here a tail that sleeps): sq says so after 2 s, kills it, and leaves nothing behind"
 	local d
@@ -6345,14 +6423,14 @@ cases=(
 	compact_no_size compact_error_screens
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
-	membar_screens membar_detect membar_call membar_fail membar_over membar_down membar_forged membar_json membar_fallback nodes_not_utf8
+	membar_screens membar_detect membar_call membar_fail membar_over membar_down membar_forged membar_json membar_fallback nodes_not_utf8 nodes_ctl_o
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
 	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
-	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
+	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
 	why_resources why_ended why_array why_budget why_parallel why_signals
 )
 start=$(date +%s%N)

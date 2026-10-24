@@ -685,13 +685,18 @@ function pend_kind(why) {
 # leaves that node unknown (NODE_BAD "twice").  By index 1..NN: NODE_NAME, NODE_CPUS
 # (CPUEfctv, else CPUTot), NODE_CPUALLOC, NODE_REALMEM, NODE_ALLOCMEM and
 # NODE_SPECMEM (MemSpecLimit, 0 when absent) in MB, NODE_STATE, NODE_PARTS
-# (its partitions, comma-separated); a number missing or garbled is -1
+# (its partitions, comma-separated); a number missing or garbled is -1.  The
+# strings kept (NodeName, State, Partitions) take the control rule of the
+# tables first, as json_str gives it to the --json answer: a name then reads
+# as in the table of sinfo, and two that differ only in a control character
+# are one, "twice"
 function node_read(file,   ln, KV, s, m, name, n) {
   while ((getline ln < file) > 0) {
     if (ln !~ /^NodeName=/) continue
     if (match(ln, / (Reason|Comment|Extra)=/)) ln = substr(ln, 1, RSTART - 1)
     delete KV; s = ln
     while (match(s, /(^| )([A-Za-z_]+)=([^ ]*)/, m)) { if (!(m[2] in KV)) KV[m[2]] = m[3]; s = substr(s, RSTART + RLENGTH) }
+    gsub(CNTRL, "?", KV["NodeName"]); gsub(CNTRL, "?", KV["State"]); gsub(CNTRL, "?", KV["Partitions"])
     name = KV["NodeName"]
     if (name in NODE_AT) { NODE_BAD[NODE_AT[name]] = "twice"; continue }
     n = NODE_AT[name] = ++NN; NODE_NAME[n] = name
