@@ -9,8 +9,9 @@
 # section (tests/fixtures/sqjob/screens) instead of comparing with them, for
 # a change that is meant to change them; git diff then shows what changed.
 #
-# Needs bash, gawk, coreutils, util-linux `script` and `setsid` for the
-# terminal cases, and glibc's localedef with its locale sources for one case;
+# Needs bash, gawk, coreutils (8.31 or later: env --default-signal), util-linux
+# `script` and `setsid` for the terminal cases, and glibc's localedef with its
+# locale sources for one case;
 # util-linux `flock` (the stub's call counter) and procps `ps` (sq log's
 # leftover processes, found by session id) for the sq log cases.
 # The stubs in tests/bin stand in for squeue/sinfo/sacct/sstat/scontrol
@@ -131,8 +132,11 @@ sq_start() {
 	sq_env "$@"
 	: > "$RUN/pid"
 	# sh writes its pid and execs setsid, which (sh leading no process group)
-	# makes it a session leader and execs sq: one pid all along
-	local launch='printf "%s\n" "$$" > "$0"; exec setsid "$@"'
+	# makes it a session leader and execs sq: one pid all along.  env first
+	# resets SIGINT and SIGQUIT to their default: a run.sh started with & from
+	# a non-interactive shell has them ignored, sq inherits that and cannot
+	# trap a signal ignored on entry
+	local launch='printf "%s\n" "$$" > "$0"; exec env --default-signal=INT,QUIT setsid "$@"'
 	local -a cmd=(sh -c "$launch" "$RUN/pid" env -i "${ENVLIST[@]}" "$sq" "${SQ_ARGV[@]}")
 	# (bash's own "Killed" notice for a sq a case killed goes nowhere), and
 	# what still ran in its session the moment sq returned goes to left-at-exit
