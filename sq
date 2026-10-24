@@ -4868,9 +4868,13 @@ END{
       g = FAILG                                 # (the fallback says it is one)
       cap = "recently finished" (rsrc == "sacct" ? "" \
             : " (" (rwhyc == "filter" ? rwhy : "no accounting") ")") ": "
-      x = clip(cap fid(g) " " rname[g] " " rstate[g] " " fexit(g, 3), target)
-      out[++o] = sprintf("%s%s%s%s%s%s%s", lm, e("2"), substr(x, 1, length(cap)), e("0"),
-                         e(fcol(rst[g])), substr(x, length(cap) + 1), e("0"))
+      # the caption dim, the job in the colour of its state, each cut on its own:
+      # cut as one text and split at length(cap), which counts bytes in C,
+      # the split halved a character ("…" of the cut, or one of the caption)
+      x = fid(g) " " rname[g] " " rstate[g] " " fexit(g, 3)
+      if (colw(cap) >= target) { capx = clip(cap x, target); x = "" }   # cut in the caption
+      else { capx = cap; x = clip(x, target - colw(cap)) }
+      out[++o] = sprintf("%s%s%s%s%s%s%s", lm, e("2"), capx, e("0"), e(fcol(rst[g])), x, e("0"))
     } else {
       if (rsrc == "sacct")
         cap = "recently finished · " wtxt sfilt (shown ? "" : " · nothing in this window")

@@ -1835,6 +1835,24 @@ c_wide_compact_fin() {
 		rc_is 0 && matches "^  recently finished: 4002 失敗した解析…$" && [ "$(oracle_width "$(lines_matching "^  recently finished: ")")" -le 40 ]'
 	WIDTHS="36 38 40 42 44 46 48" twin_sweep wide-fin "${wide_cols[@]}"
 }
+# COMPACT's one finished line with gawk in C (no UTF-8 locale to pin: the
+# locale tool knows C and POSIX alone), the caption itself cut: the caption
+# and the job are cut each on its own, as one cut of both, split at the
+# caption's length (bytes, in C), halved its "…" at 60 and 61 columns
+c_wide_compact_fin_c() {
+	T_TITLE="COMPACT's one finished line under gawk in C with its caption cut (noacct, --reservation=x, 24 lines, 58-63 columns): valid UTF-8, within the width, as under UTF-8"
+	local nobin=$T_DIR/nobin w want
+	mkdir -p "$nobin"
+	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	for w in 58 59 60 61 62 63; do
+		sq_run noacct SQ_WIDTH=$w SQ_HEIGHT=24 -- --compact --color --reservation=x
+		want=$(LC_ALL=C grep -a '^  .*recently finished (' "$OUT")
+		sq_run noacct SQ_WIDTH=$w SQ_HEIGHT=24 LC_ALL=C PATH="$nobin:$here/bin:$PATH" -- --compact --color --reservation=x
+		need "$w columns: rc 0, valid UTF-8, the finished line within $w columns, byte for byte as under UTF-8" eval '
+			rc_is 0 && err_empty && utf8_valid && [ -n "$want" ] && [ "$(LC_ALL=C grep -a "^  .*recently finished (" "$OUT")" = "$want" ] &&
+			[ "$(oracle_width "$(lines_matching "^  recently finished \(")")" -le '"$w"' ]'
+	done
+}
 # a finished NAME cut by columns with a gap after "…": x and han, cut at an
 # odd boundary (x日本語のとても長いジョ… at 60 is 24 of 25 columns), padded
 # from its cut width, so STATE stays in its column
@@ -7217,7 +7235,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty bell_state_odd centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_compact_fin_c wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty bell_state_odd centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
