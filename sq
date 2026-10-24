@@ -98,8 +98,9 @@
 # reports plain success and only its step carries the signal.  With no
 # accounting, or with a filter sq does not translate for sacct (-n -w -L -R
 # --sibling, so SQUEUE_NAMES, SQUEUE_LICENSES, SQUEUE_SIB and SQUEUE_SIBLING
-# too), the block falls back to squeue -t all and its caption says so.  A state filter (-t) filters
-# the queue only: the block shows every finished job either way.
+# too), the block falls back to squeue -t all and its caption says so.  A
+# state filter (-t) filters the queue only: the block shows every finished
+# job either way.
 # A new failure rings the bell once, and only while it is
 # younger than SQ_BELL_HORIZON, so a first run, a cleared cache and a week of
 # downtime all stay quiet.  The state kept is "<jobid><tab><end epoch>" lines
