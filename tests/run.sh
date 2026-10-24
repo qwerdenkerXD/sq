@@ -2073,7 +2073,7 @@ c_locale_missing() {
 # $(...), which bash answered with a setlocale warning): nothing on stderr names
 # setlocale but the line bash prints as it starts.
 c_locale_missing_screens() {
-	T_TITLE="LC_ALL naming no installed locale: the dashboard on every fixture and sq job's tail of failed1, failed127 and sigill-recent print no setlocale warning of sq's own"
+	T_TITLE="LC_ALL naming no installed locale: the dashboard on every fixture and sq job's tail of failed1, failed127 and sigill-recent, sq log with a failing tail print no setlocale warning of sq's own"
 	local bad=xx_YY.UTF-8 noop=$T_DIR/noop dir fx id
 	printf '#!/usr/bin/env bash\n:\n' > "$noop"; chmod +x "$noop"
 	env -i PATH="$here/bin:$PATH" LC_ALL=$bad "$noop" 2> "$T_DIR/startup"
@@ -2089,6 +2089,18 @@ c_locale_missing_screens() {
 		need "sq job $id: its tail read, no setlocale on stderr but bash's own line" eval '
 			why_lines | grep -q " ends with:$" && ! grep -vxFf "$T_DIR/startup" "$ERR" | grep -q setlocale'
 	done
+	# sq log reads the first line of a failing tail's stderr (log_tail_verdict):
+	# a tail that fails reading the file, --no-follow
+	local tbin=$T_DIR/tbin
+	mkdir -p "$tbin"
+	printf '#!/bin/sh\necho "tail: error reading %s: Input/output error" >&2\nexit 1\n' "'x'" > "$tbin/tail"; chmod +x "$tbin/tail"
+	sq_run "$(log_fx tailfail <<'EOF'
+StateCompact=R
+@file create wd/out_500.log a\n
+EOF
+)" LC_ALL=$bad PATH="$tbin:$here/bin:$PATH" -- log --no-follow 500
+	need "sq log, its tail failing: rc 1, tail's reason, no setlocale on stderr but bash's own line" eval '
+		rc_is 1 && [ "$(grep -vxFf "$T_DIR/startup" "$ERR")" = "sq log: tail: error reading '"'"'x'"'"': Input/output error" ]'
 }
 # A multibyte locale is not a UTF-8 one: under ja_JP.eucJP gawk counts "…" as
 # one character, as UTF-8 does, but "█" as two, and warns of invalid data on
@@ -5824,7 +5836,7 @@ c_why_not_utf8() {
 # verdict is the --json one; node\001 beside node? is "listed it twice" on both
 # paths.  Under C.UTF-8 and under a gawk forced to C.
 c_why_ctl_o() {
-	T_TITLE="sq job under -o: a partition with \\001 or \\302\\201 gets the --json verdict (the pinned screen, Loc?lQ); node\\001 beside node? 'listed it twice' as under --json; under C.UTF-8 and a gawk in C"
+	T_TITLE="sq job under -o: a partition with \\001 or \\302\\201 gets the --json verdict (the pinned screen, Loc?lQ); node\\001 beside node? 'listed it twice' as under --json; a state with ESC or \\001 reads ? as under --json; under C.UTF-8 and a gawk in C"
 	local d p how json src=$jfx/badconstraints-11955 f
 	no_utf8_locale "$T_DIR/nobin"
 	for p in 'Loc\x01lQ' 'Loc\xc2\x81lQ' 'pair'; do
@@ -5849,6 +5861,18 @@ c_why_ctl_o() {
 					rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && job_is "$json" && { [ $how = C ] || job_is "$d/want"; }'
 			fi
 		done
+	done
+	# the states node_read keeps: an ESC in a flag reads ?, as --json reads it
+	d=$T_DIR/fx-ctl-state; mkdir -p "$d"
+	for f in squeue-all squeue-queue sacct; do sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$jfx/resources-11964/$f" > "$d/$f"; done
+	sed -e 's/State=MIXED /State=MIXED+FAIL\\x1b[2J /' -e 's/State=IDLE /State=IDLE+FAIL\\x01 /' "$jfx/resources-11964/scontrol-node" > "$d/scontrol-node"
+	for how in utf8 C; do
+		if [ $how = utf8 ]; then why_run "$d" -- --no-color job 11964; else why_run "$d" LC_ALL=C PATH="$T_DIR/nobin:$here/bin:$PATH" -- --no-color job 11964; fi
+		json=$RUN/out
+		if [ $how = utf8 ]; then why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964; else why_run "$d" SQSTUB_NOJSON=1 LC_ALL=C PATH="$T_DIR/nobin:$here/bin:$PATH" -- --no-color job 11964; fi
+		need "states MIXED+FAIL+ESC[2J and IDLE+FAIL+\\001, $how, -o: rc 0, no ESC, fb2-bioinf mixed+fail?[2j in the table, the --json screen" eval '
+			rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && [ "$(escapes)" = 0 ] && why_lines | grep -qE "^    fb2-bioinf +- +- +mixed\+fail\?\[2j$" &&
+			job_is "$json"'
 	done
 }
 # The passes batch L's review found unpinned (F3): each case fails with its
