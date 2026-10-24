@@ -9,11 +9,17 @@
 # section (tests/fixtures/sqjob/screens) instead of comparing with them, for
 # a change that is meant to change them; git diff then shows what changed.
 #
+# A failed case's run directories stay without -k too, as a flake may not
+# come back for a rerun: under ${TMPDIR:-/tmp}/sq-failed/<UTC start>.<pid>/,
+# one directory per run, made at its first FAIL; the newest SQ_KEEP_FAILED
+# (5) runs' stay, older ones go as a run starts and as one makes its own.
+#
 # Needs bash, gawk, coreutils (8.31 or later: env --default-signal), util-linux
 # `script` and `setsid` for the terminal cases, and glibc's localedef with its
 # locale sources for one case;
-# util-linux `flock` (the stub's call counter) and procps `ps` (sq log's
-# leftover processes, found by session id) for the sq log cases.
+# util-linux `flock` (the stub's call counter, the failed cases' evidence) and
+# procps `ps` (sq log's leftover processes, found by session id) for the sq
+# log cases.
 # The stubs in tests/bin stand in for squeue/sinfo/sacct/sstat/scontrol
 # (tests/lib/stub.sh says how, tests/FAITHFULNESS.md how they were checked
 # against the real ones) and for getent; tests/bin/stty only logs and runs the
@@ -38,7 +44,7 @@ for a in "$@"; do
 	case $a in
 		-k|--keep) keep=1 ;;
 		--pin) pin=1 ;;
-		-h|--help) sed -n '2,22{s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# Results:/{/^# Results:/d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
 		-*) printf 'run.sh: unknown option %s\n' "$a" >&2; exit 2 ;;
 		*) only+=("$a") ;;
 	esac
@@ -53,7 +59,36 @@ done
 [ -n "$utf8" ] || { echo "run.sh: no UTF-8 locale available (tried C.UTF-8, en_US.UTF-8)" >&2; exit 2; }
 
 # TMPDIR is honoured; with -k the evidence stays there, under a recognisable
-# name, and a failed case's stays without -k too (sq-failed-NAME.*, see verdict)
+# name, and a failed case's stays without -k too (failrun_make, verdict)
+keep_failed=${SQ_KEEP_FAILED:-5}
+case $keep_failed in
+	*[!0-9]*|'') printf "run.sh: SQ_KEEP_FAILED is a number of runs, not '%s'\n" "$keep_failed" >&2; exit 2 ;;
+esac
+failroot=${TMPDIR:-/tmp}/sq-failed failrun= failstamp=$(date -u +%Y%m%dT%H%M%SZ)
+# prune_failed N: every run's evidence but the newest N goes, by the time it
+# was last written, unless a running suite holds its lock (flock -n); the
+# sq-failed-NAME.* directories of the suite before count as runs too
+prune_failed() {
+	local d n=0
+	{ find "$failroot" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*Z.[0-9]*' -printf '%T@ %p\n'
+	  find "${TMPDIR:-/tmp}" -mindepth 1 -maxdepth 1 -type d -name 'sq-failed-*.??????' -printf '%T@ %p\n'
+	} 2>/dev/null | sort -rn | while read -r _ d; do
+		n=$((n + 1)); [ "$n" -le "$1" ] || flock -n "$d/.lock" rm -rf "$d" 2>/dev/null
+	done
+}
+# failrun_make: this run's evidence directory, made at its first FAIL with
+# room for it among the newest SQ_KEEP_FAILED, and locked while the run
+# lasts; made under a dot name and renamed once locked, so no pruning run
+# takes it in between
+failrun_make() {
+	[ -z "$failrun" ] || return 0
+	local new=$failroot/.new.$$
+	prune_failed $((keep_failed - 1))
+	mkdir -p "$failroot" && rm -rf "$new" && mkdir "$new" &&
+		exec {faillock}> "$new/.lock" && flock -n "$faillock" &&
+		mv "$new" "$failroot/$failstamp.$$" && failrun=$failroot/$failstamp.$$
+}
+prune_failed "$keep_failed"
 work=$(mktemp -d "${TMPDIR:-/tmp}/sq-tests.XXXXXX") || exit 2
 [ $keep = 0 ] || echo "evidence kept in $work"
 # every session a background sq ran in (sq_start) is emptied on the way out too
@@ -425,10 +460,9 @@ verdict() {
 	printf '%-5s  %-24s %s\n' "$status" "$T_NAME" "${reason//$'\x1f'/; }"
 	# a failed case keeps its run directories even without -k, as a flake may
 	# not come back for a rerun: moved out of the work dir the suite removes
-	local kept
 	if { [ $status = FAIL ] || [ $status = XPASS ]; } && [ $keep = 0 ]; then
-		if kept=$(mktemp -d "${TMPDIR:-/tmp}/sq-failed-$T_NAME.XXXXXX") && mv "$T_DIR" "$kept/"; then
-			printf '       evidence kept in %s\n' "$kept/$T_NAME"
+		if [ "$keep_failed" = 0 ]; then printf '       evidence: not kept (SQ_KEEP_FAILED=0), rerun with -k\n'
+		elif failrun_make && mv "$T_DIR" "$failrun/"; then printf '       evidence kept in %s\n' "$failrun/$T_NAME"
 		else printf '       evidence: rerun with -k\n'
 		fi
 	fi
@@ -7106,4 +7140,5 @@ done
 ms=$(( ($(date +%s%N) - start) / 1000000 ))
 printf '\n%d passed, %d failed, %d xfail, %d xpass  (%d.%03ds)\n' \
 	$n_pass $n_fail $n_xfail $n_xpass $((ms / 1000)) $((ms % 1000))
+[ -z "$failrun" ] || printf 'evidence of the failed cases in %s\n' "$failrun"
 [ $n_fail -eq 0 ] && [ $n_xpass -eq 0 ]
