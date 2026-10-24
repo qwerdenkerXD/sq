@@ -4392,7 +4392,7 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     memt[nn] = sprintf("%.0fG", F[4]/1024)
     nreason[nn] = (F[6] == "none" || F[6] == "") ? "" : F[6]
     if (nreason[nn] != "" && F[7] ~ /^[0-9]{4}-/) nreason[nn] = nreason[nn] " · since " substr(F[7], 1, 10)
-    if ((cw = WIDE ? colw(F[2]) : length(F[2])) > wn) wn = cw
+    if ((cw = WIDE ? (NODECW[nn] = colw(F[2])) : length(F[2])) > wn) wn = cw   # NODECW: kept for its line
     if ((cw = WIDE ? colw(F[5]) : length(F[5])) > ws) ws = cw
     if (length(used[nn]) > wu) wu = length(used[nn])
     if (length(tot[nn])  > wt) wt = length(tot[nn])
@@ -4815,7 +4815,7 @@ END{
       sm = cells(memalloc[r], meminuse[r], memreal[r], barm,
                  down ? "31" : (mp>95 ? "1;31" : (mp>85 ? "33" : "32")))
     out[++o] = sprintf("%s%s%-*s%s %s%s%3d%%  %s%*d%s/%-*d cpu   %s%s%3s%%  %s%*s%s/%-*s mem  %*s%s%s%s",
-                       lm, e("1"), WIDE ? 0 : wn, WIDE ? colpad(node[r], -wn) : node[r], e("0"), sc, (bar?" ":""), p,
+                       lm, e("1"), WIDE ? 0 : wn, WIDE ? colpad(node[r], -wn, NODECW[r]) : node[r], e("0"), sc, (bar?" ":""), p,
                        e("1"), wu, used[r], e("0"), wt, tot[r],
                        sm, (bar?" ":""), (mp<0 ? "-" : sprintf("%d", mp)),
                        e(mp>95 && mp>=0 && !MEMALLOC ? "1;31" : "1"), wf, memu[r], e("0"), wm, memt[r],
