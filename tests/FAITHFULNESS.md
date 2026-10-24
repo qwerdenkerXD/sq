@@ -21,9 +21,11 @@ the header checks, writes any.
 |---|---|---|
 | nodes | `SLURM_TIME_FORMAT=standard sinfo -hN -O 'CPUsState:0<N3>,NodeList:0<N3>,FreeMem:0<N3>,Memory:0<N3>,StateLong:0<N3>,Reason:0<N3>,TimeStamp:0<N3>,CPUsLoad:0<N3>,AllocMem:0<N3>'` | MATCH (2026-10-07): 2 records, 558 bytes |
 | nodes, no size | the same with `Field:<N3>` instead of `Field:0<N3>` | MATCH (2026-10-07): 2 records, 558 bytes |
-| queue | `SLURM_TIME_FORMAT=standard SQUEUE_FORMAT='%i<N>%j<N>…%t<N>%l<N>%S<N>' squeue -h -S t,i` | MATCH, but EMPTY: 0 bytes vs 0 bytes |
+| queue | `SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT='%i<N>%i<N>%j<N>…%R<N>%t<N>%l<N>%S<N>%A<N>%U<N>' squeue -h -S t,i` (sq's hidden leading `%i` and trailing `%A %U` since 2026-10-24) | not yet run in this form; the older form without `%i` first, `%A %U` and `SLURM_BITSTR_LEN`: MATCH, but EMPTY: 0 bytes vs 0 bytes |
 | finished | `SLURM_TIME_FORMAT=standard sacct -p --delimiter=<N2> -n -S now-7days -E now -a -o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName` | MATCH: 1198 records, 325915 bytes |
 | fallback | `SLURM_TIME_FORMAT=standard SQUEUE_FORMAT2='JobID:<N>,StateCompact:<N>,…,Name:<N>' squeue -t all -h` | MATCH, but EMPTY: 0 bytes vs 0 bytes |
+| sq log | `SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2='JobID:<N>,ArrayJobID:<N>,…,exit_code:<N>' squeue -h --jobs=ID -t all`, sq's 17 `log_fields` read out of `sq`, ID the first job the fallback printed (SKIP without one) | not yet run |
+| uid names | `getent passwd UID...`: the caller's uid, each canceller's in the finished window, and 2147483646 (no one's); the stub's answer from the real lines, rc compared too (2 for the missing uid) | not yet run |
 | array ids | the finished command restricted to the 10 bracketed array ids in the window, with `SLURM_BITSTR_LEN` unset, 0, 1, 2, 3, 4, 5, 6, 8, 64; the fixture is taken once with `SLURM_BITSTR_LEN=0` (the whole truth) | MATCH at every length |
 
 What a match shows: field order, the separator after every field including the

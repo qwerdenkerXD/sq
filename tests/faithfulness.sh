@@ -12,8 +12,8 @@
 # compares as zero bytes against zero bytes, and is reported as such).
 #
 # Nothing is written on the target: the commands are squeue, sinfo and sacct
-# with output formats, and scontrol show node, and their output comes back
-# over the ssh pipe.
+# with output formats, scontrol show node, getent passwd and id -u, and their
+# output comes back over the ssh pipe.
 
 set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -43,7 +43,10 @@ real() {    # real <words...>: VAR=value ... tool args, on the target
 
 # fixture_of MODE NAMES N < real output: one fixture record per real record.
 # MODE pct|long|sacct says how a field is named; NAMES are the fields in order;
-# every field is followed by N, and a record by a newline.
+# every field is followed by N, and a record by a newline.  A name the format
+# asks for twice (sq's hidden leading %i) is set once, from its first field,
+# as the stub prints one value wherever the format names it: a second field
+# that differs then differs in the comparison.
 fixture_of() {
 	LC_ALL=C gawk -v names="$2" -v N="$3" '
 	function enc(s,   o, i, c, n) {
@@ -70,7 +73,8 @@ fixture_of() {
 			if (substr(v, 1, 1) != "\n") { bad = "record " int(NR/nf)+1 " does not start on a new line"; exit }
 			v = substr(v, 2)
 		}
-		line = line (j > 1 ? "; " : "") nm[j] "=" enc(v)
+		if (j == 1) delete seen
+		if (!(nm[j] in seen)) { seen[nm[j]]; line = line (line != "" ? "; " : "") nm[j] "=" enc(v) }
 		if (j == nf) { print line; line = "" }
 	}
 	END {
@@ -132,8 +136,10 @@ compare() {   # compare LABEL MODE NAMES SEP FILE words...
 	verdict "$label" "$d" "$(wc -l < "$d/fx/$file")"
 }
 
-# ---- the four call shapes of sq (sq ~388, ~391, ~457, ~474) ------------------
-# separators shaped as sq mints them, SLURM_TIME_FORMAT pinned as sq pins it
+# ---- the dashboard's call shapes (sq's "collect nodes", "collect jobs",
+# "collect recent" sacct and squeue) ---------------------------------------------
+# separators shaped as sq mints them, SLURM_TIME_FORMAT and SLURM_BITSTR_LEN
+# pinned as sq pins them where this compares them
 nfields="CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp CPUsLoad AllocMem"
 nfmt=; nfmt_nosize=                   # sq's form, size 0; and the same without the 0,
 for f in $nfields; do                 # which the stub takes as the same form
@@ -143,9 +149,12 @@ compare sinfo long "${nfields// /,}" "$N3" sinfo \
 	SLURM_TIME_FORMAT=standard sinfo -hN -O "$nfmt"
 compare sinfo-nosize long "${nfields// /,}" "$N3" sinfo \
 	SLURM_TIME_FORMAT=standard sinfo -hN -O "$nfmt_nosize"
-compare squeue pct i,j,u,T,M,L,C,m,R,t,l,S "$N" squeue \
-	SLURM_TIME_FORMAT=standard \
-	SQUEUE_FORMAT="%i$N%j$N%u$N%T$N%M$N%L$N%C$N%m$N%R$N%t$N%l$N%S$N" squeue -h -S t,i
+# the queue as sq asks for its default columns i,j,u,T,M,L,C,m,R: the job id
+# first and hidden, the columns, then hidden %t %l %S and, with MEM shown and
+# no cluster selection (JOBMEM), %A %U last
+compare squeue pct i,i,j,u,T,M,L,C,m,R,t,l,S,A,U "$N" squeue \
+	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 \
+	SQUEUE_FORMAT="%i$N%i$N%j$N%u$N%T$N%M$N%L$N%C$N%m$N%R$N%t$N%l$N%S$N%A$N%U$N" squeue -h -S t,i
 sfields=JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName
 compare sacct sacct "$sfields" "$N2" sacct \
 	SLURM_TIME_FORMAT=standard sacct -p --delimiter="$N2" -n -S "$since" -E now -a -o "$sfields"
@@ -153,6 +162,44 @@ compare squeue-all long JobID,StateCompact,State,exit_code,TimeUsed,EndTime,Arra
 	SLURM_TIME_FORMAT=standard \
 	SQUEUE_FORMAT2="JobID:$N,StateCompact:$N,State:$N,exit_code:$N,TimeUsed:$N,EndTime:$N,ArrayJobID:$N,ArrayTaskID:$N,UserName:$N,Name:$N" \
 	squeue -t all -h
+
+# ---- sq log's one squeue call: 17 fields of one job (sq's log_ask) -------------
+# The fields as sq lists them (log_fields, read out of sq), each framed by the
+# nonce, the times as epochs; the job is the first that squeue -t all printed
+# above, so it is one squeue still knows
+eval "$(sed -n '/^log_fields="/,/"$/p' "$here/../sq")"
+lfmt= lnames=
+for f in $log_fields; do lfmt="$lfmt${lfmt:+,}$f:$N" lnames="$lnames${lnames:+,}$f"; done
+lid=$(LC_ALL=C sed -n 's/^JobID=\([0-9][0-9]*\(_[0-9][0-9]*\)\{0,1\}\);.*/\1/p' "$work/squeue-all/fx/squeue-all" 2>/dev/null | head -n 1)
+if [ -z "$lid" ]; then
+	echo "SKIP   squeue-log       squeue -t all printed no job: sq log's call not compared"
+else
+	compare squeue-log long "$lnames" "$N" squeue-all \
+		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2="$lfmt" squeue -h --jobs="$lid" -t all
+	printf '       (job compared: %s)\n' "$lid"
+fi
+
+# ---- the login names of uids: one getent passwd call (sq's uid_names) ---------
+# The caller's uid, every canceller's of the finished window (sacct's
+# "CANCELLED by UID"), and one no system has: getent prints the known ones in
+# the order asked and exits 2 for the missing one, and the stub must do the
+# same from the known ones' lines as its passwd file, rc included
+uids=$(echo $(real id -u 2>/dev/null) $(LC_ALL=C grep -ao 'CANCELLED by [0-9]*' "$work/sacct/real.out" 2>/dev/null | LC_ALL=C sed 's/.* //' | sort -un | head -10 | paste -sd' ') 2147483646)
+d=$work/getent; mkdir -p "$d/fx"
+real getent passwd $uids > "$d/real.out" 2> "$d/real.err"; echo $? > "$d/real.rc"
+if real_err getent "$d/real.err"; then
+	cp "$d/real.out" "$d/fx/passwd"
+	run_stub "$d" "$d/fx" getent passwd $uids
+	if [ "$(cat "$d/real.rc")" != "$(cat "$d/stub.rc")" ]; then
+		printf 'DIFFER %-16s rc %s, the stub %s: %s\n' getent "$(cat "$d/real.rc")" "$(cat "$d/stub.rc")" "$(head -1 "$d/stub.err")"
+		fails=$((fails+1))
+	elif cmp -s "$d/real.out" "$d/stub.out"; then
+		printf 'MATCH  %-16s uids %s: %d lines, rc %s, bytes identical\n' getent "$uids" "$(wc -l < "$d/real.out")" "$(cat "$d/real.rc")"
+	else
+		printf 'DIFFER %-16s uids %s; first difference: %s\n' getent "$uids" "$(cmp "$d/real.out" "$d/stub.out" 2>&1 | head -1)"
+		fails=$((fails+1))
+	fi
+fi
 
 # ---- sacct's array-id truncation (SLURM_BITSTR_LEN) ---------------------------
 # The fixture is the WHOLE truth, taken with SLURM_BITSTR_LEN=0; the stub must
