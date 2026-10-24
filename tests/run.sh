@@ -3997,24 +3997,40 @@ node_edge() {
 			if (n != 0 && n != 2) bad = 1; if (n) drawn = 1 }
 		END { print nw + 0, hw + 0, bad ? "small" : "ok", drawn + 0 }'
 }
+# one series of the sweep, in a subshell of its own, as the 12 series run at
+# once: its T_DIR and run counter its own, what it found and its T_FAIL and
+# T_CALLS into FILE for the case to take back
+sweep_series() {   # sweep_series FIXTURE MODE FILE
+	local fx=$1 mode=$2 res=$3 w nmin nw hw bars any over= short= small= drawn=0 bare=0 ok21=0
+	T_DIR=$T_DIR/s-$fx$mode run_n=0 T_FAIL=() T_CALLS=0; mkdir -p "$T_DIR"
+	sq_run "$fx" SQ_WIDTH=21 -- "$mode"
+	nmin=$(node_width)
+	rc_is 0 && [ "$nmin" -gt 0 ] && ok21=1
+	for w in $(seq 21 140); do
+		sq_run "$fx" SQ_WIDTH="$w" -- "$mode"
+		read -r nw hw bars any <<< "$(node_edge)"
+		[ "$nw" -le $(( w > nmin ? w : nmin )) ] || over="$over $w"
+		[ "$bars" = ok ] || small="$small $w"
+		if [ "$any" = 1 ]; then drawn=$((drawn + 1)); else bare=$((bare + 1)); fi
+		[ "$nw" -le "$w" ] || continue          # past the screen: the bar-less line, checked above
+		[ "$nw" = $(( hw <= w ? hw : w )) ] || short="$short $w($nw/$hw)"
+	done
+	local s_fail=("${T_FAIL[@]}") s_calls=$T_CALLS
+	declare -p ok21 over short small drawn bare s_fail s_calls > "$res"
+}
 c_bars_width_sweep() {
 	T_TITLE="FULL and COMPACT at every width 21..140: no node line wider than the screen (or than with its bars collapsed), no bar of 1-3 cells, and the node lines end on the queue header's edge (the screen's where the table is wider), bars or none"
-	local fx mode w nmin over short small drawn bare nw hw bars any
-	for fx in array-running busy24 bars-busy mix30 membar-busy bars-over; do
+	local fx mode pids=() ok21 over short small drawn bare s_fail s_calls
+	local fixtures_swept="array-running busy24 bars-busy mix30 membar-busy bars-over"
+	for fx in $fixtures_swept; do
+		for mode in --full --compact; do sweep_series "$fx" "$mode" "$T_DIR/res$fx$mode" & pids+=($!); done
+	done
+	wait "${pids[@]}"
+	for fx in $fixtures_swept; do
 		for mode in --full --compact; do
-			sq_run "$fx" SQ_WIDTH=21 -- "$mode"
-			nmin=$(node_width)
-			need "$fx $mode at 21: rc 0, node lines drawn" eval 'rc_is 0 && [ "$nmin" -gt 0 ]'
-			over= short= small= drawn=0 bare=0
-			for w in $(seq 21 140); do
-				sq_run "$fx" SQ_WIDTH="$w" -- "$mode"
-				read -r nw hw bars any <<< "$(node_edge)"
-				[ "$nw" -le $(( w > nmin ? w : nmin )) ] || over="$over $w"
-				[ "$bars" = ok ] || small="$small $w"
-				if [ "$any" = 1 ]; then drawn=$((drawn + 1)); else bare=$((bare + 1)); fi
-				[ "$nw" -le "$w" ] || continue          # past the screen: the bar-less line, checked above
-				[ "$nw" = $(( hw <= w ? hw : w )) ] || short="$short $w($nw/$hw)"
-			done
+			if ! [ -s "$T_DIR/res$fx$mode" ] || ! . "$T_DIR/res$fx$mode"; then T_FAIL+=("$fx $mode: the series left no result"); continue; fi
+			T_FAIL+=("${s_fail[@]}"); T_CALLS=$((T_CALLS + s_calls))
+			need "$fx $mode at 21: rc 0, node lines drawn" test "$ok21" = 1
 			need "$fx $mode: no node line past the screen (past it at W =${over:- none})" test -z "$over"
 			need "$fx $mode: every bar 0 or at least 2 cells (not at W =${small:- none})" test -z "$small"
 			need "$fx $mode: bars drawn at some width, none at some other" eval '[ "$drawn" -gt 0 ] && [ "$bare" -gt 0 ]'
