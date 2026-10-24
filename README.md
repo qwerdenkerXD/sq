@@ -357,7 +357,8 @@ efficiency
 ## Tests
 
 ```sh
-tests/run.sh              # ~2 min, no cluster needed
+tests/run.sh              # ~25 min, no cluster needed
+tests/run.sh -j 6         # ~8 min: 6 cases at once, the timed ones one by one after
 ```
 
 The suite puts stand-ins for `squeue`, `sinfo`, `sacct`, `sstat`, `scontrol` and `getent` first
