@@ -3,7 +3,11 @@
 # of its output (counts, rows, captions, escapes, widths, exit codes), never a
 # snapshot of it.
 #
-#   tests/run.sh [-k|--keep] [--pin] [NAME...]   NAME: run only the case of that name
+#   tests/run.sh [-k|--keep] [--pin] [-j N] [NAME...]   NAME: run only the case of that name
+#
+# -j N runs N cases at once (default 1, one after the other), each case whole
+# and its lines printed in the order of the cases as always; the cases that
+# measure time or load (timed_cases) run one after the other after the rest.
 #
 # --pin writes what sq prints into the pinned screens of sq job and its why
 # section (tests/fixtures/sqjob/screens) instead of comparing with them, for
@@ -39,16 +43,23 @@ set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 sq=${SQ_UNDER_TEST:-${here%/*}/sq}    # SQ_UNDER_TEST: another build of sq, e.g. an installed one
 fixtures=$here/fixtures
-keep=0; pin=0; only=()
-for a in "$@"; do
-	case $a in
+keep=0; pin=0; jobs=1; only=()
+while [ $# -gt 0 ]; do
+	case $1 in
 		-k|--keep) keep=1 ;;
 		--pin) pin=1 ;;
+		-j) jobs=${2-}; [ $# -lt 2 ] || shift ;;
+		-j*) jobs=${1#-j} ;;
 		-h|--help) sed -n '2,/^# Results:/{/^# Results:/d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
-		-*) printf 'run.sh: unknown option %s\n' "$a" >&2; exit 2 ;;
-		*) only+=("$a") ;;
+		-*) printf 'run.sh: unknown option %s\n' "$1" >&2; exit 2 ;;
+		*) only+=("$1") ;;
 	esac
+	shift
 done
+case $jobs in
+	''|*[!0-9]*) printf "run.sh: -j takes how many cases run at once, not '%s'\n" "$jobs" >&2; exit 2 ;;
+esac
+jobs=$((10#$jobs)); [ "$jobs" -ge 1 ] || { echo "run.sh: -j takes 1 or more" >&2; exit 2; }
 
 # sq measures widths with gawk's length(), which counts characters only in a
 # UTF-8 locale; pick one that exists, rather than inherit whatever the caller has
@@ -91,10 +102,14 @@ failrun_make() {
 prune_failed "$keep_failed"
 work=$(mktemp -d "${TMPDIR:-/tmp}/sq-tests.XXXXXX") || exit 2
 [ $keep = 0 ] || echo "evidence kept in $work"
-# every session a background sq ran in (sq_start) is emptied on the way out too
-all_sids=
+# every session a background sq ran in (sq_start) is emptied on the way out
+# too, those of the cases -j runs at once as well (each its own process
+# group, in case_pgids, their sessions listed in $work/sids)
+all_sids= case_pgids=
 suite_exit() {
-	local sid; for sid in $all_sids; do session_kill "$sid"; done
+	local sid pgid
+	for pgid in $case_pgids; do kill -KILL -- "-$pgid" 2>/dev/null; done
+	for sid in $all_sids $(cat "$work/sids" 2>/dev/null); do session_kill "$sid"; done
 	[ $keep = 1 ] || rm -rf "$work"
 }
 trap suite_exit EXIT
@@ -183,6 +198,7 @@ sq_start() {
 	echo $! > "$RUN/job"
 	waits_for 5 eval '[ -s "$RUN/pid" ]' || T_FAIL+=("sq did not start")
 	SQ_PID=$(cat "$RUN/pid"); T_SIDS="$T_SIDS $SQ_PID" all_sids="$all_sids $SQ_PID"
+	echo "$SQ_PID" >> "$work/sids"
 }
 at_exit() { leftovers "$(cat "$RUN/pid")" > "$RUN/left-at-exit"; echo "$1" > "$RUN/rc"; }
 nothing_at_exit() { [ ! -s "$RUN/left-at-exit" ]; }   # sq waited for all it started
@@ -297,7 +313,7 @@ cplain() {
 	ORACLE_MAP=$work/oracle.map LC_ALL=$utf8 gawk "$oracle_awk"' { gsub(/\033\[[0-9;]*m/, ""); gsub(/\r/, ""); print cellify($0) }' "$OUT"
 }
 oracle_width() {
-	printf '%s\n' "$1" > "$work/oracle.text"; oracle_fill "$work/oracle.text"
+	printf '%s\n' "$1" > "$T_DIR/oracle.text"; oracle_fill "$T_DIR/oracle.text"
 	ORACLE_MAP=$work/oracle.map T=$1 LC_ALL=$utf8 gawk "$oracle_awk"' BEGIN { print length(cellify(ENVIRON["T"])) }'
 }
 has()   { plain | grep -qF -- "$1"; }
@@ -438,6 +454,7 @@ today() { "${@:2}" || T_TODAY+=("$1"); }
 xfail() { T_XFAIL=$1; }
 
 n_pass=0 n_fail=0 n_xfail=0 n_xpass=0
+# verdict: the case's status into T_STATUS, and its line
 verdict() {
 	local status reason
 	[ "$T_CALLS" -gt 0 ] || T_FAIL+=("no stub was called: tests/bin is not answering for Slurm")
@@ -454,14 +471,18 @@ verdict() {
 	else
 		status=XFAIL; reason=$T_XFAIL
 	fi
-	case $status in
+	T_STATUS=$status
+	printf '%-5s  %-24s %s\n' "$status" "$T_NAME" "${reason//$'\x1f'/; }"
+}
+# tally: case T_NAME's T_STATUS counted; a failed case keeps its run
+# directories (T_DIR) even without -k, as a flake may not come back for a
+# rerun: moved out of the work dir the suite removes
+tally() {
+	case $T_STATUS in
 		PASS) n_pass=$((n_pass+1)) ;; FAIL) n_fail=$((n_fail+1)) ;;
 		XFAIL) n_xfail=$((n_xfail+1)) ;; XPASS) n_xpass=$((n_xpass+1)) ;;
 	esac
-	printf '%-5s  %-24s %s\n' "$status" "$T_NAME" "${reason//$'\x1f'/; }"
-	# a failed case keeps its run directories even without -k, as a flake may
-	# not come back for a rerun: moved out of the work dir the suite removes
-	if { [ $status = FAIL ] || [ $status = XPASS ]; } && [ $keep = 0 ]; then
+	if { [ $T_STATUS = FAIL ] || [ $T_STATUS = XPASS ]; } && [ $keep = 0 ]; then
 		if [ "$keep_failed" = 0 ]; then printf '       evidence: not kept (SQ_KEEP_FAILED=0), rerun with -k\n'
 		elif failrun_make && mv "$T_DIR" "$failrun/"; then printf '       evidence kept in %s\n' "$failrun/$T_NAME"
 		else printf '       evidence: rerun with -k\n'
@@ -2021,7 +2042,7 @@ c_locale_big5() {
 # that cats it; rows written, history included.  The wide screen takes the
 # twin's rows where the twin fits COLUMNS, at most them where it does not
 tmux_rows() {   # tmux_rows FILE COLUMNS LINES
-	local sock=sq-test-$$-$RANDOM i out
+	local sock=sq-test-$BASHPID-$RANDOM i out
 	env LC_ALL=$utf8 tmux -L "$sock" -f /dev/null -u new-session -d -x "$2" -y "$3" "cat '$1'; exec sleep 20" 2>/dev/null || { echo none; return; }
 	for i in $(seq 100); do
 		[ "$(tmux -L "$sock" display -p '#{pane_current_command}' 2>/dev/null)" = sleep ] && break
@@ -7271,21 +7292,84 @@ cases=(
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 )
-start=$(date +%s%N)
+# The cases that measure time or load: a bound on how long sq or a call
+# takes, CPU seconds, a poll that must see sq do something within seconds,
+# signals sent while calls are in flight, a snapshot's age by the clock, or
+# SQ_TIMEOUT=1 on calls that must answer.  -j runs them one after the other
+# once the others are done, so no other case loads the host meanwhile.
+timed_cases=" squeue_hangs squeue_ignores_term scrub_bounded tables_pass_cost cancel_names
+	membar_json membar_fallback jobmem_outcomes jobmem_throttle job_own
+	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract
+	why_nodes_json why_tail_hung why_budget why_parallel why_signals "
+timed_cases=" $(printf '%s ' $timed_cases)"       # one space around each name
+for c in $timed_cases; do
+	[[ " ${cases[*]} " == *" $c "* ]] || { echo "run.sh: timed_cases names $c, which is no case" >&2; exit 2; }
+done
+selected=()
 for c in "${cases[@]}"; do
 	if [ ${#only[@]} -gt 0 ]; then
 		hit=0; for o in "${only[@]}"; do [ "$c" = "$o" ] && hit=1; done
 		[ $hit = 1 ] || continue
 	fi
-	T_NAME=$c T_TITLE= T_XFAIL= T_CALLS=0 T_FAIL=() T_WANT=() T_TODAY=() run_n=0 T_SIDS=
-	T_DIR=$work/$c; mkdir -p "$T_DIR"
-	"c_$c"
+	selected+=("$c")
+done
+# run_case NAME: the case, its line printed, its status in T_STATUS
+run_case() {
+	local sid
+	T_NAME=$1 T_TITLE= T_XFAIL= T_CALLS=0 T_FAIL=() T_WANT=() T_TODAY=() run_n=0 T_SIDS=
+	T_DIR=$work/$1; mkdir -p "$T_DIR"
+	"c_$1"
 	# whatever a background sq of this case left running is a FAIL, and goes
 	for sid in $T_SIDS; do
 		[ -z "$(leftovers "$sid")" ] || { T_FAIL+=("left running: $(leftovers "$sid" | paste -sd';')"); session_kill "$sid"; }
 	done
 	verdict
-done
+}
+# -j: each case's line, stderr and status go to $results/NAME.{out,err,status}
+# (status last, so it says the case is done), and show_done prints the cases
+# in their order as far as they are done
+results=$work/.results shown=0
+run_case_into() {   # run_case_into NAME: run_case, its output into $results
+	run_case "$1" > "$results/$1.out" 2> "$results/$1.err"
+	printf '%s\n' "$T_STATUS" > "$results/$1.status"
+}
+show_done() {
+	local c
+	while [ "$shown" -lt ${#selected[@]} ]; do
+		c=${selected[$shown]}
+		[ -e "$results/$c.status" ] || break
+		cat "$results/$c.out"; cat "$results/$c.err" >&2
+		T_NAME=$c T_DIR=$work/$c T_STATUS=$(cat "$results/$c.status"); tally
+		shown=$((shown + 1))
+	done
+}
+start=$(date +%s%N)
+if [ "$jobs" = 1 ]; then
+	for c in "${selected[@]}"; do run_case "$c"; tally; done
+else
+	mkdir -p "$results"; running=0
+	for c in "${selected[@]}"; do
+		[[ $timed_cases == *" $c "* ]] && continue
+		while [ "$running" -ge "$jobs" ]; do wait -n; running=$((running - 1)); show_done; done
+		# a process group of its own (set -m only while it forks, and off in
+		# it again): suite_exit kills the case whole, and SIGINT is not
+		# ignored in it as it would be in a background job without job control
+		set -m; ( set +m; run_case_into "$c" ) & set +m
+		case_pgids="$case_pgids $!" running=$((running + 1))
+	done
+	while [ "$running" -gt 0 ]; do wait -n; running=$((running - 1)); show_done; done
+	case_pgids=
+	for c in "${selected[@]}"; do   # a case whose shell died left no status: a FAIL
+		[[ $timed_cases == *" $c "* ]] || [ -e "$results/$c.status" ] && continue
+		printf '%-5s  %-24s %s\n' FAIL "$c" "its shell ended without a verdict" >> "$results/$c.out"
+		echo FAIL > "$results/$c.status"
+	done
+	show_done
+	for c in "${selected[@]}"; do
+		[[ $timed_cases == *" $c "* ]] || continue
+		run_case_into "$c"; show_done
+	done
+fi
 ms=$(( ($(date +%s%N) - start) / 1000000 ))
 printf '\n%d passed, %d failed, %d xfail, %d xpass  (%d.%03ds)\n' \
 	$n_pass $n_fail $n_xfail $n_xpass $((ms / 1000)) $((ms % 1000))
