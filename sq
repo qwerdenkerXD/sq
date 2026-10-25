@@ -4655,7 +4655,7 @@ function digest(   r, s, nc, nord, ns, u, t, x, i, ma, mt) {
 # from scontrol, read by node_json_read, or by node_read where Slurm has no
 # --json): none for a node scontrol does not list (or was not asked about,
 # its name not one it can be asked by), lists twice, gives no usable figure
-# for (garbled, none, or not below RealMemory), and none for any node when no
+# for (garbled, none, or one not below RealMemory), and none for any node when no
 # answer was used.  The MEMNOTE line under the nodes says so: why no answer
 # was used, else which nodes count RealMemory and why (one line, the first
 # such node named).
@@ -4672,7 +4672,7 @@ function membar(   r, anyalloc, anycpu, i, spec, kind, nk, first, KINDS, nkinds,
     i = (node[r] in NODE_AT) ? NODE_AT[node[r]] : 0
     if (!i || (node[r] in NODE_NF) || (nodespecfmt == "text" && !node_listable(noderaw[r]))) kind = "nolist"
     else if (i in NODE_BAD) kind = (NODE_BAD[i] == "twice") ? "twice" : "bad"
-    else if (NODE_SPECMEM[i] < 0 || NODE_SPECMEM[i] >= memreal[r]) kind = "bad"
+    else if (NODE_SPECMEM[i] < 0 || (NODE_SPECMEM[i] > 0 && NODE_SPECMEM[i] >= memreal[r])) kind = "bad"   # 0: none kept
     else kind = ""
     spec = (kind == "") ? NODE_SPECMEM[i] : 0
     if (kind != "") { if (!nk++) first = node[r]; if (!(kind in KINDS)) { KINDS[kind]; nkinds++ }; last = kind }

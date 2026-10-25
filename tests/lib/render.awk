@@ -194,6 +194,9 @@ function derive_node(full,   rec, k, cpus, out) {
   parse_fields(cur_text, rec)
   for (k in DEF) if (!(k in rec)) rec[k] = DEF[k]
   if (!("nodelist" in rec) || rec["nodelist"] in DERIVED) return ""
+  # the -o line of a node from its first record with a whole CPUsState, as
+  # Slurm prints a CPU run for every node (the --json one as it always was)
+  if (full && rec["cpusstate"] !~ /^[0-9]+\/[0-9]+\/[0-9]+\/[0-9]+$/) return ""
   DERIVED[rec["nodelist"]] = 1
   DERIVED_NAME = rec["nodelist"]
   out = "NodeName=" rec["nodelist"]

@@ -28,7 +28,9 @@
 #                   fixture without scontrol-node answers scontrol -o show node
 #                   from its sinfo file, as the mirror call is answered: its
 #                   records alone, each node once (sinfo -N prints one record per
-#                   partition), as a line of the figures sinfo has, in
+#                   partition; on -o its first record with a whole A/I/O/T
+#                   CPUsState, as Slurm prints a CPU run for every node), as a
+#                   line of the figures sinfo has, in
 #                   scontrol's order: NodeName, CPUAlloc, CPUTot, CPULoad, then
 #                   the memory run whole as every Slurm prints it (RealMemory,
 #                   AllocMem, 0 where sinfo has none, FreeMem, N/A where it has

@@ -6785,13 +6785,13 @@ c_why_forged() {   # V14
 		d=$(node_fx extra "$big Extra=RealMemory=1 CPUEfctv=1 MemSpecLimit=0" "$small")
 		why_run "$d" $nojson -- --no-color job 11955
 		need "${nojson:+no --json: }an Extra= at the end, as scontrol prints it, naming figures: ignored, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
-		# a key twice before the cut: the first counts.  23.11.4 prints the CPU
-		# figures before OS=, whose value (the node's uname) has spaces and may
-		# name anything; a later CPUEfctv or CPUAlloc there is text, not a figure
+		# 23.11.4 prints the CPU figures before OS=, whose value (the node's
+		# uname) has spaces and may name anything: a CPUEfctv or CPUAlloc
+		# there is text, not a figure (no CPU run of its own)
 		first=' SMP CPUEfctv\x3d999 CPUAlloc\x3d0 PREEMPT_DYNAMIC'     # "=" as \x3d: text, no key (stub.sh)
 		d=$(node_fx first "${big/ SMP PREEMPT_DYNAMIC/$first}" "$small")
 		why_run "$d" $nojson -- --no-color job 11955
-		need "${nojson:+no --json: }CPUEfctv= and CPUAlloc= again in the OS= text: the first ones count, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
+		need "${nojson:+no --json: }CPUEfctv= and CPUAlloc= again in the OS= text: the CPU run counts, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
 		d=$(node_fx cputot "${big/ CPUEfctv=128/}" "${small/ CPUEfctv=24/}")
 		why_run "$d" $nojson -- --no-color job 11955
 		need "${nojson:+no --json: }no CPUEfctv: CPUTot, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
@@ -8520,6 +8520,10 @@ CPUsState=0/8/0/8; NodeList=extra2; FreeMem=7000; Memory=8000; StateLong=idle; R
 		sq_run "$d" $how -- --full
 		need "a node not listed and the answer failing${how:+, -o}: the whole-answer note" eval '
 			rc_is 0 && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (slurm_load_node error: down)" ] && membar_real'
+	done
+	for how in "" SQSTUB_NOJSON=1; do
+		sq_run bars-edges $how -- --full
+		need "nodes of RealMemory 0 and no MemSpecLimit (none kept, nothing unusable)${how:+, -o}: no caption" eval 'rc_is 0 && err_empty && [ -z "$(membar_note)" ]'
 	done
 }
 
