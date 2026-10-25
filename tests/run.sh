@@ -4611,8 +4611,8 @@ c_membar_fail() {
 	need "... COMPACT at 12 lines: the nodes with the line, within 12 lines, the footer last" eval '
 		rc_is 0 && [ -n "$(membar_note)" ] && [ "$(plain | wc -l)" -le 12 ] && plain | tail -n 1 | grep -qE "^ +5 jobs "'
 	sq_run "$d" SQ_HEIGHT=4 -- --compact
-	need "... the summary line: allocated of RealMemory, no line for it" eval '
-		rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/1085G mem" ] && [ -z "$(membar_note)" ]'
+	need "... the summary line: allocated of RealMemory, its total marked ! (DISPLAY-v4 E1), no line for it" eval '
+		rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/!1085G mem" ] && [ -z "$(membar_note)" ]'
 	d=$(mem_fixture membar-busy scontrol-node "@hang 10")
 	sq_run "$d" -- --full
 	need "silent: the same, after SQ_TIMEOUT, and no -o call after it" eval '
