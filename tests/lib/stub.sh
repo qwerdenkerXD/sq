@@ -29,24 +29,60 @@
 #                   from its sinfo file, as the mirror call is answered: its
 #                   records alone, each node once (sinfo -N prints one record per
 #                   partition), as a line of the figures sinfo has, in
-#                   scontrol's order: NodeName, CPUAlloc, CPUTot, CPULoad,
-#                   RealMemory, AllocMem, FreeMem.  No MemSpecLimit, so a node
-#                   reads as one without (scontrol prints it only when set).
+#                   scontrol's order: NodeName, CPUAlloc, CPUTot, CPULoad, then
+#                   the memory run whole as every Slurm prints it (RealMemory,
+#                   AllocMem, 0 where sinfo has none, FreeMem, N/A where it has
+#                   none, Sockets=1 Boards=1), then State=IDLE.  No
+#                   MemSpecLimit, so a node reads as one without (scontrol
+#                   prints it only when set).
+#                   A record of scontrol-node (a line starting NodeName=) is
+#                   read as Slurm printed it: before the first raw " Reason=",
+#                   " Comment=" or " Extra=" (free text, which may hold
+#                   anything), each raw "(^| )Key=" is a key Slurm printed, its
+#                   value up to the next space, escapes then decoded; the rest
+#                   is free text.  So text that looks like a key inside a value
+#                   (an OS naming RealMemory=, a forged line after \n) is
+#                   written with "=" as \x3d (\\x3d through a printf %b
+#                   helper): no key here, an "=" once printed.  A forged line
+#                   goes inside a value (\n), never on a fixture line of its
+#                   own.  Refused: a key sq maps (NodeName, Arch, CPUTot,
+#                   CPUEfctv, CPUAlloc, RealMemory, AllocMem, MemSpecLimit,
+#                   State, Partitions) twice before the free text, and a
+#                   NodeName an earlier line had, unless the fixture has a
+#                   sinfo file of its own.
+#                   scontrol -o show node LIST prints, per element of LIST in
+#                   order, the record whose NodeName is that element (one twice
+#                   in LIST, twice), else "Node <name> not found" on stdout and
+#                   exit 1 at the end, as Slurm does; the records are printed
+#                   where the file ends or at an @exit (one other than 0 prints
+#                   no "not found" of its own: a failure where it stands), every
+#                   other directive acting where it stands.  Lines that are no
+#                   record are printed where they stand.
+#                   sinfo -O CPUsState,NodeList,PartitionName,Memory,AllocMem,
+#                   StateComplete (sq job's figure call) of a fixture without a
+#                   sinfo file is made from the records of scontrol-node alone
+#                   (@include and @defaults followed, every other directive
+#                   skipped): one row per partition of each record with
+#                   Partitions, CPUsState A/I/O/T from CPUAlloc and CPUTot, T-A
+#                   other where State has DRAIN or its base is DOWN, else idle;
+#                   NodeList NodeName, Memory RealMemory, AllocMem, StateComplete
+#                   State in lower case.  A sinfo file wins, and needs those
+#                   fields.
 #                   scontrol --json show node reads <dir>/scontrol-node.json,
 #                   printed verbatim (every line but a directive, blank ones
 #                   too, no escape decoded); without it, ONE document is made
 #                   in json-c's pretty layout from the NodeName= records of
-#                   scontrol-node (decoded, each to its first newline and its
-#                   first " Reason=", " Comment=" or " Extra="; the first key
-#                   of a name counts): NodeName -> name, CPUTot -> cpus,
+#                   scontrol-node (their keys as above, the first of a name
+#                   counting): NodeName -> name, CPUTot -> cpus,
 #                   CPUEfctv -> effective_cpus, CPUAlloc -> alloc_cpus,
 #                   RealMemory -> real_memory, AllocMem -> alloc_memory,
 #                   MemSpecLimit -> specialized_memory (0 when absent), State
 #                   split on "+" and Partitions on "," into arrays; a figure
 #                   that is no number becomes a string, a key absent no member,
-#                   and the rest of the record (the free text) the reason.
+#                   and the free text, decoded, the reason.
 #                   Without scontrol-node, from the lines derived from sinfo as
-#                   for -o.  The file's directives act on it as on -o (the
+#                   for -o (without the memory run's added fields and State, as
+#                   before).  The file's directives act on it as on -o (the
 #                   document is printed where the file ends or at @exit)
 #   SQSTUB_JSONC    the json-c whose pretty layout a made document has: 0.17
 #                   (the default, as bioserver: an empty [] on one line), 0.16
@@ -58,8 +94,8 @@
 #                   exit 1
 #   SQSTUB_LOG      file every invocation is appended to, one line per call:
 #                   CALL <tool> <argv, %q-quoted> <VAR=%q value | VAR(unset)>...
-#                   (the fixed list below, then every other SQUEUE_* and SACCT_*
-#                   that is set), and a STUBERROR line for every refusal of the stub
+#                   (the fixed list below, then every other SQUEUE_*, SACCT_*,
+#                   SCONTROL_* and SINFO_* that is set), and a STUBERROR line for every refusal of the stub
 #                   itself.  Its directory is the run's own (tests/run.sh makes
 #                   one per run): the call counter of @step and the files of
 #                   @file live there, and \{run} in a value names it
@@ -71,14 +107,17 @@
 #
 # Formats, as the real tools take them (see tests/FAITHFULNESS.md):
 #   sinfo   -o FMT or -O FMT             %<letter> grammar or Field:0suffix
-#                                        grammar, needs -h and -N
+#                                        grammar, needs -h and -N; --local
+#                                        accepted (logged)
 #   squeue  -o FMT, -O FMT, else $SQUEUE_FORMAT, else $SQUEUE_FORMAT2
 #           (%<letter> grammar or Field:suffix grammar), needs -h
 #   sacct   -o F1,F2,... with -p or -P and -n, --delimiter=D (default "|")
 #   sstat   -o F1,F2,... with -p or -P, -n, -a and --noconvert
-#   scontrol -o show node: each record line of the file printed as written
-#                                        (escapes decoded), as scontrol's one
-#                                        line per node has no format to render
+#   scontrol -o show node [LIST]: each record line of the file printed as
+#                                        written (escapes decoded; a line with
+#                                        no backslash as it is), as scontrol's
+#                                        one line per node has no format to
+#                                        render; with LIST, see SQSTUB_FIXTURE
 #   scontrol --json show node: see SQSTUB_FIXTURE
 # Anything the stub cannot render exactly the way Slurm would (field widths,
 # headers, unsized -O fields, an unknown option) is refused with exit 97 and a
@@ -108,7 +147,7 @@
 #   @raw TEXT           print TEXT (escapes decoded) as one output line
 #   @stderr TEXT        print TEXT (escapes decoded) on stderr
 #   @exit N             stop here with exit code N
-#   @hang [SECONDS]     block for SECONDS (default 30): exercises sq's timeout
+#   @hang [SECONDS]     block for SECONDS (default 30; 2.9 too): exercises sq's timeout
 #   @step N             what follows, up to the next @step, answers the N-th
 #                       call of this tool with this format in this run, and
 #                       every later one until a higher @step takes over; what
@@ -152,14 +191,14 @@ line=$(printf 'CALL\t%s\t' "$tool"; [ $# -gt 0 ] && printf '%q ' "$@"
 		if [ -n "${!v+set}" ]; then printf '\t%s=%q' "$v" "${!v}"
 		else printf '\t%s(unset)' "$v"; fi
 	done
-	for v in $(compgen -e); do      # any other squeue, sacct or scontrol setting that reached it
-		case $v in SQUEUE_FORMAT|SQUEUE_FORMAT2) ;; SQUEUE_*|SACCT_*|SCONTROL_*) printf '\t%s=%q' "$v" "${!v}" ;; esac
+	for v in $(compgen -e); do      # any other squeue, sacct, scontrol or sinfo setting that reached it
+		case $v in SQUEUE_FORMAT|SQUEUE_FORMAT2) ;; SQUEUE_*|SACCT_*|SCONTROL_*|SINFO_*) printf '\t%s=%q' "$v" "${!v}" ;; esac
 	done)
 printf '%s\n' "$line" >> "$SQSTUB_LOG"
 
 # ---- argv: every option sq can send, nothing else --------------------------
-mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0 derive=0 json=0
-cmd_o=; cmd_O=; states=; jobs=; show=
+mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0 derive=0 json=0 figrows=0
+cmd_o=; cmd_O=; states=; jobs=; show=; nodelist=; listed=0
 need_value() { [ $# -ge 2 ] || refuse "$1 needs a value"; }
 while [ $# -gt 0 ]; do
 	a=$1; v=
@@ -181,6 +220,7 @@ while [ $# -gt 0 ]; do
 		sinfo:-hN|sinfo:-Nh)       noheader=1; nodes=1; shift_n=1 ;;
 		sinfo:-o|sinfo:--format)   take "$@"; cmd_o=$val ;;
 		sinfo:-O|sinfo:--Format)   take "$@"; cmd_O=$val ;;
+		sinfo:--local)             shift_n=1 ;;     # logged; one cluster is all the stub has
 
 		squeue:-h|squeue:--noheader) noheader=1; shift_n=1 ;;
 		squeue:-o|squeue:--format)   take "$@"; cmd_o=$val ;;
@@ -238,6 +278,9 @@ while [ $# -gt 0 ]; do
 		scontrol:--json)             [ "$has" = 0 ] || refuse "--json=PARSER is not emulated"; json=1; shift_n=1 ;;
 		scontrol:show)               [ -z "$show" ] || refuse "show twice"; show=what; shift_n=1 ;;
 		scontrol:node|scontrol:nodes) [ "$show" = what ] || refuse "'$a' without show"; show=node; shift_n=1 ;;
+		# show node LIST: the nodes named, in that order (scontrol -o only)
+		scontrol:[!-]*) [ "$show" = node ] && [ $listed = 0 ] || refuse "argument '$a' is not emulated"
+		                nodelist=$a; listed=1; shift_n=1 ;;
 
 		*) refuse "option '$1' is not emulated" ;;
 	esac
@@ -255,7 +298,10 @@ case $tool in
 		elif [ -n "$cmd_O" ]; then mode=long; fmt=$cmd_O
 		else refuse "sinfo's default format is not emulated: pass -o or -O"
 		fi
-		file=sinfo ;;
+		file=sinfo
+		# sq job's figure call, of a fixture with no sinfo of its own: its rows
+		# from the scontrol-node records alone (render.awk, figure_rows)
+		[ -f "$SQSTUB_FIXTURE/sinfo" ] || [ ! -f "$SQSTUB_FIXTURE/scontrol-node" ] || { file=scontrol-node; figrows=1; } ;;
 	squeue)
 		[ $noheader = 1 ] || refuse "header lines are not emulated: pass -h"
 		# precedence measured on 23.11: the command line beats the environment,
@@ -297,6 +343,7 @@ case $tool in
 		[ "$show" = node ]  || refuse "only 'show node' is emulated"
 		if [ $json = 1 ]; then
 			[ $noheader = 0 ] || refuse "--json and -o together are not emulated"
+			[ $listed = 0 ]   || refuse "--json show node LIST is not emulated"
 			if [ "${SQSTUB_NOJSON:-}" = 1 ]; then   # Slurm 22.05's getopt, then its hint
 				printf '%s\n' "scontrol: unrecognized option '--json'" 'Try "scontrol --help" for more information' >&2
 				exit 1
@@ -310,6 +357,7 @@ case $tool in
 		else
 			[ $noheader = 1 ]   || refuse "only the one-line form (-o) or --json is emulated"
 			mode=raw; fmt="show node"; file=scontrol-node
+			[ $listed = 0 ] || [ -n "$nodelist" ] || refuse "an empty node list is not emulated"
 			[ -f "$SQSTUB_FIXTURE/scontrol-node" ] || { file=sinfo; derive=1; }
 		fi ;;
 	*) refuse "unknown tool" ;;
@@ -334,11 +382,13 @@ counter=$rundir/.stubcalls.$tool.$(printf '%s' "$fmt" | cksum | cut -d' ' -f1)
 # a core limit of exactly 1 byte dumps nothing, even where cores go to a pipe
 # (systemd-coredump, WSL), which ignore a limit of 0; bash's ulimit counts in
 # blocks, hence prlimit, and without it 0 still stops a core file
-sig=; [ "$mirror" = 1 ] || [ "$derive" = 1 ] ||   # a call answered from another tool's file: records alone
+sig=; [ "$mirror" = 1 ] || [ "$derive" = 1 ] || [ "$figrows" = 1 ] ||   # a call answered from another tool's file: records alone
 	sig=$(LC_ALL=C sed -n 's/^@signal[[:space:]]\{1,\}\([0-9]\{1,\}\)[[:space:]]*$/\1/p' "$path" | head -n 1)
 if [ -n "$sig" ]; then
 	prlimit --pid $$ --core=1 2>/dev/null || ulimit -c 0 2>/dev/null
 	kill -"$sig" $$; refuse "still alive after @signal $sig"
 fi
-STUB_TOOL=$tool STUB_MODE=$mode STUB_FMT=$fmt STUB_DELIM=$delim STUB_TRAIL=$trail \
+own_sinfo=0; [ ! -f "$SQSTUB_FIXTURE/sinfo" ] || own_sinfo=1
+[ $listed = 0 ] || export STUB_LIST=$nodelist
+STUB_TOOL=$tool STUB_MODE=$mode STUB_FMT=$fmt STUB_DELIM=$delim STUB_TRAIL=$trail STUB_FIGROWS=$figrows STUB_OWN_SINFO=$own_sinfo \
 STUB_FILE=$path STUB_MIRROR=$mirror STUB_DERIVE=$derive STUB_CALL=$call STUB_RUN=$rundir LC_ALL=C exec gawk -f "$stubdir/json.awk" -f "$stubdir/render.awk"

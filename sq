@@ -328,10 +328,13 @@ exported_names() {
 # becoming it, and leaves a TERM for once the client is gone (timeout signals
 # the whole process group, the client too), so the exit status stays the
 # client's and a client that ignores TERM is still killed 2s past the
-# deadline; its notice of a client killed by a signal goes nowhere.  sh, not
+# deadline.  The client is a subshell that execs it, waited for with stderr
+# on /dev/null, so the notice of a client killed by a signal ("Killed",
+# "Segmentation fault") goes nowhere: dash writes it where the stderr of the
+# command it waited for went, which for the client itself is NAME.err.  sh, not
 # bash: bash warns on an LC_ALL naming no installed locale, into NAME.tmo,
 # which reads as timeout's
-collect_timed='trap "exit 143" TERM; f=$1; shift; read s x < /proc/uptime; { "$@" 2>&3 3>&-; } 2>/dev/null; r=$?; read e x < /proc/uptime; echo "$s $e" > "$f"; exit $r'
+collect_timed='trap "exit 143" TERM; f=$1; shift; read s x < /proc/uptime; { ( exec "$@" 2>&3 3>&- ); r=$?; } 2>/dev/null; read e x < /proc/uptime; echo "$s $e" > "$f"; exit $r'
 collect() {   # collect [-t SECONDS] [-r] [-w|-b] NAME TOOL ARGS...: stdout into $tmp/NAME,
 	local limit=$tmo name how=fg timed=   # bounded by SECONDS, SQ_TIMEOUT's by default
 	[ "$1" != -t ] || { limit=$2; shift 2; }
@@ -429,42 +432,99 @@ why_of() {   # why_of NAME RC OUTPUT TOOL [SECONDS]: OUTPUT as collect left it, 
 }
 # The nodes, asked of scontrol as `scontrol --json show node` (collect -r
 # NAME, bounded by BOUND, its exit status RC), whose answer is used when it
-# exits 0 and node_json_read accepts it: FMTVAR json.  Any other answer but a
-# timeout gets `scontrol -o show node` once, under the same NAME, within what
-# is left of BOUND once the JSON call's own run time is off (NAME.run; none
-# read counts as none), through job_limit, so not past sq job's deadline:
-# Slurm 22.05 has no --json, a Slurm without json-c or the data_parser fails
-# it, and a dump that failed half-way exits 0 with the nodes cut short.  Its
-# answer, for node_read (FMTVAR text), is used when it exits 0.  Into WHYVAR the reason when no answer was used, from the last
-# call: a timeout's "no response after SHOWN s" (SHOWN the first call's bound,
-# as the line prints it, also when the second ran out), else its first line
-# of stderr, else "exit N" or "signal N"; "" when one was used.  $tmp/NAME is
-# empty when none was.  OPTION... go to the second call's collect
-node_answer() {   # node_answer WHYVAR FMTVAR RC NAME BOUND SHOWN [OPTION...]
-	local why_var=$1 fmt_var=$2 rc=$3 name=$4 bound=$5 shown=$6 start= end= run=0 left nwhy nwhy_real
-	shift 6
+# exits 0 and node_json_read accepts it: FMTVAR json.  Slurm 22.05 has no
+# --json, a Slurm without json-c or the data_parser fails it, and a dump that
+# failed half-way exits 0 with the nodes cut short; any such answer but a
+# timeout gets `scontrol -o show node G` once (FMTVAR text), G the names of
+# the nodes in sinfo's answer, as sinfo sent them: asked about those alone,
+# scontrol prints each once or says "Node N not found", so node_read can tell
+# a forged line from a node's own.  HOOK is called right before that call,
+# with what is left of BOUND once the JSON call's own run time is off
+# (node_left) and SHOWN: it may ask sinfo first (sq job), and sets
+# NODE_HOOK_LEFT, the bound the -o call gets (what is left once its own calls
+# are off, so no call waits beyond the one budget), NODE_HOOK_NODES, G joined
+# by ",", and NODE_HOOK_BYTES its length in bytes; it returns 1 when no -o
+# call is to be made, NODE_HOOK_WHY then saying why, whole ("sinfo failed
+# (...)").  G goes to $tmp/NAME.gate, one a line, through the scrub as the
+# answer goes, for node_read; an empty G asks nothing (no node, no answer);
+# one longer than 100000 bytes (Linux takes 128 KiB in one argument) is not
+# passed, scontrol then lists every node.  The -o answer is used when it exits
+# 0, or 1 with nothing on stderr and a "Node N not found" of a name in G (an
+# unknown name sets exit 1, the rest is still printed).  Into WHYVAR, when no
+# answer was used, the whole reason: "scontrol failed (...)" from the last
+# call (fail_text: a timeout named by SHOWN, the first call's bound as the
+# line prints it, also when the second ran out), or the hook's.  $tmp/NAME
+# is empty then.  OPTION... go to the -o call's collect
+node_answer() {   # node_answer WHYVAR FMTVAR RC NAME BOUND SHOWN HOOK [OPTION...]
+	local why_var=$1 fmt_var=$2 rc=$3 name=$4 bound=$5 shown=$6 hook=$7 left list why
+	shift 7
 	printf -v "$why_var" ''; printf -v "$fmt_var" json
 	scrub_answer "$name"
 	[ "$rc" = 0 ] && node_json_ok "$tmp/$name" && return
-	why_of nwhy "$rc" "$tmp/$name" scontrol "$shown"
-	if [ "$nwhy_real" != "no response after ${shown}s" ]; then
-		read -r start end < "$tmp/$name.run" 2>/dev/null
-		[[ $start =~ ^[0-9]+\.[0-9][0-9]$ && $end =~ ^[0-9]+\.[0-9][0-9]$ ]] &&
-			run=$(( (10#${end/./} - 10#${start/./}) * 10000 ))
-		[ "$run" -ge 0 ] || run=0
-		us_of left "$bound"; left=$((left - run)); [ "$left" -ge 0 ] || left=0
-		printf -v left '%d.%06d' $((left / 1000000)) $((left % 1000000))
-		job_limit left "$left"
+	fail_text why scontrol "$rc" "$name" "$shown"
+	if [ "$why" != "scontrol failed (no response after ${shown}s)" ]; then
+		node_left left "$bound" "$name"
 		printf -v "$fmt_var" text
-		collect -t "$left" "$@" "$name" scontrol -o show node; rc=$?
-		[ "$rc" != 0 ] || { scrub_answer "$name"; return 0; }
-		why_of nwhy "$rc" "$tmp/$name" scontrol "$shown"
+		if ! "$hook" "$left" "$shown"; then
+			printf -v "$why_var" '%s' "$NODE_HOOK_WHY"; : > "$tmp/$name"; return 1
+		fi
+		list=$NODE_HOOK_NODES
+		if [ -z "$list" ]; then : > "$tmp/$name.gate"; : > "$tmp/$name"; return 0; fi
+		printf '%s\n' "${list//,/$'\n'}" > "$tmp/$name.gate"; scrub_answer "$name.gate"
+		[ "${NODE_HOOK_BYTES:-0}" -le 100000 ] || list=
+		SLURM_TIME_FORMAT=standard collect -t "$NODE_HOOK_LEFT" "$@" "$name" scontrol -o show node ${list:+"$list"}; rc=$?
+		scrub_answer "$name"
+		[ "$rc" != 0 ] || return 0
+		[ "$rc" != 1 ] || [ -s "$tmp/$name.err" ] || ! node_nf_any "$tmp/$name" "$tmp/$name.gate" || return 0
+		fail_text why scontrol "$rc" "$name" "$shown"
 	fi
-	if   [ -n "$nwhy_real" ];  then printf -v "$why_var" '%s' "$nwhy_real"
-	elif [ "$rc" -gt 128 ];    then printf -v "$why_var" 'signal %s' $((rc - 128))
-	else                            printf -v "$why_var" 'exit %s' "$rc"
+	printf -v "$why_var" '%s' "$why"
+	: > "$tmp/$name"; return 1
+}
+# what is left of BOUND once call NAME's own run time is off (NAME.run, as
+# collect -r notes it; none read counts as none), through job_limit, into VAR
+node_left() {   # node_left VAR BOUND NAME (its locals named apart from any VAR)
+	local nl_start= nl_end= nl_run=0 nl_us
+	read -r nl_start nl_end < "$tmp/$3.run" 2>/dev/null
+	[[ $nl_start =~ ^[0-9]+\.[0-9][0-9]$ && $nl_end =~ ^[0-9]+\.[0-9][0-9]$ ]] &&
+		nl_run=$(( (10#${nl_end/./} - 10#${nl_start/./}) * 10000 ))
+	[ "$nl_run" -ge 0 ] || nl_run=0
+	us_of nl_us "$2"; nl_us=$((nl_us - nl_run)); [ "$nl_us" -ge 0 ] || nl_us=0
+	printf -v nl_us '%d.%06d' $((nl_us / 1000000)) $((nl_us % 1000000))
+	job_limit "$1" "$nl_us"
+}
+# "TOOL failed (REASON)" into VAR for call NAME that ended with RC (as
+# collect left it), REASON as why_of has it real: a timeout's "no response
+# after SHOWN s", else the first line of its stderr; else "exit N" or
+# "signal N"
+fail_text() {   # fail_text VAR TOOL RC NAME SHOWN
+	local w w_real
+	why_of w "$3" "$tmp/$4" "$2" "$5"
+	if   [ -n "$w_real" ]; then printf -v "$1" '%s failed (%s)' "$2" "$w_real"
+	elif [ "$3" -gt 128 ];  then printf -v "$1" '%s failed (signal %s)' "$2" $(($3 - 128))
+	else                         printf -v "$1" '%s failed (exit %s)' "$2" "$3"
 	fi
-	: > "$tmp/$name"
+}
+# the listable node names of sinfo's framed answer FILE (NONCE, NFIELDS fields
+# a record) as node_names reads them, under C: node_list_stat ok, none (no
+# record) or bad (a record not whole, with STRICT 1, or no gawk verdict),
+# node_list and node_list_bytes
+node_list() {   # node_list FILE NONCE NFIELDS STRICT
+	local out
+	out=$(env LC_ALL=C SQ_NODEFILE="$1" SQ_LISTNONCE="$2" gawk -v nfields="$3" -v strict="$4" "$shared_awk"'
+		BEGIN { n = node_names(ENVIRON["SQ_NODEFILE"], ENVIRON["SQ_LISTNONCE"], nfields, strict)
+		        print (n < 0 ? "bad" : n ? "ok" : "none"), length(NODE_LIST); printf "%s", NODE_LIST }' 2>/dev/null)
+	node_list_stat=${out%%[ $'\n']*} node_list= node_list_bytes=0
+	[[ $out == *$'\n'* ]] && node_list=${out#*$'\n'}
+	[[ $out =~ ^[a-z]+\ ([0-9]+) ]] && node_list_bytes=${BASH_REMATCH[1]}
+	case $node_list_stat in ok|none) ;; *) node_list_stat=bad node_list= ;; esac
+}
+# Is there a "Node N not found" line of a name in GATE in FILE (node_nf, as
+# the report's gawk reads it)?
+node_nf_any() {   # node_nf_any FILE GATE
+	[ "$(env LC_ALL="$gloc" SQ_NODEFILE="$1" SQ_NODEGATE="$2" gawk "$shared_awk"'
+		BEGIN { node_gate(ENVIRON["SQ_NODEGATE"], G)
+		        while ((getline ln < ENVIRON["SQ_NODEFILE"]) > 0) if (node_nf(ln, G) != "") { print "nf"; exit } }' 2>/dev/null)" = nf ]
 }
 # node_json_read's verdict on FILE, in a gawk of its own, as the report's
 # gawk will read it (gloc set)
@@ -701,37 +761,139 @@ function pend_kind(why) {
 }
 # ---- the node readers (tests/faithfulness.sh runs the text from here to
 # "node readers end" on real answers)
-# ---- scontrol -o show node: one node a line, as Slurm 23.11 prints it
-# (slurm_sprint_node_table): NodeName first, the figures, then free text an
-# admin sets (Reason=, Comment=, Extra=), which may hold anything: a
-# "MemSpecLimit=" of its own, or a newline and a whole forged line.  So a key
-# is read only before the first " Reason=", " Comment=" or " Extra=", the
-# first one of its name counts (MemSpecLimit and Partitions are printed only
-# when set, so a later one would be the text), and a NodeName seen twice
-# leaves that node unknown (NODE_BAD "twice").  By index 1..NN: NODE_NAME, NODE_CPUS
-# (CPUEfctv, else CPUTot), NODE_CPUALLOC, NODE_REALMEM, NODE_ALLOCMEM and
-# NODE_SPECMEM (MemSpecLimit, 0 when absent) in MB, NODE_STATE, NODE_PARTS
-# (its partitions, comma-separated); a number missing or garbled is -1.  The
-# strings kept (NodeName, State, Partitions) take the control rule of the
-# tables first, as json_str gives it to the --json answer: a name then reads
-# as in the table of sinfo, and two that differ only in a control character
-# are one, "twice"
-function node_read(file,   ln, KV, s, m, name, n) {
+# ---- the node names sq asks scontrol -o about, and what it reads of the
+# answer (Slurm 23.11 prints one node a line, slurm_sprint_node_table:
+# NodeName first, the figures, then free text a node or an admin sets - OS=,
+# Arch=, Reason=, Comment=, Extra=, MCS_label= - which may hold anything: a
+# whole run of figures of its own, or a newline and a whole forged line).
+# A node record in the framed answers of sinfo leads with CPUsState,
+# alloc/idle/other/total: four machine-emitted numbers, so no reason text can
+# be taken for the start of a record
+BEGIN { NODEID = "^[0-9]+/[0-9]+/[0-9]+/[0-9]+$" }
+# A name scontrol can be asked about as Slurm knows it: not empty, no "," "["
+# "]" (the hostlist syntax), no whitespace or control character (a separator
+# to hostlist_create, or a forged line), not starting with "-" (scontrol
+# permutes its argv, so it would read as an option).  Any other name reads
+# unknown
+function node_listable(nm) {
+  return nm != "" && nm !~ /^-/ && nm !~ /[],[]/ && nm !~ /[ \t\n\v\f\r]/ && nm !~ CNTRL
+}
+# The listable names of a framed sinfo answer FILE as sinfo sent them (read
+# under C, before the scrub, so a broken byte or a bidi control reaches
+# scontrol as Slurm knows the name): records ending in NONCE "\n", NFIELDS
+# fields each, CPUsState first, NodeList second; each name once, in the order
+# of its first record, joined by "," into NODE_LIST.  The count of records,
+# or with STRICT -1 when one is not whole (as read_stream says); without it
+# such a record is passed over, as the dashboard skips one
+function node_names(file, nonce, nfields, strict,   saved, ln, f, n, seen, bad) {
+  NODE_LIST = ""; saved = RS; RS = nonce "\n"
   while ((getline ln < file) > 0) {
-    if (ln !~ /^NodeName=/) continue
-    if (match(ln, / (Reason|Comment|Extra)=/)) ln = substr(ln, 1, RSTART - 1)
-    delete KV; s = ln
-    while (match(s, /(^| )([A-Za-z_]+)=([^ ]*)/, m)) { if (!(m[2] in KV)) KV[m[2]] = m[3]; s = substr(s, RSTART + RLENGTH) }
-    gsub(CNTRL, "?", KV["NodeName"]); gsub(CNTRL, "?", KV["State"]); gsub(CNTRL, "?", KV["Partitions"])
-    name = KV["NodeName"]
-    if (name in NODE_AT) { NODE_BAD[NODE_AT[name]] = "twice"; continue }
-    n = NODE_AT[name] = ++NN; NODE_NAME[n] = name
-    NODE_CPUS[n] = node_num(("CPUEfctv" in KV) ? KV["CPUEfctv"] : KV["CPUTot"])
-    NODE_CPUALLOC[n] = node_num(KV["CPUAlloc"]); NODE_REALMEM[n] = node_num(KV["RealMemory"])
-    NODE_ALLOCMEM[n] = node_num(KV["AllocMem"]); NODE_SPECMEM[n] = ("MemSpecLimit" in KV) ? node_num(KV["MemSpecLimit"]) : 0
-    NODE_STATE[n] = KV["State"]; NODE_PARTS[n] = KV["Partitions"]
+    if (split(ln, f, nonce) != nfields || RT == "" || f[1] !~ NODEID) { if (strict) { bad = 1; break }; continue }
+    n++
+    if (!node_listable(f[2]) || (f[2] in seen)) continue
+    seen[f[2]]; NODE_LIST = NODE_LIST (NODE_LIST == "" ? "" : ",") f[2]
+  }
+  close(file); RS = saved
+  return bad ? -1 : n + 0
+}
+# G, the names scontrol was asked about (FILE, one a line, through the scrub
+# as the answer went), under the control rule of the tables, into G[]
+function node_gate(file, G,   ln) {
+  while ((getline ln < file) > 0) { gsub(CNTRL, "?", ln); G[ln] = 1 }
+  close(file)
+}
+# the name of a line that is exactly "Node NAME not found" (the word of scontrol
+# for a name it was asked about and does not know, on stdout), NAME in G
+# under the control rule; "" for any other line
+function node_nf(ln, G,   nm) {
+  if (ln !~ /^Node .* not found$/) return ""
+  nm = ln; sub(/^Node /, "", nm); sub(/ not found$/, "", nm); gsub(CNTRL, "?", nm)
+  return (nm in G) ? nm : ""
+}
+# ---- scontrol -o show node G: the figures Slurm prints for each node but
+# sinfo cannot, CPUEfctv and MemSpecLimit (sinfo -O has no field for either),
+# read only where Slurm prints them.  G, the names asked about, comes from
+# the answer of sinfo, so a forged line can neither add a node nor stand for one:
+# - a line "NodeName=N ..." with N in G (the control rule on N) begins a
+#   record; every other line is text of the record before it, its newline
+#   kept: a continuation, or an unlisted line (a NodeName= that is not in G);
+#   lines before the first record are text of no record;
+# - a "Node N not found" line of a name in G adds N to NODE_NF and is no
+#   text of a record, neither beginning nor ending one;
+# - in a record the CPU run " CPUAlloc=V( CPUEfctv=V| CPUErr=V)? CPUTot=V"
+#   (17.11 prints CPUErr) and the memory run " RealMemory=V AllocMem=V
+#   FreeMem=V Sockets=V Boards=V" are format text Slurm prints once (V: no
+#   space, no newline); MemSpecLimit is the one " MemSpecLimit=V" between the
+#   memory run and the first " State=" after it, 0 when there is none.  A
+#   run found other than once, MemSpecLimit twice there, or no State after
+#   the memory run leave the spec unknown (NODE_BAD "garbled", NODE_SPECMEM
+#   and NODE_CPUS -1);
+# - a name that begins two records makes it "twice" and the record just
+#   before each of them "garbled" (the forged one sits in its text); a record
+#   of a name in NODE_NF is forged, so it and the one before it are "garbled".
+# By index 1..NN: NODE_NAME, NODE_CPUS (CPUEfctv, else CPUTot), NODE_EFCTV
+# (1 when the run has CPUEfctv), NODE_REALMEM and NODE_SPECMEM in MB; a
+# number missing or garbled is -1.  CPUAlloc, AllocMem, State and Partitions
+# are not read (-1, ""): sinfo prints those.  And for the pair check of sq job, per
+# NodeName= line, records and unlisted lines alike, each " Partitions=V
+# +BootTime=" it holds: NODE_PAIR_NAME[k] (the NodeName of that line) and
+# NODE_PAIR_PARTS[k], k 1..NODE_PAIRS.  Runs and cuts by split, one pass over
+# a record however long its free text
+function node_read(file, gate,   G, ln, nm, nrec, cur, REC, RNAME, RNODE, FIRST, k, n) {
+  node_gate(gate, G)
+  while ((getline ln < file) > 0) {
+    if ((nm = node_nf(ln, G)) != "") { NODE_NF[nm] = 1; continue }
+    if (ln ~ /^NodeName=/) {
+      nm = ln; sub(/^NodeName=/, "", nm); sub(/ .*/, "", nm); gsub(CNTRL, "?", nm)
+      node_pairs(ln, nm)
+      if (nm in G) { if (nrec) REC[nrec] = cur; cur = ln; RNAME[++nrec] = nm; continue }
+    }
+    if (nrec) cur = cur "\n" ln              # in place, however many lines
   }
   close(file)
+  if (nrec) REC[nrec] = cur
+  for (k = 1; k <= nrec; k++) {
+    nm = RNAME[k]
+    if (nm in NODE_AT) {                        # F2: twice, and both predecessors
+      RNODE[k] = n = NODE_AT[nm]; NODE_BAD[n] = "twice"
+      if (FIRST[nm] > 1) node_garbled(RNODE[FIRST[nm] - 1])
+      node_garbled(RNODE[k - 1])
+      continue
+    }
+    RNODE[k] = n = NODE_AT[nm] = ++NN; NODE_NAME[n] = nm; FIRST[nm] = k
+    NODE_CPUALLOC[n] = NODE_ALLOCMEM[n] = NODE_REALMEM[n] = -1; NODE_STATE[n] = NODE_PARTS[n] = ""
+    node_spec(n, REC[k])
+  }
+  for (k = 1; k <= nrec; k++)                   # F3: a record of a name not found
+    if (RNAME[k] in NODE_NF) { node_garbled(RNODE[k]); if (k > 1) node_garbled(RNODE[k - 1]) }
+}
+# the spec of node N unknown; "twice" stays what it is
+function node_garbled(n) {
+  if (!(n in NODE_BAD) || NODE_BAD[n] != "twice") NODE_BAD[n] = "garbled"
+  NODE_SPECMEM[n] = NODE_CPUS[n] = -1
+}
+# the spec figures of record REC, node N
+function node_spec(n, rec,   P, S, cpu, mem, Q, c, X, XS, v) {
+  if (split(rec, P, / CPUAlloc=[^ \n]*( CPUEfctv=[^ \n]*| CPUErr=[^ \n]*)? CPUTot=[^ \n]*/, S) != 2) { node_garbled(n); return }
+  cpu = S[1]
+  if (split(rec, P, / RealMemory=[^ \n]* AllocMem=[^ \n]* FreeMem=[^ \n]* Sockets=[^ \n]* Boards=[^ \n]*/, S) != 2) { node_garbled(n); return }
+  mem = S[1]
+  if (split(P[2], Q, / State=/) < 2) { node_garbled(n); return }
+  if ((c = split(Q[1], X, / MemSpecLimit=[^ \n]*/, XS)) > 2) { node_garbled(n); return }   # "" splits into 0
+  v = XS[1]; sub(/^ MemSpecLimit=/, "", v); NODE_SPECMEM[n] = (c == 2) ? node_num(v) : 0
+  NODE_EFCTV[n] = (cpu ~ / CPUEfctv=/)
+  v = cpu; sub(/.* CPUTot=/, "", v)
+  if (NODE_EFCTV[n]) { v = cpu; sub(/^.* CPUEfctv=/, "", v); sub(/ .*/, "", v) }
+  NODE_CPUS[n] = node_num(v)
+  v = mem; sub(/^ RealMemory=/, "", v); sub(/ .*/, "", v); NODE_REALMEM[n] = node_num(v)
+}
+# each " Partitions=V +BootTime=" of line LN (no newline in it), whose NodeName is NM
+function node_pairs(ln, nm,   n, X, XS, i, v) {
+  if ((n = split(ln, X, / Partitions=[^ ]* +BootTime=/, XS)) < 2) return
+  for (i = 1; i < n; i++) {
+    v = XS[i]; sub(/^ Partitions=/, "", v); sub(/ +BootTime=$/, "", v); gsub(CNTRL, "?", v)
+    NODE_PAIR_NAME[++NODE_PAIRS] = nm; NODE_PAIR_PARTS[NODE_PAIRS] = v
+  }
 }
 function node_num(x) { return (x ~ /^[0-9]{1,12}$/) ? x + 0 : -1 }
 # ---- scontrol --json show node: the same arrays, from the pretty layout of
@@ -906,8 +1068,9 @@ function json_bytes(   b, i) {
         "\340,\341,\342,\343,\344,\345,\346,\347,\350,\351,\352,\353,\354,\355,\356,\357,\360,\361,\362,\363,\364,\365,\366,\367,\370,\371,\372,\373,\374,\375,\376,\377", b, ",")
   for (i = 1; i <= 128; i++) JSON_BYTE[127 + i] = b[i]
 }
-# the node answer in FORMAT (json or text), as the shell names it
-function nodes_read(file, format) { if (format == "json") node_json_read(file); else node_read(file) }
+# the node answer in FORMAT (json or text), as the shell names it; GATE the
+# names a text answer was asked for
+function nodes_read(file, format, gate) { if (format == "json") node_json_read(file); else node_read(file, gate) }
 # ---- node readers end
 # the final states, by squeue code, into DONE, and those that are failures
 # (worth a bell, red) into BAD
@@ -1932,14 +2095,16 @@ function bar(p, hue) { return cells(100, p > 100 ? 100 : p, 100, BARW, hue) }
 function cpucolour(p, cap,   r) { r = p / (cap ? cap : 100); return (r >= 0.7) ? "32" : (r >= 0.3) ? "33" : "31" }
 # one framed stream: records ending in NONCE "\n", the fields NAMES lists
 # separated by NONCE, the first matching ANCHOR, into ARR[record, name] with
-# every control character a "?" (they reach the terminal); the count, or -1
-# when a record is not whole (a field missing or too many, the end cut off)
-function read_stream(file, nonce, names, ARR, anchor,   saved, n, nn, N, ln, f, i, bad) {
+# every control character a "?" (they reach the terminal), and the field
+# RAWNAME, when one is named, as it was before that into RAW[record]; the
+# count, or -1 when a record is not whole (a field missing or too many, the
+# end cut off)
+function read_stream(file, nonce, names, ARR, anchor, RAW, rawname,   saved, n, nn, N, ln, f, i, bad) {
   nn = split(names, N, /[ \t\n]+/)
   saved = RS; RS = nonce "\n"
   while ((getline ln < file) > 0) {
     if (split(ln, f, nonce) != nn || RT == "" || f[1] !~ anchor) { bad = 1; break }
-    n++; for (i = 1; i <= nn; i++) { gsub(CNTRL, "?", f[i]); ARR[n, N[i]] = f[i] }
+    n++; for (i = 1; i <= nn; i++) { if (N[i] == rawname) RAW[n] = f[i]; gsub(CNTRL, "?", f[i]); ARR[n, N[i]] = f[i] }
   }
   close(file); RS = saved
   return bad ? -1 : n + 0
@@ -2385,9 +2550,79 @@ function why_load(   nu, um, i, mf, ln) {
   npq = read_stream(ENVIRON["SQJ_WPARENTS"], NONCE, qfields, RP, "^[0-9]+$"); if (npq < 0) npq = 0
   npa = read_stream(ENVIRON["SQJ_WPACCT"], NONCE2, afields, AP, ID "([.][A-Za-z0-9_+.-]+)?$"); if (npa < 0) npa = 0
   nrq = read_stream(ENVIRON["SQJ_WQUEUE"], NONCE, ENVIRON["SQJ_WQFIELDS"], RQ, "^[0-9]+$"); if (nrq < 0) nrq = 0
-  nodes_read(ENVIRON["SQJ_WNODES"], ENVIRON["SQJ_WNODEFMT"])
+  NODESTAT = ENVIRON["SQJ_WNODESTAT"]; NODEWHY = ENVIRON["SQJ_WNODEWHY"]; NODEFMT = ENVIRON["SQJ_WNODEFMT"]
+  if (NODESTAT == "ok" && NODEFMT == "text") nodes_of_sinfo(ENVIRON["SQJ_WNODEFIG"], ENVIRON["SQJ_WNODES"], ENVIRON["SQJ_WNODEGATE"])
+  else if (NODESTAT == "ok") node_json_read(ENVIRON["SQJ_WNODES"])
   while ((getline ln < ENVIRON["SQJ_WTAIL"]) > 0) TAIL[++ntail] = ln
   close(ENVIRON["SQJ_WTAIL"])
+}
+
+# Where Slurm has no usable --json: every figure sinfo can print from its
+# own answer (FIG, read_stream, the dashboard's anchor), by name under the
+# control rule, and from scontrol -o (FILE, node_read, about GATE's names)
+# only CPUEfctv and MemSpecLimit.  A node's first row gives CPUAlloc and T
+# (CPUsState's first and fourth figures), RealMemory (Memory), AllocMem and
+# State (StateComplete in upper case, as scontrol prints it); every row adds
+# its partition.  Rows of one name that differ outside PartitionName leave it
+# "garbled", rows of two nodes that read as one name (their names differ
+# before the control rule, as two such nodes are one name to scontrol too)
+# "twice".  Its CPUs are CPUEfctv where scontrol's CPU run has one (above T:
+# garbled), else T; a node scontrol gave no usable record of (none, not
+# found, garbled, twice, the record before a forged one) is unknown
+function nodes_of_sinfo(fig, file, gate,   SP_AT, SP_BAD, SP_CPUS, SP_EFCTV, SP_SPEC, SP_NF, n, nm, ns, SI, RAWN, r, i, j, c, T, RAW1, SIG1, sig, p) {
+  node_read(file, gate)
+  for (n = 1; n <= NN; n++) {
+    nm = NODE_NAME[n]; SP_AT[nm] = n; SP_CPUS[n] = NODE_CPUS[n]; SP_EFCTV[n] = NODE_EFCTV[n]; SP_SPEC[n] = NODE_SPECMEM[n]
+    if (n in NODE_BAD) SP_BAD[n] = NODE_BAD[n]
+  }
+  for (nm in NODE_NF) SP_NF[nm] = 1
+  NN = 0; delete NODE_AT; delete NODE_BAD; delete NODE_NAME; delete NODE_CPUS; delete NODE_CPUALLOC; delete NODE_EFCTV
+  delete NODE_REALMEM; delete NODE_ALLOCMEM; delete NODE_SPECMEM; delete NODE_STATE; delete NODE_PARTS
+  ns = read_stream(fig, NONCE3, "CPUsState NodeList PartitionName Memory AllocMem StateComplete", SI, NODEID, RAWN, "NodeList")
+  for (r = 1; r <= ns; r++) {
+    nm = SI[r, "NodeList"]; p = SI[r, "PartitionName"]
+    sig = SI[r, "CPUsState"] SUBSEP SI[r, "Memory"] SUBSEP SI[r, "AllocMem"] SUBSEP SI[r, "StateComplete"]
+    if (!(nm in NODE_AT)) {
+      i = NODE_AT[nm] = ++NN; NODE_NAME[i] = nm; RAW1[i] = RAWN[r]; SIG1[i] = sig
+      split(SI[r, "CPUsState"], c, "/"); NODE_CPUALLOC[i] = node_num(c[1]); T[i] = node_num(c[4])
+      NODE_REALMEM[i] = node_num(SI[r, "Memory"]); NODE_ALLOCMEM[i] = node_num(SI[r, "AllocMem"])
+      NODE_STATE[i] = toupper(SI[r, "StateComplete"]); NODE_PARTS[i] = p
+    } else {
+      i = NODE_AT[nm]
+      if (RAWN[r] != RAW1[i]) NODE_BAD[i] = "twice"
+      else if (sig != SIG1[i] && !(i in NODE_BAD)) NODE_BAD[i] = "garbled"
+      if (!index("," NODE_PARTS[i] ",", "," p ",")) NODE_PARTS[i] = NODE_PARTS[i] "," p
+    }
+    SIROW[nm, p] = 1
+  }
+  for (i = 1; i <= NN; i++) {
+    nm = NODE_NAME[i]; NODE_CPUS[i] = NODE_SPECMEM[i] = -1
+    if (!(nm in SP_AT) || (nm in SP_NF)) { if (!(i in NODE_BAD)) NODE_BAD[i] = "none"; continue }
+    j = SP_AT[nm]
+    if (j in SP_BAD) { if (SP_BAD[j] == "twice" || !(i in NODE_BAD)) NODE_BAD[i] = SP_BAD[j]; continue }
+    NODE_SPECMEM[i] = SP_SPEC[j]
+    NODE_CPUS[i] = SP_EFCTV[j] ? SP_CPUS[j] : T[i]
+    if (SP_EFCTV[j] && SP_CPUS[j] > T[i] && !(i in NODE_BAD)) NODE_BAD[i] = "garbled"
+  }
+}
+# The pair check (N6, the -o answer only): wherever a NodeName= line of
+# scontrol's, a record or an unlisted line, holds a partitions run naming one
+# of the job's partitions P, that line's node must have a row of sinfo's in P.
+# A line that does not is forged (a node sinfo does not list, or not there),
+# so none of the nodes is known: NODESTAT fail, NODEWHY naming the first such
+# name in the answer's order, scrubbed and cut to 40 columns
+function node_pair_fail(q,   P, np, k, PP, npp, j, x) {
+  if (NODEFMT != "text" || NODESTAT != "ok") return 0
+  np = split(R[q, "Partition"], P, ",")
+  for (k = 1; k <= NODE_PAIRS; k++) {
+    npp = split(NODE_PAIR_PARTS[k], PP, ",")
+    for (j = 1; j <= npp; j++) for (x = 1; x <= np; x++)
+      if (PP[j] == P[x] && !((NODE_PAIR_NAME[k], P[x]) in SIROW)) {
+        NODESTAT = "fail"; NODEWHY = "scontrol lists " clip(NODE_PAIR_NAME[k], 40) " in " P[x] ", sinfo does not"
+        NN = 0; return 1
+      }
+  }
+  return 0
 }
 
 # ---- the section of one job, after its state and times
@@ -2548,9 +2783,11 @@ function array_state(id,   p, c, k, N, ord, out, i) {
 function node_jobmem(i) { return NODE_REALMEM[i] - NODE_SPECMEM[i] }
 function node_cpufree(i) { return NODE_CPUS[i] - NODE_CPUALLOC[i] }
 function node_memfree(i) { return node_jobmem(i) - NODE_ALLOCMEM[i] }
-# the nodes its partitions hold, by index into the scontrol answer, into USE[]
+# the nodes its partitions hold, by index into the node answer, into USE[];
+# none when the pair check finds a forged line
 function usable_nodes(q,   i, k, nn, NP, pass) {
   nuse = 0
+  if (node_pair_fail(q)) return
   for (i = 1; i <= NN; i++) {
     nn = split(NODE_PARTS[i], NP, ","); pass = 0
     for (k = 1; k <= nn; k++) if (index("," R[q, "Partition"] ",", "," NP[k] ",")) pass = 1
@@ -2591,7 +2828,13 @@ function node_table(q, how, rq_c, rq_m,   i, k, w, cw, mw, CT, MT, VT, hc, hm, f
   wl2(sprintf("%-*s  %*s  %*s", w, "it asks", cw, CT[0], mw, MT[0]))
   for (k = 1; k <= nuse; k++) wl2(sprintf("%s  %*s  %*s  %s", colpad(NODE_NAME[USE[k]], -w), cw, CT[k], mw, MT[k], VT[k]))
 }
-function nodes_unknown_note(q) { wn(ENVIRON["SQJ_WNODESTAT"] == "ok" ? "no node is in partition " R[q, "Partition"] : "the nodes are unknown: scontrol failed (" ENVIRON["SQJ_WNODEWHY"] ")") }
+# no node to show: why.  With an answer, none is in the partition; under -o
+# that rests on sinfo's rows alone, and the note says so
+function nodes_unknown_note(q) {
+  if (NODESTAT != "ok") wn("the nodes are unknown: " NODEWHY)
+  else if (NODEFMT == "text") wn("sinfo lists no node in partition " R[q, "Partition"])
+  else wn("no node is in partition " R[q, "Partition"])
+}
 # Slurm's queue order (V9): the higher priority first, then the earlier
 # submit, then the lower job id
 function before(p, prio, submit, id) {
@@ -2599,7 +2842,7 @@ function before(p, prio, submit, id) {
   if (RQ[p, "SubmitTime"] + 0 != submit) return RQ[p, "SubmitTime"] + 0 < submit
   return RQ[p, "JobID"] + 0 < id + 0
 }
-function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio, submit, later, lead, nbig, nbigdown, fitnow, idw, uw) {
+function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio, submit, later, lead, nbig, nbigdown, nunknown, fitnow, idw, uw) {
   rq_c = R[q, "NumCPUs"] + 0; rq_m = tres_mem(R[q, "tres-alloc"])
   usable_nodes(q)
   if (reason == "Priority") {
@@ -2634,15 +2877,19 @@ function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio,
     if (ENVIRON["SQJ_WQUEUESTAT"] != "ok") wn("the jobs ahead are unknown: squeue did not answer")
     lead = "what the nodes it may use (" R[q, "Partition"] ") have free now:"
   } else {
+    # a verdict of sq's own needs the figures: with a node it may use
+    # unknown, or none known, what is free is Slurm's word, not sq's
     for (k = 1; k <= nuse; k++) {
       i = USE[k]
-      if (!node_known(i) || !node_big(i, rq_c, rq_m)) continue
+      if (!node_known(i)) { nunknown++; continue }
+      if (!node_big(i, rq_c, rq_m)) continue
       if (node_down(i)) { nbigdown++; continue }
       nbig++
       if (node_fits(i, rq_c, rq_m)) fitnow = NODE_NAME[i]
     }
     if (fitnow != "") wl(vword("wait", "enough is free now on " fitnow "; Slurm should start it on a next pass"))
-    else if (!nbig && nbigdown) wl(vword("admin", "every node big enough for it is down or drained"))
+    else if (!nbig && nbigdown && !nunknown) wl(vword("admin", "every node big enough for it is down or drained"))
+    else if (nunknown || NODESTAT != "ok") wl(vword("wait", "Slurm finds too little free now on the nodes it may use (" R[q, "Partition"] ")"))
     else wl(vword("wait", "too little is free now on the nodes it may use (" R[q, "Partition"] ")"))
   }
   if (!nuse) { nodes_unknown_note(q); return }
@@ -2699,11 +2946,11 @@ function why_blockers(q, rq_c, rq_m,   k, i, p, nj, J, E, a, b, t, fc, fm, best,
   if (unl != "") wn((isepoch(est) && est > NOW && unlend != "" && est + 86400 >= unlend ? "Slurm's estimate is that far out because " : "") \
                     unl (index(unl, ",") ? " have" : " has") " no time limit: Slurm plans such a job to run for a year")
 }
-function why_toobig(q,   rq_c, rq_m, k, i, any, memshort) {
+function why_toobig(q,   rq_c, rq_m, k, i, any, memshort, nunknown) {
   rq_c = R[q, "NumCPUs"] + 0; rq_m = tres_mem(R[q, "tres-alloc"])
   usable_nodes(q)
   for (k = 1; k <= nuse; k++) {
-    i = USE[k]; if (!node_known(i)) continue
+    i = USE[k]; if (!node_known(i)) { nunknown++; continue }
     if (node_big(i, rq_c, rq_m)) any = 1
     if (rq_m > 0 && node_jobmem(i) < rq_m && NODE_SPECMEM[i] > 0 && (!memshort || node_jobmem(i) > node_jobmem(memshort))) memshort = i
   }
@@ -2712,7 +2959,7 @@ function why_toobig(q,   rq_c, rq_m, k, i, any, memshort) {
     nodes_unknown_note(q); cancel_hint(); return
   }
   if (any) wl(vword("never", "no node it may use (" R[q, "Partition"] ") meets its constraints (--constraint, --gres or the like)"))
-  else     wl(vword("never", "no node it may use (" R[q, "Partition"] ") is that big"))
+  else     wl(vword("never", "no node it may use (" R[q, "Partition"] ")" (nunknown ? " whose figures are known" : "") " is that big"))
   node_table(q, "total", rq_c, rq_m)
   if (memshort) wn("memory for jobs is a node's RealMemory less what Slurm keeps for the system (MemSpecLimit): " \
                    memsize(NODE_REALMEM[memshort], 0) " less " memsize(NODE_SPECMEM[memshort], 0) " on " NODE_NAME[memshort])
@@ -2844,8 +3091,8 @@ function why_array(   i, r, id, c, by, never, key, k, s, n, GN, GI, GK, a, b, t,
 }
 
 BEGIN {
-  NONCE = ENVIRON["SQ_NONCE"]; NONCE2 = ENVIRON["SQ_NONCE2"]
-  if (NONCE !~ /^[A-Za-z][A-Za-z0-9]{16,}$/ || NONCE2 !~ /^[A-Za-z][A-Za-z0-9]{16,}$/) {
+  NONCE = ENVIRON["SQ_NONCE"]; NONCE2 = ENVIRON["SQ_NONCE2"]; NONCE3 = ENVIRON["SQ_NONCE3"]
+  if (NONCE !~ /^[A-Za-z][A-Za-z0-9]{16,}$/ || NONCE2 !~ /^[A-Za-z][A-Za-z0-9]{16,}$/ || NONCE3 !~ /^[A-Za-z][A-Za-z0-9]{16,}$/) {
     print "internal field separator missing" > "/dev/stderr"; exit 3
   }
   color = ENVIRON["SQJ_COLOR"]
@@ -2903,8 +3150,9 @@ JOBAWK
 # ---- what the why section asks for beyond the two answers ---------------------
 # Each only when the job's record calls for it (job_run plan): the parents of
 # a dependency (squeue, and accounting for those that failed), the nodes and
-# the queue for a job waiting on resources (scontrol --json show node, or -o
-# where that fails, as for the dashboard; squeue -t PD,R), and a failed job's
+# the queue for a job waiting on resources (scontrol --json show node, or
+# where that fails sinfo for the figures and scontrol -o about its nodes for
+# CPUEfctv and MemSpecLimit, node_hook_job; squeue -t PD,R), and a failed job's
 # output file.  They run while sacct is asked, and
 # every call of sq job ends by one deadline, sacct's budget and 5 s more from
 # its first call (job_limit); the names of who cancelled come after sacct
@@ -3051,8 +3299,8 @@ job_why_start() {
 }
 # their answers, once sacct's is in: each one a file the report reads, empty
 # when the call failed, and how it went; the nodes as node_answer has them,
-# the -o call it may make bounded by the deadline too, the timeout named by
-# the first call's bound without trailing zeros (5, 2.5)
+# the sinfo and -o calls it may make bounded by the deadline too, the timeout
+# named by the first call's bound without trailing zeros (5, 2.5)
 job_why_finish() {
 	local name rc shown
 	for name in wnodes wqueue wparents wpacct; do
@@ -3060,7 +3308,7 @@ job_why_finish() {
 		collect_join "$name"; rc=$?
 		if [ $name = wnodes ]; then
 			shown=$w_nodes_bound; [[ $shown != *.* ]] || { shown=${shown%"${shown##*[!0]}"}; shown=${shown%.}; }
-			node_answer w_nodes_why w_nodes_fmt $rc wnodes "$w_nodes_bound" "$shown" -w
+			node_answer w_nodes_why w_nodes_fmt $rc wnodes "$w_nodes_bound" "$shown" node_hook_job -w
 			if [ -z "$w_nodes_why" ]; then w_nodes_stat=ok; else w_nodes_stat=fail; fi
 			continue
 		fi
@@ -3074,6 +3322,31 @@ job_why_finish() {
 		[ $rc = 0 ] || : > "$tmp/$name"
 		scrub_answer "$name"
 	done
+}
+# sq job's hook of node_answer (NODE_HOOK_*): before the -o call, sinfo is
+# asked for every figure it can print of the nodes, from machine text alone,
+# one row per node and partition, framed by a nonce of its own (nonce3; -O
+# has no environment form, so it is on sinfo's command line), and the
+# names it lists are those scontrol -o is asked about.  --local and no
+# SINFO_* (a caller's SINFO_PARTITION, SINFO_FEDERATION ... would filter or
+# widen what it lists), no -a and no -p, as scontrol shows what this user may
+# see.  In the foreground with the sentinel (-w), within LEFT; failing (its
+# reason as fail_text has it, a timeout named by SHOWN), unreadable or
+# listing no node, no -o call is made
+node_hook_job() {   # node_hook_job LEFT SHOWN
+	local rc f fmt=
+	unset $(exported_names 'SINFO_*')
+	for f in CPUsState NodeList PartitionName Memory AllocMem StateComplete; do fmt="$fmt${fmt:+,}$f:0$nonce3"; done
+	collect -t "$1" -r -w wnodefig sinfo --local -h -N -O "$fmt"; rc=$?
+	if [ "$rc" != 0 ]; then fail_text NODE_HOOK_WHY sinfo "$rc" wnodefig "$2"; return 1; fi
+	node_list "$tmp/wnodefig" "$nonce3" 6 1
+	case $node_list_stat in
+		bad)  NODE_HOOK_WHY="sinfo failed (no readable answer)"; return 1 ;;
+		none) NODE_HOOK_WHY="sinfo listed no node"; return 1 ;;
+	esac
+	scrub_answer wnodefig       # framing and anchors are ASCII: the report reads it the same
+	node_left NODE_HOOK_LEFT "$1" wnodefig
+	NODE_HOOK_NODES=$node_list NODE_HOOK_BYTES=$node_list_bytes
 }
 # the width the output lines are cut to: COLUMNS if exported, else the
 # terminal's, else 120
@@ -3089,7 +3362,7 @@ job_why_export() {
 	[ "$w_tailinfo" != ok ] || job_width
 	[ -z "$w_tailinfo" ] || me=$(hostname -s 2>/dev/null | scrub 64)
 	export SQJ_UIDMAP=$w_uidmap SQJ_WPQ=$w_parents_stat SQJ_WNODESTAT=$w_nodes_stat SQJ_WQUEUESTAT=$w_queue_stat \
-		SQJ_WNODEFMT=$w_nodes_fmt SQJ_WNODEWHY=$w_nodes_why \
+		SQJ_WNODEFMT=$w_nodes_fmt SQJ_WNODEWHY=$w_nodes_why SQJ_WNODEFIG=$tmp/wnodefig SQJ_WNODEGATE=$tmp/wnodes.gate \
 		SQJ_WTAILINFO=$w_tailinfo SQJ_WWHICH=$w_which SQJ_WHOST=$w_host SQJ_WME=$me SQJ_COLS=$job_cols \
 		SQJ_WPARENTS=$tmp/wparents SQJ_WPACCT=$tmp/wpacct SQJ_WNODES=$tmp/wnodes SQJ_WQUEUE=$tmp/wqueue \
 		SQJ_WTAIL=$tmp/wtail SQJ_WQFIELDS=$job_why_qfields
@@ -3149,11 +3422,12 @@ sub_job() {
 	# SCONTROL_ALL, SCONTROL_FEDERATION and the like change what show node
 	# lists), and SLURM_JSON, which changes how --json prints (25.05)
 	unset $(exported_names 'SQUEUE_*' 'SACCT_*' 'SCONTROL_*') SLURM_JSON
-	# two nonces, as the dashboard has: sacct's --delimiter is on its command
-	# line for anyone to read, the queue's stays in the environment
-	nonce=$(mint_nonce) && nonce2=$(mint_nonce) || die "no usable random field separator"
-	[ "$nonce" != "$nonce2" ] || die "two field separators collided"
-	export SQ_NONCE=$nonce SQ_NONCE2=$nonce2
+	# three nonces, as the dashboard has: sacct's --delimiter and sinfo's -O
+	# are on their command lines for anyone to read, the queue's stays in
+	# the environment
+	nonce=$(mint_nonce) && nonce2=$(mint_nonce) && nonce3=$(mint_nonce) || die "no usable random field separator"
+	[ "$nonce" != "$nonce2" ] && [ "$nonce" != "$nonce3" ] && [ "$nonce2" != "$nonce3" ] || die "two field separators collided"
+	export SQ_NONCE=$nonce SQ_NONCE2=$nonce2 SQ_NONCE3=$nonce3
 	make_tmp
 	# The sentinel, as sq log's: a process of its own that ticks once a
 	# second (a read on a FIFO nothing writes) while sq lives.  Killed
@@ -3971,24 +4245,32 @@ for f in CPUsState NodeList FreeMem Memory StateLong Reason TimeStamp CPUsLoad A
 done
 SLURM_TIME_FORMAT=standard collect nodes sinfo -hN -O "$nfmt"
 why_of nerr $? "$tmp/nodes" sinfo
-scrub_answer nodes
 
 # MemSpecLimit, the memory Slurm keeps from jobs on a node, is the one figure
 # the memory bar needs that sinfo cannot print (23.11.4 has no -O field for
 # it), so scontrol is asked whenever sinfo answered: --json, where no free
-# text (Reason=, Comment=, Extra=, OS=) can forge a figure, else -o, which
-# node_read is made for (node_answer).  A caller's SCONTROL_* settings change
-# what show node lists (SCONTROL_ALL, SCONTROL_FEDERATION), and SLURM_JSON
-# (25.05) how --json prints, so they are unset, as sq job unsets them.
+# text (Reason=, Comment=, Extra=, OS=) can forge a figure, else -o about the
+# nodes this sinfo answer lists, which node_read is made for (node_answer;
+# the hook below names them, from the answer as sinfo sent it, so it is
+# scrubbed only after).  A caller's SCONTROL_* settings change what show
+# node lists (SCONTROL_ALL, SCONTROL_FEDERATION), and SLURM_JSON (25.05) how
+# --json prints, so they are unset, as sq job unsets them.
 # For gawk: $tmp/nodespec, empty when no answer was used, nodespecfmt its
-# format (json, text), and serr why none was
+# format (json, text), nodespecg the names asked (text), and serr why none
+# was, whole ("scontrol failed (...)")
+node_hook_dash() {   # node_hook_dash LEFT SHOWN: node_answer's hook, no call of its own
+	NODE_HOOK_LEFT=$1
+	node_list "$tmp/nodes" "$nonce3" 9 0
+	NODE_HOOK_NODES=$node_list NODE_HOOK_BYTES=$node_list_bytes
+}
 gawk_locale
-: > "$tmp/nodespec"; serr= nodespecfmt=json
+: > "$tmp/nodespec"; : > "$tmp/nodespec.gate"; serr= nodespecfmt=json
 if [ -z "$nerr" ]; then
 	unset $(exported_names 'SCONTROL_*') SLURM_JSON
 	collect -r nodespec scontrol --json show node
-	node_answer serr nodespecfmt $? nodespec "$tmo" "$tmo"
+	node_answer serr nodespecfmt $? nodespec "$tmo" "$tmo" node_hook_dash
 fi
+scrub_answer nodes
 
 SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 SQUEUE_FORMAT=$fmt collect jobs squeue -h -S t,i "${args[@]+"${args[@]}"}"
 why_of jerr $? "$tmp/jobs" squeue
@@ -4171,8 +4453,8 @@ statef=$statedir/alerted host=$(hostname -s | scrub) now=$(date '+%H:%M:%S %Z')
 # unavailable" the filter or sacct's, the fallback's, squeue's: the filter is
 # the actionable half and the fallback's stderr only a symptom
 uwhy=$(first_why nerr jerr) fwhy=$(first_why rwhy rerr jerr)
-memallocf=$tmp/memalloc memreadf=$tmp/memread memtotalf=$tmp/memtotal nodespecf=$tmp/nodespec
-sqv="center fold color bell eta recent bellall me statef statetmp uwhy jerr rwhy fwhy wtxt sfilt host now memallocf memreadf memtotalf nodespecf nodespecfmt serr"
+memallocf=$tmp/memalloc memreadf=$tmp/memread memtotalf=$tmp/memtotal nodespecf=$tmp/nodespec nodespecg=$tmp/nodespec.gate
+sqv="center fold color bell eta recent bellall me statef statetmp uwhy jerr rwhy fwhy wtxt sfilt host now memallocf memreadf memtotalf nodespecf nodespecg nodespecfmt serr"
 for v in $sqv; do export "SQV_$v=${!v}"; done
 # wide: some record of the three answers the tables read holds a byte above
 # 127 (grep's rc 1: none), so their cells are measured, cut and padded by
@@ -4371,22 +4653,29 @@ function digest(   r, s, nc, nord, ns, u, t, x, i, ma, mt) {
 # does not draw the page cache of an idle node as use.  Allocated counts against
 # what jobs can be given, RealMemory less MemSpecLimit (specialized_memory,
 # from scontrol, read by node_json_read, or by node_read where Slurm has no
-# --json): none for a node scontrol does not list, lists twice (a line forged
-# by free text) or garbled, or gives no figure below RealMemory for, and none
-# for any node when no answer was used, which the MEMNOTE line under the nodes
-# says.
-# Into MEMALLOC, and per node memden (what jobs can be given), memu, mempc
-# and memt as the allocated figures, wf and wm their widths
-function membar(   r, anyalloc, anycpu, i, spec) {
+# --json): none for a node scontrol does not list (or was not asked about,
+# its name not one it can be asked by), lists twice, gives no usable figure
+# for (garbled, none, or not below RealMemory), and none for any node when no
+# answer was used.  The MEMNOTE line under the nodes says so: why no answer
+# was used, else which nodes count RealMemory and why (one line, the first
+# such node named).
+# Into MEMALLOC, MEMNOTE (1 with its line in MEMTEXT), and per node memden
+# (what jobs can be given), memu, mempc and memt as the allocated figures, wf
+# and wm their widths
+function membar(   r, anyalloc, anycpu, i, spec, kind, nk, first, KINDS, nkinds, last) {
   for (r=1; r<=nn; r++) { if (memalloc[r] > 0) anyalloc = 1; if (used[r] > 0) anycpu = 1 }
   if (!(MEMALLOC = anyalloc || !anycpu)) return
-  nodes_read(nodespecf, nodespecfmt)
-  MEMNOTE = (serr != "")
+  nodes_read(nodespecf, nodespecfmt, nodespecg)
+  MEMNOTE = (serr != ""); MEMTEXT = "↳ memory counts RealMemory: " serr
   wf = wm = 0
   for (r=1; r<=nn; r++) {
     i = (node[r] in NODE_AT) ? NODE_AT[node[r]] : 0
-    spec = (i && !(i in NODE_BAD)) ? NODE_SPECMEM[i] : 0
-    if (spec < 0 || spec >= memreal[r]) spec = 0
+    if (!i || (node[r] in NODE_NF) || (nodespecfmt == "text" && !node_listable(noderaw[r]))) kind = "nolist"
+    else if (i in NODE_BAD) kind = (NODE_BAD[i] == "twice") ? "twice" : "bad"
+    else if (NODE_SPECMEM[i] < 0 || NODE_SPECMEM[i] >= memreal[r]) kind = "bad"
+    else kind = ""
+    spec = (kind == "") ? NODE_SPECMEM[i] : 0
+    if (kind != "") { if (!nk++) first = node[r]; if (!(kind in KINDS)) { KINDS[kind]; nkinds++ }; last = kind }
     memden[r] = memreal[r] - spec
     memu[r]  = sprintf("%.0f", memalloc[r]/1024)
     mempc[r] = memden[r] ? int(memalloc[r]*100/memden[r]) : 0
@@ -4394,6 +4683,16 @@ function membar(   r, anyalloc, anycpu, i, spec) {
     if (length(memu[r]) > wf) wf = length(memu[r])
     if (length(memt[r]) > wm) wm = length(memt[r])
   }
+  if (MEMNOTE || !nk) return
+  MEMNOTE = 1
+  MEMTEXT = "↳ memory counts RealMemory on " first (nk > 1 ? " and " (nk - 1) " more node" (nk > 2 ? "s" : "") : "") ": " \
+            (nkinds > 1 ? "scontrol gave no usable MemSpecLimit for them" : memkind(last, nk > 1))
+}
+# why the MemSpecLimit of a node is not used, for one node or several
+function memkind(kind, many) {
+  if (kind == "twice")  return "scontrol listed " (many ? "them" : "it") " twice"
+  if (kind == "nolist") return "scontrol did not list " (many ? "them" : "it")
+  return "scontrol gave no usable MemSpecLimit" (many ? " for them" : "")
 }
 # the JOBID and EXIT cells of a finished group, for its row and for the one-line form
 function fid(g) {
@@ -4565,9 +4864,6 @@ BEGIN{
   BRACKET = "^([^[]*_\\[)([^]]*)(\\].*)$"                 # base_[ content ]suffix
   # the same, plus the step suffix that dropping -X brings in (.batch, .extern, .0)
   SACCTID = ID "([.][A-Za-z0-9_+.-]+)?$"
-  # a node record leads with CPUsState, alloc/idle/other/total: four machine-emitted
-  # numbers, so no reason text can be taken for the start of a record
-  NODEID = "^[0-9]+/[0-9]+/[0-9]+/[0-9]+$"
   H["a"]="ACCOUNT"; H["b"]="GRES";   H["C"]="CPU";    H["c"]="MIN_CPU"; H["D"]="NODES"
   H["e"]="END";     H["f"]="FEAT";   H["g"]="GROUP";  H["i"]="JOBID";   H["j"]="NAME"
   H["K"]="ARRAY";   H["L"]="LEFT";   H["l"]="LIMIT";  H["M"]="TIME";    H["m"]="MEM"
@@ -4672,7 +4968,7 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     if (rawnode in nodeseen) next               # sinfo -N prints one record per node
     nodeseen[rawnode] = 1                       # and partition: the first one stands
     nn++
-    node[nn] = F[2]; nst[nn] = F[5]
+    node[nn] = F[2]; noderaw[nn] = rawnode; nst[nn] = F[5]
     split(F[1], cp, "/"); used[nn] = cp[1]+0; tot[nn] = cp[4]+0
     load[nn] = (F[8] ~ /^[0-9]+([.][0-9]+)?$/) ? F[8]+0 : -1    # N/A: not known
     memreal[nn] = F[4]+0; memalloc[nn] = F[9]+0
@@ -5124,8 +5420,7 @@ END{
     out[++o] = sprintf("%s%s↳ %d unreadable node row%s skipped%s", lm, e("2"),
                        skip[1], (skip[1] > 1 ? "s" : ""), e("0"))
   if (SHOW["nodes"] == 2 && MEMNOTE)
-    out[++o] = sprintf("%s%s%s%s", lm, e("2"),
-                       clip("↳ memory counts RealMemory: scontrol failed (" serr ")", target), e("0"))
+    out[++o] = sprintf("%s%s%s%s", lm, e("2"), clip(MEMTEXT, target), e("0"))
   if (SHOW["b2"]) out[++o] = ""
 
   if (QCAP && !SHOW["qcap"]) ;                 # COMPACT found no line for the caption

@@ -185,19 +185,83 @@ function slurm_value(k, v,   len) {
 }
 
 # scontrol -o show node from a sinfo record: each node once, the figures sinfo
-# has, in scontrol's order (stub.sh says why); "" for a record that adds none
-function derive_node(   rec, k, cpus, out) {
+# has, in scontrol's order (stub.sh says why); "" for a record that adds none.
+# FULL (the -o line) prints the memory run whole, as every Slurm does
+# (RealMemory AllocMem FreeMem Sockets Boards, AllocMem 0 and FreeMem N/A where
+# sinfo has none), then State=IDLE; without it (the line the made --json is
+# read from) only the figures sinfo has, so that document stays as it was
+function derive_node(full,   rec, k, cpus, out) {
   parse_fields(cur_text, rec)
   for (k in DEF) if (!(k in rec)) rec[k] = DEF[k]
   if (!("nodelist" in rec) || rec["nodelist"] in DERIVED) return ""
   DERIVED[rec["nodelist"]] = 1
+  DERIVED_NAME = rec["nodelist"]
   out = "NodeName=" rec["nodelist"]
   if (split(rec["cpusstate"], cpus, "/") == 4) out = out " CPUAlloc=" cpus[1] " CPUTot=" cpus[4]
   if ("cpusload" in rec) out = out " CPULoad=" rec["cpusload"]
+  if (full && ("memory" in rec))
+    return out " RealMemory=" rec["memory"] " AllocMem=" (("allocmem" in rec) ? rec["allocmem"] : 0) \
+               " FreeMem=" (("freemem" in rec) ? rec["freemem"] : "N/A") " Sockets=1 Boards=1 State=IDLE"
   if ("memory" in rec)   out = out " RealMemory=" rec["memory"]
   if ("allocmem" in rec) out = out " AllocMem=" rec["allocmem"]
   if ("freemem" in rec)  out = out " FreeMem=" rec["freemem"]
   return out
+}
+
+# ---- a scontrol-node record line, as Slurm printed it (N11 a-c) --------------
+# Before the first raw " Reason=", " Comment=" or " Extra=" (free text an admin
+# sets, which can hold anything), each raw "(^| )Key=" is a key Slurm printed,
+# its raw value up to the next space; text that only looks like a key inside a
+# value is written with "=" as \x3d, so it is no key here and reads "=" once
+# decoded.  Into KR[key] the raw value (the first one of a name), into
+# KEY_FREE the raw rest from the cut on ("" without one); a key sq maps (and
+# the made --json prints) found twice is refused, as is a record whose raw
+# NodeName an earlier line had, unless the fixture has a sinfo file of its own
+# (a forged line is written inside a value, never as a fixture line).  Split
+# on single spaces, so a long line costs one pass
+function node_keys(raw, KR,   p, n, T, i, key) {
+  KEY_FREE = ""
+  if (match(raw, / (Reason|Comment|Extra)=/)) { KEY_FREE = substr(raw, RSTART + 1); raw = substr(raw, 1, RSTART - 1) }
+  n = split(raw, T, " ")
+  for (i = 1; i <= n; i++) {
+    if (!match(T[i], /^[A-Za-z_]+=/)) continue
+    key = substr(T[i], 1, RLENGTH - 1)
+    if (key in KR) {
+      if (key in MAPPED) refuse(where() ": " key "= twice before the free text (write key-like text inside a value with \\x3d)")
+      continue
+    }
+    KR[key] = substr(T[i], RLENGTH + 1)
+  }
+  if (!("NodeName" in KR)) return
+  if ((KR["NodeName"] in RAWNAMES) && !OWN_SINFO)
+    refuse(where() ": NodeName=" KR["NodeName"] " again (a forged line goes inside a value, \\n; or give the fixture a sinfo file)")
+  RAWNAMES[KR["NodeName"]] = 1
+}
+# a raw value as the record prints it: escapes decoded, a value without a
+# backslash as it is
+function kv(KR, key) { return (KR[key] ~ /\\/) ? decode(KR[key]) : KR[key] }
+
+# ---- sq job's figure call (sinfo -O CPUsState,NodeList,PartitionName,Memory,
+# AllocMem,StateComplete) where the fixture has no sinfo file: from the
+# records of scontrol-node alone (N11 e), one row per partition of each record
+# with Partitions, as sinfo -N prints one per node and partition: CPUsState
+# A/I/O/T with A CPUAlloc and T CPUTot, T-A other when State has DRAIN or its
+# base is DOWN, else idle (sinfo.c:1111-1117); NodeList NodeName, Memory
+# RealMemory, AllocMem, StateComplete State in lower case.  Only these keys
+# are decoded; one missing is refused by the renderer ("no value for ...")
+function figure_rows(   KR, rec, P, np, i, a, t, st) {
+  if (cur_text !~ /^NodeName=/) return
+  node_keys(cur_text, KR)
+  if (!("Partitions" in KR) || (np = split(kv(KR, "Partitions"), P, ",")) < 1) return
+  rec["nodelist"] = kv(KR, "NodeName")
+  if ("CPUAlloc" in KR && "CPUTot" in KR && (a = kv(KR, "CPUAlloc")) ~ /^[0-9]+$/ && (t = kv(KR, "CPUTot")) ~ /^[0-9]+$/) {
+    st = ("State" in KR) ? kv(KR, "State") : ""
+    rec["cpusstate"] = a "/" ((st ~ /DRAIN/ || st ~ /^DOWN(\+|$)/) ? 0 "/" (t - a) : (t - a) "/" 0) "/" t
+  }
+  if ("RealMemory" in KR) rec["memory"] = kv(KR, "RealMemory")
+  if ("AllocMem" in KR)   rec["allocmem"] = kv(KR, "AllocMem")
+  if ("State" in KR)      rec["statecomplete"] = tolower(kv(KR, "State"))
+  for (i = 1; i <= np; i++) { rec["partitionname"] = P[i]; render_rec(rec) }
 }
 
 # ---- scontrol --json show node, made from -o lines: json-c's pretty layout ----
@@ -217,31 +281,36 @@ function jarr(d, key, list, sep,   n, a, i, out) {
   for (i = 1; i <= n; i++) out = out "\n" jind(d + 1) jstr(a[i]) (i < n ? "," : "")
   return out "\n" jind(d) "]"
 }
-# one node of the document from an -o line, as node_read reads that line: up
-# to its first newline and its first " Reason=", " Comment=" or " Extra=",
-# the first key of a name counting.  The rest, free text with whatever it
-# holds (a newline and a forged line too), is its reason, a string
-function json_node(ln,   KV, s, m, M, mn, out, i, free) {
+# one node of the document from a scontrol-node record line, as Slurm prints
+# that node (node_keys reads its keys raw; the free text from the first raw
+# Reason=/Comment=/Extra= on, decoded, is its reason, a string), or from a line
+# derive_node made of a sinfo record (DERIVED: plain text, nothing to decode)
+function json_node(ln, derived,   KR, K, k, M, mn, out, i, free) {
   if (ln !~ /^NodeName=/) return
-  free = ""
-  if (match(ln, /\n/)) { free = substr(ln, RSTART); ln = substr(ln, 1, RSTART - 1) }
-  if (match(ln, / (Reason|Comment|Extra)=/)) { free = substr(ln, RSTART + 1) free; ln = substr(ln, 1, RSTART - 1) }
-  s = ln
-  while (match(s, /(^| )([A-Za-z_]+)=([^ ]*)/, m)) { if (!(m[2] in KV)) KV[m[2]] = m[3]; s = substr(s, RSTART + RLENGTH) }
-  if ("Arch" in KV) M[++mn] = jind(3) "\"architecture\": " jstr(KV["Arch"])
+  if (derived) {                              # as the made --json always read it
+    free = ""
+    if (match(ln, /\n/)) { free = substr(ln, RSTART); ln = substr(ln, 1, RSTART - 1) }
+    if (match(ln, / (Reason|Comment|Extra)=/)) { free = substr(ln, RSTART + 1) free; ln = substr(ln, 1, RSTART - 1) }
+    while (match(ln, /(^| )([A-Za-z_]+)=([^ ]*)/, M)) { if (!(M[2] in K)) K[M[2]] = M[3]; ln = substr(ln, RSTART + RLENGTH) }
+    delete M
+  } else {
+    node_keys(ln, KR); free = (KEY_FREE == "") ? "" : decode(KEY_FREE)
+    for (k in KR) K[k] = kv(KR, k)
+  }
+  if ("Arch" in K) M[++mn] = jind(3) "\"architecture\": " jstr(K["Arch"])
   M[++mn] = jind(3) "\"boot_time\": {\n" jind(4) "\"set\": true,\n" jind(4) "\"infinite\": false,\n" jind(4) "\"number\": 0\n" jind(3) "}"
-  if ("CPUTot" in KV) M[++mn] = jnum(3, "cpus", KV["CPUTot"])
-  if ("CPUEfctv" in KV) M[++mn] = jnum(3, "effective_cpus", KV["CPUEfctv"])
+  if ("CPUTot" in K) M[++mn] = jnum(3, "cpus", K["CPUTot"])
+  if ("CPUEfctv" in K) M[++mn] = jnum(3, "effective_cpus", K["CPUEfctv"])
   M[++mn] = jarr(3, "features", "", ",")
-  M[++mn] = jnum(3, "specialized_memory", ("MemSpecLimit" in KV) ? KV["MemSpecLimit"] : 0)
-  M[++mn] = jind(3) "\"name\": " jstr(KV["NodeName"])
+  M[++mn] = jnum(3, "specialized_memory", ("MemSpecLimit" in K) ? K["MemSpecLimit"] : 0)
+  M[++mn] = jind(3) "\"name\": " jstr(K["NodeName"])
   M[++mn] = jarr(3, "next_state_after_reboot", "INVALID", ",")
-  M[++mn] = jarr(3, "state", KV["State"], "+")
-  M[++mn] = jarr(3, "partitions", KV["Partitions"], ",")
-  if ("RealMemory" in KV) M[++mn] = jnum(3, "real_memory", KV["RealMemory"])
+  M[++mn] = jarr(3, "state", K["State"], "+")
+  M[++mn] = jarr(3, "partitions", K["Partitions"], ",")
+  if ("RealMemory" in K) M[++mn] = jnum(3, "real_memory", K["RealMemory"])
   M[++mn] = jind(3) "\"reason\": " jstr(free)
-  if ("AllocMem" in KV) M[++mn] = jnum(3, "alloc_memory", KV["AllocMem"])
-  if ("CPUAlloc" in KV) M[++mn] = jnum(3, "alloc_cpus", KV["CPUAlloc"])
+  if ("AllocMem" in K) M[++mn] = jnum(3, "alloc_memory", K["AllocMem"])
+  if ("CPUAlloc" in K) M[++mn] = jnum(3, "alloc_cpus", K["CPUAlloc"])
   M[++mn] = jnum(3, "weight", 1)
   out = jind(2) "{"
   for (i = 1; i <= mn; i++) out = out "\n" M[i] (i < mn ? "," : "")
@@ -261,12 +330,40 @@ function json_doc(   i) {
   printf "%s\"meta\": {\n%s\"slurm\": {\n%s\"release\": \"23.11.4\"\n%s}\n%s},\n", jind(1), jind(2), jind(3), jind(2), jind(1)
   printf "%s,\n%s\n%s}\n", jarr(1, "errors", "", ","), jarr(1, "warnings", "", ","), jind(0)
 }
-function render(   rec, i, out, k, src) {
+function render(   rec, out, KR, name) {
   if (mode == "jsonfile") { printf "%s\n", cur_text; return }
-  if (mode == "json") { json_node(derive ? derive_node() : decode(cur_text)); return }
-  if (derive) { out = derive_node(); if (out != "") printf "%s\n", out; return }
-  if (mode == "raw") { printf "%s\n", decode(cur_text); return }
+  if (figrows) { figure_rows(); return }
+  if (mode == "json") { if (derive) json_node(derive_node(0), 1); else json_node(cur_text, 0); return }
+  if (mode == "raw") {
+    if (derive) { if ((out = derive_node(1)) == "") return; name = DERIVED_NAME }
+    else {
+      out = (cur_text ~ /\\/) ? decode(cur_text) : cur_text      # the fast path (N11 g)
+      if (cur_text ~ /^NodeName=/) { node_keys(cur_text, KR); name = kv(KR, "NodeName") }
+      else if (listed) { printf "%s\n", out; return }       # no record: printed where it stands
+    }
+    if (!listed) printf "%s\n", out
+    else if (!(name in LISTREC)) LISTREC[name] = out
+    return
+  }
   parse_fields(cur_text, rec)
+  render_rec(rec)
+}
+# scontrol -o show node LIST (N11 h): per element of LIST in order the record
+# of that name (an element twice, twice, as Slurm prints it), else "Node
+# <name> not found" on stdout; printed where the file ends or at @exit, so
+# the file's directives act as for the unlisted call: an @exit N other than 0
+# is a failure where it stands, which prints the records read so far and no
+# "not found" of its own.  1 when one was not found, as scontrol then exits 1
+function list_print(failed,   L, n, i, nf) {
+  if (!listed || LISTDONE++) return 0
+  n = split(ENVIRON["STUB_LIST"], L, ",")
+  for (i = 1; i <= n; i++)
+    if (L[i] in LISTREC) printf "%s\n", LISTREC[L[i]]
+    else if (!failed) { printf "Node %s not found\n", L[i]; nf = 1 }
+  return nf
+}
+# one record of a format's fields (the fixture's, or one figure_rows made)
+function render_rec(rec,   i, out, k, src) {
   out = lit[0]
   for (i = 1; i <= nf; i++) {
     k = fld[i]
@@ -325,7 +422,7 @@ function run_file(path, depth,   line, rc, saved_file, saved_line, dir, d, arg, 
     if (line !~ /^@/) { cur_text = line; render(); continue }
     d = line; sub(/[ \t].*$/, "", d)
     arg = substr(line, length(d) + 1); sub(/^[ \t]/, "", arg)
-    if ((mirror || derive) && d != "@defaults" && d != "@include") continue   # the records alone
+    if ((mirror || derive || figrows) && d != "@defaults" && d != "@include") continue   # the records alone
     if (d == "@file") { if (!step || step == call) file_op(arg); continue }
     if (d == "@defaults")     { delete tmp; parse_fields(arg, tmp); for (k in tmp) DEF[k] = tmp[k] }
     else if (d == "@include") {
@@ -339,11 +436,11 @@ function run_file(path, depth,   line, rc, saved_file, saved_line, dir, d, arg, 
     else if (d == "@stderr")  printf "%s\n", decode(arg) > "/dev/stderr"
     else if (d == "@exit")    {
       if (trim(arg) !~ /^[0-9]+$/) refuse(where() ": @exit needs a number")
-      json_doc(); fflush(); exit trim(arg) + 0
+      json_doc(); nf_list = list_print(trim(arg) + 0 != 0); fflush(); exit ((trim(arg) + 0) ? trim(arg) + 0 : nf_list)
     }
     else if (d == "@hang")    {
       arg = trim(arg); if (arg == "") arg = 30
-      if (arg !~ /^[0-9]+$/) refuse(where() ": @hang takes whole seconds")
+      if (arg !~ /^[0-9]+([.][0-9]+)?$/) refuse(where() ": @hang takes seconds (2, 2.9)")
       fflush(); system("sleep " arg)
     }
     else refuse(where() ": unknown directive " d)
@@ -356,6 +453,10 @@ function run_file(path, depth,   line, rc, saved_file, saved_line, dir, d, arg, 
 BEGIN {
   tool = ENVIRON["STUB_TOOL"]; mode = ENVIRON["STUB_MODE"]; fmt = ENVIRON["STUB_FMT"]
   mirror = (ENVIRON["STUB_MIRROR"] == "1"); derive = (ENVIRON["STUB_DERIVE"] == "1")
+  figrows = (ENVIRON["STUB_FIGROWS"] == "1"); listed = ("STUB_LIST" in ENVIRON)
+  OWN_SINFO = (ENVIRON["STUB_OWN_SINFO"] == "1")
+  split("NodeName Arch CPUTot CPUEfctv CPUAlloc RealMemory AllocMem MemSpecLimit State Partitions", k, " ")
+  for (i in k) MAPPED[k[i]] = 1
   logf = ENVIRON["SQSTUB_LOG"]
   call = ENVIRON["STUB_CALL"] + 0
   parse_format()
@@ -363,5 +464,5 @@ BEGIN {
   JSONC = ("SQSTUB_JSONC" in ENVIRON) ? ENVIRON["SQSTUB_JSONC"] : "0.17"
   run_file(ENVIRON["STUB_FILE"], 0)
   json_doc()
-  exit 0
+  exit list_print(0)
 }

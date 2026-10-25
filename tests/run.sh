@@ -4282,8 +4282,8 @@ CPUsState=8/0/16/24; NodeList=fb2-bioinf-0; FreeMem=N/A; Memory=80000; StateLong
 		mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem draining" && bar_kinds_are fb2-bioinf 2 "2:░ 31:█"'
 }
 c_membar_forged() {
-	T_TITLE="MemSpecLimit only before Reason=/Comment=/Extra=, the first one counting: free text naming one, a forged line, a figure at or above RealMemory and a node scontrol does not list count none; read from --json and, where Slurm has none, from -o"
-	local d big small nojson
+	T_TITLE="MemSpecLimit only where Slurm prints it (--json; where Slurm has none, -o's one between the memory run and State): free text naming one, a forged line, a figure at or above RealMemory and a node scontrol does not list count none, and the caption says so"
+	local d big small nojson forged
 	big=$(grep '^NodeName=fb2-bioinf ' "$fixtures/membar-busy/scontrol-node")
 	small=$(grep '^NodeName=fb2-bioinf-0 ' "$fixtures/membar-busy/scontrol-node")
 	for nojson in "" SQSTUB_NOJSON=1; do
@@ -4296,9 +4296,12 @@ c_membar_forged() {
 		sq_run "$d" $nojson -- --full
 		need "${nojson:+no --json: }... and one before it: that one counts" eval 'rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed"'
 		if [ -n "$nojson" ]; then
-			d=$(mem_fixture membar-busy scontrol-node "$big Comment=x\nNodeName=fb2-bioinf RealMemory=1031000 AllocMem=0 MemSpecLimit=900000 State=IDLE\n$small")
+			# written inside a value (stub.sh): MCS_label, before the free text,
+			# its "=" as \x3d, so neither the record nor the made --json gets a key
+			forged=' MCS_label=x\\nNodeName\\x3dfb2-bioinf RealMemory\\x3d1031000 AllocMem\\x3d0 MemSpecLimit\\x3d900000 State\\x3dIDLE'
+			d=$(mem_fixture membar-busy scontrol-node "${big%% MCS_label=N/A*}$forged${big#* MCS_label=N/A}\n$small")
 			sq_run "$d" $nojson -- --full
-			need "no --json: a Comment whose newline starts a second NodeName=fb2-bioinf line: RealMemory counts" eval '
+			need "no --json: an MCS_label whose newline starts a second NodeName=fb2-bioinf line: RealMemory counts" eval '
 				rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed"'
 		else   # --json prints that Comment as one string, its newline escaped
 			d=$(json_fx membar-busy "$json_add" NODE=fb2-bioinf KEY=comment V=$'x\nNodeName=fb2-bioinf RealMemory=1031000 AllocMem=0 MemSpecLimit=900000 State=IDLE')
@@ -4311,13 +4314,15 @@ c_membar_forged() {
 		need "${nojson:+no --json: }an Extra= at the end naming MemSpecLimit=0: ignored" eval 'rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed"'
 		d=$(mem_fixture membar-busy scontrol-node "${big/ MemSpecLimit=31000/ MemSpecLimit=1031000}\n${small/ MemSpecLimit=3200/ MemSpecLimit=lots}")
 		sq_run "$d" $nojson -- --full
-		need "${nojson:+no --json: }MemSpecLimit as large as RealMemory, or no number: RealMemory counts" eval '
-			rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" && mem_part_is fb2-bioinf-0 "██████████████░░ 89% 70/78G mem allocated"'
+		need "${nojson:+no --json: }MemSpecLimit as large as RealMemory, or no number: RealMemory counts, the caption names both (N10)" eval '
+			rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" && mem_part_is fb2-bioinf-0 "██████████████░░ 89% 70/78G mem allocated" &&
+			membar_note | grep -qxE "↳ memory counts RealMemory on fb2-bioinf and 1 more node: scontrol gave no usable MemSpecLimit( for them| ?…)"'
 		d=$(mem_fixture membar-busy scontrol-node "$small")
 		sq_run "$d" $nojson -- --full
-		need "${nojson:+no --json: }fb2-bioinf not listed: RealMemory for it, fb2-bioinf-0 its own, no line" eval '
+		need "${nojson:+no --json: }fb2-bioinf not listed: RealMemory for it, fb2-bioinf-0 its own, the caption names it (N10)" eval '
 			rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" &&
-			mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated" && [ -z "$(membar_note)" ]'
+			mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated" &&
+			[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf: scontrol did not list it" ]'
 		# one record whose Comment holds a newline and a line of its own: -o
 		# prints two lines, a node listed twice; --json keeps it in a string
 		d=$(mem_fixture membar-busy scontrol-node "$big Comment=x\\\\nNodeName=fb2-bioinf RealMemory=1031000 AllocMem=0 MemSpecLimit=900000 State=IDLE\n$small")
@@ -4389,9 +4394,10 @@ c_membar_json() {
 	# a node unknown: specialized_memory twice, or named twice
 	d=$(json_fx membar-busy "$json_add" NODE=fb2-bioinf KEY=specialized_memory J=0)
 	sq_run "$d" -- --full
-	need "specialized_memory twice: fb2-bioinf unknown, its RealMemory counts, fb2-bioinf-0 its own" eval '
+	need "specialized_memory twice: fb2-bioinf unknown, its RealMemory counts, fb2-bioinf-0 its own, the caption names it (N10)" eval '
 		rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" &&
-		mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated" && [ -z "$(membar_note)" ]'
+		mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated" &&
+		[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf: scontrol gave no usable MemSpecLimit" ]'
 	d=$(json_fx membar-busy "$json_name" NODE=fb2-bioinf-0 J='"fb2-bioinf"')
 	sq_run "$d" -- --full
 	need "a name in two nodes: both RealMemory (fb2-bioinf unknown, fb2-bioinf-0 not listed)" eval 'rc_is 0 && err_empty && membar_real'
@@ -4410,11 +4416,12 @@ c_membar_json() {
 	d=$(json_fx membar-busy "$json_name" NODE=fb2-bioinf J="\"fb2${u}002dbio${u}0069nf\"")
 	sq_run "$d" SQSTUB_HOST=FranzGB -- --full --no-color
 	need "a name written with \\u escapes: decoded, the accepted screen" eval 'rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && membar_busy_is'
-	# no nodes at all: an answer, every node at RealMemory, no line
+	# no nodes at all: an answer, every node at RealMemory, the caption says so (N10)
 	d=$(json_fx membar-busy '/^  "nodes": \[$/ { print "  \"nodes\": [],"; skip = 1; next } skip && /^  \],$/ { skip = 0; next } !skip { print }')
 	sq_run "$d" -- --full
-	need "an empty nodes array: one call, RealMemory for both, no line" eval '
-		rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && membar_real && [ -z "$(membar_note)" ]'
+	need "an empty nodes array: one call, RealMemory for both, the caption naming the first" eval '
+		rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && membar_real &&
+		[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf and 1 more node: scontrol did not list them" ]'
 	# 1000 nodes of 3 KB each (bioserver's are 3.5 KB), the first one padded
 	# and copied, then the two of the fixture
 	d=$(json_fx membar-busy 'n < 2 { L[++nl] = $0 } /^    [{}],?$/ && ++n == 2 { pad = "      \"energy\": {"; for (i = 1; i <= 40; i++) pad = pad "\n        \"e" i "\": {\"set\": true,\n          \"number\": " i "\n        },"; pad = pad "\n        \"last\": 0\n      },"
@@ -4506,27 +4513,35 @@ ctl_run() {   # ctl_run FIXTURE utf8|C|none [VAR=value...]: the dashboard, FULL,
 	esac
 }
 c_nodes_ctl_o() {
-	T_TITLE="under -o a node name with \\001 or \\302\\201 joins its MemSpecLimit, and node\\001 beside node? is 'twice', each screen the --json path's: under C.UTF-8, a gawk forced to C and a host with no UTF-8 locale"
-	local d how fx name a json
+	T_TITLE="a node name with \\001 or \\302\\201: --json joins its MemSpecLimit; -o cannot ask scontrol by it (N5), so it reads RealMemory with the caption, the other node its own; node\\001 beside node? is 'twice' under --json, under -o node? its own; under C.UTF-8, a gawk forced to C and a host with no UTF-8 locale"
+	local d how fx name a
 	no_utf8_locale "$T_DIR/nobin"
 	for fx in 'c0:fb2-bio\\x01nf' 'c1:fb2-bio\\xc2\\x81nf'; do
 		IFS=: read -r name a <<< "$fx"
 		d=$(names_fx "ctl-$name" "$a" fb2-bioinf-0)
 		for how in utf8 C none; do
-			ctl_run "$d" $how; json=$RUN/screen; without_clock "$OUT" > "$json"
+			ctl_run "$d" $how
+			need "$name in the name, $how, --json: rc 0, stderr empty, fb2-bio?nf at RealMemory less MemSpecLimit (265/977G), no caption" eval '
+				rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && matches "^ +fb2-bio\\?nf .* 265/977G +mem" && matches "^ +fb2-bioinf-0 .* 70/75G +mem" &&
+				[ -z "$(membar_note)" ]'
 			ctl_run "$d" $how SQSTUB_NOJSON=1
-			need "$name in the name, $how, -o: rc 0, stderr empty, fb2-bio?nf at RealMemory less MemSpecLimit (265/977G), the --json screen" eval '
-				rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && matches "^ +fb2-bio\\?nf .* 265/977G +mem" && matches "^ +fb2-bioinf-0 .* 70/75G +mem" &&
-				cmp -s "$json" <(without_clock "$OUT")'
+			need "$name in the name, $how, -o: rc 0, stderr empty, not asked about (only fb2-bioinf-0), fb2-bio?nf at RealMemory (265/1007G) with the caption, fb2-bioinf-0 its own" eval '
+				rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && argv_has scontrol -o show node fb2-bioinf-0 &&
+				matches "^ +fb2-bio\\?nf .* 265/1007G +mem" && matches "^ +fb2-bioinf-0 .* 70/75G +mem" &&
+				[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bio?nf: scontrol did not list it" ]'
 		done
 	done
 	d=$(names_fx ctl-pair 'fb2-bio\\x01nf' 'fb2-bio?nf')
 	for how in utf8 C none; do
-		ctl_run "$d" $how; json=$RUN/screen; without_clock "$OUT" > "$json"
-		ctl_run "$d" $how SQSTUB_NOJSON=1
-		need "fb2-bio\\x01nf beside fb2-bio?nf, $how, -o: two rows fb2-bio?nf at RealMemory (listed twice), the --json screen" eval '
+		ctl_run "$d" $how
+		need "fb2-bio\\x01nf beside fb2-bio?nf, $how, --json: two rows fb2-bio?nf at RealMemory (listed twice)" eval '
 			rc_is 0 && err_empty && [ "$(plain | grep -cE "^ +fb2-bio\\?nf ")" = 2 ] && matches "^ +fb2-bio\\?nf .* 265/1007G +mem" &&
-			matches "^ +fb2-bio\\?nf .* 70/78G +mem" && cmp -s "$json" <(without_clock "$OUT")'
+			matches "^ +fb2-bio\\?nf .* 70/78G +mem" && [ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bio?nf and 1 more node: scontrol listed them twice" ]'
+		ctl_run "$d" $how SQSTUB_NOJSON=1
+		need "fb2-bio\\x01nf beside fb2-bio?nf, $how, -o: asked about fb2-bio?nf alone; the first at RealMemory with the caption, fb2-bio?nf its own" eval '
+			rc_is 0 && err_empty && [ "$(plain | grep -cE "^ +fb2-bio\\?nf ")" = 2 ] && argv_has scontrol -o show node "fb2-bio?nf" &&
+			matches "^ +fb2-bio\\?nf .* 265/1007G +mem" && matches "^ +fb2-bio\\?nf .* 70/75G +mem" &&
+			[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bio?nf: scontrol did not list it" ]'
 	done
 }
 
@@ -4575,12 +4590,14 @@ c_membar_fallback() {
 	printf '@exit 1\n' > "$d/scontrol-node.json"
 	sq_run "$d" -- --full
 	need "-o killed: signal 9" eval 'rc_is 0 && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (signal 9)" ]'
-	# -o with no record, exit 0: an answer, as today
+	# -o with no record: asked for both, scontrol says neither is found, exit
+	# 1 with nothing on stderr: an answer (N4), the caption says so (N10)
 	d=$(mem_fixture membar-busy scontrol-node "# no node")
 	printf 'garbage\n' > "$d/scontrol-node.json"
 	sq_run "$d" -- --full
-	need "-o listing no node, exit 0: used, RealMemory for both, no line" eval '
-		rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && membar_real && [ -z "$(membar_note)" ]'
+	need "-o finding no node asked for: used, RealMemory for both, the caption naming the first" eval '
+		rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && membar_real &&
+		[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf and 1 more node: scontrol did not list them" ]'
 	# the -o call within what the --json call left of SQ_TIMEOUT, its
 	# timeout named by the first bound
 	d=$(mem_fixture membar-busy scontrol-node "@hang 10")
@@ -6741,8 +6758,8 @@ node_fx() {
 	printf '%s' "$d"
 }
 c_why_forged() {   # V14
-	T_TITLE="scontrol --json, and -o where Slurm has no --json: keys only before Reason=/Comment=/Extra=, the first one counts, a node listed twice is unknown; double spaces, a missing MemSpecLimit or CPUEfctv"
-	local big small d nojson
+	T_TITLE="scontrol --json, and where Slurm has no --json sinfo's figures with CPUEfctv and MemSpecLimit read from -o only where Slurm prints them: free text naming figures or partitions is text, a node listed twice is unknown; double spaces, a missing MemSpecLimit or CPUEfctv"
+	local big small d nojson first
 	big=$(grep '^NodeName=fb2-bioinf ' "$jfx/badconstraints-11955/scontrol-node")
 	small=$(grep '^NodeName=fb2-bioinf-0 ' "$jfx/badconstraints-11955/scontrol-node")
 	for nojson in "" SQSTUB_NOJSON=1; do
@@ -6754,7 +6771,7 @@ c_why_forged() {   # V14
 			rc_is 0 && err_empty && why_has "    fb2-bioinf     128          1006.8G  too few CPUs" &&
 			! why_notes | grep -q "on fb2-bioinf\$" && why_notes | grep -qxF "memory for jobs is a node'"'"'s RealMemory less what Slurm keeps for the system (MemSpecLimit): 78.1G less 3.1G on fb2-bioinf-0"'
 		if [ -n "$nojson" ]; then
-			d=$(node_fx comment "$big Comment=x" "NodeName=fb2-bioinf CPUEfctv=999 CPUTot=999 RealMemory=99999999 AllocMem=0 MemSpecLimit=0 State=IDLE Partitions=LocalQ" "$small")
+			d=$(node_fx comment "$big Comment=x\\nNodeName=fb2-bioinf CPUEfctv=999 CPUTot=999 RealMemory=99999999 AllocMem=0 MemSpecLimit=0 State=IDLE Partitions=LocalQ" "$small")
 			why_run "$d" $nojson -- --no-color job 11955
 			need "no --json: a Comment whose newline starts a second NodeName=fb2-bioinf line: that node unknown, not the forged figures" eval '
 				rc_is 0 && why_has "    fb2-bioinf       ?                ?  unknown: scontrol listed it twice" && ! has 999'
@@ -6771,7 +6788,8 @@ c_why_forged() {   # V14
 		# a key twice before the cut: the first counts.  23.11.4 prints the CPU
 		# figures before OS=, whose value (the node's uname) has spaces and may
 		# name anything; a later CPUEfctv or CPUAlloc there is text, not a figure
-		d=$(node_fx first "${big/ SMP PREEMPT_DYNAMIC/ SMP CPUEfctv=999 CPUAlloc=0 PREEMPT_DYNAMIC}" "$small")
+		first=' SMP CPUEfctv\x3d999 CPUAlloc\x3d0 PREEMPT_DYNAMIC'     # "=" as \x3d: text, no key (stub.sh)
+		d=$(node_fx first "${big/ SMP PREEMPT_DYNAMIC/$first}" "$small")
 		why_run "$d" $nojson -- --no-color job 11955
 		need "${nojson:+no --json: }CPUEfctv= and CPUAlloc= again in the OS= text: the first ones count, the screen as pinned" eval 'rc_is 0 && job_is "$jfx/screens/why__pending-badconstraints.txt"'
 		d=$(node_fx cputot "${big/ CPUEfctv=128/}" "${small/ CPUEfctv=24/}")
@@ -6780,7 +6798,8 @@ c_why_forged() {   # V14
 		d=$(node_fx garbled "${big/ RealMemory=1031000/ RealMemory=lots}" "$small")
 		why_run "$d" $nojson -- --no-color job 11955
 		need "${nojson:+no --json: }a figure that is no number: that node unknown" eval 'rc_is 0 && why_has "    fb2-bioinf       ?                ?  unknown: scontrol did not say"'
-		printf '@stderr scontrol: error: Unable to contact slurm controller (connect failure)\n@exit 1\n' > "$d/scontrol-node"
+		# the records first, which sinfo's answer is made of (stub.sh), then scontrol failing
+		{ printf '%s\n' "$big" "$small"; printf '@stderr scontrol: error: Unable to contact slurm controller (connect failure)\n@exit 1\n'; } > "$d/scontrol-node"
 		why_run "$d" $nojson -- --no-color job 11955
 		need "${nojson:+no --json: }scontrol failing: the verdict, no table, and why" eval '
 			rc_is 0 && why_has "  can never start: no node it may use (LocalQ) meets what it asks for" &&
@@ -6845,17 +6864,17 @@ c_why_nodes_json() {
 	why_run "$d" -- --no-color job 11955
 	need "a --json answer cut short, exit 0: -o, the screen as pinned" eval '
 		rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && job_is "$jfx/screens/why__pending-badconstraints.txt"'
-	printf '@stderr %s\n@exit 1\n' "$why" > "$d/scontrol-node"
+	{ cat "$bfx/scontrol-node"; printf '@stderr %s\n@exit 1\n' "$why"; } > "$d/scontrol-node"   # sinfo answers (stub.sh)
 	why_run "$d" -- --no-color job 11955
 	need "... and -o failing: no table, nothing from the part read, -o's reason" eval '
 		rc_is 0 && ! why_lines | grep -q "fb2-bioinf " &&
 		[ "$(why_notes)" = "$(printf "%s\n" "the nodes are unknown: scontrol failed ($why)" "Slurm keeps it pending all the same; remove it: scancel 11955")" ]'
-	d=$(mem_fixture "${jfx#"$fixtures/"}/badconstraints-11955" scontrol-node "@exit 1")
+	d=$(mem_fixture "${jfx#"$fixtures/"}/badconstraints-11955" scontrol-node "@include $bfx/scontrol-node\n@exit 1")
 	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11955
 	need "no --json, -o failing silently: its exit status" eval '
 		rc_is 0 && why_notes | head -n 1 | grep -qxF "the nodes are unknown: scontrol failed (exit 1)"'
 	# a timeout asks no more, and names the bound as job_limit set it, without trailing zeros
-	printf '@hang 10\n' > "$d/scontrol-node"
+	{ cat "$bfx/scontrol-node"; printf '@hang 10\n'; } > "$d/scontrol-node"
 	why_run "$d" SQ_TIMEOUT=2 -- --no-color job 11955
 	need "--json silent: one call, 'no response after 2s'" eval '
 		rc_is 0 && [ "$(calls scontrol)" = 1 ] && why_notes | head -n 1 | grep -qxF "the nodes are unknown: scontrol failed (no response after 2s)"'
@@ -6874,7 +6893,7 @@ c_why_nodes_json() {
 		why_has "    fb2-bioinf     128           976.5G  too few CPUs, too little memory"'
 }
 c_why_nodes_figures() {
-	T_TITLE="sq job's node table from scontrol --json (effective_cpus, state) and from -o where Slurm has none (CPUEfctv, State): the effective CPUs where they differ from the total, a state of two flags shown joined by +"
+	T_TITLE="sq job's node table from scontrol --json (effective_cpus, state) and where Slurm has none from -o's CPUEfctv and sinfo's StateComplete: the effective CPUs where they differ from the total, a state of two flags shown joined by +"
 	local d nojson ncalls efctv state
 	for nojson in "" SQSTUB_NOJSON=1; do
 		if [ -n "$nojson" ]; then ncalls=2 efctv="no --json, CPUEfctv=120 and CPUTot=128" state="no --json, State=MIXED+FAIL"
@@ -7095,10 +7114,10 @@ EOF
 			"    11958      amadvi     64 CPUs    500G  PENDING (Resources), submitted 1h ago" \
 			"    11367_213  hal         2 CPUs   15.2G  PENDING (Priority), submitted 2h ago")" ]'
 	d=$(res_fx nonodes resources-11964)
-	printf '@stderr scontrol: error: Unable to contact slurm controller (connect failure)\n@exit 1\n' > "$d/scontrol-node"
+	{ cat "$jfx/resources-11964/scontrol-node"; printf '@stderr scontrol: error: Unable to contact slurm controller (connect failure)\n@exit 1\n'; } > "$d/scontrol-node"
 	why_run "$d" -- --no-color job 11964
-	need "scontrol failing: the lead, then why there is no table" eval '
-		rc_is 0 && why_has "  waits its turn: too little is free now on the nodes it may use (LocalQ)" &&
+	need "scontrol failing: the lead, Slurm's word for it as the nodes are unknown (N8), then why there is no table" eval '
+		rc_is 0 && why_has "  waits its turn: Slurm finds too little free now on the nodes it may use (LocalQ)" &&
 		[ "$(why_notes)" = "the nodes are unknown: scontrol failed (scontrol: error: Unable to contact slurm controller (connect failure))" ]'
 	d=$(res_fx noqueue resources-11964)
 	printf '@stderr slurm_load_jobs error: Socket timed out on send/recv operation\n@exit 1\n' > "$d/squeue-queue"
@@ -7830,6 +7849,681 @@ c_opts_docs() {   # AC27
 }
 
 # ============================================================================
+# NODES-v4: where scontrol --json is unusable, sq job takes every figure sinfo
+# can print from sinfo (machine text, framed by a third nonce), scontrol -o
+# is asked only about sinfo's names (both sites), and only CPUEfctv and
+# MemSpecLimit are read from it, where Slurm prints them (node_read)
+# ============================================================================
+# line_with LINE OLD NEW: LINE with its first OLD (literal text) made NEW,
+# verbatim: no pattern, no backslash undone (a fixture's \x3d, \n stay)
+line_with() {
+	local pre=${1%%"$2"*}
+	[ "$pre" != "$1" ] || { printf 'line_with: no "%s" in the line\n' "$2" >&2; return 1; }
+	printf '%s' "$pre$3${1#*"$2"}"
+}
+# jfx_copy NAME FIXTURE [FILE=LINES...]: a copy of sq job fixture FIXTURE
+# (its files as they are, @includes made absolute), FILE then holding these
+# lines (printf %s, so fixture escapes reach the stub as written); prints its
+# directory
+jfx_copy() {
+	local d=$T_DIR/fx-$1 src=$jfx/$2 f; shift 2
+	mkdir -p "$d"
+	for f in "$src"/*; do sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$f" > "$d/${f##*/}"; done
+	while [ $# -gt 0 ]; do printf '%s\n' "${1#*=}" > "$d/${1%%=*}"; shift; done
+	printf '%s' "$d"
+}
+# dash_copy NAME [FILE=LINES...]: membar-busy, each file an @include of it,
+# FILE holding these lines as written; prints its directory
+dash_copy() {
+	local d=$T_DIR/fx-$1 f; shift
+	mkdir -p "$d"
+	for f in sinfo sacct squeue scontrol-node; do printf '@include %s\n' "$fixtures/membar-busy/$f" > "$d/$f"; done
+	while [ $# -gt 0 ]; do printf '%s\n' "${1#*=}" > "$d/${1%%=*}"; shift; done
+	printf '%s' "$d"
+}
+# o_path DIR nojson|garbage: what makes --json unusable for the next run:
+# Slurm without it (O_ENV, SQSTUB_NOJSON=1), or an answer of garbage, exit 0
+# (DIR/scontrol-node.json); the two ways the -o path is reached
+o_path() {
+	rm -f "$1/scontrol-node.json"; O_ENV=SQSTUB_NOJSON=1
+	[ "$2" = nojson ] || { printf 'garbage\n' > "$1/scontrol-node.json"; O_ENV=; }
+}
+# pinned_is FILE: stdout is the pinned screen FILE, dates and the run's
+# directory aside (never written, also under --pin)
+pinned_is() { cmp -s <(job_mask "$1") <(unrooted | job_mask /dev/stdin); }
+# argv_is TOOL N WORD...: call N of TOOL got exactly these words
+argv_is() {
+	local want; want="$(printf '%q ' "${@:3}")"
+	W=$want gawk -F'\t' -v t="$1" -v n="$2" '$1 == "CALL" && $2 == t && ++c == n { exit !($3 == ENVIRON["W"]) } END { if (c < n) exit 1 }' "$LOG"
+}
+# node_calls: the scontrol and sinfo calls of the log in order, one a line ("scontrol --json", "sinfo", "scontrol -o")
+node_calls() { gawk -F'\t' '$1 == "CALL" && $2 == "sinfo" { print "sinfo" } $1 == "CALL" && $2 == "scontrol" { print "scontrol " ($3 ~ /^--json/ ? "--json" : "-o") }' "$LOG" | paste -sd,; }
+# the -o line's own fixtures: fb2-bioinf's and fb2-bioinf-0's lines of
+# badconstraints-11955 (bc_big, bc_small) and of resources-11964 (rs_big,
+# rs_small), and membar-busy's (mb_big, mb_small)
+nodes_lines() {
+	bc_big=$(grep '^NodeName=fb2-bioinf ' "$jfx/badconstraints-11955/scontrol-node")
+	bc_small=$(grep '^NodeName=fb2-bioinf-0 ' "$jfx/badconstraints-11955/scontrol-node")
+	rs_big=$(grep '^NodeName=fb2-bioinf ' "$jfx/resources-11964/scontrol-node")
+	rs_small=$(grep '^NodeName=fb2-bioinf-0 ' "$jfx/resources-11964/scontrol-node")
+	mb_big=$(grep '^NodeName=fb2-bioinf ' "$fixtures/membar-busy/scontrol-node")
+	mb_small=$(grep '^NodeName=fb2-bioinf-0 ' "$fixtures/membar-busy/scontrol-node")
+}
+# sq job's figure call answered by a sinfo file of its own: resources-11964's
+# rows as sinfo prints them (fb2-bioinf in LocalQ and main, fb2-bioinf-0 in
+# LocalQ and small), then these rows
+rs_sinfo() {
+	printf '%s\n' '@defaults Memory=1031000; AllocMem=327680; StateComplete=mixed; CPUsState=48/80/0/128' \
+		'NodeList=fb2-bioinf; PartitionName=LocalQ' 'NodeList=fb2-bioinf; PartitionName=main' \
+		'NodeList=fb2-bioinf-0; PartitionName=LocalQ; CPUsState=0/24/0/24; Memory=80000; AllocMem=0; StateComplete=idle' \
+		'NodeList=fb2-bioinf-0; PartitionName=small; CPUsState=0/24/0/24; Memory=80000; AllocMem=0; StateComplete=idle' "$@"
+}
+rs_pinned=$jfx/screens/why__pending-resources.txt bc_pinned=$jfx/screens/why__pending-badconstraints.txt
+bc_unknown='    fb2-bioinf       ?                ?  unknown: scontrol did not say'
+# why_unknown NODE WHY: the node table row of NODE reads "? ? unknown: scontrol WHY"
+why_unknown() { why_lines | grep -qE "^    $1 +\? +\? +unknown: scontrol $2\$"; }
+
+c_nodes_o_calls() {   # AC 1, 2, 9, 14
+	T_TITLE="NODES -o (no --json, or --json garbage): the --json screens of resources-11964, pending-est and badconstraints-11955; scontrol --json, then sinfo --local -h -N -O six fields framed by a third nonce (no SINFO_* reaching it), then scontrol -o show node fb2-bioinf,fb2-bioinf-0 under SLURM_TIME_FORMAT=standard; --json asks no sinfo; the dashboard asks its own sinfo once and scontrol -o its names, its -o collect as before"
+	local c name fx id want d how n n1 n2 f fmt
+	for c in "pending-resources resources-11964 11964" "pending-est pending-est 11962" "pending-badconstraints badconstraints-11955 11955"; do
+		read -r name fx id <<< "$c"
+		d=$(jfx_copy "calls-$fx" "$fx")
+		why_run "$d" -- --no-color job "$id"; want=$RUN/screen; unrooted > "$want"
+		need "$fx, --json: rc 0, stderr empty, one scontrol call, no sinfo call" eval '
+			rc_is 0 && err_empty && [ "$(node_calls)" = "scontrol --json" ]'
+		for how in nojson garbage; do
+			o_path "$d" "$how"
+			why_run "$d" $O_ENV SINFO_PARTITION=main SINFO_ALL=1 SINFO_FORMAT=%N SINFO_SORT=N SINFO_FEDERATION=1 SINFO_LOCAL=1 -- --no-color job "$id"
+			n=$(gawk -F'\t' '$1 == "CALL" && $2 == "sinfo" { if (match($3, /CPUsState:0[A-Za-z0-9]+/)) print substr($3, RSTART + 11, RLENGTH - 11); exit }' "$LOG")
+			n1=$(env_of sacct 1 SQ_NONCE) n2=$(env_of sacct 1 SQ_NONCE2) fmt=
+			for f in CPUsState NodeList PartitionName Memory AllocMem StateComplete; do fmt="$fmt${fmt:+,}$f:0$n"; done
+			need "$fx, -o ($how): rc 0, stderr empty, the --json screen" eval 'rc_is 0 && err_empty && cmp -s "$want" <(unrooted)'
+			[ "$name" = pending-est ] || need "$fx, -o ($how): the pinned screen" pinned_is "$jfx/screens/why__$name.txt"
+			need "$fx, -o ($how): scontrol --json, sinfo, scontrol -o, in that order" eval '[ "$(node_calls)" = "scontrol --json,sinfo,scontrol -o" ]'
+			need "$fx, -o ($how): sinfo --local -h -N -O, the six fields framed by a nonce of 17+ letters and digits apart from the other two" eval '
+				argv_is sinfo 1 --local -h -N -O "$fmt" && [[ $n =~ ^[A-Za-z][A-Za-z0-9]{16,}$ ]] && [ "$n" != "$n1" ] && [ "$n" != "$n2" ] && [ -n "$n1" ] && [ -n "$n2" ]'
+			need "$fx, -o ($how): no SINFO_* reached sinfo (six exported)" eval '! gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"sinfo\"" "$LOG" | grep -q SINFO_'
+			need "$fx, -o ($how): scontrol -o show node fb2-bioinf,fb2-bioinf-0, SLURM_TIME_FORMAT=standard; --json and sinfo as before (unset)" eval '
+				argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0 && [ "$(env_of scontrol 2 SLURM_TIME_FORMAT)" = standard ] &&
+				[ "$(env_of scontrol 1 SLURM_TIME_FORMAT)" = "(unset)" ] && [ "$(env_of sinfo 1 SLURM_TIME_FORMAT)" = "(unset)" ]'
+		done
+	done
+	sq_run membar-busy SQSTUB_NOJSON=1 SQSTUB_HOST=FranzGB "$(timeout_as)" SQSTUB_TIMEOUT=log -- --full --no-color
+	need "the dashboard, -o: the accepted screen, its own sinfo once, scontrol -o show node with its names, SLURM_TIME_FORMAT=standard there alone" eval '
+		rc_is 0 && err_empty && membar_busy_is && [ "$(calls sinfo)" = 1 ] && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0 &&
+		[ "$(env_of scontrol 2 SLURM_TIME_FORMAT)" = standard ] && [ "$(env_of scontrol 1 SLURM_TIME_FORMAT)" = "(unset)" ] && [ "$(env_of sinfo 1 SLURM_TIME_FORMAT)" = standard ]'
+	need "... its -o collect as before: timeout -k 2 LEFT sh -c exec, the list last" eval '
+		gawk -F"\t" "\$1 == \"TIMEOUT\" && / scontrol -o show node / { n++; ok = (\$2 ~ /-k 2 [0-9.]+ sh -c exec \"\\\$@\" 2>&3 3>&- scontrol scontrol -o show node fb2-bioinf,fb2-bioinf-0\$/) } END { exit !(n == 1 && ok) }" "$LOG"'
+	sq_run membar-busy SQSTUB_HOST=FranzGB -- --full --no-color
+	need "the dashboard, --json: the accepted screen, sinfo once, no -o" eval 'rc_is 0 && err_empty && membar_busy_is && [ "$(calls sinfo)" = 1 ] && [ "$(calls scontrol)" = 1 ]'
+}
+
+c_nodes_o_figures() {   # AC 3, 4, 13, 24
+	T_TITLE="NODES -o figures: CPUEfctv 120 of CPUTot 128 reads 72 of 120, none reads T, 17.11's CPUErr reads T and 976.5G, CPUEfctv above T reads ?; sinfo rows of one name that differ read ?; MemSpecLimit twice in the spec segment, or no State after the memory run, reads ?; the -o argv carries raw bytes; N8: an unknown node or none known makes the lead Slurm's, the admin verdict needs every node known, BadConstraints says 'whose figures are known'"
+	local d how
+	nodes_lines
+	for how in nojson garbage; do
+		d=$(jfx_copy "efctv-$how" resources-11964)
+		printf '%s\n' "$(line_with "$rs_big" CPUEfctv=128 CPUEfctv=120)" "$rs_small" > "$d/scontrol-node"
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "CPUEfctv=120, CPUTot=128 ($how): 72 of 120" eval 'rc_is 0 && err_empty && why_has "    fb2-bioinf    72 of 120  656.5G of 976.5G  too few CPUs free"'
+		printf '%s\n' "$(line_with "$rs_big" "CPUEfctv=128 " "")" "$rs_small" > "$d/scontrol-node"
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "no CPUEfctv ($how): T, the pinned screen" eval 'rc_is 0 && err_empty && pinned_is "$rs_pinned"'
+		printf '%s\n' "$(line_with "$rs_big" "CPUEfctv=128" "CPUEfctv=129")" "$rs_small" > "$d/scontrol-node"
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "CPUEfctv above T ($how): ?" eval 'rc_is 0 && err_empty && why_unknown fb2-bioinf "did not say"'
+	done
+	d=$(node_fx cpuerr "$(line_with "$bc_big" "CPUEfctv=128" "CPUErr=0")" "$bc_small")
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11955
+	need "17.11's CPU run (CPUErr): T and 976.5G, the pinned screen" eval 'rc_is 0 && err_empty && why_has "    fb2-bioinf     128           976.5G  too few CPUs, too little memory" && pinned_is "$bc_pinned"'
+	# sinfo rows of one name that differ outside PartitionName
+	d=$(jfx_copy rows resources-11964 "sinfo=$(rs_sinfo | sed 's/^NodeList=fb2-bioinf; PartitionName=main$/NodeList=fb2-bioinf; PartitionName=main; Memory=1031001/')")
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "two sinfo rows of fb2-bioinf differing in Memory: ?" eval 'rc_is 0 && err_empty && why_unknown fb2-bioinf "did not say"'
+	rs_sinfo > "$d/sinfo"
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "... the same rows alike: the pinned screen" eval 'rc_is 0 && err_empty && pinned_is "$rs_pinned"'
+	# the spec segment
+	d=$(node_fx cpuspec "$(line_with "$bc_big" " MemSpecLimit=31000" ' MemSpecLimit=31000 CPUSpecList=0-1 MemSpecLimit\x3d900000')" "$bc_small")
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11955
+	need "a genuine MemSpecLimit and CPUSpecList=0-1 MemSpecLimit=900000: ?" eval 'rc_is 0 && err_empty && why_has "$bc_unknown"'
+	d=$(node_fx nostate "$(line_with "$bc_big" " State=MIXED" "")" "$bc_small")
+	rs_sinfo > "$d/sinfo"          # its rows (the same as resources-11964's): sinfo prints a state
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11955
+	need "a memory run and no State after it: ?" eval 'rc_is 0 && err_empty && why_has "$bc_unknown"'
+	# raw bytes reach scontrol as Slurm knows the name
+	d=$(jfx_copy raw badconstraints-11955 "scontrol-node=$(sed -e 's/fb2-bioinf-0/@B@/g' -e 's/fb2-bioinf/n\\xe9x/g' -e 's/@B@/fb2-bioinf-0/g' "$jfx/badconstraints-11955/scontrol-node")")
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11955
+	need "a Latin-1 name: the -o argv carries its raw bytes ($'n\\351x,fb2-bioinf-0'), the row reads n␚x" eval '
+		rc_is 0 && err_empty && argv_is scontrol 2 -o show node $'"'"'n\351x,fb2-bioinf-0'"'"' && why_lines | grep -qE "^    n␚x +128 +976.5G "'
+	# N8, both paths
+	for how in json nojson; do
+		local env=; [ $how = json ] || env=SQSTUB_NOJSON=1
+		d=$(jfx_copy "n8a-$how" resources-11964)
+		{ cat "$jfx/resources-11964/scontrol-node"; printf '@stderr scontrol: error: Unable to contact slurm controller (connect failure)\n@exit 1\n'; } > "$d/scontrol-node"
+		why_run "$d" $env -- --no-color job 11964
+		need "$how, scontrol failing: V1b's lead" eval 'rc_is 0 && why_has "  waits its turn: Slurm finds too little free now on the nodes it may use (LocalQ)"'
+		printf '%s\n' "$(line_with "$rs_big" "RealMemory=1031000" "RealMemory=lots")" "$rs_small" > "$d/scontrol-node"
+		why_run "$d" $env -- --no-color job 11964
+		need "$how, fb2-bioinf garbled: V1b's lead, its row ?" eval '
+			rc_is 0 && err_empty && why_has "  waits its turn: Slurm finds too little free now on the nodes it may use (LocalQ)" && why_lines | grep -qE "^    fb2-bioinf +\\? +\\? +unknown"'
+		printf '%s\n' "$(line_with "$rs_big" "State=MIXED" "State=MIXED+DRAIN")" "$(line_with "$rs_small" "RealMemory=80000" "RealMemory=lots")" > "$d/scontrol-node"
+		why_run "$d" $env -- --no-color job 11964
+		need "$how, fb2-bioinf drained and fb2-bioinf-0 unknown: V1b's lead, not the admin verdict" eval '
+			rc_is 0 && err_empty && why_has "  waits its turn: Slurm finds too little free now on the nodes it may use (LocalQ)" && ! why_lines | grep -q "waits for an admin"'
+		d=$(node_fx "n8b-$how" "$(line_with "$bc_big" "RealMemory=1031000" "RealMemory=lots")" "$bc_small")
+		why_run "$d" $env -- --no-color job 11955
+		need "$how, badconstraints with fb2-bioinf garbled: L4b's line" eval '
+			rc_is 0 && err_empty && why_has "  can never start: no node it may use (LocalQ) whose figures are known is that big" && why_has "$bc_unknown"'
+	done
+}
+
+# the forgeries of the attacks (nodes-attack-int/-fmt), each written inside a
+# value, its key-like text with "=" as \x3d (stub.sh): NAME|OLD|NEW, OLD the
+# text of fb2-bioinf's line it goes into
+nodes_forgeries_genuine=(
+	'a1|2026  RealMemory=|2026  RealMemory\x3d1031000 AllocMem\x3d0 MemSpecLimit\x3d700000 Reason\x3dx  RealMemory='
+	'a1b|OS=Linux|OS=Linux MemSpecLimit\x3d500000 Reason\x3dx'
+	'a3|Arch=x86_64|Arch=x86_64 MemSpecLimit\x3d900000'
+	'A4|Arch=x86_64|Arch=x86_64 CPUEfctv\x3d9999 OS\x3dx'
+	'osnl|OS=Linux|OS=Linux\n'
+)
+nodes_forgeries_runs=(
+	'a1full|2026  RealMemory=|2026 RealMemory\x3d1 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 MemSpecLimit\x3d0 State\x3dIDLE  RealMemory='
+	'archrun|Arch=x86_64|Arch=x86_64 CPUAlloc\x3d0 CPUEfctv\x3d999 CPUTot\x3d999'
+	'A2|OS=Linux|OS=Linux RealMemory\x3d1 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 MemSpecLimit\x3d0 State\x3dIDLE\n'
+)
+# forged_line VAR "NAME|OLD|NEW" LINE: LINE with that forgery, into VAR
+forged_line() {
+	local name old new
+	IFS='|' read -r name old new <<< "$2"
+	printf -v "$1" '%s' "$(line_with "$3" "$old" "$new")"
+}
+c_nodes_o_forged() {   # AC 5, 6, 7, 8
+	T_TITLE="NODES -o forgeries: text in OS/Arch naming figures (forge2, osdash, a1, a1b, a3, A4, A13, an OS of a newline) reads genuine, as --json; a whole run there (a1full, archrun, A2) or in a Comment (A16, the stated regression) makes the node ?, the dashboard RealMemory with the caption; the HIGH-1 splits (S1/S2: the pair check's note; S3: ? and twice; S4: the caption), F3 (a name not found that begins a record) and M3 (a not-found line inside the forger's text) fail closed; forge1's ghost never shows a row"
+	local spec name line d how json n
+	nodes_lines
+	for spec in "${nodes_forgeries_genuine[@]}"; do
+		name=${spec%%|*}
+		forged_line line "$spec" "$bc_big"
+		d=$(node_fx "g-$name" "$line" "$bc_small")
+		why_run "$d" -- --no-color job 11955
+		need "$name, --json: the pinned screen" eval 'rc_is 0 && err_empty && pinned_is "$bc_pinned"'
+		for how in nojson garbage; do
+			o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11955
+			need "$name, -o ($how): genuine, the pinned screen" eval 'rc_is 0 && err_empty && pinned_is "$bc_pinned"'
+		done
+		forged_line line "$spec" "$mb_big"
+		d=$(dash_copy "gd-$name" "scontrol-node=$line"$'\n'"$mb_small")
+		sq_run "$d" SQSTUB_HOST=FranzGB -- --full --no-color; json=$RUN/out
+		sq_run "$d" SQSTUB_HOST=FranzGB SQSTUB_NOJSON=1 -- --full --no-color
+		need "$name, the dashboard -o: the accepted screen, as --json" eval 'rc_is 0 && err_empty && membar_busy_is && cmp -s <(without_clock "$json") <(without_clock "$OUT")'
+	done
+	# forge2 (triage 3): fb2-bioinf-0's OS naming RealMemory, AllocMem, CPUAlloc, CPUEfctv
+	d=$(jfx_copy forge2 resources-11964)
+	printf '%s\n' "$rs_big" "$(line_with "$rs_small" "#146-Ubuntu SMP" '#146-Ubuntu RealMemory\x3d2000000 AllocMem\x3d0 CPUAlloc\x3d0 CPUEfctv\x3d256 SMP')" > "$d/scontrol-node"
+	for how in json nojson garbage; do
+		if [ $how = json ]; then rm -f "$d/scontrol-node.json"; O_ENV=; else o_path "$d" $how; fi
+		why_run "$d" $O_ENV -- --no-color job 11964
+		need "forge2, $how: fb2-bioinf-0 its own 75G, the pinned screen" eval 'rc_is 0 && err_empty && pinned_is "$rs_pinned"'
+	done
+	# osdash (triage 3): fb2-bioinf's OS naming MemSpecLimit=900000
+	d=$(dash_copy osdash "scontrol-node=$(line_with "$mb_big" "OS=Linux" 'OS=Linux MemSpecLimit\x3d900000')"$'\n'"$mb_small")
+	for how in "" SQSTUB_NOJSON=1; do
+		sq_run "$d" $how -- --full
+		need "osdash${how:+, -o}: FULL 265/977G" eval 'rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" && [ -z "$(membar_note)" ]'
+		sq_run "$d" $how SQ_HEIGHT=4 -- --compact
+		need "osdash${how:+, -o}: COMPACT 335/1052G" eval 'rc_is 0 && err_empty && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/1052G mem" ]'
+	done
+	# A13: no MemSpecLimit, an InstanceType naming one, after State
+	d=$(dash_copy a13 "scontrol-node=$(line_with "$mb_big" " MemSpecLimit=31000" "") InstanceType=a MemSpecLimit\\x3d500000"$'\n'"$mb_small")
+	for how in "" SQSTUB_NOJSON=1; do
+		sq_run "$d" $how -- --full
+		need "A13${how:+, -o}: 26% 265/1007G, no caption" eval 'rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" && [ -z "$(membar_note)" ]'
+	done
+	# whole runs in free text: the node unknown, the dashboard says why
+	for spec in "${nodes_forgeries_runs[@]}" "A16"; do
+		name=${spec%%|*}
+		if [ "$name" = A16 ]; then line="$bc_big Comment=see: $bc_small"; else forged_line line "$spec" "$bc_big"; fi
+		d=$(node_fx "r-$name" "$line" "$bc_small")
+		why_run "$d" -- --no-color job 11955
+		need "$name, --json: the pinned screen" eval 'rc_is 0 && err_empty && pinned_is "$bc_pinned"'
+		for how in nojson garbage; do
+			o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11955
+			need "$name, -o ($how)$([ $name = A16 ] && echo ', the regression N12 states (1eb0218 read it genuine)'): fb2-bioinf unknown" eval 'rc_is 0 && err_empty && why_has "$bc_unknown"'
+		done
+		if [ "$name" = A16 ]; then line="$mb_big Comment=see: $mb_small"; else forged_line line "$spec" "$mb_big"; fi
+		d=$(dash_copy "rd-$name" "scontrol-node=$line"$'\n'"$mb_small")
+		sq_run "$d" SQSTUB_NOJSON=1 -- --full
+		need "$name, the dashboard -o: 26% 265/1007G, M7e's caption" eval '
+			rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" &&
+			[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf: scontrol gave no usable MemSpecLimit" ]'
+	done
+	# HIGH-1: a newline plus NodeName= in text before the figures
+	local s1 s2 s3 s4
+	s1='OS=Linux RealMemory\x3d2000000 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 State\x3dIDLE Partitions\x3dLocalQ,main  BootTime\x3dx\nNodeName=fb2-fake '
+	s2='Arch=x86_64 CPUAlloc\x3d0 CPUEfctv\x3d999 CPUTot\x3d999 RealMemory\x3d2000000 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 State\x3dIDLE Partitions\x3dLocalQ,main  BootTime\x3dx\nNodeName=fb2-fake '
+	s3='OS=Linux RealMemory\x3d2000000 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 State\x3dIDLE Partitions\x3dLocalQ,main  BootTime\x3dx\nNodeName=fb2-bioinf-0 '
+	s4='OS=Linux RealMemory\x3d1 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 MemSpecLimit\x3d900000 State\x3dIDLE\nNodeName=x '
+	for name in S1 S2 S3; do
+		case $name in S1) line=$(line_with "$bc_big" "OS=Linux " "$s1") ;; S2) line=$(line_with "$bc_big" "Arch=x86_64 " "$s2") ;; S3) line=$(line_with "$bc_big" "OS=Linux " "$s3") ;; esac
+		d=$(node_fx "h-$name" "$line" "$bc_small")
+		why_run "$d" -- --no-color job 11955
+		need "$name, --json: the pinned screen" eval 'rc_is 0 && err_empty && pinned_is "$bc_pinned"'
+		for how in nojson garbage; do
+			o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11955
+			if [ $name = S3 ]; then
+				need "S3, -o ($how): fb2-bioinf ? (did not say), fb2-bioinf-0 ? (listed it twice)" eval '
+					rc_is 0 && err_empty && why_unknown fb2-bioinf "did not say" && why_unknown fb2-bioinf-0 "listed it twice"'
+			else
+				need "$name, -o ($how): D4's note, no rows" eval '
+					rc_is 0 && err_empty && why_notes | head -n 1 | grep -qxF "the nodes are unknown: scontrol lists fb2-fake in LocalQ, sinfo does not" && ! why_lines | grep -q "^    fb2-bioinf"'
+			fi
+		done
+	done
+	d=$(dash_copy h-S4 "scontrol-node=$(line_with "$mb_big" "OS=Linux " "$s4")"$'\n'"$mb_small")
+	sq_run "$d" SQSTUB_NOJSON=1 -- --full
+	need "S4, the dashboard -o: 26% 265/1007G with M7e's caption, never 128G" eval '
+		rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" && ! mem_part fb2-bioinf | grep -q /128G &&
+		[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf: scontrol gave no usable MemSpecLimit" ]'
+	# F3: a forged NodeName=nosuch that sinfo lists (in LocalQ) and scontrol does not know
+	d=$(jfx_copy f3 resources-11964 "sinfo=$(rs_sinfo 'NodeList=nosuch; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle')")
+	printf '%s\n' "$(line_with "$rs_big" "OS=Linux " 'OS=Linux\nNodeName=nosuch ')" "$rs_small" > "$d/scontrol-node"
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "F3, -o ($how): asked about nosuch too, not found (rc 1, used): fb2-bioinf ? and nosuch ?, fb2-bioinf-0 its own" eval '
+			rc_is 0 && err_empty && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0,nosuch && why_unknown fb2-bioinf "did not say" && why_unknown nosuch "did not say" &&
+			why_lines | grep -qE "^    fb2-bioinf-0 +24 of 24 +75G of 75G +never fits: too few CPUs, too little memory$"'
+	done
+	# M3: the forger's complete runs, then a not-found line of the first node, then the genuine tail
+	d=$(jfx_copy m3 resources-11964)
+	printf '%s\n' "$(line_with "$rs_big" "OS=Linux " 'OS=Linux CPUAlloc\x3d0 CPUEfctv\x3d999 CPUTot\x3d999 RealMemory\x3d2000000 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 MemSpecLimit\x3d0 State\x3dIDLE\nNode fb2-bioinf not found\n')" "$rs_small" > "$d/scontrol-node"
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "M3, -o ($how): fb2-bioinf ?, never the forged figures, fb2-bioinf-0 its own" eval '
+			rc_is 0 && err_empty && why_unknown fb2-bioinf "did not say" && ! has 999 && ! has 1.9T &&
+			why_lines | grep -qE "^    fb2-bioinf-0 +24 of 24 +75G of 75G +never fits: too few CPUs, too little memory$"'
+	done
+	# ghosts (forge1 of triage 3), job 11964
+	local ghost='NodeName=fb2-fake CPUAlloc=0 CPUTot=256 RealMemory=2000000 AllocMem=0 State=IDLE Partitions=LocalQ'
+	for spec in "forge1:$ghost" "boot:$ghost  BootTime=x" "copy:${rs_small//fb2-bioinf-0/fb2-fake}" "small:${ghost/LocalQ/small}  BootTime=x" "named:${rs_big}"; do
+		name=${spec%%:*} line=${spec#*:}
+		d=$(jfx_copy "ghost-$name" resources-11964)
+		printf '%s\n' "$rs_big" "$rs_small Comment=x\\n$line" > "$d/scontrol-node"
+		rm -f "$d/scontrol-node.json"; why_run "$d" -- --no-color job 11964
+		need "ghost $name, --json: the pinned screen, no sinfo call" eval 'rc_is 0 && err_empty && pinned_is "$rs_pinned" && [ "$(calls sinfo)" = 0 ]'
+		for how in nojson garbage; do
+			o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+			case $name in
+				forge1|small) need "ghost $name, -o ($how): fb2-bioinf-0 ?, fb2-bioinf its own, no ghost row, no note" eval '
+					rc_is 0 && err_empty && why_unknown fb2-bioinf-0 "did not say" && why_has "    fb2-bioinf    80 of 128  656.5G of 976.5G  too few CPUs free" &&
+					! has fb2-fake && ! why_notes | grep -q "unknown"' ;;
+				boot|copy) need "ghost $name, -o ($how): D4's note naming fb2-fake in LocalQ, no rows" eval '
+					rc_is 0 && err_empty && why_notes | head -n 1 | grep -qxF "the nodes are unknown: scontrol lists fb2-fake in LocalQ, sinfo does not" && ! why_lines | grep -q "^    fb2-bioinf"' ;;
+				named) need "ghost named fb2-bioinf, -o ($how): F2, fb2-bioinf twice, fb2-bioinf-0 before it ?" eval '
+					rc_is 0 && err_empty && why_unknown fb2-bioinf "listed it twice" && why_unknown fb2-bioinf-0 "did not say"' ;;
+			esac
+		done
+	done
+}
+
+c_nodes_o_pairs() {   # AC 9, 10, 24
+	T_TITLE="NODES -o pair check and gate: a pair run naming the job's partition whose node sinfo lacks there is D4's note (several partitions: the one named); an honest Reason naming another partition changes nothing; an empty sinfo answer is W6's line and no -o call; nodes sinfo lists that scontrol does not know read ? (not found, rc 1 used); no node in the job's partition is W5b's line on -o, 'no node is in partition' on --json; N6's name cut to 40 columns, controls as ?; names that cannot be listed reach no list and read ?, the dashboard's caption; the dashboard lists its own names whatever SINFO_* says"
+	local d how line long shown
+	nodes_lines
+	# several partitions: the ghost names small, the job is in LocalQ,small
+	d=$(jfx_copy pairs resources-11964)
+	sed -i 's/^\(JobID=11964;.*\)Partition=LocalQ;/\1Partition=LocalQ,small;/' "$d/squeue-queue"
+	sed -i 's/^\(JobID=11964;.*\)$/\1; Partition=LocalQ,small/' "$d/squeue-all"
+	printf '%s\n' "$rs_big" "$(line_with "$rs_small" "OS=Linux " 'OS=Linux\nNodeName=ghost Partitions\x3dsmall  BootTime\x3dx ')" > "$d/scontrol-node"
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "Partition=LocalQ,small, a ghost run naming small ($how): the note names small" eval '
+			rc_is 0 && err_empty && why_notes | head -n 1 | grep -qxF "the nodes are unknown: scontrol lists ghost in small, sinfo does not"'
+	done
+	# an honest Reason naming another partition, the job in LocalQ
+	d=$(jfx_copy honest resources-11964)
+	printf '%s\n' "$rs_big Reason=moved Partitions=small  BootTime=x [root@2026-10-21T10:00:00]" "$rs_small" > "$d/scontrol-node"
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "an honest Reason 'moved Partitions=small  BootTime=x' ($how): the pinned screen" eval 'rc_is 0 && err_empty && pinned_is "$rs_pinned"'
+	done
+	# sinfo answering nothing, rc 0
+	d=$(jfx_copy empty resources-11964 "sinfo=# no node")
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "an empty sinfo answer, rc 0: W6's line, no scontrol -o" eval '
+		rc_is 0 && err_empty && [ "$(why_notes | head -n 1)" = "the nodes are unknown: sinfo listed no node" ] && [ "$(node_calls)" = "scontrol --json,sinfo" ]'
+	# sinfo listing both, scontrol knowing neither: not found, rc 1, used
+	d=$(jfx_copy none resources-11964 "sinfo=$(rs_sinfo)" "scontrol-node=# no node")
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "sinfo listing both, scontrol knowing neither ($how): both not found, rc 1 and used: every row ?" eval '
+			rc_is 0 && err_empty && why_unknown fb2-bioinf "did not say" && why_unknown fb2-bioinf-0 "did not say" && ! why_notes | grep -q "nodes are unknown"'
+	done
+	# a third node sinfo lists and scontrol does not know
+	d=$(jfx_copy third resources-11964 "sinfo=$(rs_sinfo 'NodeList=fb2-extra; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle')")
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "a third node sinfo lists, scontrol does not know ($how): its row ?, the others theirs" eval '
+			rc_is 0 && err_empty && why_unknown fb2-extra "did not say" && why_lines | grep -qE "^    fb2-bioinf +80 of 128 +656.5G of 976.5G +too few CPUs free$"'
+	done
+	# no node in the job's partition
+	d=$(jfx_copy nopart resources-11964)
+	sed -i 's/^\(JobID=11964;.*\)Partition=LocalQ;/\1Partition=gpu;/' "$d/squeue-queue"
+	sed -i 's/^\(JobID=11964;.*\)$/\1; Partition=gpu/' "$d/squeue-all"
+	why_run "$d" -- --no-color job 11964
+	need "no node in partition gpu, --json: 'no node is in partition gpu'" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "no node is in partition gpu" ]'
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "no node in partition gpu, -o ($how): W5b's line" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "sinfo lists no node in partition gpu" ]'
+	done
+	# N6's name: scrubbed, controls as ?, cut to 40 columns
+	long='g\x01ghostghostghostghostghostghostghostghostghostghost' shown=$(printf 'g?%s' ghostghostghostghostghostghostghostghostghostghost | cut -c1-39)…
+	d=$(jfx_copy long resources-11964)
+	printf '%s\n' "$rs_big" "$(line_with "$rs_small" "OS=Linux " "OS=Linux\\nNodeName=$long Partitions\\x3dLocalQ  BootTime\\x3dx ")" > "$d/scontrol-node"
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "a ghost of 52 characters, the second \\001: named in 40 columns, … last, the control character a ?" eval '
+		rc_is 0 && err_empty && [ "$(why_notes | head -n 1)" = "the nodes are unknown: scontrol lists $shown in LocalQ, sinfo does not" ]'
+	# names scontrol cannot be asked by: none reaches the list
+	d=$(jfx_copy hygiene resources-11964 "sinfo=$(rs_sinfo 'NodeList=t\tb; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle' \
+		'NodeList=c\x01d; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle' \
+		'NodeList=a,b; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle' \
+		'NodeList=n[1-2]; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle' \
+		'NodeList=-x; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle' \
+		'NodeList=; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle')")
+	why_run "$d" SQSTUB_NOJSON=1 COLUMNS=120 -- --no-color job 11964
+	need "sinfo names with a tab, \\001, ',', '[', a leading '-', and an empty one: none in the list, each row ?, the others theirs" eval '
+		rc_is 0 && err_empty && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0 &&
+		why_unknown "t\\?b" "did not say" && why_unknown "c\\?d" "did not say" && why_unknown "a,b" "did not say" && why_unknown "n\\[1-2\\]" "did not say" &&
+		why_unknown "-x" "did not say" && why_unknown "" "did not say" && why_lines | grep -qE "^    fb2-bioinf +80 of 128 +656.5G of 976.5G +too few CPUs free$"'
+	d=$(dash_copy dhygiene "sinfo=@include $fixtures/membar-busy/sinfo
+CPUsState=0/8/0/8; NodeList=t\\tb; FreeMem=7000; Memory=8000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/8/0/8; NodeList=-x; FreeMem=7000; Memory=8000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/8/0/8; NodeList=a[1]; FreeMem=7000; Memory=8000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0")
+	sq_run "$d" SQSTUB_NOJSON=1 -- --full
+	need "the dashboard: those names reach no list; RealMemory with the caption for them, the others their own" eval '
+		rc_is 0 && err_empty && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0 &&
+		mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" && mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated" &&
+		[ "$(membar_note)" = "↳ memory counts RealMemory on t?b and 2 more nodes: scontrol did not list them" ]'
+	# the dashboard lists the names of its own sinfo, whatever SINFO_* filters
+	for how in "" SINFO_PARTITION=main; do
+		sq_run membar-busy SQSTUB_NOJSON=1 SQSTUB_HOST=FranzGB $how -- --full --no-color
+		need "the dashboard${how:+, $how exported}: its sinfo once, scontrol -o its names, no -o %N call, the accepted screen" eval '
+			rc_is 0 && err_empty && [ "$(calls sinfo)" = 1 ] && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0 && ! grep -q -- "-o %N" "$LOG" && membar_busy_is'
+	done
+	d=$(dash_copy dthird "sinfo=@include $fixtures/membar-busy/sinfo
+CPUsState=0/8/0/8; NodeList=fb2-extra; FreeMem=7000; Memory=8000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0")
+	for how in "" SQSTUB_NOJSON=1; do
+		sq_run "$d" $how -- --full
+		need "the dashboard${how:+, -o}: a third node scontrol lacks reads RealMemory, 'scontrol did not list it'; sinfo once" eval '
+			rc_is 0 && err_empty && [ "$(calls sinfo)" = 1 ] && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" &&
+			mem_part fb2-extra | grep -q " 0/8G mem idle$" && [ "$(membar_note)" = "↳ memory counts RealMemory on fb2-extra: scontrol did not list it" ]'
+	done
+}
+
+c_nodes_o_fail() {   # AC 11, 24 (timed)
+	T_TITLE="NODES -o failures: sinfo failing (stderr, exit, signal, a record without its nonce) is 'sinfo failed (...)' with no -o call and no wait; -o failing after sinfo answered is scontrol's text byte for byte; exit 1 with nothing on stderr and no not-found line is 'scontrol failed (exit 1)'; a not-found answer with a stderr line fails; a --json timeout asks neither; the dashboard's MEMNOTE as before"
+	local d start why='sinfo: error: Unable to contact slurm controller (connect failure)' swhy='scontrol: error: Unable to contact slurm controller (connect failure)'
+	d=$(jfx_copy sfail resources-11964 "sinfo=@stderr $why
+@exit 1")
+	start=$(date +%s%N); why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "sinfo failing with stderr: W1's line, V1b's lead, no -o call, done within 1.5 s" eval '
+		rc_is 0 && err_empty && [ "$(why_notes)" = "the nodes are unknown: sinfo failed ($why)" ] &&
+		why_has "  waits its turn: Slurm finds too little free now on the nodes it may use (LocalQ)" && [ "$(calls scontrol)" = 1 ] &&
+		[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 1500 ]'
+	printf '@exit 1\n' > "$d/sinfo"; why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "sinfo exit 1, nothing said: '(exit 1)'" eval 'rc_is 0 && [ "$(why_notes)" = "the nodes are unknown: sinfo failed (exit 1)" ] && [ "$(calls scontrol)" = 1 ]'
+	printf '@signal 9\n' > "$d/sinfo"; why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "sinfo killed: '(signal 9)'" eval 'rc_is 0 && [ "$(why_notes)" = "the nodes are unknown: sinfo failed (signal 9)" ] && [ "$(calls scontrol)" = 1 ]'
+	rs_sinfo '@raw not a record' > "$d/sinfo"; why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "a record without its nonce: W3b's '(no readable answer)'" eval 'rc_is 0 && [ "$(why_notes)" = "the nodes are unknown: sinfo failed (no readable answer)" ] && [ "$(calls scontrol)" = 1 ]'
+	d=$(jfx_copy ofail resources-11964)
+	{ cat "$jfx/resources-11964/scontrol-node"; printf '@stderr %s\n@exit 1\n' "$swhy"; } > "$d/scontrol-node"
+	start=$(date +%s%N); why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "sinfo answering, -o exit 1 with stderr: scontrol's line byte for byte, done within 1.5 s" eval '
+		rc_is 0 && err_empty && [ "$(why_notes)" = "the nodes are unknown: scontrol failed ($swhy)" ] && [ "$(node_calls)" = "scontrol --json,sinfo,scontrol -o" ] &&
+		[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 1500 ]'
+	{ cat "$jfx/resources-11964/scontrol-node"; printf '@exit 1\n'; } > "$d/scontrol-node"
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "-o exit 1, nothing on stderr, no not-found line: 'scontrol failed (exit 1)'" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (exit 1)" ]'
+	d=$(jfx_copy nfstderr resources-11964 "sinfo=$(rs_sinfo 'NodeList=fb2-extra; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle')")
+	{ cat "$jfx/resources-11964/scontrol-node"; printf '@stderr scontrol: warning: x\n'; } > "$d/scontrol-node"
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "a not-found answer with a stderr line: the call fails (L10), scontrol's text" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (scontrol: warning: x)" ]'
+	d=$(jfx_copy jtmo resources-11964)
+	{ printf '@hang 10\n'; cat "$jfx/resources-11964/scontrol-node"; } > "$d/scontrol-node"
+	why_run "$d" SQ_TIMEOUT=2 -- --no-color job 11964
+	need "a --json timeout: no sinfo, no -o, 'scontrol failed (no response after 2s)'" eval '
+		rc_is 0 && [ "$(node_calls)" = "scontrol --json" ] && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (no response after 2s)" ]'
+	d=$(mem_fixture membar-busy scontrol-node "@include $fixtures/membar-busy/scontrol-node\n@stderr slurm_load_node error: down\n@exit 1")
+	sq_run "$d" SQSTUB_NOJSON=1 -- --full
+	need "the dashboard, -o failing: the MEMNOTE of 1eb0218 byte for byte (serr the whole text now)" eval '
+		rc_is 0 && err_empty && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (slurm_load_node error: down)" ]'
+}
+
+c_nodes_o_bounds() {   # AC 12 (timed)
+	T_TITLE="NODES -o bounds: sinfo and -o within what --json left of one budget, never waiting twice: -o gets what sinfo left (1.5 to 2.0 of 3 s; 2.5 to 3.0 of 6 s with sinfo taking 3), sinfo at least 0.1 s; timeouts named by the first bound"
+	local d start v
+	d=$(jfx_copy b1 resources-11964)
+	printf '@hang 1\n@exit 1\n' > "$d/scontrol-node.json"
+	{ cat "$jfx/resources-11964/scontrol-node"; printf '@hang 10\n'; } > "$d/scontrol-node"
+	start=$(date +%s%N); why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 -- --no-color job 11964
+	need "SQ_TIMEOUT=3, --json 1 s, sinfo at once, -o hanging: -o bound 1.5 to 2.0, done within 4.5 s, 'no response after 3s'" eval '
+		rc_is 0 && err_empty && v=$(timeout_of scontrol 2) && gawk -v v="$v" "BEGIN { exit !(v >= 1.5 && v <= 2.0) }" &&
+		[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 4500 ] && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (no response after 3s)" ]'
+	d=$(jfx_copy b2 resources-11964 "sinfo=@hang 3
+$(rs_sinfo)")
+	printf '@exit 1\n' > "$d/scontrol-node.json"
+	{ cat "$jfx/resources-11964/scontrol-node"; printf '@hang 10\n'; } > "$d/scontrol-node"
+	start=$(date +%s%N); why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=6 -- --no-color job 11964
+	need "SQ_TIMEOUT=6, --json failing at once, sinfo taking 3 s, -o hanging: -o bound 2.5 to 3.0, done within 7.5 s (twice would be 9)" eval '
+		rc_is 0 && err_empty && v=$(timeout_of scontrol 2) && gawk -v v="$v" "BEGIN { exit !(v >= 2.5 && v <= 3.0) }" &&
+		[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 7500 ] && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (no response after 6s)" ]'
+	d=$(jfx_copy b3 resources-11964)
+	printf '@hang 2.9\n@exit 1\n' > "$d/scontrol-node.json"
+	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 -- --no-color job 11964
+	need "SQ_TIMEOUT=3, --json failing after 2.9 s: sinfo's bound exactly 0.100000" eval 'rc_is 0 && [ "$(timeout_of sinfo)" = 0.100000 ]'
+	d=$(jfx_copy b4 resources-11964 "sinfo=@hang 10")
+	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQSTUB_NOJSON=1 SQ_TIMEOUT=2 -- --no-color job 11964
+	need "sinfo hanging: 'sinfo failed (no response after 2s)', no -o call" eval '
+		rc_is 0 && [ "$(why_notes)" = "the nodes are unknown: sinfo failed (no response after 2s)" ] && [ "$(calls scontrol)" = 1 ]'
+}
+
+# stub_run FIXTURE TOOL ARGS...: the stub alone (its log the current LOG),
+# stdout into OUT, stderr into ERR, RC
+stub_run() {
+	local fx=$1; shift
+	[[ $fx == /* ]] || fx=$fixtures/$fx
+	SQSTUB_LOG=$LOG SQSTUB_FIXTURE=$fx "$here/bin/$@" > "$OUT" 2> "$ERR"; RC=$?
+	T_CALLS=$((T_CALLS + 1))
+}
+c_stub_nodes() {   # AC 15 (a)-(f), (h)
+	T_TITLE="the stub (N11): keys of a record only raw, before Reason=/Comment=/Extra= (\\x3d is text: -o prints the = it decodes, --json keeps the record's own); a key sq maps twice, or a NodeName again without a sinfo file, refused; a line made from sinfo has the whole memory run and State=IDLE, its --json as before; sq job's figure call made from scontrol-node's records (one row per partition, A/I/O/T, DRAIN to other, through @include, its directives not acting), a sinfo file winning; SINFO_* and --local logged; show node LIST in its order, not found on stdout and exit 1"
+	local d n
+	sq_env empty --; : > "$LOG"
+	nodes_lines
+	d=$T_DIR/fx-twice; mkdir -p "$d"; printf '%s\n' "$(line_with "$rs_big" "OS=Linux" "OS=Linux RealMemory=2000000")" > "$d/scontrol-node"
+	stub_run "$d" scontrol -o show node
+	need "a mapped key twice before the free text: refused, rc 97" eval '[ "$RC" = 97 ] && grep -q "^STUBERROR.*RealMemory= twice" "$LOG"'
+	: > "$LOG"; printf '%s\n' "$rs_big" "$rs_big" > "$d/scontrol-node"
+	stub_run "$d" scontrol --json show node
+	need "a NodeName again, no sinfo file: refused, rc 97" eval '[ "$RC" = 97 ] && grep -q "^STUBERROR.*NodeName=fb2-bioinf again" "$LOG"'
+	: > "$LOG"; printf '# a sinfo of its own\n' > "$d/sinfo"
+	stub_run "$d" scontrol -o show node
+	need "... with a sinfo file of its own: printed, rc 0" eval '[ "$RC" = 0 ] && [ "$(grep -c "^NodeName=fb2-bioinf " "$OUT")" = 2 ]'
+	rm -f "$d/sinfo"; : > "$LOG"
+	printf '%s\n' "$(line_with "$rs_small" "OS=Linux" 'OS=Linux RealMemory\x3d2000000')" > "$d/scontrol-node"
+	stub_run "$d" scontrol -o show node
+	need "\\x3d in a value: -o prints RealMemory=2000000 there and the record's own 80000" eval '[ "$RC" = 0 ] && grep -q "OS=Linux RealMemory=2000000 .* RealMemory=80000 " "$OUT"'
+	stub_run "$d" scontrol --json show node
+	need "... the made --json has 80000" eval '[ "$RC" = 0 ] && grep -qx " *\"real_memory\": 80000," "$OUT" && ! grep -q 2000000 "$OUT"'
+	stub_run empty scontrol -o show node
+	need "a line made from sinfo: the whole memory run, then State=IDLE" eval '
+		[ "$RC" = 0 ] && [ "$(head -n 1 "$OUT")" = "NodeName=node01 CPUAlloc=0 CPUTot=32 CPULoad=0.01 RealMemory=128000 AllocMem=0 FreeMem=120000 Sockets=1 Boards=1 State=IDLE" ]'
+	stub_run empty scontrol --json show node
+	need "... its --json as before: no state, no sockets" eval '[ "$RC" = 0 ] && grep -q "\"state\": \[\]" "$OUT" && ! grep -qi sockets "$OUT"'
+	n=Nabcdefghijklmnopq
+	local fmt="CPUsState:0$n,NodeList:0$n,PartitionName:0$n,Memory:0$n,AllocMem:0$n,StateComplete:0$n"
+	local rows; rows=$(printf '%s\n' "48/80/0/128${n}fb2-bioinf${n}LocalQ${n}1031000${n}327680${n}mixed${n}" "48/80/0/128${n}fb2-bioinf${n}main${n}1031000${n}327680${n}mixed${n}" \
+		"0/24/0/24${n}fb2-bioinf-0${n}LocalQ${n}80000${n}0${n}idle${n}" "0/24/0/24${n}fb2-bioinf-0${n}small${n}80000${n}0${n}idle${n}")
+	stub_run "$jfx/resources-11964" sinfo --local -h -N -O "$fmt"
+	need "sq job's figure call made from resources-11964's records: fb2-bioinf in LocalQ and main (48/80/0/128), fb2-bioinf-0 in LocalQ and small (0/24/0/24)" eval '[ "$RC" = 0 ] && [ "$(cat "$OUT")" = "$rows" ]'
+	d=$T_DIR/fx-inc; mkdir -p "$d"; printf '@include %s\n@exit 1\n' "$jfx/resources-11964/scontrol-node" > "$d/scontrol-node"
+	stub_run "$d" sinfo --local -h -N -O "$fmt"
+	need "... the same through @include, its @exit 1 not acting" eval '[ "$RC" = 0 ] && [ "$(cat "$OUT")" = "$rows" ]'
+	printf '%s\n' "$(line_with "$rs_big" State=MIXED State=MIXED+DRAIN)" > "$d/scontrol-node"
+	stub_run "$d" sinfo --local -h -N -O "$fmt"
+	need "... DRAIN moves T-A to other: 48/0/80/128, mixed+drain" eval '[ "$RC" = 0 ] && [ "$(head -n 1 "$OUT")" = "48/0/80/128${n}fb2-bioinf${n}LocalQ${n}1031000${n}327680${n}mixed+drain${n}" ]'
+	printf '@defaults CPUsState=1/1/0/2; Memory=9; AllocMem=0; StateComplete=idle\nNodeList=own; PartitionName=p\n' > "$d/sinfo"
+	stub_run "$d" sinfo --local -h -N -O "$fmt"
+	need "... a fixture sinfo file wins" eval '[ "$RC" = 0 ] && [ "$(cat "$OUT")" = "1/1/0/2${n}own${n}p${n}9${n}0${n}idle${n}" ]'
+	: > "$LOG"; SINFO_FOO=bar stub_run "$d" sinfo --local -h -N -O "$fmt"
+	need "SINFO_FOO and --local logged" eval 'grep "^CALL	sinfo	--local " "$LOG" | grep -q "	SINFO_FOO=bar"'
+	stub_run "$jfx/resources-11964" scontrol -o show node fb2-bioinf-0,fb2-bioinf,nosuch
+	need "show node b,a,nosuch: b, a, then 'Node nosuch not found' on stdout, exit 1" eval '
+		[ "$RC" = 1 ] && [ "$(cut -d" " -f1 "$OUT" | paste -sd" ")" = "NodeName=fb2-bioinf-0 NodeName=fb2-bioinf Node" ] && [ "$(tail -n 1 "$OUT")" = "Node nosuch not found" ] && [ ! -s "$ERR" ]'
+	stub_run "$jfx/resources-11964" scontrol -o show node fb2-bioinf,fb2-bioinf
+	need "show node a,a: a twice, exit 0" eval '[ "$RC" = 0 ] && [ "$(grep -c "^NodeName=fb2-bioinf " "$OUT")" = 2 ]'
+	stub_run "$jfx/resources-11964" scontrol --json show node fb2-bioinf
+	need "--json show node LIST: refused" eval '[ "$RC" = 97 ]'
+}
+c_stub_fast() {   # AC 15 (g) (timed)
+	T_TITLE="the stub's -o fast path: a 10 MB answer without a backslash printed within 1 s, as written"
+	local d=$T_DIR/fx-big start
+	mkdir -p "$d"
+	sq_env empty --
+	gawk 'BEGIN { s = "x"; while (length(s) < 10000) s = s s; for (i = 1; i <= 640; i++) printf "NodeName=n%04d CPUAlloc=0 CPUTot=1 RealMemory=1 AllocMem=0 FreeMem=1 Sockets=1 Boards=1 State=IDLE Partitions=p Comment=%s\n", i, substr(s, 1, 16000) }' > "$d/scontrol-node"
+	start=$(date +%s%N); stub_run "$d" scontrol -o show node
+	need "$(( $(wc -c < "$d/scontrol-node") / 1048576 )) MB, -o: rc 0, byte for byte, within 1 s" eval '
+		[ "$RC" = 0 ] && cmp -s "$d/scontrol-node" "$OUT" && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 1000 ]'
+}
+
+c_nodes_o_cost() {   # AC 16 (timed)
+	T_TITLE="NODES -o cost, each within 10 s under the 3G cap, stderr empty: node_read (cut out of sq) on 1000 records of 64 KB, 200000 continuation lines, a 5 MB OS of ␚ with 3000 runs, and node_names on 5000 names; end to end, 1000 filler nodes with 8 KB Comments, sq job's pinned fb2-bioinf row and the dashboard's 265/977G"
+	local w=$T_DIR/cost r start d i
+	mkdir -p "$w"
+	sed -n -e '/^# ---- the character classes/,/^# ---- character classes end/p' -e '/^# ---- the node readers/,/^# ---- node readers end/p' "$sq" > "$w/readers.awk"
+	nodes_lines; sq_env empty --
+	reader() {   # reader ANSWER GATE: node_read's figures, a node a line, within 10 s under the cap
+		start=$(date +%s%N)
+		O=$1 G=$2 systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0 env LC_ALL=$utf8 gawk -f "$w/readers.awk" -e 'END { node_read(ENVIRON["O"], ENVIRON["G"])
+			for (n = 1; n <= NN; n++) print NODE_NAME[n], NODE_CPUS[n], NODE_REALMEM[n], NODE_SPECMEM[n], ((n in NODE_BAD) ? NODE_BAD[n] : "ok") }' /dev/null > "$w/out" 2> "$w/err"
+		r=$?; T_CALLS=$((T_CALLS + 1)); [ $r = 0 ] && [ ! -s "$w/err" ] && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ]
+	}
+	gawk 'BEGIN { s = "x"; while (length(s) < 65536) s = s s; s = substr(s, 1, 65536)
+		for (i = 1; i <= 1000; i++) { printf "NodeName=n%04d CPUAlloc=0 CPUTot=8 RealMemory=%d AllocMem=0 FreeMem=1 Sockets=1 Boards=1 MemSpecLimit=%d State=IDLE Partitions=p Comment=%s\n", i, 100000 + i, i, s; print "n" sprintf("%04d", i) > "/dev/stderr" } }' > "$w/a1" 2> "$w/g1"
+	need "1000 records of 64 KB: record 500's MemSpecLimit (500)" eval 'reader "$w/a1" "$w/g1" && grep -qx "n0500 8 100500 500 ok" "$w/out" && [ "$(wc -l < "$w/out")" = 1000 ]'
+	{ printf '%s\n' "$bc_big"; gawk 'BEGIN { for (i = 1; i <= 200000; i++) print "       continuation " i }'; printf '%s\n' "$bc_small"; } > "$w/a2"; printf 'fb2-bioinf\nfb2-bioinf-0\n' > "$w/g2"
+	need "200000 continuation lines: the genuine spec (31000)" eval 'reader "$w/a2" "$w/g2" && grep -qx "fb2-bioinf 128 1031000 31000 ok" "$w/out"'
+	LC_ALL=C gawk -v big="$bc_big" -v small="$bc_small" 'BEGIN { s = "\342\220\232"; while (length(s) < 5000000) s = s s; s = substr(s, 1, 4999998)
+		r = " CPUAlloc=0 CPUTot=1 RealMemory=1 AllocMem=0 FreeMem=1 Sockets=1 Boards=1"; t = ""; for (i = 1; i <= 3000; i++) t = t r
+		sub(/OS=Linux/, "OS=Linux" s t, big); print big; print small }' > "$w/a3"
+	need "a 5 MB OS of ␚ with 3000 runs: garbled" eval 'reader "$w/a3" "$w/g2" && grep -qx "fb2-bioinf -1 -1 -1 garbled" "$w/out"'
+	n=Nabcdefghijklmnopq
+	gawk -v n="$n" 'BEGIN { for (i = 1; i <= 5000; i++) printf "1/1/0/2%sfiller-node-%05d%sLocalQ%s1000%s0%sidle%s\n", n, i, n, n, n, n, n }' > "$w/s4"
+	start=$(date +%s%N)
+	F=$w/s4 N=$n systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0 env LC_ALL=C gawk -f "$w/readers.awk" -e 'END { k = node_names(ENVIRON["F"], ENVIRON["N"], 6, 1); print k, length(NODE_LIST) }' /dev/null > "$w/out" 2> "$w/err"
+	need "node_names on 5000 names: all of them, 89999 bytes, within 10 s" eval '[ "$(cat "$w/out")" = "5000 89999" ] && [ ! -s "$w/err" ] && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ]'
+	tr ',' '\n' < <(gawk -F"$n" '{ printf "%s%s", (NR > 1 ? "," : ""), $2 }' "$w/s4") > "$w/g4"
+	gawk 'BEGIN { for (i = 1; i <= 5000; i++) printf "NodeName=filler-node-%05d CPUAlloc=0 CPUTot=2 RealMemory=1000 AllocMem=0 FreeMem=1 Sockets=1 Boards=1 State=IDLE Partitions=LocalQ\n", i }' > "$w/a4"
+	need "... and node_read on their answer: 5000 nodes, within 10 s" eval 'reader "$w/a4" "$w/g4" && [ "$(grep -c " ok$" "$w/out")" = 5000 ]'
+	# end to end through the stub's fast path
+	gawk 'BEGIN { s = "x"; while (length(s) < 8192) s = s s; s = substr(s, 1, 8192)
+		for (i = 1; i <= 1000; i++) printf "NodeName=filler%04d CPUAlloc=0 CPUTot=2 RealMemory=1000 AllocMem=0 FreeMem=1 Sockets=1 Boards=1 State=IDLE Partitions=LocalQ  BootTime=x Comment=%s\n", i, s }' > "$w/fillers"
+	d=$(jfx_copy cost resources-11964)
+	{ printf '%s\n' "$rs_big" "$rs_small"; cat "$w/fillers"; } > "$d/scontrol-node"
+	start=$(date +%s%N); why_run "$d" SQSTUB_NOJSON=1 SQ_TIMEOUT=10 -- --no-color job 11964
+	need "sq job, 1000 filler nodes in LocalQ with 8 KB Comments: fb2-bioinf's pinned row, within 10 s" eval '
+		rc_is 0 && err_empty && why_has "    fb2-bioinf    80 of 128  656.5G of 976.5G  too few CPUs free" && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ]'
+	d=$(dash_copy cost "scontrol-node=$(printf '%s\n' "$mb_big" "$mb_small"; cat "$w/fillers")" \
+		"sinfo=@include $fixtures/membar-busy/sinfo
+$(gawk 'BEGIN { for (i = 1; i <= 1000; i++) printf "CPUsState=0/2/0/2; NodeList=filler%04d; FreeMem=900; Memory=1000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0\n", i }')")
+	start=$(date +%s%N); sq_run "$d" SQSTUB_NOJSON=1 SQ_TIMEOUT=10 SQ_HEIGHT=1100 -- --full
+	need "the dashboard, the same 1000 in its sinfo: fb2-bioinf 265/977G, within 10 s" eval '
+		rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ]'
+}
+
+c_nodes_nopart() {   # AC 22
+	T_TITLE="R-NOPART: a node in no partition after fb2-bioinf, which sinfo does not list: never asked about, so sq job 11955 and the dashboard are as pinned; with the list over 100000 bytes the call goes without it, scontrol lists every node, and fb2-bioinf reads ? (the residual N12 states)"
+	local d spare fillers
+	nodes_lines
+	spare=$(line_with "${bc_small//fb2-bioinf-0/spare}" " Partitions=LocalQ,small" "")
+	d=$(node_fx nopart "$bc_big" "$spare" "$bc_small")
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11955
+		need "sq job 11955, -o ($how): spare never asked about, the pinned screen" eval 'rc_is 0 && err_empty && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0 && pinned_is "$bc_pinned"'
+	done
+	d=$(dash_copy nopart "scontrol-node=$mb_big"$'\n'"$(line_with "${mb_small//fb2-bioinf-0/spare}" " Partitions=LocalQ,small" "")"$'\n'"$mb_small")
+	sq_run "$d" SQSTUB_NOJSON=1 SQSTUB_HOST=FranzGB -- --full --no-color
+	need "the dashboard, -o: the accepted screen" eval 'rc_is 0 && err_empty && membar_busy_is'
+	fillers=$(gawk 'BEGIN { for (i = 1; i <= 6000; i++) printf "NodeName=filler-node-%05d CPUAlloc=0 CPUTot=2 RealMemory=1000 AllocMem=0 FreeMem=1 Sockets=1 Boards=1 State=IDLE Partitions=other\n", i }')
+	d=$(node_fx nopartbig "$bc_big" "$spare" "$bc_small" "$fillers")
+	why_run "$d" SQSTUB_NOJSON=1 SQ_TIMEOUT=10 -- --no-color job 11955
+	need "a list of 6002 names (over 100000 bytes): no list, the partition-less record joins fb2-bioinf, which reads ?" eval '
+		rc_is 0 && err_empty && argv_is scontrol 2 -o show node && why_has "$bc_unknown"'
+}
+
+c_nodes_caption() {   # AC 23
+	T_TITLE="the caption (N10, D7(a)): a node scontrol listed twice (M7c), did not list, gave no usable MemSpecLimit for (garbled, M7e; at or above RealMemory), several (M7f): one line under the nodes, FULL and COMPACT, on --json as on -o; none under CR_CORE; the whole-answer note wins; COMPACT keeps its height"
+	local d dj fx env how kind want mode
+	nodes_lines
+	for kind in twice nolist garbled big; do
+		# the -o answer (scontrol-node), and the --json one where the made
+		# document cannot hold that flaw (a twice listed node, a member twice)
+		case $kind in
+			twice)   d=$(dash_copy "c-$kind" "scontrol-node=$mb_big Comment=x\\n$mb_big"$'\n'"$mb_small")
+			         dj=$(json_fx membar-busy '{ print } /^    \{$/ && !s { s = 1 } s == 1 { buf = buf $0 "\n" } /^    \},$/ && s == 1 { s = 2; printf "%s", buf }') ;;
+			nolist)  d=$(dash_copy "c-$kind" "scontrol-node=$mb_small"); dj=$d ;;
+			garbled) d=$(dash_copy "c-$kind" "scontrol-node=$(line_with "$mb_big" "OS=Linux" 'OS=Linux RealMemory\x3d1 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1')"$'\n'"$mb_small")
+			         dj=$(json_fx membar-busy "$json_add" NODE=fb2-bioinf KEY=specialized_memory J=0) ;;
+			big)     d=$(dash_copy "c-$kind" "scontrol-node=$(line_with "$mb_big" "MemSpecLimit=31000" "MemSpecLimit=1031000")"$'\n'"$mb_small"); dj=$d ;;
+		esac
+		case $kind in
+			twice)  want="scontrol listed it twice" ;; nolist) want="scontrol did not list it" ;; *) want="scontrol gave no usable MemSpecLimit" ;;
+		esac
+		for how in json nojson; do
+			for mode in full compact; do
+				if [ $how = json ]; then fx=$dj env=; else fx=$d env=SQSTUB_NOJSON=1; fi
+				if [ $mode = full ]; then sq_run "$fx" $env -- --full --no-color; else sq_run "$fx" $env SQ_HEIGHT=12 -- --compact --no-color; fi
+				need "$kind, $how, $mode: fb2-bioinf at RealMemory, fb2-bioinf-0 its own, the caption right under them" eval '
+					rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" && mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated" &&
+					[ "$(plain | sed -n 5p)" = "  ↳ memory counts RealMemory on fb2-bioinf: $want" ]'
+				[ $mode = full ] || need "$kind, $how, compact: within 12 lines, the footer last" eval 'lines_within 12 && plain | tail -n 1 | grep -qE "^ +5 jobs "'
+			done
+		done
+	done
+	# several: two kinds, and one kind
+	d=$(dash_copy several "scontrol-node=$(line_with "$mb_big" "MemSpecLimit=31000" "MemSpecLimit=lots")")
+	for how in "" SQSTUB_NOJSON=1; do
+		sq_run "$d" $how -- --full
+		need "fb2-bioinf no usable, fb2-bioinf-0 not listed${how:+, -o}: one line, 'and 1 more node', the mixed kinds' text" eval '
+			rc_is 0 && membar_note | grep -qxE "↳ memory counts RealMemory on fb2-bioinf and 1 more node: scontrol gave no usable MemSpecLimit( for them| ?…)"'
+	done
+	d=$(dash_copy three "sinfo=@include $fixtures/membar-busy/sinfo
+CPUsState=0/8/0/8; NodeList=extra1; FreeMem=7000; Memory=8000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/8/0/8; NodeList=extra2; FreeMem=7000; Memory=8000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0" "scontrol-node=$mb_small")
+	for how in "" SQSTUB_NOJSON=1; do
+		sq_run "$d" $how SQ_WIDTH=200 -- --full
+		need "three not listed${how:+, -o}: 'on fb2-bioinf and 2 more nodes: scontrol did not list them'" eval '
+			rc_is 0 && [ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf and 2 more nodes: scontrol did not list them" ]'
+	done
+	d=$(mem_fixture membar-crcore scontrol-node "$(grep '^NodeName=fb2-bioinf-0 ' "$fixtures/membar-crcore/scontrol-node")")
+	for how in "" SQSTUB_NOJSON=1; do
+		sq_run "$d" $how SQSTUB_HOST=FranzGB -- --full --no-color
+		need "CR_CORE, fb2-bioinf not listed${how:+, -o}: no caption, the screen as accepted" eval '
+			rc_is 0 && [ -z "$(membar_note)" ] && cmp -s <(without_clock "$fixtures/membar-crcore/full-w120.txt") <(without_clock "$OUT")'
+	done
+	d=$(mem_fixture membar-busy scontrol-node "$mb_small\n@stderr slurm_load_node error: down\n@exit 1")
+	for how in "" SQSTUB_NOJSON=1; do
+		sq_run "$d" $how -- --full
+		need "a node not listed and the answer failing${how:+, -o}: the whole-answer note" eval '
+			rc_is 0 && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (slurm_load_node error: down)" ] && membar_real'
+	done
+}
+
+# ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
@@ -7871,6 +8565,7 @@ cases=(
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
 	opts_jobid opts_repeat opts_check_order opts_sub_placement opts_o_attached opts_fallback_source opts_mem opts_docs
+	nodes_o_calls nodes_o_figures nodes_o_forged nodes_o_pairs nodes_o_fail nodes_o_bounds stub_nodes stub_fast nodes_o_cost nodes_nopart nodes_caption
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,
@@ -7880,7 +8575,8 @@ cases=(
 timed_cases=" squeue_hangs squeue_ignores_term scrub_bounded tables_pass_cost cancel_names
 	membar_json membar_fallback jobmem_outcomes jobmem_throttle job_own
 	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract
-	why_nodes_json why_tail_hung why_budget why_parallel why_signals "
+	why_nodes_json why_tail_hung why_budget why_parallel why_signals
+	nodes_o_fail nodes_o_bounds stub_fast nodes_o_cost "
 timed_cases=" $(printf '%s ' $timed_cases)"       # one space around each name
 for c in $timed_cases; do
 	[[ " ${cases[*]} " == *" $c "* ]] || { echo "run.sh: timed_cases names $c, which is no case" >&2; exit 2; }
