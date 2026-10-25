@@ -53,9 +53,10 @@ again, and
   for the nodes of G, the name, CPUs, real memory and MemSpecLimit `node_read`
   keeps from either `-o G` answer (the figures may move between two calls);
 - checks that the `-o G` answers hold no "Node N not found" line;
-- compares sinfo's figures with `--json`'s per node (allocated and total CPUs,
-  memory, allocated memory, the state as its base word and the set of its
-  flags, as JSON lists the flags in another order) and the rows of one node
+- compares sinfo's figures with `--json`'s per node (allocated CPUs, memory,
+  allocated memory, the state as its base word and the set of its flags, as
+  JSON lists the flags in another order; the total CPUs with `-o`'s CPUTot, as
+  `node_json_read` keeps the effective ones) and the rows of one node
   (one per partition) with each other outside PartitionName.
 
 Run it once as an operator and once as a user who is none: the NODES design

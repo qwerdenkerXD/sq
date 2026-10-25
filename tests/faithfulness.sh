@@ -236,7 +236,8 @@ fi
 # - G's -o answer has no "Node N not found" line (sinfo and scontrol see the
 #   same nodes);
 # - sinfo's figures with --json per node (CPUsState's first figure alloc_cpus
-#   and its fourth cpus, Memory real_memory, AllocMem alloc_memory,
+#   and its fourth -o's CPUTot, as node_json_read keeps the effective CPUs,
+#   Memory real_memory, AllocMem alloc_memory,
 #   StateComplete in upper case the state, compared as its base word and the
 #   set of its flags, as JSON lists the flags in another order), and the rows
 #   of one node byte for byte alike outside PartitionName.
@@ -292,9 +293,14 @@ if run_real "$d/fig" sinfo --local -h -N -O "$sfmt" &&
 	fi
 	# sinfo's figures with --json's, per node, and one node's rows alike
 	scrub -s < "$d/fig/real.out" > "$d/fig/real.scrubbed"
-	if J="$d/real.out.scrubbed" S="$d/fig/real.scrubbed" LC_ALL=C.UTF-8 SQ_N="$N3" gawk -f "$work/readers.awk" -e "$flags_awk" -e '
+	scrub -s < "$d/o1/real.out" > "$d/o1/real.scrubbed"
+	if J="$d/real.out.scrubbed" S="$d/fig/real.scrubbed" O="$d/o1/real.scrubbed" LC_ALL=C.UTF-8 SQ_N="$N3" gawk -f "$work/readers.awk" -e "$flags_awk" -e '
 		END {
 			if (!node_json_read(ENVIRON["J"])) { print "         | --json not accepted"; exit 1 }
+			# CPUsState counts CPUTot, which -o prints (--json keeps effective_cpus beside cpus,
+			# and node_json_read the effective ones, below CPUTot on a node with CPUSpecList)
+			while ((getline ln < ENVIRON["O"]) > 0)
+				if (ln ~ /^NodeName=/ && match(ln, / CPUTot=[^ ]*/)) { nm = ln; sub(/^NodeName=/, "", nm); sub(/ .*/, "", nm); gsub(CNTRL, "?", nm); TOT[nm] = substr(ln, RSTART + 8, RLENGTH - 8) }
 			ns = read_rows(ENVIRON["S"], ENVIRON["SQ_N"])
 			for (r = 1; r <= ns; r++) {
 				nm = ROW[r, 2]; gsub(CNTRL, "?", nm)
@@ -304,7 +310,7 @@ if run_real "$d/fig" sinfo --local -h -N -O "$sfmt" &&
 				if (!(nm in NODE_AT)) { print "         | " nm ": not in --json"; bad = 1; continue }
 				i = NODE_AT[nm]; split(ROW[r, 1], c, "/")
 				got = c[1] "/" c[4] "/" ROW[r, 4] "/" ROW[r, 5] "/" flags(toupper(ROW[r, 6]))
-				want = NODE_CPUALLOC[i] "/" NODE_CPUS[i] "/" NODE_REALMEM[i] "/" NODE_ALLOCMEM[i] "/" flags(NODE_STATE[i])
+				want = NODE_CPUALLOC[i] "/" ((nm in TOT) ? TOT[nm] : "no CPUTot in -o") "/" NODE_REALMEM[i] "/" NODE_ALLOCMEM[i] "/" flags(NODE_STATE[i])
 				if (got != want) { print "         | " nm ": sinfo " got ", --json " want; bad = 1 }
 			}
 			exit bad

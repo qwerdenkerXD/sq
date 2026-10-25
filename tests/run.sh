@@ -7938,7 +7938,7 @@ c_nodes_o_calls() {   # AC 1, 2, 9, 14
 			n=$(gawk -F'\t' '$1 == "CALL" && $2 == "sinfo" { if (match($3, /CPUsState:0[A-Za-z0-9]+/)) print substr($3, RSTART + 11, RLENGTH - 11); exit }' "$LOG")
 			n1=$(env_of sacct 1 SQ_NONCE) n2=$(env_of sacct 1 SQ_NONCE2) fmt=
 			for f in CPUsState NodeList PartitionName Memory AllocMem StateComplete; do fmt="$fmt${fmt:+,}$f:0$n"; done
-			need "$fx, -o ($how): rc 0, stderr empty, the --json screen" eval 'rc_is 0 && err_empty && cmp -s "$want" <(unrooted)'
+			need "$fx, -o ($how): rc 0, stderr empty, the --json screen (dates aside)" eval 'rc_is 0 && err_empty && cmp -s <(job_mask "$want") <(unrooted | job_mask /dev/stdin)'
 			[ "$name" = pending-est ] || need "$fx, -o ($how): the pinned screen" pinned_is "$jfx/screens/why__$name.txt"
 			need "$fx, -o ($how): scontrol --json, sinfo, scontrol -o, in that order" eval '[ "$(node_calls)" = "scontrol --json,sinfo,scontrol -o" ]'
 			need "$fx, -o ($how): sinfo --local -h -N -O, the six fields framed by a nonce of 17+ letters and digits apart from the other two" eval '
@@ -8137,6 +8137,40 @@ c_nodes_o_forged() {   # AC 5, 6, 7, 8
 			rc_is 0 && err_empty && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0,nosuch && why_unknown fb2-bioinf "did not say" && why_unknown nosuch "did not say" &&
 			why_lines | grep -qE "^    fb2-bioinf-0 +24 of 24 +75G of 75G +never fits: too few CPUs, too little memory$"'
 	done
+	# F3 in the superset direction (the review's rv_f3pred, rv_f3): a name sinfo lists and
+	# scontrol does not know begins a forged record; its record and the one before it fail
+	# closed, so neither the forger's runs in fb2-bioinf's OS nor the forged record's own
+	# figures reach a screen
+	local f3fx='NodeList=nosuch; PartitionName=LocalQ; CPUsState=0/8/0/8; Memory=8000; AllocMem=0; StateComplete=idle'
+	local f3row='CPUsState=0/8/0/8; NodeList=nosuch; FreeMem=7000; Memory=8000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0'
+	local f3pred='OS=Linux RealMemory\x3d1031000 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 MemSpecLimit\x3d900000 State\x3dIDLE\nNodeName\x3dnosuch '
+	local f3rec='\nNodeName\x3dnosuch CPUAlloc\x3d0 CPUEfctv\x3d2 CPUTot\x3d8 RealMemory\x3d8000 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 MemSpecLimit\x3d7000 State\x3dIDLE'
+	d=$(jfx_copy f3pred resources-11964 "sinfo=$(rs_sinfo "$f3fx")")
+	printf '%s\n' "$(line_with "$rs_big" "OS=Linux " "$f3pred")" "$rs_small" > "$d/scontrol-node"
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "F3, the forger's runs before a not-found name's record, -o ($how): fb2-bioinf ? (never MemSpecLimit 900000), nosuch ?" eval '
+			rc_is 0 && err_empty && why_unknown fb2-bioinf "did not say" && why_unknown nosuch "did not say" && ! why_lines | grep -qE "^    fb2-bioinf +80 of 128"'
+	done
+	d=$(dash_copy f3pred "scontrol-node=$(line_with "$mb_big" "OS=Linux " "$f3pred")"$'\n'"$mb_small" "sinfo=@include $fixtures/membar-busy/sinfo
+$f3row")
+	sq_run "$d" SQSTUB_NOJSON=1 -- --full
+	need "F3, the same on the dashboard: fb2-bioinf at RealMemory with the caption, never /128G" eval '
+		rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" && ! mem_part fb2-bioinf | grep -q /128G &&
+		membar_note | grep -q "^↳ memory counts RealMemory on fb2-bioinf and 1 more node: "'
+	d=$(jfx_copy f3rec resources-11964 "sinfo=$(rs_sinfo "$f3fx")")
+	printf '%s\n' "$rs_big Comment=x$f3rec" "$rs_small" > "$d/scontrol-node"
+	for how in nojson garbage; do
+		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
+		need "F3, a complete forged record of a not-found name in fb2-bioinf's Comment, -o ($how): nosuch ? (never 'of 2'), fb2-bioinf ?" eval '
+			rc_is 0 && err_empty && why_unknown nosuch "did not say" && ! why_lines | grep -q " of 2 " && why_unknown fb2-bioinf "did not say"'
+	done
+	d=$(dash_copy f3rec "scontrol-node=$mb_big Comment=x$f3rec"$'\n'"$mb_small" "sinfo=@include $fixtures/membar-busy/sinfo
+$f3row")
+	sq_run "$d" SQSTUB_NOJSON=1 -- --full
+	need "F3, the same on the dashboard: nosuch at RealMemory (0/8G, never 0/1G), fb2-bioinf too, the caption" eval '
+		rc_is 0 && err_empty && mem_part nosuch | grep -q " 0/8G mem idle$" && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 26% 265/1007G mem mixed" &&
+		membar_note | grep -q "^↳ memory counts RealMemory on fb2-bioinf and 1 more node: "'
 	# M3: the forger's complete runs, then a not-found line of the first node, then the genuine tail
 	d=$(jfx_copy m3 resources-11964)
 	printf '%s\n' "$(line_with "$rs_big" "OS=Linux " 'OS=Linux CPUAlloc\x3d0 CPUEfctv\x3d999 CPUTot\x3d999 RealMemory\x3d2000000 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1 MemSpecLimit\x3d0 State\x3dIDLE\nNode fb2-bioinf not found\n')" "$rs_small" > "$d/scontrol-node"
@@ -8247,6 +8281,13 @@ CPUsState=0/8/0/8; NodeList=a[1]; FreeMem=7000; Memory=8000; StateLong=idle; Rea
 		rc_is 0 && err_empty && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0 &&
 		mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" && mem_part_is fb2-bioinf-0 "███████████████░ 93% 70/75G mem allocated" &&
 		[ "$(membar_note)" = "↳ memory counts RealMemory on t?b and 2 more nodes: scontrol did not list them" ]'
+	# every name sinfo lists unlistable: no -o call at all (not an unlisted one), every row ?
+	d=$(jfx_copy unlistable resources-11964 "sinfo=@defaults Memory=8000; AllocMem=0; StateComplete=idle; CPUsState=0/8/0/8
+NodeList=a,b; PartitionName=LocalQ
+NodeList=-x; PartitionName=LocalQ")
+	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "sq job, every sinfo name unlistable: no scontrol -o call, each row ?" eval '
+		rc_is 0 && err_empty && [ "$(node_calls)" = "scontrol --json,sinfo" ] && why_unknown "a,b" "did not say" && why_unknown "-x" "did not say"'
 	# the dashboard lists the names of its own sinfo, whatever SINFO_* filters
 	for how in "" SINFO_PARTITION=main; do
 		sq_run membar-busy SQSTUB_NOJSON=1 SQSTUB_HOST=FranzGB $how -- --full --no-color
@@ -8495,6 +8536,15 @@ c_nodes_caption() {   # AC 23
 		done
 	done
 	# several: two kinds, and one kind
+	# a name scontrol does not know that begins a (forged) record of its own, the first line:
+	# not found, so "did not list it", never "no usable MemSpecLimit" (F3 garbles that record)
+	d=$(dash_copy nfrec "scontrol-node=@raw NodeName=nosuch CPUAlloc=0 CPUTot=8 RealMemory=8000 AllocMem=0 FreeMem=1 Sockets=1 Boards=1 MemSpecLimit=7000 State=IDLE
+@include $fixtures/membar-busy/scontrol-node" "sinfo=@include $fixtures/membar-busy/sinfo
+CPUsState=0/8/0/8; NodeList=nosuch; FreeMem=7000; Memory=8000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0")
+	sq_run "$d" SQSTUB_NOJSON=1 -- --full
+	need "a not-found name that begins a record, -o: RealMemory (0/8G) with 'scontrol did not list it', the others their own" eval '
+		rc_is 0 && err_empty && mem_part nosuch | grep -q " 0/8G mem idle$" && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" &&
+		[ "$(membar_note)" = "↳ memory counts RealMemory on nosuch: scontrol did not list it" ]'
 	d=$(dash_copy several "scontrol-node=$(line_with "$mb_big" "MemSpecLimit=31000" "MemSpecLimit=lots")")
 	for how in "" SQSTUB_NOJSON=1; do
 		sq_run "$d" $how -- --full
