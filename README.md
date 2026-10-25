@@ -39,9 +39,12 @@ watch -tc -n 1 'sq -C'
   finished block shrinks to one line naming the newest failure, else the newest job, and on the
   smallest screens the nodes become one summary line. Piped or redirected, sq draws the FULL
   screen, every job. `--compact`, `--full` or `SQ_COMPACT` choose instead.
-  The width has a floor: the node lines and the job table cannot shrink below about 60 columns
-  (it depends on the node names and the columns shown), and on a narrower terminal those lines
-  wrap, so COMPACT can then run over the screen's height.
+  COMPACT fits every width it can measure, below 21 columns too: on a narrow terminal its lines
+  take shorter forms of whole parts, one step at a time: the nodes as name and state, then with
+  sinfo's short state names (`alloc`, `drain*`), then the one summary line; durations as `5h59m`
+  once the text columns are down to 8; fewer columns (CPU, TIME, USER, MEM, LEFT and NAME go
+  whole, in that order); Slurm's state codes (`PD`, `R`) last. A line is cut only below its
+  shortest form. FULL takes none of these forms: its long lines wrap.
 - **Fits the terminal's width.** Every column is sized to its content. When the table is too wide, the text
   columns (name, reason, command, node list, work dir) shrink first, longest first, cut with `…`.
   Numbers are never cut while anything else can give.

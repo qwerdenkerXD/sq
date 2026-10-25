@@ -1,0 +1,7 @@
+# COMPACT scenario "busy24" (decision 2): a busy queue on a cluster with node02
+# down.  23 pending (busy24/squeue-pending), then 128 running: the 112-task array
+# 3990 (folding into 8 rows of 14, longest-running first) and 16 single jobs.
+# The finished block has a fresh failure (4188) and 20 jobs in 10 rows.
+@include ../_common/squeue-defaults
+@include ../busy24/squeue-pending
+@include ../busy24/squeue-running

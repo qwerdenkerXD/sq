@@ -1,0 +1,5 @@
+@include ../_common/squeue-defaults
+i=8001; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(ReqNodeNotAvail, UnavailableNodes:fb2-bioinf,fb2-bioinf-0); S=\{now+3d}; r=ReqNodeNotAvail, UnavailableNodes:fb2-bioinf,fb2-bioinf-0
+i=8003; j=prep3; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(QOSMaxCpuPerUserLimit); S=\{now+5h}; r=QOSMaxCpuPerUserLimit
+i=8004; j=prep4; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Reservation); S=\{now+40d}; r=Reservation
+i=8005; j=sample12345_trim; L=2-00:00:00; M=1-02:03:04

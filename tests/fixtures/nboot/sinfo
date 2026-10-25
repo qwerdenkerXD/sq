@@ -1,0 +1,6 @@
+CPUsState=0/24/0/24; NodeList=gpu-a100-node07; FreeMem=70000; Memory=80000; StateLong=reboot^; Reason=Reboot ASAP; TimeStamp=2026-10-25T05:00:00; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/24/0/24; NodeList=gpu-a100-node08; FreeMem=70000; Memory=80000; StateLong=powering_down; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=4/20/0/24; NodeList=gpu-a100-node09; FreeMem=70000; Memory=80000; StateLong=mixed-; Reason=none; TimeStamp=Unknown; CPUsLoad=4.00; AllocMem=8000
+CPUsState=0/0/24/24; NodeList=gpu-a100-node10; FreeMem=N/A; Memory=80000; StateLong=drained*; Reason=bad GPU 3 ticket#4711; TimeStamp=2026-10-24T22:14:00; CPUsLoad=0.00; AllocMem=0
+CPUsState=24/0/0/24; NodeList=gpu-a100-node11; FreeMem=2000; Memory=80000; StateLong=draining; Reason=swap DIMM B2 2026-10-26; TimeStamp=2026-10-24T22:14:00; CPUsLoad=24.00; AllocMem=80000
+CPUsState=0/24/0/24; NodeList=gpu-a100-node12; FreeMem=70000; Memory=80000; StateLong=planned; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0

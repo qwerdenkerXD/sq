@@ -1,0 +1,4 @@
+@include ../_common/squeue-defaults
+@defaults u=alice; j=job; T=RUNNING; t=R; M=10:00; L=50:00; l=1:00:00; C=1; m=4G; R=node01; S=2026-10-06T08:00:00; r=None; E=(null); A=0; U=31001; Q=4294967295; D=1; V=2026-10-06T07:00:00; e=2026-10-07T08:00:00; P=very-long-partition-name; a=acct-with-digits-2026
+i=900; j=train1
+i=901; j=train2; Q=12; D=1000; t=PD; T=PENDING; M=0:00; R=(Priority); r=Priority; S=N/A; e=N/A

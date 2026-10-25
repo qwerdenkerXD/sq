@@ -1,0 +1,4 @@
+@include ../_common/squeue-defaults
+i=4294967294_3999999; j=a
+i=4201; j=b; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=4202; j=c; t=CG; T=COMPLETING

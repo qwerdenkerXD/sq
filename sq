@@ -57,9 +57,12 @@
 # own near their memory limit first (from 90 %, then from 70 %), then the
 # longest-running, and ordinary pending jobs last.  The finished block
 # shrinks to one line, the newest failure, else the newest job, and on the
-# smallest screens the nodes to one summary line.  Below about 60 columns
-# some lines are wider than the screen and wrap, so COMPACT can still run
-# over its height there.
+# smallest screens the nodes to one summary line.  COMPACT fits every width
+# it can measure, below 21 columns too: its lines take shorter forms of whole
+# parts (sinfo's short node states, durations as 5h59m once the text columns
+# are at 8, fewer columns, Slurm's state codes last), and a line is cut only
+# below its shortest form.  FULL takes none of these forms: its long lines
+# wrap.
 # COMPACT is chosen when stdout is a terminal or COLUMNS and LINES are both
 # exported (watch does that), FULL in a pipe or a file; --compact, --full and
 # SQ_COMPACT decide instead, the flags first.
@@ -4170,7 +4173,7 @@ done
 cols=${SQ_WIDTH:-${COLUMNS:-}}
 lines=${SQ_HEIGHT:-${LINES:-}}
 mincols=21 minlines=5            # anything smaller is no usable size, from any source,
-[ "$compact" = 0 ] || minlines=1 # but COMPACT fits whatever height it is given, down
+[ "$compact" = 0 ] || minlines=1 mincols=1   # but COMPACT fits whatever size it is given, down
                                  # to the footer alone; 0 still means "not sized yet"
 
 # the terminal's own size (tty_size), asked once, and only for an axis the
@@ -4525,51 +4528,76 @@ function idfit(x, wd,   b, c, t, keep, base, cnt) {
   if (idw(base "…") <= wd) return base "…"
   return x
 }
-# The narrowest a JOBID column goes while any other column can still give: the
-# widest BASE_… of its bracket cells and its widest cell without a bracket (a
-# plain id or a task id N_T, without its ×N): an id is never cut while
-# anything else can give
+# A task id 11950_3 narrows to its base, 11950_…: the task is a part, whole
+# or gone, never cut
+function idtask(x, wd,   m) {
+  if (idw(x) <= wd || !match(x, /^([0-9]+_)[0-9]+$/, m)) return x
+  return (idw(m[1] "…") <= wd) ? m[1] "…" : x
+}
+# an id cell in its F2 forms narrowed to wd: a bracket by idfit, a task id by
+# idtask; below its narrowest form it is returned whole, for the last resort
+function idform(x, wd) { return match(x, BRACKET) ? idfit(x, wd) : idtask(x, wd) }
+# The second tier of the JOBID floor, the narrowest a JOBID column goes while
+# any other column can still give: the widest BASE_… of its bracket cells and
+# its widest cell without a bracket (a plain id without its ×N, a task id as
+# N_…): an id is never cut while anything else can give
 function idfl_of(x,   b) {
   if (match(x, BRACKET, b)) return idw(substr(b[1], 1, length(b[1]) - 1) "…")
   sub(/ ×[0-9]+$/, "", x)
+  if (match(x, /^([0-9]+_)[0-9]+$/, b)) return idw(b[1] "…")
+  return idw(x)
+}
+# Its first tier, while any text column is above its floor: a bracket shrinks
+# only inside its terms and keeps its ×N, any other id stays whole
+function idfl1_of(x,   b) {
+  if (match(x, BRACKET, b)) return idfloor(x)
   return idw(x)
 }
 # the queue table shaved to the budget: the widest flexible column to 8, then
-# any column to 5, widest first, MEM after every other, JOBID below its floor
-# after MEM; FIX is a column held as it is (0: none)
+# every column to its floor (qfloor), widest first; FIX is a column held as it
+# is (0: none)
 function qshrink(fix,   big, i) {
+  qflex(fix)
   while (tabw > budget) {
     big = 0
-    for (i=1; i<=n; i++) if (i != fix && FLEX[k[i]] && w[i] > 8 && w[i] > w[big]) big = i
-    if (!big) break
-    w[big]--; tabw--
-  }
-  while (tabw > budget) {
-    big = 0
-    for (i=1; i<=n; i++) if (i != fix && w[i] > 5 && w[i] > w[big] && i != mc && !(i == idc && w[i] <= IDFL)) big = i
-    if (!big && mc && mc != fix && w[mc] > 5) big = mc        # MEM last
-    if (!big && idc && idc != fix && w[idc] > 5) big = idc    # the base id after it
+    for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && w[i] > qfloor(i) && w[i] > w[big]) big = i
     if (!big) break
     w[big]--; tabw--
   }
 }
-# the last resort of the finished table, any column to 4, widest first, JOBID below
-# its floor last; FIX holds JOBID and EXIT as they are
-function fshrink(fix,   big, i) {
+# The finished table shaved to the budget, after the levels of the ladder:
+# every column to its floor (ffloor), widest first, FIX holding JOBID and EXIT as
+# they are.  COMPACT goes on (H6): ELAPSED, AGO and NAME go whole, a hold that
+# is still too wide goes, the state takes its code, EXIT goes, and the last
+# resort cuts inside the JOBID cell
+function fshrink(fix,   big, i, keepw) {
   while (rtabw > budget) {
     big = 0
-    for (i=1; i<=6; i++) if (rw[i] > 4 && rw[i] > rw[big] && !(fix && (i == 1 || i == 4)) && !(i == 1 && rw[1] <= IDFLF)) big = i
-    if (!big && !fix && rw[1] > 4) big = 1
+    for (i=1; i<=6; i++) if (!FDROPPED[i] && rw[i] > ffloor(i) && rw[i] > rw[big] && !(fix && (i == 1 || i == 4))) big = i
     if (!big) break
     rw[big]--; rtabw--
   }
+  if (!compact) return
+  if (rtabw > budget) fdrop(fix, "5 6 2")
+  while (fix && rtabw > budget) {
+    big = 0
+    for (i=1; i<=6; i++) if (!FDROPPED[i] && rw[i] > ffloor(i) && rw[i] > rw[big]) big = i
+    if (!big) break
+    rw[big]--; rtabw--
+  }
+  if (rtabw > budget) fcode()
+  if (rtabw > budget) fdrop(fix, "4")           # the exit outlasts the long state, as in the finished line
+  if (rtabw > budget && shown) {
+    keepw = rw[1] - (rtabw - budget); rw[1] = (keepw < 1) ? 1 : keepw; rtabw = rtab()
+  }
 }
-# The EXIT cell narrowed to wd: a canceller that is a uid is whole or "by…",
-# then goes with its "by" (a cut number would name another user); a name
-# takes the plain right cut, as the USER column does
+# The EXIT cell narrowed to wd (its forms, E-M3): a canceller that is a name
+# is cut as text (F4, the plain right cut, as the USER column takes it) down to
+# one character, then "by…", then it goes with its "by" and the exit stands
+# alone; a uid is whole or "by…" (a cut number would name another user)
 function excut(x, wd,   m) {
   if (idw(x) <= wd || !match(x, /^(.*) by (.+)$/, m)) return x
-  if (m[2] !~ /^[0-9]+$/) return x          # a name: the plain right cut, as USER takes it
+  if (m[2] !~ /^[0-9]+$/ && wd - idw(m[1] " by ") >= 2) return m[1] " by " clip(m[2], wd - idw(m[1] " by "))
   if (idw(m[1] " by…") <= wd) return m[1] " by…"
   return m[1]
 }
@@ -4667,14 +4695,55 @@ function grow(   k) {                     # keep the last change if the screen s
   for (k in KEPT) SHOW[k] = KEPT[k]; for (k in KEPTQ) QUOTA[k] = KEPTQ[k]
   return 0
 }
-function step(k, v) { SHOW[k] = v; return grow() }
+# the short state names of sinfo (%t, node_state_string_compact of Slurm 23.11.4,
+# lower-cased by sinfo), the suffix kept: allocated* -> alloc*; a state with
+# no short name keeps its long one
+function node_short_state(st,   m, base, i) {
+  if (!match(st, /^([a-z_]+)(.*)$/, m)) return st
+  if (!NSHORTN) {
+    NSHORTN = split("allocated alloc mixed mix draining drng drained drain completing comp reserved resv " \
+                    "future futr failing failg planned plnd unknown unk perfctrs npc reboot boot " \
+                    "powering_down powring_dn powered_down powered_dn power_down pow_dn power_up pow_up " \
+                    "cancel_reboot canc_r resume resm reboot_issued boot^", NSHORTL, " ")
+    for (i = 1; i < NSHORTN; i += 2) NSHORT[NSHORTL[i]] = NSHORTL[i+1]
+  }
+  base = m[1]
+  return ((base in NSHORT) ? NSHORT[base] : base) m[2]
+}
+# a node block that only the digest fits into the width (NODEFORM 5) is the
+# digest at every height
+function step(k, v) { if (k == "nodes" && v == 2 && NODEFORM == 5) v = 1; SHOW[k] = v; return grow() }
+# fit() with the height cap (H11, decision 8: a taller terminal never shows
+# less).  Below the height h0 where the full node block first fits, the digest
+# screen shows no job row, no finished row and no "… n jobs" line that the
+# screen at h0 lacks: HCAP holds fill and floor to the quotas at h0 (HCAPQ,
+# HCAPFIN, HCAPFSLOTS).  Whether the full block fits only grows with the height, so h0
+# is found by doubling, then bisection: about 2 log2(nodes) fit() runs
+function fit_capped(   x, h, lo, hi, stp) {
+  fit()
+  if (SHOW["nodes"] == 2 || NODEFORM == 5 || nn < 2) return
+  h = avail; lo = h; stp = 1
+  for (;;) {
+    avail = h + stp; fit()
+    if (SHOW["nodes"] == 2 || stp > 1073741824) break
+    lo = avail; stp *= 2
+  }
+  hi = avail
+  while (hi - lo > 1) { avail = int((lo + hi) / 2); fit(); if (SHOW["nodes"] == 2) hi = avail; else lo = avail }
+  avail = hi; fit()
+  for (x=1; x<=6; x++) HCAPQ[x] = QUOTA[x]
+  HCAPFIN = SHOW["fin"]; HCAPFSLOTS = SHOW["fslots"]; HCAP = (SHOW["nodes"] == 2)
+  avail = h; fit(); HCAP = 0
+}
 function floor(x) {         # the least of a small section is one row (both, if it
   if (!SECN[x]) return 1    # has two), of the others their "… n jobs" line alone
+  if (HCAP && HCAPQ[x] < 0) return 1   # not even that where h0 lacks it
   QUOTA[x] = (x <= 3) ? 1 : 0
+  if (HCAP && QUOTA[x] > HCAPQ[x]) QUOTA[x] = HCAPQ[x]
   return grow()
 }
 function fill(x) {          # then a row at a time; the cap stops a small section
-  while (QUOTA[x] < SECN[x]) {    # but is no misfit, so the next one still grows
+  while (QUOTA[x] < SECN[x] && !(HCAP && QUOTA[x] >= HCAPQ[x])) {   # but is no misfit, so the next one still grows
     QUOTA[x]++
     if (x <= 3 && CAP >= 0 && seclines(1) + seclines(2) + seclines(3) > CAP) {
       QUOTA[x]--; return 1
@@ -4685,8 +4754,9 @@ function fill(x) {          # then a row at a time; the cap stops a small sectio
 }
 function fillfin() {        # the one line becomes the block, reaching down to the
   if (!recent || rbad || rtrunc || !d) return 1   # newest failure, then grows
+  if (HCAP && HCAPFIN < 2) return 1
   if (SHOW["fin"] == 1) { SHOW["fin"] = 2; SHOW["fslots"] = FMIN; if (!grow()) return 0 }
-  while (SHOW["fslots"] < FSLOTS) { SHOW["fslots"]++; if (!grow()) return 0 }
+  while (SHOW["fslots"] < FSLOTS && !(HCAP && SHOW["fslots"] >= HCAPFSLOTS)) { SHOW["fslots"]++; if (!grow()) return 0 }
   return 1
 }
 # The order is what Franz chose: what the footer cannot count (a stuck job, a
@@ -4694,8 +4764,10 @@ function fillfin() {        # the one line becomes the block, reaching down to t
 # the blank separators outlast the "… n jobs" lines the footer repeats, small
 # sections fill before running but within half the queue table while running
 # still hides jobs, the finished block grows only once every running job fits,
-# and ordinary pending gets rows last.
+# and ordinary pending gets rows last.  A node block too tall for the screen
+# stays the digest and the later steps still run (fit_capped caps them)
 function fit(   x) {
+  delete KEPT; delete KEPTQ                       # no state carried over from an earlier fit()
   for (x in SHOWN) SHOW[SHOWN[x]] = 0
   for (x=1; x<=6; x++) QUOTA[x] = -1
   CAP = -1
@@ -4703,7 +4775,7 @@ function fit(   x) {
   if (!(step("banner", 1) && step("qcap", 1) && step("notes", 1) && step("title", 1) &&
         step("nodes", (nn >= 2 || NRSN) ? 1 : 2) &&
         floor(1) && step("fin", 1) && floor(2) && floor(3) &&
-        step("nodes", 2) && step("reasons", 1) &&
+        (step("nodes", 2) ? step("reasons", 1) : 1) &&
         step("b2", 1) && step("b1", 1) && step("b0", 1) && step("b3", 1) && step("b4", 1) &&
         floor(4) && floor(6) && floor(5))) return
   CAP = int((avail - height() + qbody() + (qbody() > 0) - 1) / 2)   # half the table rows
@@ -4736,8 +4808,9 @@ function unreadtext(   o, i, NM) {
 }
 # nodes: 1 allocated, 1 down* · 128/256 cpu, and where the memory bar counts
 # allocated memory (membar) · 335/1052G mem.  Its parts: DST[1..DNS] the state
-# counts in the order of sinfo, DFG[1..DNF] the CPU and the memory figure, DPR the
-# states in the order they are kept, the DNFLT fault states first.  A sum with
+# counts in the order of sinfo (DSTSHORT with the short names of sinfo),
+# DFG[1..DNF] the CPU and the memory figure, DPR the states in the order they
+# are kept, the DNFLT fault states first.  A sum with
 # an unknown term is "?"; "!" stands before a total that counts RealMemory for
 # some node (MEMNOTE: scontrol failed, or gave no usable MemSpecLimit for it)
 function digest(   r, s, nc, nord, ns, u, t, i, j, ma, mt, maunk, mtunk) {
@@ -4747,7 +4820,7 @@ function digest(   r, s, nc, nord, ns, u, t, i, j, ma, mt, maunk, mtunk) {
     if (memalloc[r] < 0) maunk = 1
     if (memden[r] < 0) mtunk = 1
   }
-  DNS = ns; for (i=1; i<=ns; i++) DST[i] = nc[nord[i]] " " nord[i]
+  DNS = ns; for (i=1; i<=ns; i++) { DST[i] = nc[nord[i]] " " nord[i]; DSTSHORT[i] = nc[nord[i]] " " node_short_state(nord[i]) }
   DNF = 1; DFG[1] = u+0 "/" t+0 " cpu"
   if (MEMALLOC) DFG[++DNF] = (maunk ? "?" : sprintf("%.0f", ma/1024)) "/" \
                              (mtunk ? "?" : (MEMNOTE ? "!" : "") sprintf("%.0f", mt/1024)) "G mem"
@@ -4761,28 +4834,33 @@ function digest(   r, s, nc, nord, ns, u, t, i, j, ma, mt, maunk, mtunk) {
 # as on the node line, and the bare words powered_down and powering_down are
 # faults, as the node line colours them
 function dfault(st) { return st ~ /down|drain|fail|inval|unk/ || st ~ /[*]$/ }
-# the digest of the first KS states in DPR order and the first KF figures: the
-# states kept stand in the order of sinfo, and a list cut short ends in a "…" of its
-# own, one more item after the separator of that list
-function dform(ks, kf,   x, i, K) {
+# the digest of the first KS states in DPR order and the first KF figures, the
+# states by their short names where SHORT: the states kept stand in the order
+# of sinfo, and a list cut short ends in a "…" of its own, one more item after
+# the separator of that list
+function dform(ks, kf, short,   x, i, K) {
   for (i=1; i<=ks; i++) K[DPR[i]] = 1
-  for (i=1; i<=DNS; i++) if (i in K) x = x (x != "" ? ", " : "") DST[i]
+  for (i=1; i<=DNS; i++) if (i in K) x = x (x != "" ? ", " : "") (short ? DSTSHORT[i] : DST[i])
   if (ks < DNS) x = x (ks ? ", " : "") "…"
   for (i=1; i<=kf; i++) x = x " · " DFG[i]
   if (kf < DNF) x = x " · …"
   return "nodes: " x
 }
 # The digest in WD columns by whole parts, never a cut number.  The parts go
-# in one fixed order: the healthy states from the last, then the memory
-# figure, then the CPU figure, then the fault states from the last, so a wider
-# screen only ever adds a part.  The narrowest, "nodes: … · …", is 13 columns,
-# which every width from 21 holds
-function dfit(wd,   ks, kf, x) {
+# in one fixed order (H3): the healthy states from the last, down to one where
+# no fault state is left (the fault states all stay); then the memory figure,
+# then the CPU figure; then the states take the short names of sinfo, all at once;
+# then the states kept from the last, down to one, then none: so a wider
+# screen only ever adds a part.  The narrowest, "nodes: … · …", is 13
+# columns; below it, lastcut
+function dfit(wd,   ks, kf, x, keep) {
   digest()
-  for (ks = DNS; ks >= DNFLT; ks--) if (colw(x = dform(ks, DNF)) <= wd) return x
-  for (kf = DNF - 1; kf >= 0; kf--) if (colw(x = dform(DNFLT, kf)) <= wd) return x
-  for (ks = DNFLT - 1; ks >= 0; ks--) if (colw(x = dform(ks, 0)) <= wd) return x
-  return x
+  keep = DNFLT
+  if (!keep && DNS) keep = 1
+  for (ks = DNS; ks >= keep; ks--) if (colw(x = dform(ks, DNF)) <= wd) return x
+  for (kf = DNF - 1; kf >= 0; kf--) if (colw(x = dform(keep, kf)) <= wd) return x
+  for (ks = keep; ks >= 1; ks--) if (colw(x = dform(ks, 0, 1)) <= wd) return x
+  return dform(0, 0)
 }
 # The memory bar shows memory allocated where Slurm schedules memory, as the
 # CPU figure counts allocated cores, and memory in use where it does not.  It
@@ -4829,6 +4907,7 @@ function membar(   r, anyalloc, zerobusy, i, spec, kind, nk, first, KINDS, nkind
   }
   if (MEMNOTE || !nk) return
   MEMNOTE = 1
+  MEMNODE = first                               # the node the caption names, never cut (W8)
   MEMTEXT = "↳ memory counts RealMemory on " first (nk > 1 ? " and " (nk - 1) " more node" (nk > 2 ? "s" : "") : "") ": " \
             (nkinds > 1 ? "scontrol gave no usable MemSpecLimit for them" : memkind(last, nk > 1))
 }
@@ -4845,7 +4924,7 @@ function fid(g) {
 }
 function fexit(g, cap) { return exset(gex[g], cap) (gcxl[g] == "" ? "" : " by " gcxl[g]) }
 # a finished cell of column i narrowed to wd, before the plain right cut
-function fcut(i, x, wd) { return (i == 1) ? idfit(x, wd) : (i == 4) ? excut(x, wd) : x }
+function fcut(i, x, wd) { return (i == 1) ? idform(x, wd) : (i == 4) ? excut(x, wd) : x }
 
 # COMPACT keeps own rows at risk longest: 0 from 90 %, 1 from 70 %, 2 the rest
 function memband(g) { return !(g in grp_worst_pct) ? 2 : (grp_worst_pct[g] >= 90) ? 0 : (grp_worst_pct[g] >= 70) ? 1 : 2 }
@@ -4940,6 +5019,372 @@ function othercells(g,   f, text) {   # its text in each form, once the group is
   v[g,mc] = other_text[g, "decimal"]
 }
 
+# ---- WHOLE: a line is made of parts, each whole or absent -----------------
+# A number (a duration, a size, an exit, a count), a state word, an id in its
+# F2 forms, a node name, the host, the clock with its zone: each is shown whole
+# or not at all while anything else can give.  Text gives first: job names,
+# commands, node lists, user and account names, the prose of captions, cut
+# plain but guarded (textcut).  Every line kind narrows through its own forms,
+# in a fixed order, so a wider screen never shows fewer parts of a line;
+# only below the narrowest form of a line does the last resort cut it (lastcut, or
+# the cut inside the JOBID cell).  All of it is for COMPACT: FULL takes no short
+# form, drops no column and wraps as it always did (decision 4), and keeps only
+# the floors (no number or state cut) and the guard where it cut before.
+function plain(s) { gsub(/\033\[[0-9;]*m/, "", s); return s }
+# The last resort, COMPACT only: a line still wider than the screen, cut as clip
+# cuts, its escapes kept up to the cut and closed after it.  An escape that is
+# no SGR is taken as one character, so the loop always moves on; the lines
+# hold only the SGRs of e(), as the scrub turns every outside ESC into "?"
+function lastcut(s, cols,   out, used, t, p, any, x) {
+  if (colw(plain(s)) <= cols) return s
+  if (cols < 1) cols = 1
+  while (s != "") {
+    if (match(s, /^\033\[[0-9;]*m/)) { out = out substr(s, 1, RLENGTH); any = 1; s = substr(s, RLENGTH + 1); continue }
+    p = index(substr(s, 2), "\033"); t = p ? substr(s, 1, p) : s; s = p ? substr(s, p + 1) : ""
+    if (used + colw(t) <= cols - 1) { out = out t; used += colw(t); continue }
+    x = clip(t " ", cols - used); sub(/……$/, "…", x); sub(/  +…$/, " …", x)   # one "…"; padding does not run up to it
+    out = out x; break
+  }
+  return out (any ? "\033[0m" : "")
+}
+# Text cut to wd: the plain cut (clip), guarded.  For captions, prose lines and
+# the text cells of the tables alike
+function textcut(s, wd) { return (colw(s) <= wd) ? s : guard(s, clip(s, wd)) }
+# The guard: a plain cut C of S never leaves a digit right before its "…"
+# ("node0…" would name another node, "202…" another date, "4G…" another
+# size).  Each step moves the cut before the one word it fell in or right
+# after, one word at a time, until the end is clean
+function guard(s, c,   d) {
+  while (c != s && (d = guard_step(s, c)) != c) c = d
+  return c
+}
+# One step of the guard.  A word ends at " ", ":", "=" or ",", so a key before
+# ":" or "=" and the whole items before "," stay ("UnavailableNodes:…",
+# "--mem=…", "fb2-bioinf,…").  The word the cut falls in, or right after, goes
+# when it holds a digit; a digit word ended by its separator ("9:…") goes too,
+# never a key.  Where no earlier word is left (a lone ↳, ⚠ or · is none), the
+# word backs up over its trailing digit run instead ("ticket#4711-2026" ->
+# "ticket#…", "node07" -> "node…"), and only where that leaves nothing does the
+# plain cut stand.  Nor does a cut end in a bare count whose label it cut away
+# ("CPUsLoad (1…" -> "CPUsLoad …")
+function guard_step(s, c,   pre, rest, x, k, p2, t, inw) {
+  if (c == s) return c
+  pre = substr(c, 1, length(c) - length("…")); rest = substr(s, length(pre) + 1)
+  match(pre, /[^ :=,]*$/); x = substr(pre, RSTART); k = length(x)
+  inw = (x != "" && rest ~ /^[^ :=,]/)
+  if (x == "" && match(pre, /[^ :=,]*[0-9][:=,]+$/)) { x = substr(pre, RSTART); k = RLENGTH; inw = 0 }
+  if (inw) { match(rest, /^[^ :=,]*/); x = x substr(rest, 1, RLENGTH) }
+  if (x ~ /[0-9]/) {                            # inside, or right after, a word that holds a digit
+    p2 = substr(pre, 1, length(pre) - k); t = p2
+    gsub(/↳|⚠|·/, "", t)
+    if (t ~ /[^ ]/) c = p2 "…"                  # an earlier word is left: the cut falls before this one
+    else {                                      # none: the first word backs up over its digits
+      t = pre; if (pre ~ /[0-9][:=,]?$/) sub(/[0-9][0-9.,:\/+-]*$/, "", t); p2 = t; gsub(/↳|⚠|·/, "", p2)
+      if (p2 ~ /[^ ]/ && t !~ /[0-9]$/) c = t "…"
+    }
+  }
+  pre = substr(c, 1, length(c) - length("…"))
+  if (c != s && match(pre, /[ ]\(?[0-9]+ ?$/) && RSTART > 1) c = substr(pre, 1, RSTART) "…"
+  return c
+}
+# textcut for a caption that names a node (the MEMNOTE of NODES): a node name is
+# never cut (W8), the cut falls before " on NAME" where it would fall inside it
+function textcut_node(s, wd, name,   c, p, k) {
+  c = textcut(s, wd)
+  if (name == "" || c == s || !(p = index(s, " on " name))) return c
+  k = length(c) - length("…")
+  if (k > p && k < p + 4 + length(name)) c = substr(s, 1, p) "…"
+  return c
+}
+# The title, ▌ SLURM host  HH:MM:SS ZONE, fitted to wd: "SLURM" goes, then the
+# gap narrows to one space, then the host goes (T-A), then the mark; the clock
+# and its zone are one part, the host is never cut, only gone (W8).  Below the
+# clock alone, lastcut
+function title_line(wd,   F, i, hp, cp) {
+  hp = e("2") host e("0"); cp = e("1") now e("0")
+  F[0] = "▌ SLURM " host "  " now
+  F[1] = "▌ " host "  " now
+  F[2] = "▌ " host " " now
+  F[3] = "▌ " now
+  for (i = 0; i < 4 && colw(F[i]) > wd; i++) ;
+  if (i == 0) return e("1;36") "▌ SLURM" e("0") " " hp "  " cp
+  if (i == 1) return e("1;36") "▌" e("0") " " hp "  " cp
+  if (i == 2) return e("1;36") "▌" e("0") " " hp " " cp
+  if (i == 3) return e("1;36") "▌" e("0") " " cp
+  return cp
+}
+# The footer, N jobs   R running   P pending   O other, fitted to wd: the gaps
+# narrow to 2, then 1; the labels become the codes of Slurm (R, PD); the total goes,
+# then other, then pending (F-A); running never.  Before a count goes, the same
+# counts are tried without the left margin, which comes back on the next
+# narrower form that fits with it.  A count is whole or absent, in the colour
+# of its label.  FOOTMARGIN says whether the line keeps the margin
+function footer_line(wd,   a, b, c, dd, L, F, T, f, nf, i, x, gap, last, margin) {
+  a = QKNOWN ? qjobs+0 : "?"; b = QKNOWN ? cnt["R"]+0 : "?"; c = QKNOWN ? cnt["PD"]+0 : "?"
+  dd = QKNOWN ? qjobs - cnt["R"] - cnt["PD"] : "?"
+  # a form: its gap, codes (1) or words (0), the first and the last part kept
+  # (1 jobs, 2 running, 3 pending, 4 other), and "m" where it gives the margin
+  nf = split("3 0 1 4|2 0 1 4|1 0 1 4|1 1 1 4|1 1 1 4 m|1 1 2 4|1 1 2 4 m|1 1 2 3|1 1 2 3 m|1 1 2 2|1 1 2 2 m", F, "|")
+  FOOTMARGIN = 1
+  for (f = 1; f <= nf; f++) {
+    split(F[f], T, " "); gap = sprintf("%*s", T[1], ""); last = T[4]
+    margin = (T[5] == "m") ? left : 0
+    L[1] = e("1") a e("0") " jobs"
+    L[2] = e("32") b (T[2] ? " R" : " running") e("0")
+    L[3] = e("33") c (T[2] ? " PD" : " pending") e("0")
+    L[4] = e("31") dd " other" e("0")
+    x = ""; for (i = T[3]; i <= last; i++) x = x (x != "" ? gap : "") L[i]
+    if (colw(plain(x)) <= wd + margin) { if (margin) FOOTMARGIN = 0; return x }
+  }
+  FOOTMARGIN = 0
+  return x
+}
+# The state code of finished group g: that of Slurm (CD, F, CA, OOM), SE for
+# SPECIAL_EXIT; a state with no code stays long
+function stcode(g) { return (rst[g] != "") ? rst[g] : (rstate[g] == "SPECIAL_EXIT") ? "SE" : rstate[g] }
+# The one finished line of COMPACT, recently finished (marker): id name STATE exits,
+# fitted to wd by its forms, in this order (H7): the caption shortens to
+# "finished"; the marker of a filter (decision 29) shortens to "(--opt: no sacct)",
+# then "(--opt)", both still naming the filter (N-B; the "(no
+# accounting)" of decision 16 has no shorter form); the canceller is cut as text (a uid never),
+# then "by…", then gone; the exits keep one item; the name is cut (not below 3
+# columns), then goes; the id takes its F2 forms; the marker goes; the caption
+# goes; the state takes its code; the exit goes.  The id and the state never go
+function fin_line(g, wd,   mk, mk1, mk2, flt, F, f, nf, T, capx, st, ex, x, room, job, cc, idx, nmx, cx, can, items) {
+  mk = mk1 = mk2 = ""
+  if (rsrc != "sacct") {                        # decisions 16 and 29: the marker
+    mk = " (" (rwhyc == "filter" ? rwhy : "no accounting") ")"
+    if (rwhyc == "filter") {                    # the option the sentence names, else its first word
+      flt = rwhy; if (match(rwhy, /--?[A-Za-z][-A-Za-z0-9]*/)) flt = substr(rwhy, RSTART, RLENGTH); else sub(/ .*/, "", flt)
+      mk1 = " (" flt ": no sacct)"; mk2 = " (" flt ")"
+    } else mk1 = mk2 = mk
+  }
+  cc = e(fcol(rst[g])); can = gcxl[g]
+  # a form: caption (2 long, 1 short, 0 none), marker (3 whole, 2 and 1 its
+  # short forms, 0 none), canceller (3 whole, 2 cut, 1 "by…", 0 none), exits
+  # (3 items, 1), name (2 whole, 1 cut, 0 none), id (0 whole, 1 its F2 forms),
+  # state (0 long, 1 code), exit (1 shown, 0 gone)
+  nf = split("2 3 3 3 2 0 0 1|1 3 3 3 2 0 0 1|1 2 3 3 2 0 0 1|1 1 3 3 2 0 0 1|1 1 2 3 2 0 0 1|1 1 1 3 2 0 0 1|" \
+             "1 1 0 3 2 0 0 1|1 1 0 1 2 0 0 1|1 1 0 1 1 0 0 1|1 1 0 1 0 0 0 1|1 1 0 1 0 1 0 1|1 0 0 1 0 1 0 1|" \
+             "0 0 0 1 0 1 0 1|0 0 0 1 0 1 1 1|0 0 0 1 0 1 1 0", F, "|")
+  for (f = 1; f <= nf; f++) {
+    split(F[f], T, " ")
+    capx = (T[1] == 2) ? "recently finished" : (T[1] == 1) ? "finished" : ""
+    if (capx != "") capx = capx (T[2] == 3 ? mk : T[2] == 2 ? mk1 : T[2] == 1 ? mk2 : "") ": "
+    st = T[7] ? stcode(g) : rstate[g]
+    items = exset(gex[g], T[4])
+    cx = (can == "" || !T[3]) ? "" : (T[3] == 3) ? " by " can : (T[3] == 1) ? " by…" : "C"
+    nmx = (T[5] == 2) ? " " rname[g] : ""
+    idx = fid(g)
+    if (cx == "C") {                            # the canceller name cut as text (F4); a uid is never cut
+      if (can ~ /^[0-9]+$/) continue
+      room = wd - colw(capx idx nmx " " st " " items " by ")
+      if (room < 2 || colw(can) <= room) continue
+      cx = " by " clip(can, room)
+    }
+    ex = T[8] ? " " items cx : ""
+    if (T[6] && colw(capx idx nmx " " st ex) > wd) idx = idform(idx, wd - colw(capx nmx " " st ex))
+    if (T[5] == 1) {                            # the name cut, where at least 3 of its columns stay
+      room = wd - colw(capx idx " " st ex) - 1
+      if (room < 3 || colw(rname[g]) <= room) continue
+      nmx = " " textcut(rname[g], room)
+    }
+    job = idx nmx " " st ex
+    if (colw(capx job) <= wd) break
+  }
+  return e("2") capx e("0") cc job e("0")
+}
+# "… n jobs <section>" fitted to wd: the short name of the section, then "jobs" goes
+function more_jobs_line(nj, x, wd,   S, a, b) {
+  split("stuck|blocked|held|pending|running|other", S, "|")
+  a = "… " nj " jobs " SECNAME[x]
+  if (colw(a) <= wd) return a
+  if (colw(b = "… " nj " jobs " S[x]) <= wd) return b
+  return "… " nj " " S[x]
+}
+# The columns of the queue table by kind: the id (JOBID), a word (STATE, ST), a
+# number (the right-aligned columns and START, END, SUBMIT), and text (the
+# rest).  QDROPPED[i]: column i is gone whole (COMPACT); qtab the width of the
+# columns shown, with their gaps
+function qkind(c) { return (c == "i") ? "id" : (c == "T" || c == "t") ? "word" : (RIGHT[c] || c == "S" || c == "e" || c == "V") ? "num" : "text" }
+function qtab(   i, c, t) { for (i=1; i<=n; i++) if (!QDROPPED[i]) { t += w[i]; c++ }; return t + (QBODY && c ? c - 1 : 0) }
+# The floor of column i, below which only the last resort narrows it: text 5;
+# a number or a word its widest cell (QCW), its header not below min(header, 5);
+# JOBID the floor of its tier (IDT 1: a bracket inside its terms with its ×N, an id
+# whole; IDT 2: BASE_… and a task id N_…), and not below 5 for its header
+function qfloor(i,   t) {
+  if (i == idc) { t = (IDT == 2) ? IDFL : IDFL1; return (t < 5) ? 5 : t }
+  if (qkind(k[i]) == "text") return 5
+  return (QCW[i] > 5 || QCW[i] >= length(hd[i])) ? QCW[i] : (length(hd[i]) < 5 ? length(hd[i]) : 5)
+}
+function qcontent(i,   r, x) {                 # QCW[i]: the widest cell of column i shown
+  QCW[i] = 0
+  for (r=1; r<=rows; r++) if (QSHOW[r] && (x = (WIDE ? colw(v[r,i]) : length(v[r,i]))) > QCW[i]) QCW[i] = x
+}
+# The FLEX columns to 8, longest first, the first step of the shave
+function qflex(fix,   big, i) {
+  while (tabw > budget) {
+    big = 0
+    for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && FLEX[k[i]] && w[i] > 8 && w[i] > w[big]) big = i
+    if (!big) break
+    w[big]--; tabw--
+  }
+}
+# The text columns and JOBID back at their measured widths (what a narrower
+# form or a dropped column freed goes back to them), then shaved again
+function qregrow(fix,   i, t) {
+  for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && (i == idc || qkind(k[i]) == "text")) w[i] = wnat[i]
+  tabw = qtab(); t = IDT; IDT = 1; qshrink(fix)
+  if (tabw > budget && t == 2) { IDT = 2; qshrink(fix) }
+}
+# COMPACT: the duration columns (TIME, LEFT, LIMIT) in the short form, 5h59m,
+# as the finished table shows ELAPSED (rounded down, as the whole form of MEM
+# rounds): every one of them or none, and only where the table as a whole gets
+# narrower (a column of sub-hour values can widen by one).  QSHORT[i]: column i
+# is short, QLONGV its long cells for qlong_durations
+function qshort_durations(   i, r, x, mw, any, gain) {
+  for (i=1; i<=n; i++) if (!QDROPPED[i] && !QSHORT[i] && (k[i] == "M" || k[i] == "L" || k[i] == "l")) {
+    mw = 0
+    for (r=1; r<=rows; r++) if (QSHOW[r]) {
+      x = v[r,i]; if (x ~ /^([0-9]+-)?[0-9]+(:[0-9]+){1,2}$/) x = elap(dur(x))
+      if (length(x) > mw) mw = length(x)
+    }
+    gain += QCW[i] - mw
+  }
+  if (gain <= 0) return 0
+  for (i=1; i<=n; i++) if (!QDROPPED[i] && !QSHORT[i] && (k[i] == "M" || k[i] == "L" || k[i] == "l")) {
+    for (r=1; r<=rows; r++) QLONGV[r,i] = v[r,i]
+    QSHORT[i] = any = 1
+    for (r=1; r<=rows; r++) if (v[r,i] ~ /^([0-9]+-)?[0-9]+(:[0-9]+){1,2}$/) {
+      v[r,i] = elap(dur(v[r,i])); if (WIDE) CW[r,i] = colw(v[r,i])
+    }
+    qcontent(i); w[i] = wnat[i] = (QCW[i] > length(hd[i])) ? QCW[i] : length(hd[i])
+  }
+  tabw = qtab()
+  return any
+}
+# The long durations of Slurm back as soon as they fit with the FLEX columns at 8 or
+# wider (H-1 c: the screens Franz accepted keep 5:59:00), also after a drop; where
+# they do not fit, the short forms stay as they were
+function qlong_durations(fix,   i, r, any, SW, SV, SC, t) {
+  for (i=1; i<=n; i++) if (QSHORT[i]) any = 1
+  if (!any) return
+  for (i=1; i<=n; i++) SW[i] = w[i]
+  for (i=1; i<=n; i++) if (QSHORT[i]) {
+    for (r=1; r<=rows; r++) { SV[r,i] = v[r,i]; v[r,i] = QLONGV[r,i]; if (WIDE) CW[r,i] = colw(v[r,i]) }
+    SC[i] = QCW[i]; qcontent(i); w[i] = (QCW[i] > length(hd[i])) ? QCW[i] : length(hd[i])
+  }
+  for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && (i == idc || qkind(k[i]) == "text")) w[i] = wnat[i]
+  tabw = qtab(); t = IDT; IDT = 1
+  qflex(fix)
+  if (tabw <= budget) {
+    for (i=1; i<=n; i++) if (QSHORT[i]) { QSHORT[i] = 0; wnat[i] = w[i] }
+    return
+  }
+  for (i=1; i<=n; i++) {
+    w[i] = SW[i]
+    if (QSHORT[i]) { for (r=1; r<=rows; r++) { v[r,i] = SV[r,i]; if (WIDE) CW[r,i] = colw(v[r,i]) }; QCW[i] = SC[i] }
+  }
+  IDT = t; tabw = qtab()
+}
+# COMPACT: columns go whole.  First every column the list does not name, from
+# the right (a column a -o adds, O-A), then the list in its order (D-A): CPU,
+# TIME, USER, MEM, LEFT, NAME.  JOBID, STATE/ST, NODE/REASON and REASON never go
+function qdrop(fix,   i, j, L, nl, c) {
+  nl = split("C M u m L j", L, " ")
+  while (tabw > budget) {
+    c = 0
+    for (i=n; i>=1 && !c; i--) if (!QDROPPED[i] && i != fix && k[i] !~ /^[iTtRr]$/) {
+      for (j=1; j<=nl && L[j] != k[i]; j++) ;
+      if (j > nl) c = i
+    }
+    for (j=1; j<=nl && !c; j++) for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && k[i] == L[j]) { c = i; break }
+    if (!c) return
+    QDROPPED[c] = 1; qregrow(fix)
+  }
+}
+# COMPACT: the state column takes the codes of Slurm (PD, R, CG; header ST), the
+# last resort (Franz: "if it fits, the long variant is preferred").  Kept even
+# where the row still needs the cut inside the JOBID cell: that cut is smaller
+function qcode(fix,   i, r, any) {
+  for (i=1; i<=n; i++) if (k[i] == "T" && !QDROPPED[i] && !QCODE[i]) {
+    QCODE[i] = any = 1; hd[i] = "ST"
+    for (r=1; r<=rows; r++) { v[r,i] = state[r]; if (WIDE) CW[r,i] = colw(v[r,i]) }
+    qcontent(i); w[i] = wnat[i] = (QCW[i] > 2) ? QCW[i] : 2
+  }
+  if (!any) return
+  tabw = qtab(); qregrow(fix)
+}
+# The queue table fitted to the budget (H4), FIX a column held as it is (0:
+# none): the FLEX columns to 8; the short durations of COMPACT; every column to
+# its first-tier floor, widest first, then JOBID to its second tier (FULL
+# stops here and wraps); COMPACT: columns go whole, the state takes its code,
+# the long durations come back where they fit, and the last resort cuts inside
+# the JOBID cell, every other column at its floor
+function qfit(fix,   keepw) {
+  IDT = 1
+  qflex(fix)
+  if (compact && tabw > budget && qshort_durations()) qregrow(fix)
+  qshrink(fix)
+  if (tabw > budget) { IDT = 2; qshrink(fix) }
+  if (!compact) return
+  if (tabw <= budget) { qlong_durations(fix); return }
+  qdrop(fix)
+  if (tabw > budget) qcode(fix)
+  qlong_durations(fix)
+  if (tabw > budget && idc) {
+    keepw = w[idc] - (tabw - budget); w[idc] = (keepw < 1) ? 1 : keepw; tabw = qtab()
+  }
+}
+# NODE/REASON with a start estimate, fitted to wd: the estimate is a number,
+# whole or gone; beside it the first word of the reason is the code of Slurm, a part, so
+# the reason is cut only at whole words (ending at " ", ":", "=" or ","), with
+# no digit before its "…" (H5).  Where not even its first word fits, the
+# estimate stands alone ("→ 2027-11-30"); where not even that fits, the
+# estimate goes and the reason is text, cut by its cell
+function reason_fit(x, wd,   p, rs, es, i, y, best) {
+  if ((WIDE ? colw(x) : length(x)) <= wd || (p = index(x, " → ")) == 0) return x
+  rs = substr(x, 1, p - 1); es = substr(x, p)
+  if (colw(es) - 1 > wd) return rs
+  for (i = 1; i < length(rs); i++) {
+    if (substr(rs, i, 1) !~ /[ :=,]/) continue
+    y = substr(rs, 1, i)
+    if (y ~ /[0-9][ :=,]*$/) continue           # no digit right before the "…"
+    if (colw(y "…" es) <= wd) best = y "…"
+  }
+  if (best != "") return best es
+  return substr(es, 2)                          # "→ 2027-11-30"
+}
+# The finished table: FDROPPED[i] column i gone whole (COMPACT), rtab the width
+# of the columns shown, with their gaps; ffloor the floor of column i (NAME 4,
+# JOBID its floor, the others their widest cell, a header not below
+# min(header, 4)); RCWF[i] the widest cell of a number or word column
+function rtab(   i, c, t) { for (i=1; i<=6; i++) if (!FDROPPED[i]) { t += rw[i]; c++ }; return shown ? t + c - 1 : 0 }
+function ffloor(i) { return (i == 2) ? 4 : (i == 1) ? (IDFLF < 4 ? 4 : IDFLF) : (RCWF[i] > 4 || RCWF[i] >= length(rhd[i])) ? RCWF[i] : (length(rhd[i]) < 4 ? length(rhd[i]) : 4) }
+# the columns of LIST go whole, one after the other while the table is too
+# wide; each time the freed columns go back, then every column to its floor
+function fdrop(fix, list,   L, j, i, big, nl) {
+  nl = split(list, L, " ")
+  for (j=1; j<=nl && rtabw > budget; j++) {
+    FDROPPED[L[j]] = 1
+    for (i=1; i<=6; i++) if (!FDROPPED[i] && !(fix && (i == 1 || i == 4))) rw[i] = rwn[i]
+    rtabw = rtab()
+    while (rtabw > budget) {
+      big = 0
+      for (i=1; i<=6; i++) if (!FDROPPED[i] && rw[i] > ffloor(i) && rw[i] > rw[big] && !(fix && (i == 1 || i == 4))) big = i
+      if (!big) break
+      rw[big]--; rtabw--
+    }
+  }
+}
+# COMPACT: the state column of the finished table takes the codes (stcode)
+function fcode(   r, g, x) {
+  for (r=1; r<=shown; r++) { g = ord[r]; rv[g,3] = stcode(g) }
+  RCWF[3] = 0
+  for (r=1; r<=shown; r++) { g = ord[r]; if ((x = idw(rv[g,3])) > RCWF[3]) RCWF[3] = x; if (WIDE) FCW[g,3] = x }
+  rw[3] = (RCWF[3] > 4 || RCWF[3] >= length(rhd[3])) ? RCWF[3] : 4; rtabw = rtab()
+}
+
 # Where WIDE, a cell is cut and padded by columns: from the width the measure
 # took (CW) while it is whole, the pad done here and printf given width 0
 function qrow(r,   js, jc, line, i, x, fw, cc, xw) {     # one queue row, coloured
@@ -4947,20 +5392,21 @@ function qrow(r,   js, jc, line, i, x, fw, cc, xw) {     # one queue row, colour
   jc = (js=="R") ? "32" : (js=="PD") ? "33" : (js ~ /^(F|CA|TO|NF|OOM|ST|BF|DL)/) ? "31" : "36"
   line = lm
   for (i=1; i<=n; i++) {
-    x = (i == idc) ? idfit(v[r,i], w[i]) : v[r,i]
-    if (!WIDE) {
-      if (length(x) > w[i]) x = substr(x, 1, w[i]-1) "…"
-      fw = RIGHT[k[i]] ? w[i] : (i==n ? -length(x) : -w[i])
+    if (QDROPPED[i]) continue
+    x = (i == idc) ? idform(v[r,i], w[i]) : (i == rc) ? reason_fit(v[r,i], w[i]) : v[r,i]
+    if (!WIDE) {                                    # text guarded, the rest (only the last resort) plain
+      if (length(x) > w[i]) x = (qkind(k[i]) == "text") ? textcut(x, w[i]) : substr(x, 1, w[i]-1) "…"
+      fw = RIGHT[k[i]] ? w[i] : (i==NLAST ? -length(x) : -w[i])
     } else {
       xw = (x == v[r,i]) ? CW[r,i] : colw(x)
-      if (xw > w[i]) { x = clip(x, w[i]); xw = colw(x) }
+      if (xw > w[i]) { x = (qkind(k[i]) == "text") ? textcut(x, w[i]) : clip(x, w[i]); xw = colw(x) }
       fw = 0
     }
     if (i == mc && (r in mem_coloured) && x == v[r,i]) {   # an own MEM cell, whole:
       line = line sprintf("%*s%*s%s", gap[i], "", w[i] - (WIDE ? xw : length(x)), "", mem_coloured[r])   # its own
       continue                                      # colours, right-aligned
     }
-    if (WIDE && (i < n || RIGHT[k[i]])) x = colpad(x, RIGHT[k[i]] ? w[i] : -w[i], xw)   # the last left-aligned unpadded
+    if (WIDE && (i < NLAST || RIGHT[k[i]])) x = colpad(x, RIGHT[k[i]] ? w[i] : -w[i], xw)   # the last left-aligned unpadded
     cc = ""
     if (i == mc && (r in cell_colour)) cc = cell_colour[r]
     else if (i == idc)               cc = jc
@@ -5356,7 +5802,22 @@ END{
     FMIN = (j + 1 >= d) ? d : j + 1             # down to it at least
     if (FMIN > FSLOTS) FMIN = FSLOTS
     avail = lines - reserve - prompt
-    fit()
+    # The form of the node lines, one for all nodes and decided before the
+    # height model (H2), whole parts only: NODEFORM 1 the bars and figures (the
+    # bars go later, where they do not fit), 2 "name P% cpu  M% mem  state",
+    # 3 the name and the state, 4 the name and the short state of sinfo, 5 the digest
+    # alone.  A node name is never cut.  A percentage wider than its 3 columns
+    # (AllocMem above Memory, E3) widens the line by its excess (PCTX)
+    noderoom = cols - 2; NODEFORM = 0
+    for (r=1; r<=nn; r++) {
+      x = length((tot[r] ? int(used[r]*100/tot[r]) : 0) ""); if (x - 3 > PCTXC) PCTXC = x - 3
+      x = length((mempc[r] < 0 ? "-" : mempc[r]) "");       if (x - 3 > PCTXM) PCTXM = x - 3
+    }
+    PCTX = PCTXC + PCTXM; noderoom -= PCTX
+    wss = 0; for (r=1; r<=nn; r++) { NSTSHORT[r] = node_short_state(nst[r]); if ((x = colw(NSTSHORT[r])) > wss) wss = x }
+    NODEFORM = (!nn || 28 + wn + wu + wt + wf + wm + ws <= noderoom) ? 1 : (wn + ws + 21 <= noderoom) ? 2 \
+             : (wn + 2 + ws <= noderoom) ? 3 : (wn + 2 + wss <= noderoom) ? 4 : 5
+    fit_capped()
   } else {                                      # FULL: everything
     for (x in SHOWN) SHOW[SHOWN[x]] = 1
     SHOW["nodes"] = SHOW["fin"] = 2
@@ -5382,7 +5843,7 @@ END{
     for (r=1; r<=rows; r++) if (QSHOW[r])
       for (i=1; i<=n; i++) if ((CW[r,i] = colw(v[r,i])) > w[i]) w[i] = CW[r,i]
 
-  nfix = 30 + wn + wu + wt + wf + wm + ws       # node line, bars and margin aside
+  nfix = 30 + wn + wu + wt + wf + wm + ws + PCTX   # node line, bars and margin aside; PCTX: the wider percentages of COMPACT
   bar  = BAR_PREF
   tabw = QBODY ? (n-1) : 0                      # one space per gap
   for (i=1; i<=n; i++) tabw += w[i]
@@ -5393,16 +5854,18 @@ END{
   # decimal total; on a screen where the table with them is too wide, all of
   # them take whole numbers, and if that is still too wide and the screen shows
   # colour, own cells form a, the allocation, which the colour alone
-  # qualifies.  Off a screen always decimal.  MEM is cut last, as a cut cell
-  # ("1006.…") loses its unit: only once every other column is down to its
-  # floor, so a screen too narrow even for that still gets its height
+  # qualifies.  Off a screen always decimal.  MEM is never cut, as a cut cell
+  # ("1006.…") loses its unit: COMPACT drops the column instead (qdrop), FULL
+  # wraps
   formb = (mc && length(grp_own))
   if (screen && tabw > budget && (formb || length(grp_other))) memform("whole")
   if (formb && screen && color && tabw > budget) memform("alloc")
-  IDFL = 0
+  for (i=1; i<=n; i++) qcontent(i)              # the widest cell of each column, for qfloor
+  IDFL = IDFL1 = 0                              # the floor of JOBID in its two tiers
+  if (idc) for (r=1; r<=rows; r++) if (QSHOW[r] && (x = idfl1_of(v[r,idc])) > IDFL1) IDFL1 = x
   if (idc) for (r=1; r<=rows; r++) if (QSHOW[r] && (x = idfl_of(v[r,idc])) > IDFL) IDFL = x
   for (i=1; i<=n; i++) wnat[i] = w[i]           # as measured, for the second pass
-  qshrink(0)
+  qfit(0)
 
   # FULL shows every finished job: SQ_SINCE already bounds the block, and cut
   # to the height of the screen it hid an old failure behind "+N more".  A
@@ -5436,27 +5899,32 @@ END{
   }
   # NAME alone used to be shaved, and at 8 characters it gave up and let this
   # block run past the shared right edge; each rung drops the least useful
-  # detail instead, down to the compact state code as a last resort
-  for (lvl=0; lvl<=5; lvl++) {
+  # detail instead (the state code is no rung: fshrink takes it, last)
+  for (lvl=0; lvl<=4; lvl++) {
     excap = (lvl >= 3) ? 1 : (lvl >= 2) ? 2 : 3
     for (r=1; r<=shown; r++) {
       g = ord[r]
-      rv[g,3] = (lvl >= 5 && rst[g] != "") ? rst[g] : rstate[g]
+      rv[g,3] = rstate[g]
       rv[g,4] = fexit(g, excap)
       rv[g,5] = (gmin[g] == gmax[g] || lvl >= 1) ? elap(gmax[g]) \
                                                  : elap(gmin[g]) "-" elap(gmax[g])
     }
-    for (i=1; i<=6; i++) rw[i] = length(rhd[i])
+    for (i=1; i<=6; i++) { rw[i] = length(rhd[i]); RCWF[i] = 0 }
+    for (r=1; r<=shown; r++) for (i=3; i<=6; i++) {      # the floors of the number and word columns
+      x = rv[ord[r],i]
+      if (i == 4 && match(x, /^(.*) by (.+)$/, xm)) x = xm[1]   # the floor of EXIT is its narrowest form
+      if (idw(x) > RCWF[i]) RCWF[i] = idw(x)
+    }
     if (!WIDE) {
       for (r=1; r<=shown; r++)
         for (i=1; i<=6; i++) if (length(rv[ord[r],i]) > rw[i]) rw[i] = length(rv[ord[r],i])
     } else                                      # in columns, as the last rung keeps them (FCW)
       for (r=1; r<=shown; r++)
         for (i=1; i<=6; i++) if ((FCW[ord[r],i] = colw(rv[ord[r],i])) > rw[i]) rw[i] = FCW[ord[r],i]
-    rtabw = shown ? 5 : 0
-    for (i=1; i<=6; i++) if (shown) rtabw += rw[i]
+    rtabw = rtab()
     for (i=1; i<=6; i++) rwn[i] = rw[i]          # this level as measured, for the second pass
     while (rtabw > budget && rw[2] > 8) { rw[2]--; rtabw-- }   # NAME first, always
+    while (rtabw > budget && rw[4] > RCWF[4] && RCWF[4] >= length(rhd[4])) { rw[4]--; rtabw-- }   # the canceller before the exits
     while (lvl >= 4 && rtabw > budget && rw[1] > idmin) { rw[1]--; rtabw-- }   # then
     if (rtabw <= budget) break                  # inside the brackets, never past ×N
   }
@@ -5469,11 +5937,13 @@ END{
   if (nfix + bar > budget) bar = budget - nfix
   if (bar < BAR_MIN) bar = 0
   nodew  = nfix + bar - (bar ? 0 : 2)
+  if (NODEFORM >= 2) { bar = 0; nodew = (NODEFORM == 2) ? wn + ws + 21 + PCTX : (NODEFORM == 3) ? wn + ws + 2 : (NODEFORM == 4) ? wn + wss + 2 : 0 }
   target = (tabw > nodew) ? tabw : nodew
   if (rtabw > target) target = rtabw
   if (target > budget) target = budget
 
-  if (nodew < target) {                         # node block grows: bars first, to
+  if (NODEFORM >= 2) { if (nodew < target) npad = target - nodew }
+  else if (nodew < target) {                    # node block grows: bars first, to
     bar = target - nfix                         # nfix + bar.  "+= target - nodew" left
                                                 # out the gap of bars that had collapsed
                                                 # and ran one column past the edge
@@ -5489,31 +5959,60 @@ END{
   if (QBODY && idc) {
     cm = 0
     for (r=1; r<=rows; r++) if (QSHOW[r]) {
-      xw = idw(idfit(v[r,idc], w[idc])); if (xw > w[idc]) xw = w[idc]
+      xw = idw(idform(v[r,idc], w[idc])); if (xw > w[idc]) xw = w[idc]
       if (xw > cm) cm = xw
     }
     hl = length(hd[idc]); if (cm < hl) cm = (w[idc] < hl) ? w[idc] : hl
-    for (i=1; i<=n; i++) if (i != idc && w[i] < wnat[i]) cutq = 1   # only where a column gains
+    for (i=1; i<=n; i++) if (!QDROPPED[i] && i != idc && w[i] < wnat[i]) cutq = 1   # only where a column gains
     if (cm < w[idc] && cutq) {
-      for (i=1; i<=n; i++) if (i != idc) { tabw += wnat[i] - w[i]; w[i] = wnat[i] }
-      tabw -= w[idc] - cm; w[idc] = cm
-      qshrink(idc)
+      for (i=1; i<=n; i++) if (i != idc) w[i] = wnat[i]
+      w[idc] = cm; tabw = qtab()
+      qfit(idc)
     }
   }
-  gap[1] = 0                                    # table grows: gaps first, capped, then
-  for (i=2; i<=n; i++) gap[i] = 1               # the widest text column soaks up the rest
-  if (QBODY && tabw < target) {
-    extra = target - tabw
-    room  = (n > 1) ? (n-1) * (GAP_MAX - 1) : 0
+  # the columns shown (QCOLS[1..nqcols]; NLAST the last), each after a gap
+  nqcols = 0; for (i=1; i<=n; i++) if (!QDROPPED[i]) { QCOLS[++nqcols] = i; gap[i] = (nqcols > 1); NLAST = i }
+  # a text column the guard left shorter than its width gives those columns
+  # to another cut text column, the one cut most; where there is none, they
+  # stay blank (L-3).  Only what the guard took: a plain cut fills its cell,
+  # and the column a wide character leaves before "…" stays (the twin rule of WIDE)
+  for (i=1; i<=n; i++) if (QBODY && !QDROPPED[i] && qkind(k[i]) == "text") {
+    xw = 0
+    for (r=1; r<=rows; r++) if (QSHOW[r]) {
+      x = (i == rc) ? reason_fit(v[r,i], w[i]) : v[r,i]
+      xe = (idw(x) > w[i]) ? w[i] - idw(clip(x, w[i])) + idw(textcut(x, w[i])) : idw(x)
+      if (xe > xw) xw = xe
+    }
+    hl = (length(hd[i]) < w[i]) ? length(hd[i]) : w[i]
+    if (xw < hl) xw = hl
+    while (xw < w[i]) {
+      big = 0
+      for (j=1; j<=n; j++) if (j != i && !QDROPPED[j] && qkind(k[j]) == "text" && w[j] < wnat[j] && (!big || wnat[j] - w[j] > wnat[big] - w[big])) big = j
+      if (!big) break
+      w[big]++; w[i]--
+    }
+  }
+  # a table narrower than target: its spare goes first to the next F2 form
+  # of the id (R-M1), then to the gaps, then to the widest text column
+  if (QBODY && idc && !QDROPPED[idc] && tabw < target) {
+    cm = 0; nx = 0
+    for (r=1; r<=rows; r++) if (QSHOW[r]) { xw = idw(idform(v[r,idc], w[idc])); if (xw > w[idc]) xw = w[idc]; if (xw > cm) cm = xw }
+    for (reach = w[idc] + 1; reach <= w[idc] + target - tabw && !nx; reach++)
+      for (r=1; r<=rows; r++) if (QSHOW[r]) { xw = idw(idform(v[r,idc], reach)); if (xw <= reach && xw > cm) nx = reach }
+    if (nx) { w[idc] = nx; tabw = qtab() }
+  }
+  if (QBODY && tabw < target) {                 # table grows: gaps first, capped, then
+    extra = target - tabw                       # the widest text column soaks up the rest
+    room  = (nqcols > 1) ? (nqcols-1) * (GAP_MAX - 1) : 0
     if (room > extra) room = extra
-    for (j=0; j<room; j++) gap[2 + (j % (n-1))]++
+    for (j=0; j<room; j++) gap[QCOLS[2 + (j % (nqcols-1))]]++
     rest = extra - room
     if (rest) {
       pick = 0                                  # prefer a flexible column ...
-      for (i=1; i<=n; i++) if (FLEX[k[i]] && (!pick || w[i] > w[pick])) pick = i
-      if (!pick) for (i=n; i>=1; i--) if (!RIGHT[k[i]]) { pick = i; break }
+      for (i=1; i<=n; i++) if (!QDROPPED[i] && FLEX[k[i]] && (!pick || w[i] > w[pick])) pick = i
+      if (!pick) for (i=n; i>=1; i--) if (!QDROPPED[i] && !RIGHT[k[i]]) { pick = i; break }
       if (pick) w[pick] += rest                 # ... never a right-aligned one
-      else for (j=0; j<rest; j++) gap[2 + (j % (n-1))]++
+      else for (j=0; j<rest; j++) gap[QCOLS[2 + (j % (nqcols-1))]]++
     }
   }
   # the same in the finished table, for JOBID and EXIT: their freed columns go
@@ -5542,8 +6041,8 @@ END{
     for (r=1; r<=shown; r++)                    # column after NAME, not held at its cut
       if (idw(rv[ord[r],4]) > rw[4] && rv[ord[r],4] ~ / by / && rv[ord[r],4] !~ / by [0-9]+$/) xname = 1
     if (spare > 0 && (cutf || c1 > cmf[1] || xname)) {
-      for (i=1; i<=6; i++) if (i != 1 && i != 4) { rtabw += rwn[i] - rw[i]; rw[i] = rwn[i] }
-      rtabw += c1 - rw[1] + cmf[4] - rw[4]; rw[1] = c1; rw[4] = cmf[4]
+      for (i=1; i<=6; i++) if (i != 1 && i != 4) rw[i] = rwn[i]
+      rw[1] = c1; rw[4] = cmf[4]; rtabw = rtab()
       while (rtabw > budget && rw[2] > 8) { rw[2]--; rtabw-- }   # NAME first, as the ladder
       fshrink(1)
       if (xname && rtabw < target) {            # what the pass left before the edge: the name
@@ -5552,13 +6051,12 @@ END{
       }
     }
   }
-  rgap[1] = 0
-  for (i=2; i<=6; i++) rgap[i] = 1
+  nfcols = 0; for (i=1; i<=6; i++) if (!FDROPPED[i]) { FCOLS[++nfcols] = i; rgap[i] = (nfcols > 1) }   # the columns shown
   if (shown && rtabw < target) {
     extra = target - rtabw
-    room  = 5 * (GAP_MAX - 1)
+    room  = (nfcols - 1) * (GAP_MAX - 1)
     if (room > extra) room = extra
-    for (j=0; j<room; j++) rgap[2 + (j % 5)]++
+    for (j=0; j<room; j++) rgap[FCOLS[2 + (j % (nfcols - 1))]]++
     rpad = extra - room                         # the rule reaches the edge, rows stay compact
   }
 
@@ -5566,12 +6064,16 @@ END{
   left = center ? int((cols - target) / 2) : 2
   if (left < 0) left = 0
   lm = sprintf("%*s", left, "")
+  # the width of a line FULL never cut: COMPACT fits it to the screen right of
+  # the margin, FULL leaves it whole; a line cut to target before is cut there
+  # in both modes, now guarded
+  linew = compact ? cols - left : 1e9
 
   # ---- render into a buffer, so we can centre vertically --------------
   if (SHOW["title"])
-    out[++o] = sprintf("%s%s▌ SLURM%s %s%s%s  %s%s%s", lm, e("1;36"), e("0"), e("2"), host, e("0"), e("1"), now, e("0"))
+    out[++o] = lm title_line(linew)
   if (BANNER && SHOW["banner"]) {
-    x = clip("⚠ slurm unreachable · " uwhy, target)
+    x = textcut("⚠ slurm unreachable · " uwhy, target)
     if (SHOW["b0"]) out[++o] = ""
     out[++o] = sprintf("%s%s%s%s", lm, e("1;31"), x, e("0"))
   }
@@ -5585,8 +6087,8 @@ END{
   # sinfo and there is no SINFO_FORMAT2, so our format cannot be overridden from
   # outside: both of these mean the stream itself was wrong.
   if (SHOW["nodes"] == 2 && (nbad || ntrunc))
-    out[++o] = sprintf("%s%s⚠ node output %s%s", lm, e("1;31"),
-                       nbad ? "unreadable (unexpected sinfo output?)" : "incomplete",
+    out[++o] = sprintf("%s%s%s%s", lm, e("1;31"),
+                       textcut("⚠ node output " (nbad ? "unreadable (unexpected sinfo output?)" : "incomplete"), linew),
                        e("0"))
   barc = int(bar/2); barm = bar - barc
   for (r=1; r<=nn && SHOW["nodes"] == 2; r++) {
@@ -5601,6 +6103,16 @@ END{
     else
       sm = cells(meminuse[r] < 0 ? 0 : meminuse[r], meminuse[r], memreal[r], barm,   # in use, as a fill
                  down ? "31" : (mp>95 ? "1;31" : (mp>85 ? "33" : "32")))
+    if (NODEFORM == 2)                          # the percentages, each with its word
+      out[++o] = sprintf("%s%s%-*s%s %s%3d%%%s cpu  %s%3s%%%s mem  %*s%s%s%s", lm, e("1"), WIDE ? 0 : wn,
+                         WIDE ? colpad(node[r], -wn, NODECW[r]) : node[r], e("0"), e("1"), p, e("0"),
+                         e(mp>95 && mp>=0 && !MEMALLOC ? "1;31" : "1"), (mp<0 ? "-" : sprintf("%d", mp)), e("0"),
+                         npad+0, "", e("2"), nst[r], e("0"))
+    else if (NODEFORM == 3 || NODEFORM == 4)    # the name and the state, or its short name
+      out[++o] = sprintf("%s%s%-*s%s  %*s%s%s%s", lm, e("1"), WIDE ? 0 : wn,
+                         WIDE ? colpad(node[r], -wn, NODECW[r]) : node[r], e("0"), npad+0, "", e("2"),
+                         (NODEFORM == 4) ? NSTSHORT[r] : nst[r], e("0"))
+    else
     out[++o] = sprintf("%s%s%-*s%s %s%s%3d%%  %s%*d%s/%-*d cpu   %s%s%3s%%  %s%*s%s/%-*s mem  %*s%s%s%s",
                        lm, e("1"), WIDE ? 0 : wn, WIDE ? colpad(node[r], -wn, NODECW[r]) : node[r], e("0"), sc, (bar?" ":""), p,
                        e("1"), wu, used[r], e("0"), wt, tot[r],
@@ -5608,34 +6120,34 @@ END{
                        e(mp>95 && mp>=0 && !MEMALLOC ? "1;31" : "1"), wf, memu[r], e("0"), wm, memt[r],
                        npad+0, "", e("2"), nst[r], e("0"))
     if (SHOW["reasons"] && nreason[r] != "") {
-      x = clip(nreason[r], target - wn - 3)
+      x = textcut(nreason[r], target - wn - 3)
       out[++o] = sprintf("%s%*s%s↳ %s%s", lm, wn+1, "", e("2"), x, e("0"))
     }
   }
   if (SHOW["nodes"] == 2 && skip[1])           # see which table it is talking about
-    out[++o] = sprintf("%s%s↳ %d unreadable node row%s skipped%s", lm, e("2"),
-                       skip[1], (skip[1] > 1 ? "s" : ""), e("0"))
+    out[++o] = sprintf("%s%s%s%s", lm, e("2"),
+                       textcut("↳ " skip[1] " unreadable node row" (skip[1] > 1 ? "s" : "") " skipped", linew), e("0"))
   if (SHOW["nodes"] == 2 && UNRNOTE && nn)
-    out[++o] = sprintf("%s%s%s%s", lm, e("2"), clip(unreadtext(), target), e("0"))
+    out[++o] = sprintf("%s%s%s%s", lm, e("2"), textcut(unreadtext(), target), e("0"))
   if (SHOW["nodes"] == 2 && MEMNOTE)
-    out[++o] = sprintf("%s%s%s%s", lm, e("2"), clip(MEMTEXT, target), e("0"))
+    out[++o] = sprintf("%s%s%s%s", lm, e("2"), textcut_node(MEMTEXT, target, MEMNODE), e("0"))
   if (SHOW["b2"]) out[++o] = ""
 
   if (QCAP && !SHOW["qcap"]) ;                 # COMPACT found no line for the caption
-  else if (qbad) out[++o] = sprintf("%s%s⚠ queue output unreadable (output format overridden?)%s", lm, e("1;31"), e("0"))
-  else if (qtrunc) out[++o] = sprintf("%s%s⚠ queue output incomplete%s", lm, e("1;31"), e("0"))
-  else if (!rows && skip[2]) out[++o] = sprintf("%s%sno readable rows%s", lm, e("2"), e("0"))
-  else if (!rows && jerr != "") out[++o] = sprintf("%s%sjob list unavailable%s", lm, e("2"), e("0"))
-  else if (!rows) out[++o] = sprintf("%s%squeue is empty%s", lm, e("2"), e("0"))
+  else if (qbad) out[++o] = sprintf("%s%s%s%s", lm, e("1;31"), textcut("⚠ queue output unreadable (output format overridden?)", linew), e("0"))
+  else if (qtrunc) out[++o] = sprintf("%s%s%s%s", lm, e("1;31"), textcut("⚠ queue output incomplete", linew), e("0"))
+  else if (!rows && skip[2]) out[++o] = sprintf("%s%s%s%s", lm, e("2"), textcut("no readable rows", linew), e("0"))
+  else if (!rows && jerr != "") out[++o] = sprintf("%s%s%s%s", lm, e("2"), textcut("job list unavailable", linew), e("0"))
+  else if (!rows) out[++o] = sprintf("%s%s%s%s", lm, e("2"), textcut("queue is empty", linew), e("0"))
   else if (QBODY) {
     line = lm e("4")
-    for (i=1; i<=n; i++) line = line sprintf("%*s%-*.*s", gap[i], "", w[i], w[i], hd[i])
+    for (i=1; i<=n; i++) if (!QDROPPED[i]) line = line sprintf("%*s%-*.*s", gap[i], "", w[i], w[i], hd[i])
     out[++o] = line e("0")
     for (r=1; r<=rows; r++) {
       if (QSHOW[r]) out[++o] = qrow(r)
       for (x=1; x<=6; x++)                      # after the row it follows, shown or not
         if (ELLAT[x] == r && (x in ELLJ))
-          out[++o] = sprintf("%s%s%s%s", lm, e("2"), clip("… " ELLJ[x] " jobs " SECNAME[x], target), e("0"))
+          out[++o] = sprintf("%s%s%s%s", lm, e("2"), more_jobs_line(ELLJ[x], x, target), e("0"))
     }
   }
 
@@ -5649,15 +6161,7 @@ END{
                          rbad ? "unreadable" : "incomplete", e("0"))
     } else if (SHOW["fin"] == 1 && d) {         # COMPACT: one line, the newest failure
       g = FAILG                                 # (the fallback says it is one)
-      cap = "recently finished" (rsrc == "sacct" ? "" \
-            : " (" (rwhyc == "filter" ? rwhy : "no accounting") ")") ": "
-      # the caption dim, the job in the colour of its state, each cut on its own:
-      # cut as one text and split at length(cap), which counts bytes in C,
-      # the split halved a character ("…" of the cut, or one of the caption)
-      x = fid(g) " " rname[g] " " rstate[g] " " fexit(g, 3)
-      if (colw(cap) >= target) { capx = clip(cap x, target); x = "" }   # cut in the caption
-      else { capx = cap; x = clip(x, target - colw(cap)) }
-      out[++o] = sprintf("%s%s%s%s%s%s%s", lm, e("2"), capx, e("0"), e(fcol(rst[g])), x, e("0"))
+      out[++o] = lm fin_line(g, target)         # the caption dim, the job in the colour of its state
     } else {
       if (rsrc == "sacct")
         cap = "recently finished · " wtxt sfilt (shown ? "" : " · nothing in this window")
@@ -5670,24 +6174,25 @@ END{
       # both paths gone: the reason the shell chose, see fwhy
       else
         cap = "finished jobs unavailable · " fwhy
-      out[++o] = sprintf("%s%s%s%s", lm, e(rsrc == "none" ? "1;31" : "2"), clip(cap, target), e("0"))
+      out[++o] = sprintf("%s%s%s%s", lm, e(rsrc == "none" ? "1;31" : "2"), textcut(cap, target), e("0"))
     }
   }
   if (recent && !rbad && !rtrunc && shown) {
     line = lm e("4")
-    for (i=1; i<=6; i++) line = line sprintf("%*s%-*.*s", rgap[i], "", rw[i], rw[i], rhd[i])
+    for (i=1; i<=6; i++) if (!FDROPPED[i]) line = line sprintf("%*s%-*.*s", rgap[i], "", rw[i], rw[i], rhd[i])
     out[++o] = line sprintf("%*s", rpad+0, "") e("0")
     for (r=1; r<=shown; r++) {
       best = ord[r]
       fc = fcol(rst[best])
       line = lm
       for (i=1; i<=6; i++) {
+        if (FDROPPED[i]) continue
         x = fcut(i, rv[best,i], rw[i])
         fw = rrt[i]+0 ? rw[i] : -rw[i]
-        if (!WIDE) { if (length(x) > rw[i]) x = substr(x, 1, rw[i]-1) "…" }
+        if (!WIDE) { if (length(x) > rw[i]) x = (i == 2) ? textcut(x, rw[i]) : substr(x, 1, rw[i]-1) "…" }
         else {                                  # cut and padded by columns
           xw = (x == rv[best,i]) ? FCW[best,i] : colw(x)
-          if (xw > rw[i]) { x = clip(x, rw[i]); xw = colw(x) }
+          if (xw > rw[i]) { x = (i == 2) ? textcut(x, rw[i]) : clip(x, rw[i]); xw = colw(x) }
           x = colpad(x, fw, xw); fw = 0
         }
         if (i==1 || i==3) line = line sprintf("%*s%s%*s%s", rgap[i], "", e(fc),  fw, x, e("0"))
@@ -5710,16 +6215,10 @@ END{
 
   for (i = 2; i <= 3 && SHOW["notes"]; i++)    # the node note renders with the node
     if (skip[i])                                # block instead, where a reader can
-      out[++o] = sprintf("%s%s↳ %d unreadable %s row%s skipped%s", lm, e("2"), skip[i],
-                         (i == 2 ? "queue" : "finished"),
-                         (skip[i] > 1 ? "s" : ""), e("0"))
+      out[++o] = sprintf("%s%s%s%s", lm, e("2"), textcut("↳ " skip[i] " unreadable " (i == 2 ? "queue" : "finished") " row" (skip[i] > 1 ? "s" : "") " skipped", linew), e("0"))
 
   if (SHOW["b4"]) out[++o] = ""                 # the footer, always the last line
-  out[++o] = sprintf("%s%s%s%s jobs   %s%s running%s   %s%s pending%s   %s%s other%s", lm,
-                     e("1"), QKNOWN ? qjobs+0 : "?", e("0"),
-                     e("32"), QKNOWN ? cnt["R"]+0 : "?", e("0"),
-                     e("33"), QKNOWN ? cnt["PD"]+0 : "?", e("0"),
-                     e("31"), QKNOWN ? qjobs - cnt["R"] - cnt["PD"] : "?", e("0"))
+  x = footer_line(linew); out[++o] = (FOOTMARGIN ? lm : "") x
 
   if (compact) {                                # a blank with nothing to separate,
     m = 0                                       # where a section collapsed away, goes
@@ -5731,7 +6230,7 @@ END{
     top = int((avail - o) / 2)
     for (i=0; i<top; i++) print ""
   }
-  for (i=1; i<=o; i++) print out[i]
+  for (i=1; i<=o; i++) print (compact ? lastcut(out[i], cols) : out[i])   # the last resort
 
   if (bell && hastty) {                         # everything remembered, not just
     printf "" > statetmp                        # what this run happened to query;

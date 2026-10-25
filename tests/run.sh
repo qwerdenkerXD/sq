@@ -1660,28 +1660,36 @@ function units(s, U, UW,   n, C, i, nu) {
 
 # ---- display width: a wide screen against its ASCII twin (AC1) --------------
 # A twin is the same fixture with every outside string beyond ASCII, as sq
-# sees it, replaced by a distinct ASCII string of the same oracle width
-# (letters a-w, then x up to the width), so sq lays both out alike: every line
-# as wide, every column at the same place.  The map (orig TAB twin) is the
-# case's own, $T_DIR/twin.map; twin_of STRING prints a string's twin, twin_fx
-# NAME... makes $T_DIR/twin-NAME of each fixture (an @include of another
-# fixture than _common reads its twin)
+# sees it, replaced by a distinct ASCII string of the same oracle width, so sq
+# lays both out alike: every line as wide, every column at the same place.
+# The twin keeps each ASCII character of the string but its letters in its
+# column (digits and the ends of words, which WHOLE's guard reads, H8) and
+# writes an id unique to the string (a-w) over its first letters and columns
+# beyond ASCII, then each letter as it is and each other column as x.  The map
+# (orig TAB twin) is the case's own, $T_DIR/twin.map; twin_of STRING prints a
+# string's twin, twin_fx NAME... makes $T_DIR/twin-NAME of each fixture (an
+# @include of another fixture than _common reads its twin)
 twin_awk='
 BEGIN {
 	mapf = ENVIRON["TWIN_MAP"]
-	while ((getline ln < mapf) > 0) { t = index(ln, "\t"); TW[substr(ln, 1, t - 1)] = substr(ln, t + 1); USED[substr(ln, t + 1)]; N++ }
+	while ((getline ln < mapf) > 0) { t = index(ln, "\t"); TW[substr(ln, 1, t - 1)] = substr(ln, t + 1); USED[substr(ln, t + 1)] }
 	close(mapf)
 }
-function twin(s,   w, id, k, t) {
+function twin(s,   n, C, i, slots, id, k, j, t) {
 	if (s !~ /[^\001-\177]/) return s
 	if (s in TW) return TW[s]
-	w = length(cellify(s))
+	n = split(cellify(s), C, "")                  # a column each: a wide character and its filler
+	for (i = 1; i <= n; i++) if (C[i] !~ /^[\001-\177]$/ || C[i] ~ /^[A-Za-z]$/) slots++
+	k = 0
 	do {
-		id = ""; k = ++N
-		while (k > 0) { id = substr("abcdefghijklmnopqrstuvw", (k - 1) % 23 + 1, 1) id; k = int((k - 1) / 23) }
-		t = id; while (length(t) < w) t = t "x"
+		id = ""; j = ++k
+		while (j > 0) { id = substr("abcdefghijklmnopqrstuvw", (j - 1) % 23 + 1, 1) id; j = int((j - 1) / 23) }
+		if (length(id) > slots) { print "twin: no twin of width " n " left for " s > "/dev/stderr"; exit 2 }
+		t = ""; j = 0
+		for (i = 1; i <= n; i++)                  # a letter or a column beyond ASCII: the id, then the letter, else x
+			if (C[i] ~ /^[\001-\177]$/ && C[i] !~ /^[A-Za-z]$/) t = t C[i]
+			else t = t ((++j <= length(id)) ? substr(id, j, 1) : (C[i] ~ /^[A-Za-z]$/) ? C[i] : "x")
 	} while ((t in USED) || (t in ASCII))
-	if (length(t) > w) { print "twin: no twin of width " w " left for " s > "/dev/stderr"; exit 2 }
 	TW[s] = t; USED[t]; printf "%s\t%s\n", s, t >> mapf; close(mapf)
 	return t
 }'
@@ -1777,8 +1785,9 @@ twin_check() {
 		for (i = 1; i <= nw && i <= nt; i++) {
 			lw = length(W[i]); lt = length(T[i])
 			if (lw == lt) continue
-			if (lw > lt || WP[i] !~ /…$/) { bad(sprintf("line %d: %d columns, the twin %d:\n  %s\n  %s", i, lw, lt, WP[i], T[i])); continue }
-			u = left_out(i, lw)
+			# a cut at the end, or inside the line (the finished line cuts the name, H7)
+			if (lw > lt || WP[i] !~ /…/) { bad(sprintf("line %d: %d columns, the twin %d:\n  %s\n  %s", i, lw, lt, WP[i], T[i])); continue }
+			u = (WP[i] ~ /…$/) ? left_out(i, lw) : left_out(i, index(W[i], "…"), 1)
 			if (!(lt - lw < u)) bad(sprintf("line %d: %d short of the twin, the unit left out %d wide:\n  %s\n  %s", i, lt - lw, u, WP[i], T[i]))
 		}
 		aligned(W, nw)
@@ -1787,9 +1796,11 @@ twin_check() {
 	}
 	# the width of the first unit the cut of line I left out: at column B (the
 	# text before "…" is B - 1 wide) the twin has the twin of string S, from
-	# column ST; the unit of S at B - ST columns into it; 0 when none is found
-	function left_out(i, b,   t, tl, st, m, s, nu, U, UW, j, acc) {
+	# column ST; the unit of S at B - ST columns into it; 0 when none is found.
+	# INNER: the cut inside the line, the twin read up to its own first "…"
+	function left_out(i, b, inner,   t, tl, st, m, s, nu, U, UW, j, acc) {
 		tl = T[i]; sub(/…$/, "", tl)
+		if (inner && index(tl, "…")) tl = substr(tl, 1, index(tl, "…") - 1)
 		for (t in ORIG) {
 			for (st = index(tl, t); st; st = (m = index(substr(tl, st + 1), t)) ? st + m : 0)
 				if (st <= b && b < st + length(t) && substr(tl, st - 1, 1) !~ /[a-x]/ && substr(tl, st + length(t), 1) !~ /[a-x]/) break
@@ -1852,29 +1863,32 @@ c_wide_twin_ascii() {
 # (wide-fin): cut by columns, so it fits, at every width around the cut, as
 # its twin does
 c_wide_compact_fin() {
-	T_TITLE="COMPACT's one finished line with the newest failure named in han and kana: cut by columns (4002 失敗した解析…), at widths 36-48 every screen as its ASCII twin"
+	T_TITLE="COMPACT's one finished line with the newest failure named in han and kana: the name cut by columns (4002 失敗した解析… FAILED 1), at widths 36-48 every screen as its ASCII twin"
 	twin_fx wide-text wide-fin
 	sq_run wide-fin SQ_WIDTH=40 SQ_HEIGHT=20 -- --compact --no-color
-	need "40x20: rc 0, the one line, cut within 40 columns" eval '
-		rc_is 0 && matches "^  recently finished: 4002 失敗した解析…$" && [ "$(oracle_width "$(lines_matching "^  recently finished: ")")" -le 40 ]'
+	# WHOLE (H7): the caption shortens, then the name is cut, the state and the exit whole
+	need "40x20: rc 0, the one line, the name cut, within 40 columns" eval '
+		rc_is 0 && matches "^  finished: 4002 失敗した解析… FAILED 1$" && [ "$(oracle_width "$(lines_matching "^  finished: ")")" -le 40 ]'
 	WIDTHS="36 38 40 42 44 46 48" twin_sweep wide-fin "${wide_cols[@]}"
 }
 # COMPACT's one finished line with gawk in C (no UTF-8 locale to pin: the
 # locale tool knows C and POSIX alone), the caption itself cut: the caption
 # and the job are cut each on its own, as one cut of both, split at the
-# caption's length (bytes, in C), halved its "…" at 60 and 61 columns
+# caption's length (bytes, in C), halved its "…" at 60 and 61 columns.
+# WHOLE (H7, N-B): the caption now takes its short forms, finished
+# (--reservation: no sacct), instead of a cut, the same under C
 c_wide_compact_fin_c() {
-	T_TITLE="COMPACT's one finished line under gawk in C with its caption cut (noacct, --reservation=x, 24 lines, 58-63 columns): valid UTF-8, within the width, as under UTF-8"
+	T_TITLE="COMPACT's one finished line under gawk in C where its caption once was cut (noacct, --reservation=x, 24 lines, 58-63 columns): valid UTF-8, within the width, as under UTF-8"
 	local nobin=$T_DIR/nobin w want
 	mkdir -p "$nobin"
 	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
 	for w in 58 59 60 61 62 63; do
 		sq_run noacct SQ_WIDTH=$w SQ_HEIGHT=24 -- --compact --color --reservation=x
-		want=$(LC_ALL=C grep -a '^  .*recently finished (' "$OUT")
+		want=$(LC_ALL=C grep -a '^  .*finished (' "$OUT")
 		sq_run noacct SQ_WIDTH=$w SQ_HEIGHT=24 LC_ALL=C PATH="$nobin:$here/bin:$PATH" -- --compact --color --reservation=x
 		need "$w columns: rc 0, valid UTF-8, the finished line within $w columns, byte for byte as under UTF-8" eval '
-			rc_is 0 && err_empty && utf8_valid && [ -n "$want" ] && [ "$(LC_ALL=C grep -a "^  .*recently finished (" "$OUT")" = "$want" ] &&
-			[ "$(oracle_width "$(lines_matching "^  recently finished \(")")" -le '"$w"' ]'
+			rc_is 0 && err_empty && utf8_valid && [ -n "$want" ] && [ "$(LC_ALL=C grep -a "^  .*finished (" "$OUT")" = "$want" ] &&
+			[ "$(oracle_width "$(lines_matching "^  finished \(")")" -le '"$w"' ]'
 	done
 }
 # a finished NAME cut by columns with a gap after "…": x and han, cut at an
@@ -1902,7 +1916,7 @@ c_wide_twin_parts() {
 # summary node line cut (COMPACT, narrow): the screen of a UTF-8 caller,
 # byte for byte, the clock aside
 c_wide_c_floor() {
-	T_TITLE="gawk in C (no UTF-8 locale): shrink-finished at 50 (the id floor, 600_[1,…] ×67) and COMPACT's one node line (digest) at narrow widths draw the UTF-8 screen byte for byte"
+	T_TITLE="gawk in C (no UTF-8 locale): shrink-finished at 50 (the id in its F2 form, 600_… ×67) and COMPACT's one node line (digest) at narrow widths draw the UTF-8 screen byte for byte"
 	local nobin=$T_DIR/nobin want spec fx mode w h
 	mkdir -p "$nobin"
 	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
@@ -1917,7 +1931,7 @@ c_wide_c_floor() {
 		need "$fx $mode ${w}x$h: under C rc 0, stderr empty, the UTF-8 screen" eval 'rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT")'
 	done
 	sq_run shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=50 SQ_HEIGHT=30 LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --full
-	need "shrink-finished at 50 under C: the id at its floor, 600_[1,…] ×67" has "600_[1,…] ×67"
+	need "shrink-finished at 50 under C: the id in its F2 form beside the long state, 600_… ×67 (WHOLE R-M3)" has "600_… ×67 sweep  CANCELLED"
 }
 # ---- display width: sq job's tables and its tail (AC2) ----------------------
 # A node named in han and kana with an emoji and a combining mark, users in
@@ -3013,8 +3027,9 @@ c_shrink_extent() {
 	T_TITLE="rung 4 stops at BASE_[…] ×N and only when needed; idfit keeps every whole term that fits"
 	sq_run shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=50 SQ_RECENT_MAX=5 --
 	need "50: rc 0"                   rc_is 0
-	need "50: cell '600_[1,…] ×67'"   row_cell recent "600_[1,…] ×67"
-	need "50: cell '5000_[…] ×30'"    row_cell recent "5000_[…] ×30"
+	# WHOLE (R-M3, H6): FULL keeps the long state, so at 50 JOBID takes F2's next forms
+	need "50: cell '600_… ×67' beside CANCELLED" eval 'row_cell recent "600_… ×67" && rows recent | grep -qE "^ *600_.* CANCELLED "'
+	need "50: cell '5000_…' beside FAILED"     eval 'row_cell recent "5000_…" && rows recent | grep -qE "^ *5000_.* FAILED "'
 	local wd
 	for wd in 53 55; do
 		sq_run shrink-finished SLURM_BITSTR_LEN=0 SQ_WIDTH=$wd SQ_RECENT_MAX=5 --
@@ -4196,7 +4211,9 @@ sweep_series() {   # sweep_series FIXTURE MODE FILE
 	T_DIR=$T_DIR/s-$fx$mode run_n=0 T_FAIL=() T_CALLS=0; mkdir -p "$T_DIR"
 	sq_run "$fx" SQ_WIDTH=21 -- "$mode"
 	nmin=$(node_width)
-	rc_is 0 && [ "$nmin" -gt 0 ] && ok21=1
+	# WHOLE (H2): a COMPACT node line too wide for its figures takes a form
+	# without them (the name and the state), which whole_monotone checks
+	rc_is 0 && { [ "$nmin" -gt 0 ] || [ "$mode" = --compact ]; } && ok21=1
 	for w in $(seq 21 140); do
 		sq_run "$fx" SQ_WIDTH="$w" -- "$mode"
 		read -r nw hw bars any <<< "$(node_edge)"
@@ -4209,6 +4226,7 @@ sweep_series() {   # sweep_series FIXTURE MODE FILE
 		esac
 		if [ "$any" = 1 ]; then drawn=$((drawn + 1)); else bare=$((bare + 1)); fi
 		[ "$nw" -le "$w" ] || continue          # past the screen: the bar-less line, checked above
+		[ "$nw" -gt 0 ] || [ "$mode" != --compact ] || continue   # no figures (H2): no line to measure
 		[ "$nw" = $(( hw <= w ? hw : w )) ] || short="$short $w($nw/$hw)"
 	done
 	local s_fail=("${T_FAIL[@]}") s_calls=$T_CALLS
@@ -4226,7 +4244,7 @@ c_bars_width_sweep() {
 		for mode in --full --compact; do
 			if ! [ -s "$T_DIR/res$fx$mode" ] || ! . "$T_DIR/res$fx$mode"; then T_FAIL+=("$fx $mode: the series left no result"); continue; fi
 			T_FAIL+=("${s_fail[@]}"); T_CALLS=$((T_CALLS + s_calls))
-			need "$fx $mode at 21: rc 0, node lines drawn" test "$ok21" = 1
+			need "$fx $mode at 21: rc 0, node lines drawn (FULL: with their figures)" test "$ok21" = 1
 			need "$fx $mode: no node line past the screen (past it at W =${over:- none})" test -z "$over"
 			need "$fx $mode: every bar 0 or at least 2 cells (not at W =${small:- none})" test -z "$small"
 			need "$fx $mode: bars drawn at some width, none at some other" eval '[ "$drawn" -gt 0 ] && [ "$bare" -gt 0 ]'
@@ -4308,7 +4326,7 @@ digest_series() {
 # memory figure, then the CPU figure, then the fault states from the last).  A
 # fault: a word of the red bar (down drain fail inval unk) or a "*" suffix
 digest_check() {
-	LC_ALL=$utf8 gawk -F'\t' '
+	WHOLE_SHORT=$whole_short LC_ALL=$utf8 gawk -F'\t' '
 	function parse(d, P,   segs, ns, i, it, ni, k) {
 		delete P; P["ok"] = 1
 		if (d !~ /^nodes: /) { P["ok"] = 0; return }
@@ -4328,6 +4346,13 @@ digest_check() {
 		P["nf"] = k + 0
 	}
 	function fault(st) { sub(/^[0-9]+ /, "", st); return st ~ /down|drain|fail|inval|unk/ || st ~ /[*]$/ }
+	# WHOLE H3: a state by the short name of sinfo stands for its long one
+	function long_of(x,   c, b, sf) {
+		c = x; sub(/ .*/, "", c); b = substr(x, length(c) + 2); sf = b; sub(/^[a-z_]+/, "", sf); b = substr(b, 1, length(b) - length(sf))
+		return (b in LONG) ? c " " LONG[b] sf : x
+	}
+	function has_short(x,   b) { b = x; sub(/^[0-9]+ /, "", b); sub(/[^a-z_]+$/, "", b); return b in SHORT }   # a long name that has a short one
+	BEGIN { n = split(ENVIRON["WHOLE_SHORT"], S, " "); for (i = 1; i < n; i += 2) { LONG[S[i+1]] = S[i]; SHORT[S[i]] } }
 	$1 == 400 { whole = $2; sub(/^ +/, "", whole); parse(whole, A)
 		for (i = 1; i <= A["ns"]; i++) { if (fault(A["s", i])) nfault++; else nheal++; AT[A["s", i]] = i }
 		for (i = 1; i <= A["nf"]; i++) AF[A["f", i]] = i
@@ -4340,9 +4365,10 @@ digest_check() {
 	  if ("bad" in P) print "W=" w ": " P["bad"] ": " d
 	  if (P["sell"] != (P["ns"] < A["ns"])) print "W=" w ": the states end in … " (P["sell"] ? "with none dropped" : "missing") ": " d
 	  if (P["fell"] != (P["nf"] < A["nf"])) print "W=" w ": the figures end in … " (P["fell"] ? "with none dropped" : "missing") ": " d
-	  prev = 0; sf = sh = 0; delete SHOWN
+	  prev = 0; sf = sh = nshort = 0; delete SHOWN
 	  for (i = 1; i <= P["ns"]; i++) {
 		x = P["s", i]
+		if (!(x in AT) && (long_of(x) in AT)) { x = long_of(x); nshort++ }
 		if (!(x in AT)) { print "W=" w ": " x " is no state of the whole digest"; continue }
 		if (AT[x] <= prev) print "W=" w ": " x " out of sinfo order"
 		prev = AT[x]; SHOWN["s" x]
@@ -4359,7 +4385,11 @@ digest_check() {
 	  k = 0; for (i = 1; i <= A["ns"]; i++) if (fault(A["s", i])) { k++; if (k <= sf && !(("s" A["s", i]) in SHOWN)) print "W=" w ": fault state " A["s", i] " dropped before a later one" }
 	  k = 0; for (i = 1; i <= A["ns"]; i++) if (!fault(A["s", i])) { k++; if (k <= sh && !(("s" A["s", i]) in SHOWN)) print "W=" w ": healthy state " A["s", i] " dropped before a later one" }
 	  if ((P["nf"] > 0 || sh > 0) && sf < nfault) print "W=" w ": a fault state missing while a figure or a healthy state shows: " d
-	  if (sh > 0 && P["nf"] < A["nf"]) print "W=" w ": a figure missing while a healthy state shows: " d
+	  # H3: one state outlasts the figures (a healthy one where no fault is), the
+	  # short names come after the figures, all at once
+	  if (P["nf"] < A["nf"] && (sh > 1 || sh > 0 && nfault > 0)) print "W=" w ": a figure missing while a healthy state shows: " d
+	  if (nshort && P["nf"] > 0) print "W=" w ": a short state name while a figure shows: " d
+	  for (i = 1; i <= P["ns"]; i++) if (nshort && has_short(P["s", i])) print "W=" w ": short names and long mixed: " d
 	  if (P["nf"] > 0 && !(("f" A["f", 1]) in SHOWN)) print "W=" w ": the CPU figure missing while the memory figure shows: " d
 	  # a wider screen only adds parts
 	  if (w > 21) for (x in LAST) if (!(x in SHOWN)) print "W=" w ": " substr(x, 2) " shown at W=" w - 1 " but not here"
@@ -4368,7 +4398,7 @@ digest_check() {
 }
 digest_at() { gawk -F'\t' -v w="$2" '$1 == w { sub(/^ +/, "", $2); print $2 }' "$1"; }   # digest_at FILE W
 c_digest_fit() {   # DISPLAY-v4 E AC 1
-	T_TITLE="E1: the COMPACT digest at every width 21..120 fits the screen by whole parts, the fault states (a red-bar word or a * suffix, not ~ ^ \$ @) kept longest, then the CPU figure, then memory, the states in sinfo order, a cut list ending in a … of its own; the pins; ! red and alone in colour; the ! and ? cases"
+	T_TITLE="E1 with WHOLE's H3: the COMPACT digest at every width 21..120 fits the screen by whole parts, the fault states (a red-bar word or a * suffix, not ~ ^ \$ @) kept longest, one state outlasting the figures, then the CPU figure, then memory, then the short names of sinfo, the states in sinfo order, a cut list ending in a … of its own; the pins; ! red and alone in colour; the ! and ? cases"
 	local fx pids=() bad pin got want
 	local swept="big40 scfail scfail-downlast membar-busy noacct bars-busy bars-down wide-text big40faults"
 	for fx in $swept; do digest_series "$fx" "$T_DIR/dig-$fx" & pids+=($!); done
@@ -4388,14 +4418,14 @@ c_digest_fit() {   # DISPLAY-v4 E AC 1
 	           "big40:80:nodes: 3 down*, 2 drained, 2 draining, … · 1020/2560 cpu · 3135/!10240G mem" \
 	           "big40:87:nodes: 12 mixed, 3 down*, 2 drained, 2 draining, … · 1020/2560 cpu · 3135/!10240G mem" \
 	           "big40:107:nodes: 12 mixed, 10 allocated, 11 idle, 3 down*, 2 drained, 2 draining · 1020/2560 cpu · 3135/!10240G mem" \
-	           "scfail:21:nodes: … · …" "scfail:27:nodes: … · 82/152 cpu · …" \
-	           "scfail:40:nodes: … · 82/152 cpu · 335/!1085G mem" "scfail:49:nodes: 1 mixed, … · 82/152 cpu · 335/!1085G mem" \
+	           "scfail:21:nodes: 1 mix, … · …" "scfail:27:nodes: 1 mixed, … · …" \
+	           "scfail:40:nodes: 1 mixed, … · 82/152 cpu · …" "scfail:49:nodes: 1 mixed, … · 82/152 cpu · 335/!1085G mem" \
 	           "scfail:59:nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/!1085G mem" \
 	           "noacct:59:nodes: 1 allocated, 1 down* · 128/256 cpu · 443/1006G mem" \
 	           "noacct:49:nodes: 1 down*, … · 128/256 cpu · 443/1006G mem" \
 	           "noacct:37:nodes: 1 down*, … · 128/256 cpu · …" "noacct:23:nodes: 1 down*, … · …" \
 	           "big40faults:25:nodes: 1 idle*, … · …" \
-	           "big40faults:55:nodes: 1 idle*, 1 down~, 1 powered_down, … · …" \
+	           "big40faults:55:nodes: 1 idle*, 1 down~, 1 powered_dn, … · …" \
 	           "big40faults:85:nodes: 1 idle*, 1 down~, 1 powered_down, 1 drained~, 1 maint*, … · 90/768 cpu · …" \
 	           "big40faults:115:nodes: 1 mixed, 1 idle~, 1 idle*, 1 down~, 1 powered_down, 1 drained~, 1 maint*, … · 90/768 cpu · 293/!3072G mem"; do
 		fx=${pin%%:*} pin=${pin#*:}; want=${pin#*:} pin=${pin%%:*}
@@ -4529,10 +4559,11 @@ c_node_figures() {   # DISPLAY-v4 E AC 3, 4, 5
 		sq_run notes3 SQ_HEIGHT=$h -- --compact
 		got=$(plain | wc -l)
 		{ rc_is 0 && lines_within "$h" && footer_last 5 5 0 0 && [[ SUM == *"$(node_notes)"* ]]; } || bad="$bad $h"
-		case $h in 6) want=4 ;; 8) want=8 ;; 10) want=10 ;; 12) want=11 ;; 14) want=14 ;; *) want=$got ;; esac
+		# 6 at 6: the blanks with the digest (WHOLE H11, E-L9)
+		case $h in 6) want=6 ;; 8) want=8 ;; 10) want=10 ;; 12) want=11 ;; 14) want=14 ;; *) want=$got ;; esac
 		[ "$got" = "$want" ] || bad="$bad $h($got)"
 	done
-	need "notes3 COMPACT 120 x H 6..14: within H, the footer last, the notes in E4's order; 4, 8, 10, 11, 14 lines at H 6, 8, 10, 12, 14 (not at H =${bad:- none})" test -z "$bad"
+	need "notes3 COMPACT 120 x H 6..14: within H, the footer last, the notes in E4's order; 6, 8, 10, 11, 14 lines at H 6, 8, 10, 12, 14 (not at H =${bad:- none})" test -z "$bad"
 	sq_run notes3 SQ_HEIGHT=12 -- --compact
 	need "notes3 at 120x12: the node block in full with all three notes" eval 'rc_is 0 && [ "$(node_notes)" = SUM ] && [ "$(lines_matching " cpu .* mem " | grep -c .)" = 2 ]'
 	sq_run allocNA-both SQ_HEIGHT=12 -- --compact
@@ -4757,13 +4788,15 @@ table_has() { rows "$1" | T=$2 gawk 'BEGIN { t = ENVIRON["T"]; gsub(/  +/, " ", 
 # the width of a table's JOBID column: up to its second header word
 jobid_width() { section "$1" | gawk '/^ *JOBID / { match($0, /JOBID +/); print RLENGTH - 1; exit }'; }
 c_id_pins() {   # DISPLAY-v4 F AC 1-5, the pins
-	T_TITLE="F1-F5 pinned: the throttle goes first (7002_[0-9] ×10, 8000_[2-9] ×8), the JOBID floor (11920_…, 9876543210_…, 123456789, 11899, 4005_1, 1234_0), the spare (600_… ×67 sweep-irr…, (Resources), 0 by mall…), sf-both's NAME, the canceller (0 by 1025, 0 by…, 0), oddfin's cliff"
+	T_TITLE="F1-F5 pinned: the throttle goes first (7002_[0-9] ×10, 8000_[2-9] ×8), the JOBID floor (11920_…, 9876543210_…, 123456789, 11899, 4005_1, 1234_0), the spare (600_… ×67 sweep-irr…, (Resources), 0 by mall…), sf-both's NAME, the canceller (0 by 1025, 0 by…, 0), oddfin's cliff; WHOLE re-pinned the narrow FULL widths (R-M3: the finished table keeps its long state, H4: JOBID keeps ×N until the text floors)"
 	local w got bad= c
 	# F1
-	for w in 46 50; do
-		sq_run fallback-throttled SQ_WIDTH=$w -- --full --no-color
-		need "fallback-throttled W=$w: 7002_[0-9] ×10" eval 'rc_is 0 && table_has recent "7002_[0-9] ×10"'
-	done
+	sq_run fallback-throttled SQ_WIDTH=50 -- --full --no-color
+	need "fallback-throttled W=50: 7002_[0-9] ×10" eval 'rc_is 0 && table_has recent "7002_[0-9] ×10"'
+	# WHOLE re-pins (R-M3, H6): FULL keeps the long state in the finished table,
+	# so at the narrow widths below JOBID, NAME and EXIT take their narrower forms
+	sq_run fallback-throttled SQ_WIDTH=46 -- --full --no-color
+	need "fallback-throttled W=46: 7002_… ×10 beside CANCELLED (WHOLE R-M3)" eval 'rc_is 0 && table_has recent "7002_… ×10 sweep CANCELLED"'
 	for w in 66 67; do
 		sq_run throttled SQ_WIDTH=$w -- --full --no-color
 		need "throttled W=$w: the pending row 8000_[2-9] ×8" eval 'rc_is 0 && row_cell queue "8000_[2-9] ×8"'
@@ -4785,16 +4818,16 @@ c_id_pins() {   # DISPLAY-v4 F AC 1-5, the pins
 	for c in "memalloc-r:60:queue:11920_…" "oddarr:57:queue:9876543210_…" "oddarr:57:queue:11950_… ×11" "oddfin:38:recent:9876543210_…" \
 	         "longplain:54:queue:123456789" "longplain:54:queue:123456790" "memalloc-r:33:recent:11899" "memalloc-r:33:recent:11897" \
 	         "memalloc-r:33:recent:11893" "jobmem-outcomes:54:queue:4005_1" "jobmem-outcomes:54:queue:4005_0" "array-running:52:queue:1234_0:-x" \
-	         "shrink-finished:44:recent:600_… ×67" "shrink-finished:48:recent:600_[…] ×67" \
-	         "sf-longname:46:recent:600_… ×67 sweep-irr…" "shrink-pending:60:queue:600_… sweep" "shrink-pending:60:queue:(Resources)" \
-	         "throttled:60:queue:(JobArra…" "sf-alice:44:recent:600_… sweep CA 0 by mall…" \
-	         "sf-both:42:recent:sweep-… " "sf-both:43:recent:sweep-i… " "sf-both:44:recent:sweep-i… " "sf-both:45:recent:sweep-ir… " \
-	         "sf-both:46:recent:sweep-irr… " "sf-both:47:recent:sweep-irr… " "sf-both:48:recent:600_… ×67 sweep-i… " \
-	         "sf-alice:42:recent:0 by ma…" "sf-alice:43:recent:0 by mal…" "sf-alice:45:recent:600_… sweep CA 0 by mallo…" \
-	         "sf-alice:46:recent:600_… ×67 sweep CA 0 by mal…" \
-	         "oddfin:58:recent:12345678_… ×100 hugeids CA 0 by…" "oddfin:59:recent:12345678_… hugeids CA 0 by 1234567890" \
-	         "oddfin:60:recent:12345678_… ×100 hugeids CA 0 by 1234567890" \
-	         "oddfin:56:recent:11950_[1,…] ×11" "oddfin:59:recent:11950_[…] ×11" "oddfin:56:recent:9876543210_… ×3" "oddfin:59:recent:9876543210_… "; do
+	         "shrink-finished:44:recent:600_… sweep CANCELLED" "shrink-finished:48:recent:600_… ×67 sweep CANCELLED" \
+	         "sf-longname:46:recent:600_… sweep-ir… CANCELLED" "shrink-pending:60:queue:600_[…] ×67 sweep" "shrink-pending:60:queue:(Res…" \
+	         "throttled:60:queue:(JobA…" "sf-alice:44:recent:600_… sweep CANCELLED 0 by…" \
+	         "sf-both:42:recent:sweep… CANCELLED" "sf-both:43:recent:sweep… CANCELLED" "sf-both:44:recent:sweep-… CANCELLED" "sf-both:45:recent:sweep… CANCELLED" \
+	         "sf-both:46:recent:sweep-… CANCELLED" "sf-both:47:recent:sweep-i… CANCELLED" "sf-both:48:recent:600_… sweep-i… CANCELLED" \
+	         "sf-alice:42:recent:0 by…" "sf-alice:43:recent:0 by…" "sf-alice:45:recent:600_… sweep CANCELLED 0 by m…" \
+	         "sf-alice:46:recent:600_… sweep CANCELLED 0 by ma…" "sf-alice:48:recent:600_… sweep CANCELLED 0 by mall…" \
+	         "oddfin:62:recent:12345678_… ×100 hugeids CANCELLED 0 by…" "oddfin:63:recent:12345678_… hugeids CANCELLED 0 by 1234567890" \
+	         "oddfin:64:recent:12345678_… ×100 hugeids CANCELLED 0 by 1234567890" \
+	         "oddfin:56:recent:11950_[…] ×11" "oddfin:59:recent:11950_[…] ×11" "oddfin:56:recent:9876543210_… tenbase" "oddfin:59:recent:9876543210_… "; do
 		IFS=: read -r fx w table want extra <<< "$c"
 		sq_run "$fx" SQ_WIDTH=$w -- --full --no-color $extra
 		need "$fx${extra:+ $extra} W=$w, $table: '$want'" eval 'rc_is 0 && table_has $table "$want"'
@@ -4807,11 +4840,11 @@ c_id_pins() {   # DISPLAY-v4 F AC 1-5, the pins
 	sq_run ft-32 SQ_WIDTH=54 -- --full --no-color
 	need "ft-32 W=54: 7002_[0-99%32] ×100" eval 'rc_is 0 && row_cell recent "7002_[0-99%32] ×100"'
 	# F3, only where a column gains: the blanks that stay, the header and the row as they are
-	for c in "shrink-finished:43:JOBID      NAME   STATE EXIT  ELAPSED AGO:600_… ×67  sweep  CA    0 by…      0s 11h" \
-	         "shrink-finished:44:JOBID      NAME    STATE EXIT  ELAPSED AGO:600_… ×67  sweep   CA    0 by…      0s 11h" \
+	for c in "shrink-finished:43:JOBID  NAME   STATE     EXIT  ELAPSED AGO:600_…  sweep  CANCELLED 0 by…      0s 11h" \
+	         "shrink-finished:44:JOBID  NAME   STATE     EXIT   ELAPSED AGO:600_…  sweep  CANCELLED  0 by…      0s 11h" \
 	         "shrink-finished:60:JOBID               NAME   STATE     EXIT      ELAPSED AGO:5000_[0,2,4,…] ×30  sweep  FAILED            1   1m00s 12h" \
-	         "finished-throttled:41:JOBID   NAME  STATE EXIT    ELAPSED AGO:7002_…  sweep CA      0 by…      0s 12h" \
-	         "finished-throttled:43:JOBID       NAME  STATE EXIT  ELAPSED AGO:7002_… ×10  sweep CA    0 by…      0s 12h"; do
+	         "finished-throttled:41:JOBID  NAME  STATE     EXIT  ELAPSE AGO:7002_… sweep CANCELLED 0 by…     0s 12h" \
+	         "finished-throttled:43:JOBID  NAME  STATE     EXIT   ELAPSED AGO:7002_… sweep CANCELLED  0 by…      0s 12h"; do
 		IFS=: read -r fx w hdr want <<< "$c"
 		sq_run "$fx" SQ_WIDTH=$w -- --full --no-color
 		need "$fx W=$w, F3's blank that stays: '$hdr' over '$want'" eval '
@@ -4819,13 +4852,13 @@ c_id_pins() {   # DISPLAY-v4 F AC 1-5, the pins
 	done
 	for w in 43 44 45 46 47; do
 		sq_run sf-both SQ_WIDTH=$w -- --full --no-color
-		need "sf-both W=$w: the canceller 0 by m… to 0 by mal…" eval 'rc_is 0 && rows recent | grep -qE " 0 by (m|ma|mal)…( |$)"'
+		need "sf-both W=$w: the canceller 0 by… or 0 by m… (WHOLE R-M3: beside CANCELLED)" eval 'rc_is 0 && rows recent | grep -qE " 0 by( m)?…( |$)"'
 	done
 	# F4: a uid is whole, by… or gone
 	bad=
 	for w in 40 41 42 43 44 45 46; do
 		sq_run shrink-finished SQ_WIDTH=$w -- --full --no-color
-		got=$(rows recent | gawk '$1 ~ /^600_/ { for (i = 2; i <= NF; i++) if ($i == "CA") { x = $(i + 1); if ($(i + 2) ~ /^by/) x = x " " $(i + 2); if ($(i + 2) == "by") x = x " " $(i + 3); print x; exit } }')
+		got=$(rows recent | gawk '$1 ~ /^600_/ { for (i = 2; i <= NF; i++) if ($i == "CA" || $i == "CANCELLED") { x = $(i + 1); if ($(i + 2) ~ /^by/) x = x " " $(i + 2); if ($(i + 2) == "by") x = x " " $(i + 3); print x; exit } }')
 		case $got in "0 by 1025"|"0 by…"|0) ;; *) bad="$bad $w($got)" ;; esac
 	done
 	need "shrink-finished W 40..46: the 600 row's EXIT 0 by 1025, 0 by… or 0, never a cut uid (not at W =${bad:- none})" test -z "$bad"
@@ -5621,31 +5654,32 @@ c_memalloc_screens() {
 		[ "$(mem_of 11948)" = 1006G ] && [ "$(mem_of 11890)" = 121G ] && [ "$(mem_of 11926)" = 0.9G ]'
 	# no screen, so no whole form: the other columns give way, MEM never
 	mem_run memalloc SQSTUB_UID=4242 SQ_WIDTH=60 -- --full --no-recent
-	need "nobody at 60 in a pipe: rc 0, every MEM cell whole and decimal (1006.8G, not 1006.…), the line within 60, others shaved" eval '
+	# WHOLE (R-H4): FULL cuts no state and no duration either; the line wraps
+	need "nobody at 60 in a pipe: rc 0, every MEM cell whole and decimal (1006.8G, not 1006.…), others shaved, STATE whole" eval '
 		rc_is 0 && [ "$(mem_of 11948) $(mem_of 11890) $(mem_of 11926)" = "1006.8G 121.8G 0.9G" ] &&
-		! rows queue | gawk "{ print \$(NF-1) }" | grep -q "…" && [ "$(width)" -le 60 ] && rows queue | grep -q "…"'
+		! rows queue | gawk "{ print \$(NF-1) }" | grep -q "…" && rows queue | grep -q "…" && ! rows queue | grep -q "PEND…"'
 	mem_run memalloc SQ_WIDTH=80 SQ_HEIGHT=30 COLUMNS=80 LINES=30 -- --color --full
 	need "S4 as fsill at 80 on a screen: rc 0, stderr empty, the accepted screen; own form a in the unit rule (salmon 15G, fastqc 8G, multiqc ?4G) beside whole totals" eval '
 		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/fsill__full-w80-h30.ansi") <(without_clock "$OUT") &&
-		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_…" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
+		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_[…]" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
 }
-# MEM is cut last under -M too, but cut: with the feature off (-M, MEM is %m)
-# a screen narrower than every column at its floor takes MEM down to 5 as
-# well, never wider, never below
+# MEM under -M too (the feature off, MEM is %m): a screen narrower than
+# every column at its floor keeps MEM whole (WHOLE R-L5; it was cut to 5),
+# the text columns at 5, and FULL wraps
 c_memalloc_floor_M() {
-	T_TITLE="-M at 21 and 30 in a pipe: every column at its floor of 5, MEM too (1023.9G cut to 1023…), never below"
+	T_TITLE="-M at 21 and 30 in a pipe: the text columns at their floor of 5, MEM whole (1023.9G; WHOLE R-L5: never cut), FULL wrapping the rest"
 	local d q w
 	q=$(sed 's/^\(i=11890;.*\) m=7800M;/\1 m=1048575M;/' "$fixtures/memalloc/squeue" | sed "s|^@include \.\./|@include $fixtures/|")
 	d=$(mem_fixture memalloc sinfo "@include $fixtures/_common/sinfo-two-idle")
 	printf '%s\n' "$q" > "$d/squeue"
 	for w in 21 30; do
 		mem_run "$d" SQ_WIDTH=$w -- --full --no-recent -M bioinf
-		need "-M at $w: rc 0, no mirror call, the header at the floor, busco's MEM cut to 5" eval '
-			rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(section queue | head -n 1)" = "  JOBID NAME  USER  STATE TIME  LEFT  CPU MEM   NODE/" ] && [ "$(mem_of 11890)" = "1023…" ]'
+		need "-M at $w: rc 0, no mirror call, the text at its floor, busco's MEM whole" eval '
+			rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(section queue | head -n 1)" = "  JOBID   NAME  USER  STATE   TIME       LEFT       CPU MEM     NODE/" ] && [ "$(mem_of 11890)" = "1023.9G" ]'
 	done
 }
 c_memalloc_narrow() {
-	T_TITLE="MEM is cut last, down to 5: whole while any other column can give, also under -M where it is the widest, so COMPACT keeps its height on a screen just wide enough; %m in the unit rule, decimal or whole, own ?%m and !%m cells too"
+	T_TITLE="MEM is never cut (WHOLE R-L5; MEMALLOC cut it last, down to 5): whole while any other column can give, also under -M where it is the widest, so COMPACT keeps its height on a screen just wide enough; %m in the unit rule, decimal or whole, own ?%m and !%m cells too"
 	local d1 d2 q
 	d1=$(mem_fixture memalloc-tresfail sinfo "@include $fixtures/_common/sinfo-two-idle")
 	# busco's %m as if it were per node: 124800M, wider than any other MEM cell
@@ -5653,8 +5687,8 @@ c_memalloc_narrow() {
 	d2=$(mem_fixture memalloc sinfo "@include $fixtures/_common/sinfo-two-idle")
 	printf '%s\n' "$q" > "$d2/squeue"
 	mem_run "$d1" SQ_WIDTH=53 SQ_HEIGHT=16 COLUMNS=53 LINES=16 -- --color --compact
-	need "the mirror call failing, COMPACT 53x16 on a screen: rc 0, at most 16 lines, none wider than 53" eval '
-		rc_is 0 && [ "$(wc -l < "$OUT")" -le 16 ] && [ "$(width)" -le 53 ]'
+	need "the mirror call failing, COMPACT 53x16 on a screen: rc 0, at most 16 lines, none wider than 53, MEM whole where shown (WHOLE R-L5)" eval '
+		rc_is 0 && [ "$(wc -l < "$OUT")" -le 16 ] && [ "$(width)" -le 53 ] && ! plain | grep -qE "[0-9]…|!…"'
 	mem_run "$d2" SQ_WIDTH=53 SQ_HEIGHT=16 COLUMNS=53 LINES=16 -- --color --compact -M bioinf
 	need "-M (no mirror call), COMPACT 53x16 on a screen: rc 0, at most 16 lines, none wider than 53" eval '
 		rc_is 0 && [ "$(calls mirror)" -eq 0 ] && [ "$(wc -l < "$OUT")" -le 16 ] && [ "$(width)" -le 53 ]'
@@ -5680,16 +5714,16 @@ c_memalloc_narrow() {
 		need "-M at $w in a pipe, MEM the widest column: rc 0, busco 1023.9G whole, others cut" eval '
 			rc_is 0 && [ "$(mem_of 11890)" = 1023.9G ] && rows queue | grep -q "…"'
 	done
-	# own b cells without colour in a pipe: no whole form, no form a, so once
-	# every other column is down to 5, MEM is cut, and only to 5
+	# own b cells without colour in a pipe: no whole form, no form a.  WHOLE
+	# (R-L5, R-H4): MEM is never cut, nor a state or a duration; the text
+	# columns go to 5 and FULL wraps the rest
 	d1=$(mem_fixture jobmem sinfo "@include $fixtures/_common/sinfo-two-idle")
-	mem_run "$d1" SQ_WIDTH=55 -- --full --no-recent --no-color
-	need "own b cells, no colour, 55 in a pipe: rc 0, every column at 5 but MEM, MEM cut to fit (7.7/…), nothing wider than 55" eval '
-		rc_is 0 && [ "$(width)" -le 55 ] && [ "$(section queue | head -n 1)" = "  JOBID NAME  USER  STATE TIME  LEFT  CPU MEM     NODE/" ] &&
-		[ "$(mem_of 11903)" = "7.7/…" ]'
-	mem_run "$d1" SQ_WIDTH=21 -- --full --no-recent --no-color
-	need "own b cells, no colour, 21 in a pipe: rc 0, every column at its floor of 5, MEM too, never below" eval '
-		rc_is 0 && [ "$(section queue | head -n 1)" = "  JOBID NAME  USER  STATE TIME  LEFT  CPU MEM   NODE/" ] && [ "$(mem_of 11903)" = "7.…" ]'
+	for w in 55 21; do
+		mem_run "$d1" SQ_WIDTH=$w -- --full --no-recent --no-color
+		need "own b cells, no colour, $w in a pipe: rc 0, the text columns at 5, STATE, the durations and MEM whole (7.7/15.2G)" eval '
+			rc_is 0 && [ "$(section queue | head -n 1)" = "  JOBID NAME  USER  STATE   TIME       LEFT       CPU MEM         NODE/" ] &&
+			[ "$(mem_of 11903)" = "7.7/15.2G" ]'
+	done
 	# own cells with no allocation known: the mark before %m, in the unit rule
 	# and in the whole form like every other MEM cell.  gone (4008) is out of
 	# the allocation call; at 124800M its %m reads 121.8G, whole 121G
@@ -9227,6 +9261,443 @@ CPUsState=0/8/0/8; NodeList=extra2; FreeMem=7000; Memory=8000; StateLong=idle; R
 	done
 }
 
+# ---- WHOLE: a line is made of parts, each whole or absent ------------------
+# (whole-design.md, WHOLE-v3).  whole_check W H reads the screen of the last
+# run, cellified (cplain: one character a column), and prints one line per
+# breach of the rules every COMPACT screen keeps, ACs 1-3 and 10:
+#   wide        a line wider than W
+#   tall        more than H lines (a pipe)
+#   digit       a digit right before "…", a unit right after a digit ("2h…",
+#               "4G…"), a digit and ":" before it ("1-02:11:…"), or a cut state
+#               word ("RUNN…"); allowed: a first word of digits and .,:/+- the
+#               guard could not back up ("↳ 2026-10…"), and the last resort
+#   footer      the footer (last line) outside its forms (F-A, H9)
+#   title       the title outside its forms (T-A, H1)
+#   sgr         (with --color) a line whose last SGR is not ESC[0m
+# and one "lastcut N" for each row whose JOBID cell (the first) the last
+# resort cut inside a number (AC 5: whether it may act there is the caller's
+# to say).  NARROW (below 21 columns, where the last resort cuts any line at
+# the edge, E-L2): only wide, tall and sgr
+whole_check() {
+	local w=$1 h=$2 narrow=${3:-}
+	cplain | LC_ALL=$utf8 gawk -v w="$w" -v h="$h" -v host="$whole_host" -v narrow="$narrow" '
+		{ L[NR] = $0 }
+		END {
+			if (NR > h) print "tall " NR
+			for (i = 1; i <= NR; i++) {
+				x = L[i]; gsub(/\356\200\200/, "", x)                  # the fillers out, for the text
+				if (length(L[i]) > w) print "wide " i ": " x
+				if (narrow) continue
+				if (x ~ /^ *[0-9]+… /) { print "lastcut " i; continue }
+				y = x
+				if (match(y, /^ *([↳⚠] +)?[0-9.,:\/+-]+…/)) y = substr(y, RSTART + RLENGTH)   # a first word of digits
+				if (y ~ /[0-9]…/ || y ~ /(^|[ (])[0-9][0-9.]*[A-Za-z][A-Za-z]?…/ || y ~ /[0-9]:…/ ||
+				    y ~ /(PEND|RUNN|COMPL|FAIL|CANC|TIMEO|OUT_|NODE_|PREE|SUSP|BOOT_|DEADL)[A-Z_]*…/)
+					print "digit " i ": " x
+			}
+			if (narrow) exit
+			N = "([0-9]+|\\?)"
+			f = L[NR]
+			if (f !~ "^ *(" N " jobs +" N " running +" N " pending +" N " other|(" N " jobs +)?" N " R( +" N " PD( +" N " other)?)?)$")
+				print "footer: " f
+			for (i = 1; i <= NR && L[i] == ""; i++) ;
+			t = L[i]; gsub(/\356\200\200/, "", t)
+			C = "[0-9][0-9]:[0-9][0-9]:[0-9][0-9] [A-Z]+"
+			if (t ~ /SLURM|▌/ || t ~ "^ *" C "$")
+				if (t !~ "^ *(▌ SLURM " host "  " C "|▌ " host "  ?" C "|▌ " C "|" C ")$") print "title: " t
+		}'
+	if grep -q "$ESC\[" "$OUT"; then
+		LC_ALL=C gawk -v esc="$ESC" '{ n = split($0, P, esc "\\["); if (n > 1 && P[n] !~ /^0m/) print "sgr " NR }' "$OUT"
+	fi
+}
+whole_host=FranzGB
+whole_date='[0-9]{4}-[0-9]{2}-[0-9]{2}'      # a start estimate a year or more ahead
+# whole_widths FIXTURE "W..." H [sq args...]: whole_check over those widths at
+# height H, the breaches as "W:what" into WBAD, the last resort into WCUT
+whole_widths() {
+	local fx=$1 widths=$2 h=$3 wd r; shift 3
+	WBAD= WCUT=
+	for wd in $widths; do
+		sq_run "$fx" SQSTUB_HOST=$whole_host SQ_WIDTH="$wd" SQ_HEIGHT="$h" -- --compact "$@"
+		{ rc_is 0 && err_empty; } || WBAD="$WBAD $wd:rc$RC"
+		while IFS= read -r r; do
+			case $r in lastcut*) WCUT="$WCUT $wd:${r#lastcut }" ;; *) WBAD="$WBAD $wd:${r// /_}" ;; esac
+		done < <(whole_check "$wd" "$h")
+	done
+}
+c_whole_widths() {   # WHOLE ACs 1-3, 5, 10 at W 21..80
+	T_TITLE="COMPACT at every width 21..80 (H 30, with and without colour): no line wider than W, no screen taller than H, no digit, unit or state word cut, footer and title in their forms, every line's colour closed; the last resort only on realid's 10-digit ids below 23 columns"
+	local fx args
+	for fx in busy24 mix30 noacct memalloc-r oddfin membar-busy est realid huge guard guard2 nboot bars-busy elapsed24 tiny fs10 big40 "opt -o_i,j,T,Q,D,V,e,P,a,R"; do
+		args=${fx#* }; [ "$args" = "$fx" ] && args= || args=${args//_/ }; fx=${fx%% *}
+		# shellcheck disable=SC2086
+		whole_widths "$fx" "$(seq 21 80)" 30 --no-color $args
+		need "$fx: every screen at W 21..80 keeps the rules (breaches:${WBAD:- none})" test -z "$WBAD"
+		case $fx in
+			realid) need "realid: the last resort only in the JOBID cell below 23 columns (at:${WCUT:- none})" \
+			             eval '[ -n "$WCUT" ] && ! printf "%s\n" $WCUT | grep -qvE "^2[12]:"' ;;
+			*) need "$fx: the last resort never acts from 21 columns (it did at:${WCUT:- none})" test -z "$WCUT" ;;
+		esac
+		whole_widths "$fx" "21 24 30 37 44 52 60" 30 --color $args
+		need "$fx --color: the same, and every line's last SGR ESC[0m (breaches:${WBAD:- none})" test -z "$WBAD"
+	done
+}
+c_whole_narrow() {   # WHOLE AC 1 and 10 below 21 columns (E-L2), pipe and pty
+	T_TITLE="COMPACT below 21 columns, W 1..20 at H 2, 5, 8, 12, in a pipe and on a terminal: rc 0, no line wider than W, no screen taller than H (H-1 on a terminal), every line's colour closed"
+	local fx wd h bad= r
+	for fx in busy24 noacct realid huge big40; do
+		for wd in $(seq 1 20); do
+			for h in 2 5 8 12; do
+				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT="$h" -- --compact --color
+				{ rc_is 0 && err_empty; } || bad="$bad $fx:$wd:$h:rc$RC"
+				while IFS= read -r r; do bad="$bad $fx:$wd:$h:${r// /_}"; done < <(whole_check "$wd" "$h" narrow)
+			done
+		done
+	done
+	need "every pipe screen below 21 columns fits (breaches:${bad:- none})" test -z "$bad"
+	bad=
+	for wd in 12 16; do
+		PTY=1 PTY_ROWS=12 PTY_COLS=$wd sq_run busy24 TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT -- --compact
+		[ "$(cplain | LC_ALL=$utf8 gawk '{ if (length($0) > m) m = length($0) } END { print m+0 }')" -le "$wd" ] || bad="$bad $wd:wide"
+		lines_within 11 || bad="$bad $wd:tall"
+		plain | grep -v '^$' | tail -n 1 | grep -qE '^ *[0-9]+ R' || bad="$bad $wd:footer"
+	done
+	need "busy24 on a terminal at W 12 and 16: every line within W, at most 11 lines, the footer present (breaches:${bad:- none})" test -z "$bad"
+}
+# whole_parts NODES: what the last screen shows, as one line of parts for
+# the monotone check (AC 4) and the node lines (AC 3); NODES "name=state ..."
+# from a FULL run (whole_nodes).  Prints "title=R foot=P/C fin=R:M q=COLS
+# f=COLS node=F dur=D", and "badnode NAME LINE" for a node line that does not
+# end in its whole long or short state.  R the title form (0 widest), P the
+# footer counts shown, C 1 with codes, fin the finished caption (2 long, 1
+# short, 0 none) and its marker (the parenthetical, or -), COLS the columns
+# of the queue and the finished table by name (ST as STATE, a header cut to
+# its floor by the first name it starts), F the node form (1 bars or figures,
+# 2 percentages, 3 name and state, 4 name and short state, 5 digest), D 1
+# where a duration of the queue is short (5h59m), 0 in Slurm's form, -1 none
+whole_short='allocated alloc mixed mix draining drng drained drain completing comp reserved resv future futr failing failg planned plnd unknown unk perfctrs npc reboot boot powering_down powring_dn powered_down powered_dn power_down pow_dn power_up pow_up cancel_reboot canc_r resume resm reboot_issued boot^'
+whole_nodes() {   # whole_nodes FIXTURE: "name=state ..." of a FULL screen
+	sq_run "$1" SQ_WIDTH=250 -- --full --no-color
+	plain | gawk '/^ +[^ ]+ .* cpu .* mem +[^ ]+$/ { printf "%s=%s ", $1, $NF }'
+}
+whole_parts() {
+	cplain | LC_ALL=$utf8 gawk -v nodes="$1" -v short="$whole_short" -v host="$whole_host" '
+		BEGIN {
+			n = split(nodes, NL, " "); for (i = 1; i <= n; i++) { split(NL[i], P, "="); ST[P[1]] = P[2] }
+			n = split(short, S, " "); for (i = 1; i < n; i += 2) SH[S[i]] = S[i+1]
+			nq = split("JOBID NAME USER STATE TIME LEFT LIMIT CPU MEM NODE/REASON REASON PRIO NODES SUBMIT START END PART ACCOUNT QOS COMMAND WORKDIR", QH, " ")
+			nf = split("JOBID NAME STATE EXIT ELAPSED AGO", FH, " ")
+		}
+		{ gsub(/\356\200\200/, ""); L[NR] = $0 }
+		function cols(line, H, nh,   w, m, i, j, o, x) {
+			m = split(line, w, " ")
+			for (i = 1; i <= m; i++) {
+				x = (w[i] == "ST") ? "STATE" : w[i]
+				for (j = 1; j <= nh && index(H[j], x) != 1; j++) ;
+				o = o (o == "" ? "" : ",") (j <= nh ? H[j] : "?" x)
+			}
+			return o
+		}
+		function shortst(s,   b, sf) { b = s; sf = ""; if (match(s, /[^a-z_]+$/)) { b = substr(s, 1, RSTART - 1); sf = substr(s, RSTART) }; return ((b in SH) ? SH[b] : b) sf }
+		END {
+			for (i = 1; i <= NR && L[i] == ""; i++) ;
+			t = L[i]; tr = (t ~ /SLURM/) ? 0 : (t ~ ("▌ " host "  ")) ? 1 : (t ~ ("▌ " host " ")) ? 2 : (t ~ /▌/) ? 3 : 4
+			f = L[NR]; fc = (f ~ / R( |$)/); fp = gsub(/[0-9?]+ (jobs|running|pending|other|R|PD)/, "&", f)
+			fin = 0; mk = "-"; node = 0; dur = -1; q = f2 = ""
+			for (i = 1; i <= NR; i++) {
+				x = L[i]
+				if (match(x, /^ *(recently finished|finished)( \([^)]*\))?:? /)) {
+					fin = (x ~ /^ *recently/) ? 2 : 1
+					if (match(x, /\([^)]*\)/)) mk = substr(x, RSTART, RLENGTH)
+					gsub(/ /, "_", mk)
+					afterfin = 1
+				}
+				if (x ~ /^ *(JOBI|JOBID) /) {
+					if (afterfin && f2 == "") f2 = cols(x, FH, nf)
+					else if (q == "") { q = cols(x, QH, nq); inq = 1; continue }
+				}
+				if (inq && x == "") inq = 0
+				if (inq && x ~ /(^| )[0-9]+[dhm][0-9][0-9][hms]( |$)/) dur = 1
+				else if (inq && !dur && x ~ /(^| )([0-9]+-)?[0-9]+:[0-9][0-9](:[0-9][0-9])?( |$)/) dur = 0
+				split(x, w, " ")
+				if (w[1] in ST) {
+					s = ST[w[1]]
+					if (x ~ /[█░▒▓·]/ || x ~ /[0-9]+\/[0-9]+ +cpu/) fm = 1
+					else if (x ~ /% cpu/) fm = 2
+					else if (w[2] == s && w[3] == "") fm = 3
+					else if (w[2] == shortst(s) && w[3] == "") fm = 4
+					else { print "badnode " w[1] " " x; fm = 9 }
+					if (fm <= 2 && substr(x, length(x) - length(s)) != " " s) print "badnode " w[1] " " x
+					if (fm > node) node = fm
+				}
+				if (x ~ /^ *nodes: /) dig = 1
+			}
+			if (!node && dig) node = 5
+			printf "title=%d foot=%d/%d fin=%d:%s q=%s f=%s node=%d dur=%d\n", tr, fp, fc, fin, mk, q, f2, node, dur
+		}'
+}
+# whole_mono FIXTURE H "W..." [sq args]: the parts at each width, and every
+# step W -> W+1 that shows fewer (AC 4): a later title form, fewer footer
+# counts or codes where words stood, a shorter finished caption or marker, a
+# column gone from either table, a narrower node form, short durations where
+# Slurm's stood at the same columns (H0: a column that goes hands its width
+# to the long durations too).  The breaches into WMONO, bad node lines into WNODE
+whole_mono() {
+	local fx=$1 h=$2 widths=$3 nodes wd p prev= pw=; shift 3
+	WMONO= WNODE=
+	nodes=$(whole_nodes "$fx")
+	for wd in $widths; do
+		sq_run "$fx" SQSTUB_HOST=$whole_host SQ_WIDTH="$wd" SQ_HEIGHT="$h" -- --compact --no-color "$@"
+		p=$(whole_parts "$nodes")
+		while read -r k rest; do [ "$k" = badnode ] && WNODE="$WNODE $wd:$rest"; done <<< "$p"
+		p=$(grep -v '^badnode' <<< "$p")
+		if [ -n "$prev" ]; then
+			WMONO="$WMONO$(gawk -v a="$prev" -v b="$p" -v wa="$pw" -v wb="$wd" '
+				function get(s, k,   m) { return match(s, k "=[^ ]*") ? substr(s, RSTART + length(k) + 1, RLENGTH - length(k) - 1) : "" }
+				function sub_of(x, y,   X, n, i) { n = split(x, X, ","); for (i = 1; i <= n; i++) if (index("," y ",", "," X[i] ",") == 0) return 0; return 1 }
+				BEGIN {
+					if (get(b, "title") > get(a, "title")) o = o " title"
+					split(get(a, "foot"), FA, "/"); split(get(b, "foot"), FB, "/")
+					if (FB[1] < FA[1] || (FB[1] == FA[1] && FB[2] > FA[2])) o = o " footer"
+					split(get(a, "fin"), NA, ":"); split(get(b, "fin"), NB, ":")
+					if (NB[1] < NA[1] || length(NB[2]) < length(NA[2]) && NA[2] != "-" || NB[2] == "-" && NA[2] != "-") o = o " fincaption"
+					if (!sub_of(get(a, "q"), get(b, "q"))) o = o " qcols"
+					if (!sub_of(get(a, "f"), get(b, "f"))) o = o " fcols"
+					if (get(b, "node") > get(a, "node") && get(a, "node") > 0) o = o " node"
+					if (get(a, "dur") == 0 && get(b, "dur") == 1 && get(a, "q") == get(b, "q")) o = o " durations"   # at equal columns: a dropped column may give its width to the long form
+					if (o != "") printf " %s>%s:%s", wa, wb, substr(o, 2)
+				}')"
+		fi
+		prev=$p pw=$wd
+	done
+}
+c_whole_monotone() {   # WHOLE AC 3, 4 (the parts of a line, by width)
+	T_TITLE="COMPACT W 21..80 at H 40: a wider screen never shows fewer parts (the title, the footer counts, the finished caption and marker, the columns of both tables, the node form, the durations long once long); every node line ends in its whole long or short state"
+	local fx args
+	for fx in busy24 mix30 noacct memalloc-r oddfin membar-busy bars-busy nboot est big40 "opt -o_i,j,T,Q,D,V,e,P,a,R"; do
+		args=${fx#* }; [ "$args" = "$fx" ] && args= || args=${args//_/ }; fx=${fx%% *}
+		# shellcheck disable=SC2086
+		whole_mono "$fx" 40 "$(seq 21 80)" $args
+		need "$fx: no part lost from W to W+1 (lost:${WMONO:- none})" test -z "$WMONO"
+		need "$fx: every node line ends in its whole state (not:${WNODE:- none})" test -z "$WNODE"
+	done
+}
+c_whole_full() {   # WHOLE AC 6 (R-H3, R-H4, decision 4)
+	T_TITLE="FULL at W 40..120: every column of the widest screen in both tables, STATE long (no ST, no state code in the finished rows), Slurm's durations in the queue, no digit, unit or state word cut"
+	local fx wd p want bad
+	for fx in busy24 mix30 noacct memalloc-r oddfin exits-fallback est fs10 bars-busy; do
+		sq_run "$fx" SQ_WIDTH=250 SQ_HEIGHT=50 -- --full --no-color; want=$(whole_parts "" | grep -o 'q=[^ ]* f=[^ ]*')
+		bad=
+		for wd in 40 60 80 100 120; do
+			sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT=50 -- --full --no-color
+			rc_is 0 && err_empty || bad="$bad $wd:rc$RC"
+			p=$(whole_parts "")
+			[ "$(grep -o 'q=[^ ]* f=[^ ]*' <<< "$p")" = "$want" ] || bad="$bad $wd:columns($(grep -o 'q=[^ ]* f=[^ ]*' <<< "$p"))"
+			! grep -q 'dur=1' <<< "$p" || bad="$bad $wd:durations"
+			plain | gawk '/^ *(JOBI|JOBID) / && seen++ { f = 1; next } f && /^ *[^ ]+ +[^ ]+ +(CD|F|CA|OOM|TO|NF|PR|SE|BF|DL|RV|ST)( |$)/ { bad = 1 } END { exit bad }' || bad="$bad $wd:statecode"
+			bad="$bad$(whole_check "$wd" 1000 | grep -v '^wide\|^tall\|^lastcut\|^footer\|^title' | sed "s/^/ $wd:/" | tr '\n' ' ')"
+		done
+		need "$fx FULL: no column dropped, no short form taken, nothing cut but text (breaches:${bad:- none})" eval '[ -z "${bad// /}" ]'
+	done
+}
+c_whole_c_mode() {   # WHOLE AC 9
+	T_TITLE="no UTF-8 locale (gawk in C): COMPACT on ASCII fixtures at W 21..60 step 3, with and without colour, byte for byte the UTF-8 screen"
+	local nobin=$T_DIR/nobin fx wd col want bad=
+	mkdir -p "$nobin"
+	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	for fx in busy24 noacct oddfin mix30 memalloc-r nboot; do
+		for wd in $(seq 21 3 60); do
+			for col in --no-color --color; do
+				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT=30 -- --compact $col; want=$RUN/screen; without_clock "$OUT" > "$want"
+				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT=30 LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --compact $col
+				{ rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT"); } || bad="$bad $fx:$wd$col"
+			done
+		done
+	done
+	need "C mode equals UTF-8 byte for byte (not:${bad:- none})" test -z "$bad"
+}
+# the job ids a screen shows (queue and finished rows, the one finished line;
+# the footer, the last line, aside),
+# a bracket or task id by its base: one per line
+whole_ids() {
+	plain | sed '$d' | gawk 'match($0, /^ *((recently )?finished[^:]*: )?[0-9]+(_[^ ]*)? /) {
+		x = substr($0, RSTART, RLENGTH); sub(/^ *((recently )?finished[^:]*: )?/, "", x); sub(/ $/, "", x)
+		if (index(x, "_")) x = substr(x, 1, index(x, "_")); print x }' | sort -u
+}
+c_whole_height() {   # WHOLE AC 4 in H, AC 11 (H11, decision 8)
+	T_TITLE="COMPACT H 2..60: no screen taller than H, and every job id a screen shows at H it shows at H+1 too (big40 at W 40 and 120, n12busy at 100, busy24, mix30, noacct, nboot at 80; big40 and busy24 with --reserve 3)"
+	local run fx wd h prev ids lost= tall= args widths
+	for run in "big40 40,120" "n12busy 100" "busy24 80" "mix30 80" "noacct 80" "nboot 80" "big40 120 --reserve_3" "busy24 80 --reserve_3"; do
+		read -r fx widths args <<< "$run"; args=${args//_/ }
+		for wd in ${widths//,/ }; do
+			prev=
+			for h in $(seq 2 60); do
+				# shellcheck disable=SC2086
+				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT="$h" -- --compact --no-color $args
+				lines_within "$h" || tall="$tall $fx:$wd:$h"
+				ids=$(whole_ids)
+				[ -z "$prev" ] || [ -z "$(comm -23 <(printf '%s\n' "$prev") <(printf '%s\n' "$ids"))" ] || lost="$lost $fx${args:+($args)}:$wd:$((h-1))>$h"
+				prev=$ids
+			done
+		done
+	done
+	need "no screen taller than H (at:${tall:- none})" test -z "$tall"
+	need "a taller screen never loses a job id (lost at:${lost:- none})" test -z "$lost"
+}
+# a line of the last screen, its runs of blanks as one: words_line TEXT
+words_line() { plain | sed -E 's/ +/ /g; s/^ //; s/ $//' | grep -qxF -- "$1"; }
+words_has()  { plain | sed -E 's/ +/ /g' | grep -qF -- "$1"; }
+c_whole_pins() {   # WHOLE AC 8: the pinned cases, each its rule
+	T_TITLE="WHOLE's pins: the estimate (H5), the durations (H-1), the drops before the code (R-H3), the finished line (N-B, R-H1, E-M3), the JOBID cell (E-M4), the node forms (R-M2, M-3, H3), -o columns (O-A), the footer margin (R-M5), the guard (E-M2), the height cap (H11), MEM never cut (R-L5), v1's pins"
+	local wd h
+	# H5, E-M1, H-2: the estimate a number, the reason cut at whole words
+	for wd in 66 70 74; do
+		sq_run mixed SQ_WIDTH=$wd -- --full --no-color
+		need "mixed FULL W=$wd: the estimate alone, → DATE" eval 'rc_is 0 && plain | grep -qE " 4G → '"$whole_date"'$"'
+	done
+	sq_run mixed SQ_WIDTH=80 -- --full --no-color
+	need "mixed FULL W=80: (Resources) → DATE" eval 'plain | grep -qE " 4G \(Resources\) → '"$whole_date"'$"'
+	sq_run est SQ_WIDTH=110 -- --full --no-color
+	need "est W=110: the reason whole" matches "\(ReqNodeNotAvail, UnavailableNodes:node02\) → $whole_date"
+	for wd in 100 102; do
+		sq_run est SQ_WIDTH=$wd -- --full --no-color
+		need "est W=$wd: the key kept, its item gone" eval 'plain | grep -qE " \(ReqNodeNotAvail, UnavailableNodes:… → '"$whole_date"'$"'
+	done
+	sq_run est SQ_WIDTH=96 -- --full --no-color
+	need "est W=96: the first item whole, then …" eval 'plain | grep -qE " \(ReqNodeNotAvail, … → '"$whole_date"' *$"'
+	sq_run est SQ_WIDTH=70 -- --full --no-color
+	need "est W=70: the estimate alone" eval 'plain | grep -qE " 4G → '"$whole_date"'$"'
+	for wd in 104 108; do
+		sq_run mix30 SQ_WIDTH=$wd SQ_HEIGHT=30 -- --compact --no-color
+		need "mix30 COMPACT 30 lines W=$wd: (ReqNodeNotAvail, UnavailableNodes:…" eval 'plain | grep -qE "\(ReqNodeNotAvail, UnavailableNodes:…$"'
+	done
+	sq_run estreal SQ_WIDTH=150 SQ_HEIGHT=30 -- --compact --no-color
+	need "estreal W=150: the reasons whole" eval 'has "(ReqNodeNotAvail, UnavailableNodes:fb2-bioinf,fb2-bioinf-0) → " && ! has "…"'
+	# H-1 (c), R-H4: the durations
+	sq_run memalloc-r SQ_WIDTH=60 -- --full --no-color
+	need "memalloc-r FULL W=60: TIME and LEFT in Slurm's form, STATE long" eval 'words_has "PENDING 0:00 1-00:00:00 8 48G" && ! rows queue | grep -qE "[0-9]+[dh][0-9]{2}[hm] "'
+	sq_run memalloc-r SQ_WIDTH=50 SQ_HEIGHT=30 -- --compact --no-color
+	need "memalloc-r COMPACT W=50: the short form 1d19h" words_has " 1d19h "
+	sq_run memalloc-r SQ_WIDTH=100 SQ_HEIGHT=30 -- --compact --no-color
+	need "memalloc-r COMPACT W=100: Slurm's 1-19:47:27" eval 'words_has " 1-19:47:27 " && ! words_has " 1d19h "'
+	# R-H3: the code only after the drops; L-4 the header floor
+	sq_run busy24 SQ_WIDTH=52 SQ_HEIGHT=30 -- --compact --no-color
+	need "busy24 52x30: CPU gone, STATE long" words_line "JOBID NAME USER STATE TIME LEFT MEM NODE/R"
+	sq_run busy24 SQ_WIDTH=16 SQ_HEIGHT=30 -- --compact --no-color
+	need "busy24 W=16: the code, ST" eval 'plain | grep -qE "^ *JOBID ST "'
+	sq_run busy24 SQ_WIDTH=36 SQ_HEIGHT=16 -- --compact --no-color
+	need "busy24 36x16: JOBID NAME STATE LEFT NODE/R" words_line "JOBID NAME STATE LEFT NODE/R"
+	# N-B, R-H1: the finished line
+	sq_run noacct SQ_WIDTH=56 SQ_HEIGHT=30 -- --compact --no-color --reservation=maint
+	need "noacct --reservation=maint W=56: the short marker names the filter" words_line "finished (--reservation: no sacct): 4188 qc FAILED 1"
+	sq_run mix30 SQ_WIDTH=28 SQ_HEIGHT=14 -- --compact --no-color
+	need "mix30 28x14: the state long while it fits" eval 'matches "PENDING" && ! matches "^ *[0-9]+ +PD "'
+	# E-M3: EXIT's forms
+	sq_run fs10 SQ_WIDTH=21 SQ_HEIGHT=30 -- --compact --no-color
+	need "fs10 W=21: 987654 CA 0/sig15" words_line "987654 CA 0/sig15"
+	sq_run fs10 SQ_WIDTH=24 SQ_HEIGHT=14 -- --compact --no-color
+	need "fs10 24x14: the table 987654 CA 0/sig15" words_line "987654 CA 0/sig15"
+	# E-M4: the cut inside the JOBID cell, the other columns at their floors
+	sq_run realid SQ_WIDTH=24 SQ_HEIGHT=30 -- --compact --no-color
+	need "realid W=24: 4294967294_… R node01" words_line "4294967294_… R node01"
+	sq_run realid SQ_WIDTH=21 SQ_HEIGHT=30 -- --compact --no-color
+	need "realid W=21: the cut inside the JOBID cell, ST and the reason at their floors" eval 'words_line "JOBID ST NODE/" && words_line "429496729… R node…"'
+	# R-M2, M-3, H3: the node forms and the digest
+	sq_run membar-busy SQ_WIDTH=22 SQ_HEIGHT=30 -- --compact --no-color
+	need "membar-busy W=22: fb2-bioinf-0 alloc" words_line "fb2-bioinf-0 alloc"
+	for wd in 24 30; do
+		sq_run bars-idle SQ_WIDTH=$wd SQ_HEIGHT=5 -- --compact --no-color
+		need "bars-idle ${wd}x5: nodes: 2 idle · …" words_line "nodes: 2 idle · …"
+	done
+	sq_run nboot SQ_WIDTH=28 SQ_HEIGHT=30 -- --compact --no-color
+	need "nboot W=28: nodes: 1 powring_dn, … · …" words_line "nodes: 1 powring_dn, … · …"
+	sq_run nboot SQ_WIDTH=30 SQ_HEIGHT=30 -- --compact --no-color
+	need "nboot W=30: the short states" eval 'words_line "gpu-a100-node07 boot^" && words_line "gpu-a100-node08 powring_dn"'
+	sq_run nboot SQ_WIDTH=36 SQ_HEIGHT=30 -- --compact --no-color
+	need "nboot W=36: the long states" eval 'words_line "gpu-a100-node07 reboot^" && words_line "gpu-a100-node08 powering_down"'
+	# O-A: the columns a -o adds go before the code
+	sq_run opt SQ_WIDTH=30 SQ_HEIGHT=30 -- --compact --no-color -o '%i %j %T %Q %D %V %e %P %a %R'
+	need "opt W=30: JOBID NAME STATE NODE/RE" words_line "JOBID NAME STATE NODE/RE"
+	sq_run opt SQ_WIDTH=40 SQ_HEIGHT=30 -- --compact --no-color -o '%i %j %T %Q %D %V %e %P %a %R'
+	need "opt W=40: JOBID NAME STATE PRIO NODE/R" words_line "JOBID NAME STATE PRIO NODE/R"
+	# R-M5: the margin before a count
+	sq_run huge SQ_WIDTH=26 SQ_HEIGHT=30 -- --compact --no-color
+	need "huge W=26: every count, without the margin" eval '[ "$(plain | tail -n 1)" = "12345 R 1100000 PD 1 other" ]'
+	sq_run huge SQ_WIDTH=24 SQ_HEIGHT=30 -- --compact --no-color
+	need "huge W=24: other gone, the margin back" eval '[ "$(plain | tail -n 1)" = "  12345 R 1100000 PD" ]'
+	# E-M2: the guard
+	sq_run guard SQ_WIDTH=21 SQ_HEIGHT=30 -- --compact --no-color
+	need "guard W=21: ↳ swap --mem=…" words_line "↳ swap --mem=…"
+	sq_run guard SQ_WIDTH=24 SQ_HEIGHT=30 -- --compact --no-color
+	need "guard W=24: ↳ swap --mem=4G …" words_line "↳ swap --mem=4G …"
+	sq_run guard2 SQ_WIDTH=30 SQ_HEIGHT=30 -- --compact --no-color
+	need "guard2 W=30: ↳ ticket#…" words_line "↳ ticket#…"
+	# H11, H-3: the height cap
+	for h in 22 43; do
+		sq_run big40 SQ_WIDTH=120 SQ_HEIGHT=$h -- --compact --no-color
+		need "big40 120x$h: the digest, no job row" eval 'matches "^ *nodes: " && ! matches "^ +[0-9]{3,}[ _]" && ! matches "jobs running"'
+	done
+	sq_run big40 SQ_WIDTH=120 SQ_HEIGHT=44 -- --compact --no-color
+	need "big40 120x44: the node lines, no job row" eval '! matches "^ *nodes: " && ! matches "^ +[0-9]{3,}[ _]"'
+	sq_run big40 SQ_WIDTH=120 SQ_HEIGHT=50 -- --compact --no-color
+	need "big40 120x50: … 5 jobs running" has "… 5 jobs running"
+	sq_run big40 SQ_WIDTH=120 SQ_HEIGHT=53 -- --compact --no-color
+	need "big40 120x53: the running rows" eval 'matches "^ +[0-9]{3,} .* RUNNING " && lacks "jobs running"'
+	sq_run n12busy SQ_WIDTH=100 SQ_HEIGHT=19 -- --compact --no-color
+	need "n12busy 100x19: the digest, the 3 stuck rows, the failure" eval 'matches "^ *nodes: 12 mixed" && [ "$(whole_ids | paste -sd" ")" = "4188 4201 4202 4207" ]'
+	sq_run n12busy SQ_WIDTH=100 SQ_HEIGHT=20 -- --compact --no-color
+	need "n12busy 100x20: the 12 node lines and the same rows" eval '[ "$(plain | grep -cE "^ +n[0-9]{2} ")" = 12 ] && [ "$(whole_ids | paste -sd" ")" = "4188 4201 4202 4207" ]'
+	# R-L5: MEM never cut
+	sq_run memalloc-tresfail SQ_WIDTH=53 SQ_HEIGHT=16 -- --compact --no-color
+	need "memalloc-tresfail 53x16: 16 lines, MEM whole" eval 'rc_is 0 && [ "$(plain | wc -l)" = 16 ] && words_has " !100G " && ! matches "[0-9.]+…G|!1…"'
+	# v1's pins
+	for wd in 60 80; do
+		sq_run oddfin SQ_WIDTH=$wd SQ_HEIGHT=30 -- --compact --no-color
+		need "oddfin W=$wd: ELAPSED whole" eval 'matches "ELAPSED" && ! rows recent | gawk "{ print \$(NF-1) }" | grep -q "…"'
+	done
+	sq_run exits-fallback SQ_WIDTH=30 SQ_HEIGHT=30 -- --compact --no-color
+	need "exits-fallback W=30: 137 whole" words_has " 137"
+	for wd in 21 22 23 24 25; do
+		sq_run busy24 SQ_WIDTH=$wd SQ_HEIGHT=30 -- --compact --no-color
+		need "busy24 W=$wd: the clock whole in the title" eval 'plain | head -n 1 | grep -qE "[0-9]{2}:[0-9]{2}:[0-9]{2} [A-Z]+$"'
+	done
+	for wd in 21 30 40 50 60; do
+		sq_run busy24 SQ_WIDTH=$wd SQ_HEIGHT=30 -- --compact --no-color
+		need "busy24 W=$wd: down* whole" eval 'plain | grep -qE " down\*$"'
+	done
+}
+c_whole_captions() {   # WHOLE AC 13 (R-L7): NODES' MEMNOTE under H8 and W8
+	T_TITLE="the MEMNOTE caption cut by H8, the node it names never cut (W8): scnolist at 44 and 56, nodes-cntrl at 44"
+	sq_run scnolist SQ_WIDTH=44 SQ_HEIGHT=30 -- --compact --no-color
+	need "scnolist W=44: ↳ memory counts RealMemory …, the cut before ' on NODE'" words_line "↳ memory counts RealMemory …"
+	sq_run scnolist SQ_WIDTH=56 SQ_HEIGHT=30 -- --compact --no-color
+	need "scnolist W=56: … on fb2-bioinf-0: scontrol …" words_line "↳ memory counts RealMemory on fb2-bioinf-0: scontrol …"
+	sq_run nodes-cntrl SQ_WIDTH=44 SQ_HEIGHT=30 -- --compact --no-color
+	need "nodes-cntrl W=44: ↳ memory counts RealMemory on node? and …" words_line "↳ memory counts RealMemory on node? and …"
+}
+c_whole_docs() {   # WHOLE AC 12 (H12)
+	T_TITLE="sq -h and the README: COMPACT fits every measured width, below 21 columns too, by shorter forms of whole parts, a line cut only below its shortest form; FULL wraps; the README keeps 'Numbers are never cut while anything else can give'"
+	local readme=${here%/*}/README.md
+	sq_run empty -- -h
+	need "sq -h: COMPACT fits every width, FULL wraps" eval 'rc_is 0 && plain | tr "\n" " " | sed -E "s/ +/ /g" |
+		grep -qF "COMPACT fits every width it can measure, below 21 columns too: its lines take shorter forms of whole parts (sinfo'"'"'s short node states, durations as 5h59m once the text columns are at 8, fewer columns, Slurm'"'"'s state codes last), and a line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap."'
+	need "sq -h: no 'Below about 60 columns'" lacks "Below about 60 columns"
+	need "README: COMPACT fits every width, a line cut only below its shortest form, FULL wraps; no floor of 60 columns" eval '
+		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "COMPACT fits every width it can measure, below 21 columns too" &&
+		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "A line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap." &&
+		! grep -qF "cannot shrink below about 60 columns" "$readme"'
+	need "README: 'Numbers are never cut while anything else can give' stays" grep -qF "Numbers are never cut while anything else can give." "$readme"
+	stubs_answer
+}
+
+# busy24 at 100x24, the screen Franz accepted (decision 17): WHOLE leaves it
+# as the base draws it, byte for byte, the clock aside (H-1, AC 8)
+c_whole_accepted() {
+	T_TITLE="busy24 COMPACT 100x24 with colour: the accepted screen byte for byte, the clock aside (5:59:00, 6:00:00 in Slurm's form, every column)"
+	sq_run busy24 SQSTUB_HOST=FranzGB SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --color
+	need "rc 0, stderr empty, the accepted screen" eval '
+		rc_is 0 && err_empty && cmp -s <(without_clock "$fixtures/busy24/compact-w100-h24.ansi") <(without_clock "$OUT")'
+}
 # the gawk argument limit (WHOLE AC 14): Linux takes no single argument over
 # MAX_ARG_STRLEN (32 pages, 131072 bytes), and the dashboard's program alone
 # comes near it; over it, sq dies with "Argument list too long" before it
@@ -9296,6 +9767,7 @@ cases=(
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
 	opts_jobid opts_repeat opts_check_order opts_sub_placement opts_o_attached opts_fallback_source opts_mem opts_docs
 	nodes_o_calls nodes_o_figures nodes_o_forged nodes_o_pairs nodes_o_fail nodes_o_bounds stub_nodes stub_fast nodes_o_cost nodes_nopart nodes_caption
+	whole_widths whole_narrow whole_monotone whole_full whole_c_mode whole_height whole_pins whole_captions whole_docs whole_accepted
 	gawk_arg_limit
 )
 # The cases that measure time or load: a bound on how long sq or a call

@@ -1,0 +1,3 @@
+@include ../_common/sacct-defaults
+JobID=987654; JobName=analysis-run; State=CANCELLED by fsill; ExitCode=0:15; End=\{now-3m30s}
+JobID=987654.batch; User=; JobName=batch; State=CANCELLED by fsill; ExitCode=0:15; End=\{now-3m30s}

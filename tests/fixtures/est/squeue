@@ -1,0 +1,7 @@
+@include ../_common/squeue-defaults
+i=1201; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=\{now+400d}; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=1202; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=Unknown; r=Resources
+i=1203; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A; r=Resources
+i=1204; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=2999-12-31T23:59:59; r=Priority
+i=1205; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=\{now+3h}; r=Priority
+i=1206; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=\{now+20d}; r=Priority
