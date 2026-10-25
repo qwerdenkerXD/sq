@@ -4241,7 +4241,9 @@ c_bars_width_sweep() {
 # idle, busy with memory scheduled, the same jobs under CR_CORE, and busy with
 # fb2-bioinf-0 not responding.  Their <mode>.{txt,ansi} are the variant-A screens
 # Franz accepted on 2026-10-21 (drawn on host FranzGB); CR_CORE's are DISPLAY-v4
-# E2's (memory in use drawn as the fill █, not ▓), re-pinned from its build.
+# E2's (memory in use drawn as the fill █, not ▓), re-pinned from its build;
+# busy's and crcore's full-w80 are DISPLAY-v4 F3's (JOBID's blank column goes
+# to NODE/REASON: fb2-bioi…).
 membar_modes="full-w120:120:50:--full full-w80:80:50:--full compact-w120x12:120:12:--compact compact-w120x4:120:4:--compact"
 c_membar_screens() {
 	T_TITLE="the memory bar: the accepted variant-A screens byte for byte, clock aside, idle, busy and down, CR_CORE as re-pinned for DISPLAY-v4 E2 (in use as a fill); FULL at 120 and 80, COMPACT 120x12 and 120x4"
@@ -4566,6 +4568,225 @@ CPUsState=garbage; NodeList=fb2-bioinf-1; FreeMem=2176; Memory=80000; StateLong=
 			[ "$(node_caption)" = "↳ sinfo gave no usable figure for CPUsLoad (1 node): shown as unknown" ] &&
 			[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf: scontrol did not list it" ]'
 	done
+}
+
+# ---- F (DISPLAY-v4): the JOBID and EXIT cells ---------------------------------
+# id_series NAME FILE FIXTURE [sq args]: FULL at 400 and at every width
+# 21..130, each screen as cplain cellifies it after a line "@@W <width>", into
+# FILE, in a subshell of its own as the series run at once
+id_series() {
+	local name=$1 res=$2 fx=$3 w; shift 3
+	T_DIR=$T_DIR/i-$name run_n=0 T_FAIL=() T_CALLS=0; mkdir -p "$T_DIR"
+	: > "$res.part"
+	for w in 400 $(seq 21 130); do
+		sq_run "$fx" SQ_WIDTH="$w" -- --full --no-color "$@"
+		rc_is 0 || T_FAIL+=("$name W=$w: rc $RC")
+		{ printf '@@W %s\n' "$w"; cplain; } >> "$res.part"
+	done
+	printf '%s\n' "${T_FAIL[@]}" > "$res.fail"; echo "$T_CALLS" > "$res.calls"
+	mv "$res.part" "$res"
+}
+# id_check FILE: what breaks F2-F3 in a series, one line each.  Both tables
+# are read by their header (a column starts where its header word does; gaps
+# are 1 wherever a column is cut), rows by their place.  F2: a cell whose id
+# has a bracket (BASE_[TERMS]SUFFIX at 400) is one of its six forms (whole,
+# without its throttle %n, whole leading terms then …, BASE_[…] ×N, BASE_…
+# ×N, BASE_…), one without a bracket is whole, else it is a plain cut (a
+# start of the id then …), which only a screen where every other column of
+# that table is at its minimum may show (5 in the queue, 4 in the finished
+# table).  F2/F5: within one ladder level (the table's STATE cells) and one
+# EXIT form (the rows whose canceller is whole), a narrower JOBID column
+# never shows a term, a throttle or a ×N a wider one hides.  F3: where some
+# other column of the table is cut (its header, or a cell whole at 400 that
+# ends in …; JOBID and EXIT have forms of their own), JOBID (and the finished
+# EXIT) are as wide as their widest cell, or their header if wider (F3's
+# blanks that stay are where nothing else is cut: shrink-finished at 43, 44, 60)
+id_check() {
+	LC_ALL=$utf8 gawk '
+	function trim(s) { gsub(/\356\200\200/, "", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
+	function flush(   t) { if (W != "") for (t in TABS) table(t); delete TABS; delete TL; delete TN }
+	/^@@W / { flush(); W = $2; sect = "queue"; cur = ""; next }
+	/recently finished/ { sect = "finished"; cur = ""; next }
+	/^ *JOBID / { cur = sect; TN[cur] = 0; TL[cur, 0] = $0; TABS[cur] = 1; next }
+	/^ *$/ || /^ *\+[0-9]+ more$/ || /^ *… / { cur = ""; next }
+	cur != "" { TL[cur, ++TN[cur]] = $0 }
+	END { flush() }
+	function table(t,   h, i, n, S, CW, nc, x, r, cell, j, key, st, ex, idw, ew, cutother, wid) {
+		h = TL[t, 0]; nc = 0; x = h
+		while (match(x, /[^ ]+/)) { S[++nc] = RSTART + (length(h) - length(x)); HD[nc] = substr(x, RSTART, RLENGTH); x = substr(x, RSTART + RLENGTH) }
+		maxlen = 0; for (r = 1; r <= TN[t]; r++) if (length(TL[t, r]) > maxlen) maxlen = length(TL[t, r])
+		for (i = 1; i <= nc; i++) CW[i] = (i < nc ? S[i + 1] - 1 : maxlen + 1) - S[i]
+		st = 0; ex = (t == "finished") ? 4 : 0
+		for (i = 1; i <= nc; i++) if (HD[i] ~ /^ST/) { st = i; break }
+		if (W == 400) { NROW[t] = TN[t]
+			for (r = 1; r <= TN[t]; r++) for (i = 1; i <= nc; i++) { cell = trim(substr(TL[t, r], S[i], i < nc ? S[i + 1] - S[i] : 9999)); if (i == 1) FULLID[t, r] = cell; WHOLE[t, r, i] = cell }
+			for (i = 1; i <= nc; i++) HD0[t, i] = HD[i]
+			NCOL[t] = nc; return }
+		if (TN[t] != NROW[t] || nc != NCOL[t]) { bad(t, "rows or columns differ from W=400"); return }
+		key = ""; idw = 0; ew = 0; cutother = 0; allmin = 1
+		for (i = 2; i <= nc; i++) {          # cut: its header, or a cell that is whole at 400 ends in …
+			if (CW[i] > (t == "queue" ? 5 : 4)) allmin = 0
+			if (i == ex) continue                # EXIT has forms of its own (F4), as JOBID has
+			if (HD[i] != HD0[t, i]) cutother = 1
+			for (r = 1; r <= TN[t]; r++) { cell = trim(substr(TL[t, r], S[i], i < nc ? S[i + 1] - S[i] : 9999)); if (cell ~ /…$/ && cell != WHOLE[t, r, i]) cutother = 1 }
+		}
+		for (r = 1; r <= TN[t]; r++) {
+			if (st) key = key "|" trim(substr(TL[t, r], S[st], st < nc ? S[st + 1] - S[st] : 9999))
+			if (ex) { cell = trim(substr(TL[t, r], S[ex], S[ex + 1] - S[ex])); if (length(cell) > ew) ew = length(cell)
+			          if (cell ~ / by / && cell !~ /…/) key = key "|w" r }
+			cell = trim(substr(TL[t, r], S[1], S[2] - S[1])); CELL[r] = cell; if (length(cell) > idw) idw = length(cell)
+		}
+		for (r = 1; r <= TN[t]; r++) form(t, r, CELL[r], FULLID[t, r], allmin, CW[1], key)
+		if (cutother) {
+			if (CW[1] != (idw > 5 ? idw : (CW[1] < 5 ? CW[1] : 5))) bad(t, "JOBID " CW[1] " wide, its widest cell " idw)
+			if (ex && CW[ex] != (ew > 4 ? ew : (CW[ex] < 4 ? CW[ex] : 4))) bad(t, "EXIT " CW[ex] " wide, its widest cell " ew)
+		}
+	}
+	function bad(t, m) { if (++NB <= 8) print t " W=" W ": " m }
+	function terms(c, T,   n, A, i, k) { delete T; n = split(c, A, ","); for (i = 1; i <= n; i++) if (A[i] != "…" && A[i] != "") T[A[i]]; return n }
+	function form(t, r, c, full, allmin, cw, key,   m, base, cont, suf, thr, okf, sh, x, prev, K) {
+		if (c == full) okf = 1
+		else if (match(full, /^([0-9]+_)\[([^]]*)\](( ×[0-9]+)?)$/, m)) {
+			base = m[1]; cont = m[2]; suf = m[3]; thr = ""
+			if (match(cont, /%[0-9]+$/)) { thr = substr(cont, RSTART); cont = substr(cont, 1, RSTART - 1) }
+			if (c == base "[" cont "]" suf || c == base "[…]" suf || c == base "…" suf || c == base "…") okf = 1
+			else if (substr(c, 1, length(base) + 1) == base "[" && substr(c, length(c) - length(suf) - 2) == ",…]" suf) {
+				x = substr(c, length(base) + 2, length(c) - length(base) - length(suf) - 4)   # the leading terms kept
+				if (index(cont ",", x ",") == 1) okf = 1
+			}
+		}
+		if (!okf) {
+			if (c ~ /…$/ && index(full, substr(c, 1, length(c) - 1)) == 1) { if (!allmin) bad(t, "row " r ": " c " cut while another column can give (id " full ")") ; return }
+			bad(t, "row " r ": " c " is no form of " full); return
+		}
+		# monotonic: what this cell shows, against every other width of the same key
+		sh = shows(c, full)
+		K = t SUBSEP r SUBSEP key
+		for (prev in SEEN) {
+			split(prev, P, SUBSEP)
+			if (P[1] SUBSEP P[2] SUBSEP P[3] != K) continue
+			if (P[4] + 0 < cw && !subset(SEEN[prev], sh)) bad(t, "row " r ": " SEENC[prev] " in " P[4] " shows more than " c " in " cw)
+			if (P[4] + 0 > cw && !subset(sh, SEEN[prev])) bad(t, "row " r ": " c " in " cw " shows more than " SEENC[prev] " in " P[4])
+		}
+		SEEN[K SUBSEP cw] = sh; SEENC[K SUBSEP cw] = c
+	}
+	function shows(c, full,   m, o, n, A, i) {
+		if (!match(c, /^[0-9]+_\[([^]]*)\]( ×[0-9]+)?$/, m)) return (c ~ / ×[0-9]+$/) ? "×" : ""
+		n = split(m[1], A, ","); for (i = 1; i <= n; i++) if (A[i] != "…") { if (A[i] ~ /%[0-9]+$/) { o = o " %"; sub(/%[0-9]+$/, "", A[i]) } o = o " t" A[i] }
+		return o (m[2] != "" ? " ×" : "")
+	}
+	function subset(a, b,   n, A, i) { n = split(a, A, " "); for (i = 1; i <= n; i++) if (index(" " b " ", " " A[i] " ") == 0) return 0; return 1 }
+	' "$1"
+}
+c_id_cells() {   # DISPLAY-v4 F AC 2, 3, 4
+	T_TITLE="F2-F3 at every width 21..130, FULL, both tables: a bracketed id cell is one of its six forms, an id without one whole, a plain cut only where every other column is at its minimum; a narrower JOBID never shows more at one ladder level and EXIT form; JOBID and EXIT as wide as their widest cell where another column is cut"
+	local spec name fx args pids=() bad
+	local swept="shrink-finished:shrink-finished fallback-throttled:fallback-throttled shrink-pending:shrink-pending throttled:throttled
+		array-running:array-running array-running-x:array-running:-x array-split:array-split pending-strided:pending-strided
+		pending-range:pending-range memalloc-r:memalloc-r jobmem-outcomes:jobmem-outcomes longplain:longplain sf-alice:sf-alice
+		oddarr:oddarr oddfin:oddfin"
+	for spec in $swept; do
+		IFS=: read -r name fx args <<< "$spec"
+		id_series "$name" "$T_DIR/id-$name" "$fx" $args & pids+=($!)
+	done
+	wait "${pids[@]}"
+	for spec in $swept; do
+		IFS=: read -r name fx args <<< "$spec"
+		if ! [ -s "$T_DIR/id-$name" ]; then T_FAIL+=("$name: the series left no result"); continue; fi
+		while IFS= read -r bad; do [ -z "$bad" ] || T_FAIL+=("$name: $bad"); done < "$T_DIR/id-$name.fail"
+		T_CALLS=$((T_CALLS + $(cat "$T_DIR/id-$name.calls")))
+		bad=$(id_check "$T_DIR/id-$name" | head -n 5 | paste -sd ';')
+		need "$name: F2-F3 at every W 21..130${bad:+ ($bad)}" test -z "$bad"
+	done
+}
+# F AC 6: the F cells are ASCII and sq's glyphs, so measured by columns
+# (WIDE: a byte above 127 in the records) and under gawk in C (no UTF-8
+# locale) the tables are the ones of an ASCII caller under UTF-8
+c_id_cells_wide_c() {   # DISPLAY-v4 F AC 6
+	T_TITLE="F under WIDE and C: shrink-finished with one job name made wide (é) at every width 21..130 is its ASCII screen byte for byte, é aside; shrink-finished, sf-alice, oddarr and oddfin under gawk in C are the UTF-8 screens byte for byte"
+	local d=$T_DIR/fx-wide nobin=$T_DIR/nobin w spec fx want f bad=
+	mkdir -p "$d" "$nobin"
+	for f in sinfo squeue passwd; do printf '@include %s\n' "$fixtures/shrink-finished/$f" > "$d/$f"; done
+	sed 's/JobName=single;/JobName=singlé;/' "$fixtures/shrink-finished/sacct" | sed "s#^@include \.\./#@include $fixtures/#" > "$d/sacct"
+	for w in $(seq 21 130); do
+		sq_run shrink-finished SQ_WIDTH=$w -- --full --no-color
+		want=$RUN/ascii; without_clock "$OUT" > "$want"
+		sq_run "$d" SQ_WIDTH=$w -- --full --no-color
+		rc_is 0 && cmp -s "$want" <(without_clock "$OUT" | sed 's/singlé/single/') || bad="$bad $w"
+	done
+	need "shrink-finished, a name with é (WIDE): the ASCII screen at every W 21..130 (not at W =${bad:- none})" test -z "$bad"
+	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	for spec in shrink-finished:40 shrink-finished:44 shrink-finished:46 shrink-finished:60 sf-alice:44 sf-alice:46 \
+	            oddarr:57 oddarr:80 oddfin:38 oddfin:56 oddfin:58 oddfin:59 oddfin:60; do
+		IFS=: read -r fx w <<< "$spec"
+		sq_run "$fx" SQ_WIDTH=$w -- --full --color
+		want=$RUN/utf8; without_clock "$OUT" > "$want"
+		sq_run "$fx" SQ_WIDTH=$w LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --full --color
+		need "$fx W=$w under gawk in C: rc 0, stderr empty, the UTF-8 screen" eval 'rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT")'
+	done
+}
+# table_has queue|recent TEXT: some row of that table holds TEXT, runs of blanks
+# read as one on both sides
+table_has() { rows "$1" | T=$2 gawk 'BEGIN { t = ENVIRON["T"]; gsub(/  +/, " ", t) } { gsub(/  +/, " ") } index($0, t) { f = 1 } END { exit !f }'; }
+# the width of a table's JOBID column: up to its second header word
+jobid_width() { section "$1" | gawk '/^ *JOBID / { match($0, /JOBID +/); print RLENGTH - 1; exit }'; }
+c_id_pins() {   # DISPLAY-v4 F AC 1-5, the pins
+	T_TITLE="F1-F5 pinned: the throttle goes first (7002_[0-9] ×10, 8000_[2-9] ×8), the JOBID floor (11920_…, 9876543210_…, 123456789, 11899, 4005_1, 1234_0), the spare (600_… ×67 sweep-irr…, (Resources), 0 by mall…), sf-both's NAME, the canceller (0 by 1025, 0 by…, 0), oddfin's cliff"
+	local w got bad= c
+	# F1
+	for w in 46 50; do
+		sq_run fallback-throttled SQ_WIDTH=$w -- --full --no-color
+		need "fallback-throttled W=$w: 7002_[0-9] ×10" eval 'rc_is 0 && table_has recent "7002_[0-9] ×10"'
+	done
+	for w in 66 67; do
+		sq_run throttled SQ_WIDTH=$w -- --full --no-color
+		need "throttled W=$w: the pending row 8000_[2-9] ×8" eval 'rc_is 0 && row_cell queue "8000_[2-9] ×8"'
+	done
+	sq_run throttled SQ_WIDTH=68 -- --full --no-color
+	need "throttled W=68: 8000_[2-9%2] ×8" eval 'rc_is 0 && row_cell queue "8000_[2-9%2] ×8"'
+	sq_run throttled SQ_WIDTH=64 -- --full --no-color
+	need "throttled W=64: 8000_[…] ×8" eval 'rc_is 0 && row_cell queue "8000_[…] ×8"'
+	sq_run throttled SQ_WIDTH=80 -- --full --no-color
+	need "throttled W=80: %2 kept" eval 'rc_is 0 && rows queue | grep -qF "%2]"'
+	sq_run fallback-throttled SQ_WIDTH=80 -- --full --no-color
+	need "fallback-throttled W=80: %3 kept" eval 'rc_is 0 && rows recent | grep -qF "%3]"'
+	for w in $(seq 40 120); do
+		sq_run fallback-throttled SQ_WIDTH=$w -- --full --no-color
+		if table_has recent "7002_[…] ×10" && [ "$(jobid_width recent)" -ge 14 ]; then bad="$bad $w"; fi
+	done
+	need "fallback-throttled W 40..120: never 7002_[…] ×10 in a column of 14 or more (at W =${bad:- none})" test -z "$bad"
+	# F2: the floor
+	for c in "memalloc-r:60:queue:11920_…" "oddarr:57:queue:9876543210_…" "oddarr:57:queue:11950_… ×11" "oddfin:38:recent:9876543210_…" \
+	         "longplain:54:queue:123456789" "longplain:54:queue:123456790" "memalloc-r:33:recent:11899" "memalloc-r:33:recent:11897" \
+	         "memalloc-r:33:recent:11893" "jobmem-outcomes:54:queue:4005_1" "jobmem-outcomes:54:queue:4005_0" "array-running:52:queue:1234_0:-x" \
+	         "shrink-finished:44:recent:600_… ×67" "shrink-finished:48:recent:600_[…] ×67" \
+	         "sf-longname:46:recent:600_… ×67 sweep-irr…" "shrink-pending:60:queue:600_… sweep" "shrink-pending:60:queue:(Resources)" \
+	         "throttled:60:queue:(JobArra…" "sf-alice:44:recent:600_… sweep CA 0 by mall…" \
+	         "sf-both:42:recent:sweep-… " "sf-both:43:recent:sweep-i… " "sf-both:44:recent:sweep-i… " "sf-both:45:recent:sweep-ir… " \
+	         "sf-both:46:recent:sweep-irr… " "sf-both:47:recent:sweep-irr… " "sf-both:48:recent:600_… ×67 sweep-i… " \
+	         "sf-alice:42:recent:0 by ma…" "sf-alice:43:recent:0 by mal…" "sf-alice:45:recent:600_… sweep CA 0 by mallo…" \
+	         "sf-alice:46:recent:600_… ×67 sweep CA 0 by mal…" \
+	         "oddfin:58:recent:12345678_… ×100 hugeids CA 0 by…" "oddfin:59:recent:12345678_… hugeids CA 0 by 1234567890" \
+	         "oddfin:60:recent:12345678_… ×100 hugeids CA 0 by 1234567890" \
+	         "oddfin:56:recent:11950_[1,…] ×11" "oddfin:59:recent:11950_[…] ×11" "oddfin:56:recent:9876543210_… ×3" "oddfin:59:recent:9876543210_… "; do
+		IFS=: read -r fx w table want extra <<< "$c"
+		sq_run "$fx" SQ_WIDTH=$w -- --full --no-color $extra
+		need "$fx${extra:+ $extra} W=$w, $table: '$want'" eval 'rc_is 0 && table_has $table "$want"'
+	done
+	sq_run sf-alice SQ_WIDTH=44 -- --full --no-color
+	need "sf-alice W=44: JOBID 6 wide" eval 'rc_is 0 && [ "$(jobid_width recent)" = 6 ]'
+	for w in 43 44 45 46 47; do
+		sq_run sf-both SQ_WIDTH=$w -- --full --no-color
+		need "sf-both W=$w: the canceller 0 by m… to 0 by mal…" eval 'rc_is 0 && rows recent | grep -qE " 0 by (m|ma|mal)…( |$)"'
+	done
+	# F4: a uid is whole, by… or gone
+	bad=
+	for w in 40 41 42 43 44 45 46; do
+		sq_run shrink-finished SQ_WIDTH=$w -- --full --no-color
+		got=$(rows recent | gawk '$1 ~ /^600_/ { for (i = 2; i <= NF; i++) if ($i == "CA") { x = $(i + 1); if ($(i + 2) ~ /^by/) x = x " " $(i + 2); if ($(i + 2) == "by") x = x " " $(i + 3); print x; exit } }')
+		case $got in "0 by 1025"|"0 by…"|0) ;; *) bad="$bad $w($got)" ;; esac
+	done
+	need "shrink-finished W 40..46: the 600 row's EXIT 0 by 1025, 0 by… or 0, never a cut uid (not at W =${bad:- none})" test -z "$bad"
 }
 # scontrol_clean: scontrol was called, and no call of it saw an SCONTROL_* or SLURM_JSON
 scontrol_clean() {
@@ -8992,7 +9213,7 @@ cases=(
 	compact_no_size compact_error_screens
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
-	digest_fit node_figures digest_n10
+	digest_fit node_figures digest_n10 id_cells id_pins id_cells_wide_c
 	membar_screens membar_detect membar_call membar_fail membar_partial membar_over membar_down membar_forged membar_json membar_fallback nodes_not_utf8 nodes_ctl_o
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
