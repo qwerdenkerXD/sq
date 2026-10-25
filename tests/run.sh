@@ -4368,9 +4368,9 @@ digest_check() {
 }
 digest_at() { gawk -F'\t' -v w="$2" '$1 == w { sub(/^ +/, "", $2); print $2 }' "$1"; }   # digest_at FILE W
 c_digest_fit() {   # DISPLAY-v4 E AC 1
-	T_TITLE="E1: the COMPACT digest at every width 21..120 fits the screen by whole parts, the fault states kept longest, then the CPU figure, then memory, the states in sinfo order, a cut list ending in a … of its own; the pins; ! red and alone in colour; the ! and ? cases"
+	T_TITLE="E1: the COMPACT digest at every width 21..120 fits the screen by whole parts, the fault states (a red-bar word or a * suffix, not ~ ^ \$ @) kept longest, then the CPU figure, then memory, the states in sinfo order, a cut list ending in a … of its own; the pins; ! red and alone in colour; the ! and ? cases"
 	local fx pids=() bad pin got want
-	local swept="big40 scfail scfail-downlast membar-busy noacct bars-busy bars-down wide-text"
+	local swept="big40 scfail scfail-downlast membar-busy noacct bars-busy bars-down wide-text big40faults"
 	for fx in $swept; do digest_series "$fx" "$T_DIR/dig-$fx" & pids+=($!); done
 	wait "${pids[@]}"
 	for fx in $swept; do
@@ -4393,7 +4393,11 @@ c_digest_fit() {   # DISPLAY-v4 E AC 1
 	           "scfail:59:nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/!1085G mem" \
 	           "noacct:59:nodes: 1 allocated, 1 down* · 128/256 cpu · 443/1006G mem" \
 	           "noacct:49:nodes: 1 down*, … · 128/256 cpu · 443/1006G mem" \
-	           "noacct:37:nodes: 1 down*, … · 128/256 cpu · …" "noacct:23:nodes: 1 down*, … · …"; do
+	           "noacct:37:nodes: 1 down*, … · 128/256 cpu · …" "noacct:23:nodes: 1 down*, … · …" \
+	           "big40faults:25:nodes: 1 idle*, … · …" \
+	           "big40faults:55:nodes: 1 idle*, 1 down~, 1 powered_down, … · …" \
+	           "big40faults:85:nodes: 1 idle*, 1 down~, 1 powered_down, 1 drained~, 1 maint*, … · 90/768 cpu · …" \
+	           "big40faults:115:nodes: 1 mixed, 1 idle~, 1 idle*, 1 down~, 1 powered_down, 1 drained~, 1 maint*, … · 90/768 cpu · 293/!3072G mem"; do
 		fx=${pin%%:*} pin=${pin#*:}; want=${pin#*:} pin=${pin%%:*}
 		got=$(digest_at "$T_DIR/dig-$fx" "$pin")
 		need "$fx W=$pin: '$want'${got:+ (has '$got')}" test "$got" = "$want"
@@ -4497,6 +4501,21 @@ c_node_figures() {   # DISPLAY-v4 E AC 3, 4, 5
 		[ "$(node_caption)" = "↳ sinfo gave no usable figure for AllocMem (1 node), Memory (1 node): shown as unknown" ]'
 	sq_run allocmem-memory-unknown SQ_HEIGHT=4 -- --compact
 	need "... digest ?/?G mem" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · ?/?G mem" ]'
+	sq_run memory-na -- --full
+	need "Memory N/A (never Slurm 23.11 output): -% 265/- mem, all ·, Memory named" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "················ -% 265/- mem mixed" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for Memory (1 node): shown as unknown" ]'
+	sq_run figure-digits -- --full
+	need "1 to 12 digits: a 12-digit AllocMem counts (97656250/977G), a 13-digit Memory is unknown (70/-, all ·), Memory named" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "████████████████ 10000000% 97656250/977G mem mixed" &&
+		mem_part_is fb2-bioinf-0 "················ -% 70/- mem allocated" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for Memory (1 node): shown as unknown" ]'
+	sq_run scfail-plus SQ_HEIGHT=4 -- --compact
+	need "AllocMem unknown while scontrol fails: ?/!1085G mem, the unknown sum and the RealMemory total both marked" eval '
+		rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · ?/!1085G mem" ]'
+	sq_run down-stale-crcore -- --full --color
+	need "E2 in use on a down node (CR_CORE): its fill red, 31:█ then ░" eval '
+		rc_is 0 && mem_part_is fb2-bioinf-0 "████████████████ 97% 76/78G mem down*" && bar_kinds_are fb2-bioinf-0 2 "31:█"'
 	# E4: where, dim, cut at the block's width, within COMPACT's height
 	sq_run notes3 -- --full --color
 	need "notes3: the skipped-rows note, the caption, the scontrol note, in that order, the caption dim" eval '
@@ -4691,7 +4710,7 @@ c_id_cells() {   # DISPLAY-v4 F AC 2, 3, 4
 	local swept="shrink-finished:shrink-finished fallback-throttled:fallback-throttled shrink-pending:shrink-pending throttled:throttled
 		array-running:array-running array-running-x:array-running:-x array-split:array-split pending-strided:pending-strided
 		pending-range:pending-range memalloc-r:memalloc-r jobmem-outcomes:jobmem-outcomes longplain:longplain sf-alice:sf-alice
-		oddarr:oddarr oddfin:oddfin"
+		oddarr:oddarr oddfin:oddfin ft-32:ft-32 sp-longname:sp-longname"
 	for spec in $swept; do
 		IFS=: read -r name fx args <<< "$spec"
 		id_series "$name" "$T_DIR/id-$name" "$fx" $args & pids+=($!)
@@ -4782,6 +4801,22 @@ c_id_pins() {   # DISPLAY-v4 F AC 1-5, the pins
 	done
 	sq_run sf-alice SQ_WIDTH=44 -- --full --no-color
 	need "sf-alice W=44: JOBID 6 wide" eval 'rc_is 0 && [ "$(jobid_width recent)" = 6 ]'
+	# F1 with a throttle of two digits (ft-32, the fallback's 0-99%32): %32 goes first, alone
+	sq_run ft-32 SQ_WIDTH=52 -- --full --no-color
+	need "ft-32 W=52: 7002_[0-99] ×100, the throttle gone first" eval 'rc_is 0 && row_cell recent "7002_[0-99] ×100"'
+	sq_run ft-32 SQ_WIDTH=54 -- --full --no-color
+	need "ft-32 W=54: 7002_[0-99%32] ×100" eval 'rc_is 0 && row_cell recent "7002_[0-99%32] ×100"'
+	# F3, only where a column gains: the blanks that stay, the header and the row as they are
+	for c in "shrink-finished:43:JOBID      NAME   STATE EXIT  ELAPSED AGO:600_… ×67  sweep  CA    0 by…      0s 11h" \
+	         "shrink-finished:44:JOBID      NAME    STATE EXIT  ELAPSED AGO:600_… ×67  sweep   CA    0 by…      0s 11h" \
+	         "shrink-finished:60:JOBID               NAME   STATE     EXIT      ELAPSED AGO:5000_[0,2,4,…] ×30  sweep  FAILED            1   1m00s 12h" \
+	         "finished-throttled:41:JOBID   NAME  STATE EXIT    ELAPSED AGO:7002_…  sweep CA      0 by…      0s 12h" \
+	         "finished-throttled:43:JOBID       NAME  STATE EXIT  ELAPSED AGO:7002_… ×10  sweep CA    0 by…      0s 12h"; do
+		IFS=: read -r fx w hdr want <<< "$c"
+		sq_run "$fx" SQ_WIDTH=$w -- --full --no-color
+		need "$fx W=$w, F3's blank that stays: '$hdr' over '$want'" eval '
+			rc_is 0 && section recent | sed -E "s/^ +//" | grep -qxF -- "$hdr" && section recent | sed -E "s/^ +//" | grep -qxF -- "$want"'
+	done
 	for w in 43 44 45 46 47; do
 		sq_run sf-both SQ_WIDTH=$w -- --full --no-color
 		need "sf-both W=$w: the canceller 0 by m… to 0 by mal…" eval 'rc_is 0 && rows recent | grep -qE " 0 by (m|ma|mal)…( |$)"'
