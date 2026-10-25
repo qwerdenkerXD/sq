@@ -60,10 +60,17 @@ watch -tc -n 1 'sq -C'
   first of several). Where Slurm does not
   schedule memory (`CR_CORE`: no node has any memory allocated, but some node has CPUs), the
   memory bar shows memory in use instead, from the node's own free-memory reading, which is
-  exactly when you most need to watch it: all of it draws as `▓`, in use beyond the (absent)
-  allocation. With nothing allocated anywhere, the bar is the allocated one, `0/977G`. The
-  one-line node summary of a small screen adds up the allocated memory too, `335/1052G mem`. Bars
+  exactly when you most need to watch it: memory in use draws as `█` in the bar's colours, `░`
+  free. With nothing allocated anywhere, the bar is the allocated one, `0/977G`. The
+  one-line node summary of a small screen adds up the allocated memory too, `335/1052G mem`,
+  marks with `!` a total that counts RealMemory for any node (`335/!1085G mem`), and an unknown
+  sum with `?`. When the summary line must drop parts to fit, it drops whole ones, and the fault
+  states (`down*`, `drained`, …) are kept longest. Bars
   turn yellow past 85%, memory in use red past 95%, and a down node's filled cells are red.
+  A figure sinfo gives no usable value for (none, a word, a Memory of 0 or 1) reads `-` or `·`,
+  with a dim line naming it (`↳ sinfo gave no usable figure for Memory (2 nodes): shown as
+  unknown`), except FreeMem and CPUsLoad `N/A`, which read unknown without the line: Slurm prints
+  FreeMem `N/A` for a node that has not reported since slurmctld started.
   Two caveats. CPU in use is the node's 5-minute load average (`CPULoad`), refreshed only with
   slurmctld's node pings, so it trails the node by minutes, and it counts processes outside Slurm
   too. Memory in use (`CR_CORE` only) is RealMemory − FreeMem, and FreeMem follows the kernel's

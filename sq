@@ -4584,7 +4584,7 @@ function height(   h, l) {
   h = 1 + SHOW["b4"] + SHOW["title"] + SHOW["b1"] + SHOW["b2"]
   h += BANNER * (SHOW["banner"] + SHOW["b0"]) + QCAP * SHOW["qcap"] + NOTES * SHOW["notes"]
   if (SHOW["nodes"] == 1) h++
-  if (SHOW["nodes"] == 2) h += nn + (nbad || ntrunc) + (skip[1] > 0) + MEMNOTE + SHOW["reasons"] * NRSN
+  if (SHOW["nodes"] == 2) h += nn + (nbad || ntrunc) + (skip[1] > 0) + (UNRNOTE && nn > 0) + MEMNOTE + SHOW["reasons"] * NRSN
   if ((l = qbody())) h += l + 1                   # and the column header
   if ((l = finlines())) h += l + SHOW["b3"]
   return h
@@ -4641,15 +4641,78 @@ function fit(   x) {
   CAP = -1                                        # every running job fits: lifted
   fill(1) && fill(2) && fill(3) && fill(6) && fillfin() && fill(4)
 }
+# A figure of the node line of sinfo, read: FreeMem, AllocMem and Memory as 1 to 12
+# digits, and a total (Memory) only above 1, as 0 is no total and 1 is what
+# Slurm prints for a node whose RealMemory is not configured (node_conf.c);
+# anything else is unknown (-1), never 0.  The premise, from the source of
+# Slurm 23.11.4: AllocMem is always a number (0 when nothing is held) and Memory the
+# configured RealMemory, so an N/A in either is a fault or another Slurm, and
+# the caption names it; FreeMem is N/A from the start of slurmctld until the node
+# first reports, which is benign, and CPUsLoad is never N/A (0.00 for a down
+# or powered-down node): an N/A in those two stays quiet
+function nodefield(x, name, total) {
+  if (x ~ /^[0-9]{1,12}$/ && (!total || x + 0 > 1)) return x + 0
+  if (x != "N/A" || name == "Memory" || name == "AllocMem") unread(name)
+  return -1
+}
+function unread(name) { if (!UNRN[name]++) UNRNOTE = 1 }   # UNRN: the nodes, by field
+# the caption under the nodes: each field with an unknown value counted, in a
+# fixed order, with its node count
+function unreadtext(   o, i, NM) {
+  split("AllocMem Memory FreeMem CPUsLoad", NM, " ")
+  for (i = 1; i <= 4; i++) if (UNRN[NM[i]])
+    o = o (o == "" ? "" : ", ") NM[i] " (" UNRN[NM[i]] " node" (UNRN[NM[i]] > 1 ? "s" : "") ")"
+  return "↳ sinfo gave no usable figure for " o ": shown as unknown"
+}
 # nodes: 1 allocated, 1 down* · 128/256 cpu, and where the memory bar counts
-# allocated memory (membar) · 335/1052G mem
-function digest(   r, s, nc, nord, ns, u, t, x, i, ma, mt) {
+# allocated memory (membar) · 335/1052G mem.  Its parts: DST[1..DNS] the state
+# counts in the order of sinfo, DFG[1..DNF] the CPU and the memory figure, DPR the
+# states in the order they are kept, the DNFLT fault states first.  A sum with
+# an unknown term is "?"; "!" stands before a total that counts RealMemory for
+# some node (MEMNOTE: scontrol failed, or gave no usable MemSpecLimit for it)
+function digest(   r, s, nc, nord, ns, u, t, i, j, ma, mt, maunk, mtunk) {
   for (r=1; r<=nn; r++) {
     s = nst[r]; if (!(s in nc)) nord[++ns] = s
     nc[s]++; u += used[r]; t += tot[r]; ma += memalloc[r]; mt += memden[r]
+    if (memalloc[r] < 0) maunk = 1
+    if (memden[r] < 0) mtunk = 1
   }
-  for (i=1; i<=ns; i++) x = x (i > 1 ? ", " : "") nc[nord[i]] " " nord[i]
-  return "nodes: " x " · " u+0 "/" t+0 " cpu" (MEMALLOC ? sprintf(" · %.0f/%.0fG mem", ma/1024, mt/1024) : "")
+  DNS = ns; for (i=1; i<=ns; i++) DST[i] = nc[nord[i]] " " nord[i]
+  DNF = 1; DFG[1] = u+0 "/" t+0 " cpu"
+  if (MEMALLOC) DFG[++DNF] = (maunk ? "?" : sprintf("%.0f", ma/1024)) "/" \
+                             (mtunk ? "?" : (MEMNOTE ? "!" : "") sprintf("%.0f", mt/1024)) "G mem"
+  DNFLT = 0
+  for (i=1; i<=ns; i++) if (dfault(nord[i])) DPR[++DNFLT] = i
+  j = DNFLT; for (i=1; i<=ns; i++) if (!dfault(nord[i])) DPR[++j] = i
+}
+# a state that reports a fault: a word of the red bar of the node line (down, drain,
+# fail, inval, unk), or not responding (a "*" suffix).  The power-saving,
+# maint and reboot marks take the place of the "*", so idle~ reads healthy here
+# as on the node line, and the bare words powered_down and powering_down are
+# faults, as the node line colours them
+function dfault(st) { return st ~ /down|drain|fail|inval|unk/ || st ~ /[*]$/ }
+# the digest of the first KS states in DPR order and the first KF figures: the
+# states kept stand in the order of sinfo, and a list cut short ends in a "…" of its
+# own, one more item after the separator of that list
+function dform(ks, kf,   x, i, K) {
+  for (i=1; i<=ks; i++) K[DPR[i]] = 1
+  for (i=1; i<=DNS; i++) if (i in K) x = x (x != "" ? ", " : "") DST[i]
+  if (ks < DNS) x = x (ks ? ", " : "") "…"
+  for (i=1; i<=kf; i++) x = x " · " DFG[i]
+  if (kf < DNF) x = x " · …"
+  return "nodes: " x
+}
+# The digest in WD columns by whole parts, never a cut number.  The parts go
+# in one fixed order: the healthy states from the last, then the memory
+# figure, then the CPU figure, then the fault states from the last, so a wider
+# screen only ever adds a part.  The narrowest, "nodes: … · …", is 13 columns,
+# which every width from 21 holds
+function dfit(wd,   ks, kf, x) {
+  digest()
+  for (ks = DNS; ks >= DNFLT; ks--) if (colw(x = dform(ks, DNF)) <= wd) return x
+  for (kf = DNF - 1; kf >= 0; kf--) if (colw(x = dform(DNFLT, kf)) <= wd) return x
+  for (ks = DNFLT - 1; ks >= 0; ks--) if (colw(x = dform(ks, 0)) <= wd) return x
+  return x
 }
 # The memory bar shows memory allocated where Slurm schedules memory, as the
 # CPU figure counts allocated cores, and memory in use where it does not.  It
@@ -4666,12 +4729,16 @@ function digest(   r, s, nc, nord, ns, u, t, x, i, ma, mt) {
 # answer was used.  The MEMNOTE line under the nodes says so: why no answer
 # was used, else which nodes count RealMemory and why (one line, the first
 # such node named).
+# The in-use view is taken only on evidence: a node with CPUs allocated that
+# reads AllocMem 0.  Everything else gets the allocated view, the default:
+# some AllocMem above 0, nothing allocated anywhere, or every busy node with
+# an AllocMem sinfo gave no usable figure for (each such node "-" and ·).
 # Into MEMALLOC, MEMNOTE (1 with its line in MEMTEXT), and per node memden
-# (what jobs can be given), memu, mempc and memt as the allocated figures, wf
-# and wm their widths
-function membar(   r, anyalloc, anycpu, i, spec, kind, nk, first, KINDS, nkinds, last) {
-  for (r=1; r<=nn; r++) { if (memalloc[r] > 0) anyalloc = 1; if (used[r] > 0) anycpu = 1 }
-  if (!(MEMALLOC = anyalloc || !anycpu)) return
+# (what jobs can be given, -1 unknown), memu, mempc and memt as the allocated
+# figures, wf and wm their widths
+function membar(   r, anyalloc, zerobusy, i, spec, kind, nk, first, KINDS, nkinds, last) {
+  for (r=1; r<=nn; r++) { if (memalloc[r] > 0) anyalloc = 1; if (used[r] > 0 && memalloc[r] == 0) zerobusy = 1 }
+  if (!(MEMALLOC = anyalloc || !zerobusy)) return
   nodes_read(nodespecf, nodespecfmt, nodespecg)
   MEMNOTE = (serr != ""); MEMTEXT = "↳ memory counts RealMemory: " serr
   wf = wm = 0
@@ -4683,10 +4750,10 @@ function membar(   r, anyalloc, anycpu, i, spec, kind, nk, first, KINDS, nkinds,
     else kind = ""
     spec = (kind == "") ? NODE_SPECMEM[i] : 0
     if (kind != "") { if (!nk++) first = node[r]; if (!(kind in KINDS)) { KINDS[kind]; nkinds++ }; last = kind }
-    memden[r] = memreal[r] - spec
-    memu[r]  = sprintf("%.0f", memalloc[r]/1024)
-    mempc[r] = memden[r] ? int(memalloc[r]*100/memden[r]) : 0
-    memt[r]  = sprintf("%.0fG", memden[r]/1024)
+    memden[r] = (memreal[r] < 0) ? -1 : memreal[r] - spec
+    memu[r]  = (memalloc[r] < 0) ? "-" : sprintf("%.0f", memalloc[r]/1024)
+    mempc[r] = (memalloc[r] < 0 || memden[r] < 0) ? -1 : int(memalloc[r]*100/memden[r])
+    memt[r]  = (memden[r] < 0) ? "-" : sprintf("%.0fG", memden[r]/1024)
     if (length(memu[r]) > wf) wf = length(memu[r])
     if (length(memt[r]) > wm) wm = length(memt[r])
   }
@@ -4978,16 +5045,18 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     node[nn] = F[2]; noderaw[nn] = rawnode; nst[nn] = F[5]
     split(F[1], cp, "/"); used[nn] = cp[1]+0; tot[nn] = cp[4]+0
     load[nn] = (F[8] ~ /^[0-9]+([.][0-9]+)?$/) ? F[8]+0 : -1    # N/A: not known
-    memreal[nn] = F[4]+0; memalloc[nn] = F[9]+0
-    if (F[3] == "N/A") { memu[nn] = "-"; mempc[nn] = -1; meminuse[nn] = -1 }
+    if (load[nn] < 0 && F[8] != "N/A") unread("CPUsLoad")
+    memreal[nn] = nodefield(F[4], "Memory", 1); memalloc[nn] = nodefield(F[9], "AllocMem", 0)
+    freemem = nodefield(F[3], "FreeMem", 0)
+    if (freemem < 0 || memreal[nn] < 0) { memu[nn] = "-"; mempc[nn] = -1; meminuse[nn] = -1 }
     else {
-      usedmem = F[4] - F[3]                     # RealMemory can be configured below the
+      usedmem = memreal[nn] - freemem           # RealMemory can be configured below the
       if (usedmem < 0) usedmem = 0              # real RAM, so FreeMem may exceed it
       memu[nn]  = sprintf("%.0f", usedmem/1024)
-      mempc[nn] = F[4] ? int(usedmem*100/F[4]) : 0
+      mempc[nn] = int(usedmem*100/memreal[nn])
       meminuse[nn] = usedmem
     }
-    memt[nn] = sprintf("%.0fG", F[4]/1024)
+    memt[nn] = (memreal[nn] < 0) ? "-" : sprintf("%.0fG", memreal[nn]/1024)
     nreason[nn] = (F[6] == "none" || F[6] == "") ? "" : F[6]
     if (nreason[nn] != "" && F[7] ~ /^[0-9]{4}-/) nreason[nn] = nreason[nn] " · since " substr(F[7], 1, 10)
     if ((cw = WIDE ? (NODECW[nn] = colw(F[2])) : length(F[2])) > wn) wn = cw   # NODECW: kept for its line
@@ -5392,7 +5461,11 @@ END{
     out[++o] = sprintf("%s%s%s%s", lm, e("1;31"), x, e("0"))
   }
   if (SHOW["b1"]) out[++o] = ""
-  if (SHOW["nodes"] == 1) out[++o] = lm clip(digest(), target)
+  if (SHOW["nodes"] == 1) {                     # the digest lines up with no table:
+    x = dfit(cols - left)                       # the screen right of the margin is its width
+    if (color && (at = index(x, "/!"))) x = substr(x, 1, at) e("31") "!" e("0") substr(x, at + 2)
+    out[++o] = lm x
+  }
   # In place of every node line and bar.  Unlike the queue, no user argument reaches
   # sinfo and there is no SINFO_FORMAT2, so our format cannot be overridden from
   # outside: both of these mean the stream itself was wrong.
@@ -5410,7 +5483,7 @@ END{
       sm = cells(memalloc[r], (meminuse[r] < 0) ? -1 : memalloc[r], memden[r], barm,
                  down ? "31" : (mp>85 ? "33" : "32"))
     else
-      sm = cells(memalloc[r], meminuse[r], memreal[r], barm,
+      sm = cells(meminuse[r] < 0 ? 0 : meminuse[r], meminuse[r], memreal[r], barm,   # in use, as a fill
                  down ? "31" : (mp>95 ? "1;31" : (mp>85 ? "33" : "32")))
     out[++o] = sprintf("%s%s%-*s%s %s%s%3d%%  %s%*d%s/%-*d cpu   %s%s%3s%%  %s%*s%s/%-*s mem  %*s%s%s%s",
                        lm, e("1"), WIDE ? 0 : wn, WIDE ? colpad(node[r], -wn, NODECW[r]) : node[r], e("0"), sc, (bar?" ":""), p,
@@ -5426,6 +5499,8 @@ END{
   if (SHOW["nodes"] == 2 && skip[1])           # see which table it is talking about
     out[++o] = sprintf("%s%s↳ %d unreadable node row%s skipped%s", lm, e("2"),
                        skip[1], (skip[1] > 1 ? "s" : ""), e("0"))
+  if (SHOW["nodes"] == 2 && UNRNOTE && nn)
+    out[++o] = sprintf("%s%s%s%s", lm, e("2"), clip(unreadtext(), target), e("0"))
   if (SHOW["nodes"] == 2 && MEMNOTE)
     out[++o] = sprintf("%s%s%s%s", lm, e("2"), clip(MEMTEXT, target), e("0"))
   if (SHOW["b2"]) out[++o] = ""

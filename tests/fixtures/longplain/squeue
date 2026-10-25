@@ -1,0 +1,5 @@
+@include ../_common/squeue-defaults
+i=600_[5]; j=one-element-bracket-name; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=7_[0-3,5,7-15:2]; j=stride; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=123456789; j=plain; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=123456790; j=other-plain-job; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority

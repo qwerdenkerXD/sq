@@ -1,0 +1,3 @@
+# memory scheduled, RealMemory not configured (Memory=1): a job without --mem holds the node's 1 MB
+CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=526168; Memory=1; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=51.20; AllocMem=1
+CPUsState=24/0/0/24; NodeList=fb2-bioinf-0; FreeMem=2176; Memory=1; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=23.81; AllocMem=1

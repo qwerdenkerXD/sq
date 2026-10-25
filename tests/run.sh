@@ -3939,12 +3939,20 @@ c_compact_prompt_row() {
 	need "--full on a 20-row pty: what a pipe prints with --full (tries: $PAIR_RUNS)" test "$PAIR_SAME" = 1
 }
 c_display_docs() {
-	T_TITLE="DISPLAY-v4's docs: sq -h and the README's --reserve row name the prompt's row, the README's Usage the ssh -qt note (G1 AC5)"
+	T_TITLE="DISPLAY-v4's docs: sq -h and the README's --reserve row name the prompt's row, the README's Usage the ssh -qt note (G1 AC5); the README's bars paragraph: CR_CORE's memory in use as █, the dim line naming an unusable figure but FreeMem and CPUsLoad N/A, the summary's ! and ?, its fault states kept longest (E AC7)"
 	local readme=${here%/*}/README.md
 	sq_run empty -- -h
 	need "sq -h: the --reserve line and its prompt row" eval 'rc_is 0 && plain | grep -A1 -E "^ *sq --reserve N +COMPACT leaves N lines of the screen unused$" | tail -n 1 | grep -qE "^ +\(on a terminal one more, for the prompt\)$"'
 	need "README: the --reserve row says it" grep -qF '| `--reserve N` | COMPACT leaves N lines of the screen unused, e.g. for `watch`'"'"'s own header (on a terminal one more, for the prompt).' "$readme"
 	need "README: Usage, ssh -qt and the closing line, or --reserve 1" eval 'grep -qE "^ssh -qt host sq +# " "$readme" && grep -qF "ssh'"'"'s \"Connection to … closed.\" line takes the row" "$readme" && grep -qF "(or give it --reserve 1)" "$readme"'
+	need "README: CR_CORE's memory in use draws as █ in the bar's colours, no ▓ for memory" eval '
+		grep -qF "memory in use draws as \`█\` in the bar'"'"'s colours" "$readme" && ! grep -qF "all of it draws as \`▓\`" "$readme"'
+	need "README: an unusable figure reads - or · with a dim line naming it, FreeMem and CPUsLoad N/A without it" eval '
+		grep -qF "reads \`-\` or \`·\`," "$readme" && grep -qF "with a dim line naming it" "$readme" &&
+		grep -qF "except FreeMem and CPUsLoad \`N/A\`, which read unknown without the line" "$readme"'
+	need "README: the summary line marks a RealMemory total with !, an unknown sum with ?, keeps the fault states longest" eval '
+		grep -qF "marks with \`!\` a total that counts RealMemory for any node" "$readme" && grep -qF "an unknown" "$readme" &&
+		grep -qF "sum with \`?\`" "$readme" && grep -qF "states (\`down*\`, \`drained\`, …) are kept longest" "$readme"'
 	stubs_answer
 }
 c_auto_full() {   # detection settled by measurement; true today already
@@ -4139,13 +4147,24 @@ bar_of() {        # bar_of NODE K: the K-th bar (1 CPU, 2 memory) on NODE's line
 }
 bar_kinds() { bar_of "$1" "$2" | tr ' ' '\n' | sort -u | paste -sd' '; }   # its distinct cells
 bar_kinds_are() { [ "$(bar_kinds "$1" "$2")" = "$3" ]; }
+# mem_bar_kinds NODE: the distinct glyphs of the MEM bar on NODE's line, the
+# run of bar glyphs after " cpu " (plain text: one glyph per cell)
+mem_bar_kinds() {
+	plain | LC_ALL=$utf8 gawk -v n="$1" '$1 == n { s = $0; sub(/^.* cpu +/, "", s)
+		if (match(s, /^[█▒▓░·]+/)) { s = substr(s, 1, RLENGTH); while (s != "") { k[substr(s, 1, 1)]; s = substr(s, 2) } }
+		for (g in k) o = o g; print o; exit }'
+}
+# E4: the dim line naming the fields sinfo gave no usable figure for
+node_caption() { plain | grep -E '^ *↳ sinfo gave no usable figure for ' | sed -E 's/^ +//'; }
 c_bars_edges() {
 	T_TITLE="bars: a draining node in the down hue, zero totals, the 85% boundary, a load that is no number"
 	sq_run bars-edges -- --full --color
 	need "rc 0, nothing on stderr" eval 'rc_is 0 && err_empty'
 	need "draining: CPU bar █ 31, ▒ 2;31, ░ 2" bar_kinds_are drn01 1 "2:░ 2;31:▒ 31:█"
 	need "draining: memory bar, allocated, █ 31, ░ 2" bar_kinds_are drn01 2 "2:░ 31:█"
-	need "0 CPUs, 0 memory: both bars all ░" eval 'bar_kinds_are zero01 1 "2:░" && bar_kinds_are zero01 2 "2:░"'
+	need "0 CPUs, 0 memory: CPU bar all ░, MEM bar all · (Memory 0 is unknown), Memory named in the caption" eval '
+		bar_kinds_are zero01 1 "2:░" && bar_kinds_are zero01 2 "2:·" && mem_part_is zero01 "················ -% 0/- mem idle" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for Memory (2 nodes), CPUsLoad (1 node): shown as unknown" ]'
 	need "0 CPUs, 0 memory, use N/A: both bars all ·" eval 'bar_kinds_are zero02 1 "2:·" && bar_kinds_are zero02 2 "2:·"'
 	need "85% allocated: CPU bar green" bar_kinds_are pct85 1 "2:░ 32:█"
 	need "86% allocated: CPU bar yellow" bar_kinds_are pct86 1 "2:░ 33:█"
@@ -4173,7 +4192,7 @@ node_edge() {
 # once: its T_DIR and run counter its own, what it found and its T_FAIL and
 # T_CALLS into FILE for the case to take back
 sweep_series() {   # sweep_series FIXTURE MODE FILE
-	local fx=$1 mode=$2 res=$3 w nmin nw hw bars any over= short= small= drawn=0 bare=0 ok21=0
+	local fx=$1 mode=$2 res=$3 w nmin nw hw bars any over= short= small= shade= drawn=0 bare=0 ok21=0 nd
 	T_DIR=$T_DIR/s-$fx$mode run_n=0 T_FAIL=() T_CALLS=0; mkdir -p "$T_DIR"
 	sq_run "$fx" SQ_WIDTH=21 -- "$mode"
 	nmin=$(node_width)
@@ -4183,17 +4202,22 @@ sweep_series() {   # sweep_series FIXTURE MODE FILE
 		read -r nw hw bars any <<< "$(node_edge)"
 		[ "$nw" -le $(( w > nmin ? w : nmin )) ] || over="$over $w"
 		[ "$bars" = ok ] || small="$small $w"
+		case $fx in bars-*|membar-*)        # E2: memory in use is a fill, never ▓
+			for nd in $(lines_matching " cpu .* mem " | gawk '{ print $1 }'); do
+				case $(mem_bar_kinds "$nd") in *▓*) shade="$shade $w"; break ;; esac
+			done ;;
+		esac
 		if [ "$any" = 1 ]; then drawn=$((drawn + 1)); else bare=$((bare + 1)); fi
 		[ "$nw" -le "$w" ] || continue          # past the screen: the bar-less line, checked above
 		[ "$nw" = $(( hw <= w ? hw : w )) ] || short="$short $w($nw/$hw)"
 	done
 	local s_fail=("${T_FAIL[@]}") s_calls=$T_CALLS
-	declare -p ok21 over short small drawn bare s_fail s_calls > "$res"
+	declare -p ok21 over short small shade drawn bare s_fail s_calls > "$res"
 }
 c_bars_width_sweep() {
-	T_TITLE="FULL and COMPACT at every width 21..140: no node line wider than the screen (or than with its bars collapsed), no bar of 1-3 cells, and the node lines end on the queue header's edge (the screen's where the table is wider), bars or none"
-	local fx mode pids=() ok21 over short small drawn bare s_fail s_calls
-	local fixtures_swept="array-running busy24 bars-busy mix30 membar-busy bars-over"
+	T_TITLE="FULL and COMPACT at every width 21..140: no node line wider than the screen (or than with its bars collapsed), no bar of 1-3 cells, and the node lines end on the queue header's edge (the screen's where the table is wider), bars or none; no ▓ in a MEM bar of the bars and membar fixtures, CR_CORE's too (E2)"
+	local fx mode pids=() ok21 over short small shade drawn bare s_fail s_calls
+	local fixtures_swept="array-running busy24 bars-busy mix30 membar-busy bars-over membar-crcore"
 	for fx in $fixtures_swept; do
 		for mode in --full --compact; do sweep_series "$fx" "$mode" "$T_DIR/res$fx$mode" & pids+=($!); done
 	done
@@ -4207,6 +4231,7 @@ c_bars_width_sweep() {
 			need "$fx $mode: every bar 0 or at least 2 cells (not at W =${small:- none})" test -z "$small"
 			need "$fx $mode: bars drawn at some width, none at some other" eval '[ "$drawn" -gt 0 ] && [ "$bare" -gt 0 ]'
 			need "$fx $mode: node lines end on the queue header's edge, or the screen's (not at W =${short:- none})" test -z "$short"
+			case $fx in bars-*|membar-*) need "$fx $mode: no ▓ in a MEM bar (at W =${shade:- none})" test -z "$shade" ;; esac
 		done
 	done
 }
@@ -4215,10 +4240,11 @@ c_bars_width_sweep() {
 # (RealMemory 1031000/80000, MemSpecLimit 31000/3200 in their scontrol-node):
 # idle, busy with memory scheduled, the same jobs under CR_CORE, and busy with
 # fb2-bioinf-0 not responding.  Their <mode>.{txt,ansi} are the variant-A screens
-# Franz accepted on 2026-10-21 (drawn on host FranzGB); CR_CORE's are today's.
+# Franz accepted on 2026-10-21 (drawn on host FranzGB); CR_CORE's are DISPLAY-v4
+# E2's (memory in use drawn as the fill █, not ▓), re-pinned from its build.
 membar_modes="full-w120:120:50:--full full-w80:80:50:--full compact-w120x12:120:12:--compact compact-w120x4:120:4:--compact"
 c_membar_screens() {
-	T_TITLE="the memory bar: the accepted variant-A screens byte for byte, clock aside, idle, busy and down, CR_CORE as today; FULL at 120 and 80, COMPACT 120x12 and 120x4"
+	T_TITLE="the memory bar: the accepted variant-A screens byte for byte, clock aside, idle, busy and down, CR_CORE as re-pinned for DISPLAY-v4 E2 (in use as a fill); FULL at 120 and 80, COMPACT 120x12 and 120x4"
 	local c m name w h flag ext
 	for c in idle busy crcore down; do
 		for m in $membar_modes; do
@@ -4236,7 +4262,7 @@ mem_part() { plain | gawk -v n="$1" '$1 == n { sub(/.* cpu +/, ""); gsub(/ +/, "
 mem_part_is() { [ "$(mem_part "$1")" = "$2" ]; }
 digest_line() { plain | grep -E '^ *nodes: ' | sed -E 's/^ +//'; }
 c_membar_detect() {
-	T_TITLE="memory scheduled (some node has AllocMem): allocated against RealMemory less MemSpecLimit; CR_CORE (none has, CPUs are allocated): memory in use against RealMemory, as today; nothing allocated: the allocated view, 0"
+	T_TITLE="memory scheduled (some node has AllocMem): allocated against RealMemory less MemSpecLimit; CR_CORE (none has, CPUs are allocated): memory in use against RealMemory, as a fill; nothing allocated: the allocated view, 0"
 	sq_run membar-busy -- --full
 	need "scheduled: 265 of 977G and 70 of 75G allocated, █ then ░" eval '
 		rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" &&
@@ -4244,15 +4270,302 @@ c_membar_detect() {
 	sq_run membar-busy SQ_HEIGHT=4 -- --compact
 	need "... the summary line adds allocated/schedulable memory" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/1052G mem" ]'
 	sq_run membar-crcore -- --full
-	need "CR_CORE: memory in use of RealMemory, ▓ in use beyond the (no) allocation" eval '
-		rc_is 0 && mem_part_is fb2-bioinf "▓▓▓▓▓▓▓▓░░░░░░░░ 48% 493/1007G mem mixed" &&
-		mem_part_is fb2-bioinf-0 "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 97% 76/78G mem allocated"'
+	need "CR_CORE: memory in use of RealMemory, drawn as the fill █ (E2)" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "████████░░░░░░░░ 48% 493/1007G mem mixed" &&
+		mem_part_is fb2-bioinf-0 "████████████████ 97% 76/78G mem allocated"'
+	sq_run membar-crcore -- --full --color
+	need "... in the hue of its percentage: fb2-bioinf green and ░, fb2-bioinf-0 (97 %) bold red" eval '
+		rc_is 0 && bar_kinds_are fb2-bioinf 2 "2:░ 32:█" && bar_kinds_are fb2-bioinf-0 2 "1;31:█"'
 	sq_run membar-crcore SQ_HEIGHT=4 -- --compact
 	need "... the summary line counts no memory" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu" ]'
 	sq_run membar-idle -- --full
 	need "nothing allocated: 0 of 977G and of 75G, all ░, not the 228G of page cache and OS" eval '
 		rc_is 0 && mem_part_is fb2-bioinf "░░░░░░░░░░░░░░░░ 0% 0/977G mem idle" &&
 		mem_part_is fb2-bioinf-0 "░░░░░░░░░░░░░░░░ 0% 0/75G mem idle"'
+}
+# ---- E1 (DISPLAY-v4): the digest fitted to the screen by whole parts --------
+# digest_series FIXTURE FILE: the COMPACT 4-line digest at every width 21..120
+# and the whole one (at 400), "W<TAB>line" (the line as cplain cellifies it,
+# margin and all) into FILE, in a subshell of its own as the series run at once
+digest_series() {
+	local fx=$1 res=$2 w
+	T_DIR=$T_DIR/d-$fx run_n=0 T_FAIL=() T_CALLS=0; mkdir -p "$T_DIR"
+	: > "$res.part"
+	for w in 400 $(seq 21 120); do
+		sq_run "$fx" SQ_WIDTH="$w" SQ_HEIGHT=4 -- --compact --no-color
+		rc_is 0 || T_FAIL+=("$fx W=$w: rc $RC")
+		printf '%s\t%s\n' "$w" "$(cplain | grep -E '^ *nodes: ' | head -n 1)" >> "$res.part"
+	done
+	printf '%s\n' "${T_FAIL[@]}" > "$res.fail"; echo "$T_CALLS" > "$res.calls"
+	mv "$res.part" "$res"
+}
+# digest_check FILE: what breaks E1 in a series (one line each, none if it
+# holds): the width, a "…" that is no item of its own, a part that is no whole
+# part of the whole digest or out of its order, a part at W missing at W+1,
+# and the order the parts drop in (the healthy states from the last, then the
+# memory figure, then the CPU figure, then the fault states from the last).  A
+# fault: a word of the red bar (down drain fail inval unk) or a "*" suffix
+digest_check() {
+	LC_ALL=$utf8 gawk -F'\t' '
+	function parse(d, P,   segs, ns, i, it, ni, k) {
+		delete P; P["ok"] = 1
+		if (d !~ /^nodes: /) { P["ok"] = 0; return }
+		ns = split(substr(d, 8), segs, / · /)
+		ni = split(segs[1], it, /, /)
+		for (i = 1; i <= ni; i++) {
+			if (it[i] == "…") { if (i != ni) P["bad"] = "a … that is not the last state item"; P["sell"] = 1; continue }
+			if (index(it[i], "…")) P["bad"] = "a … glued to " it[i]
+			P["s", ++k] = it[i]
+		}
+		P["ns"] = k + 0; k = 0
+		for (i = 2; i <= ns; i++) {
+			if (segs[i] == "…") { if (i != ns) P["bad"] = "a … that is not the last figure"; P["fell"] = 1; continue }
+			if (index(segs[i], "…")) P["bad"] = "a … glued to " segs[i]
+			P["f", ++k] = segs[i]
+		}
+		P["nf"] = k + 0
+	}
+	function fault(st) { sub(/^[0-9]+ /, "", st); return st ~ /down|drain|fail|inval|unk/ || st ~ /[*]$/ }
+	$1 == 400 { whole = $2; sub(/^ +/, "", whole); parse(whole, A)
+		for (i = 1; i <= A["ns"]; i++) { if (fault(A["s", i])) nfault++; else nheal++; AT[A["s", i]] = i }
+		for (i = 1; i <= A["nf"]; i++) AF[A["f", i]] = i
+		next }
+	{ w = $1; line = $2; d = line; sub(/^ +/, "", d)
+	  if (d == "") { print "W=" w ": no digest"; next }
+	  if (length(line) > w) print "W=" w ": " length(line) " columns: " d
+	  parse(d, P)
+	  if (!P["ok"]) { print "W=" w ": not a digest: " d; next }
+	  if ("bad" in P) print "W=" w ": " P["bad"] ": " d
+	  if (P["sell"] != (P["ns"] < A["ns"])) print "W=" w ": the states end in … " (P["sell"] ? "with none dropped" : "missing") ": " d
+	  if (P["fell"] != (P["nf"] < A["nf"])) print "W=" w ": the figures end in … " (P["fell"] ? "with none dropped" : "missing") ": " d
+	  prev = 0; sf = sh = 0; delete SHOWN
+	  for (i = 1; i <= P["ns"]; i++) {
+		x = P["s", i]
+		if (!(x in AT)) { print "W=" w ": " x " is no state of the whole digest"; continue }
+		if (AT[x] <= prev) print "W=" w ": " x " out of sinfo order"
+		prev = AT[x]; SHOWN["s" x]
+		if (fault(x)) sf++; else sh++
+	  }
+	  prev = 0
+	  for (i = 1; i <= P["nf"]; i++) {
+		x = P["f", i]
+		if (!(x in AF)) { print "W=" w ": " x " is no figure of the whole digest"; continue }
+		if (AF[x] <= prev) print "W=" w ": " x " out of order"
+		prev = AF[x]; SHOWN["f" x]
+	  }
+	  # dropped from the last within each kind: the kept ones are the first of their kind
+	  k = 0; for (i = 1; i <= A["ns"]; i++) if (fault(A["s", i])) { k++; if (k <= sf && !(("s" A["s", i]) in SHOWN)) print "W=" w ": fault state " A["s", i] " dropped before a later one" }
+	  k = 0; for (i = 1; i <= A["ns"]; i++) if (!fault(A["s", i])) { k++; if (k <= sh && !(("s" A["s", i]) in SHOWN)) print "W=" w ": healthy state " A["s", i] " dropped before a later one" }
+	  if ((P["nf"] > 0 || sh > 0) && sf < nfault) print "W=" w ": a fault state missing while a figure or a healthy state shows: " d
+	  if (sh > 0 && P["nf"] < A["nf"]) print "W=" w ": a figure missing while a healthy state shows: " d
+	  if (P["nf"] > 0 && !(("f" A["f", 1]) in SHOWN)) print "W=" w ": the CPU figure missing while the memory figure shows: " d
+	  # a wider screen only adds parts
+	  if (w > 21) for (x in LAST) if (!(x in SHOWN)) print "W=" w ": " substr(x, 2) " shown at W=" w - 1 " but not here"
+	  delete LAST; for (x in SHOWN) LAST[x]
+	}' "$1"
+}
+digest_at() { gawk -F'\t' -v w="$2" '$1 == w { sub(/^ +/, "", $2); print $2 }' "$1"; }   # digest_at FILE W
+c_digest_fit() {   # DISPLAY-v4 E AC 1
+	T_TITLE="E1: the COMPACT digest at every width 21..120 fits the screen by whole parts, the fault states kept longest, then the CPU figure, then memory, the states in sinfo order, a cut list ending in a … of its own; the pins; ! red and alone in colour; the ! and ? cases"
+	local fx pids=() bad pin got want
+	local swept="big40 scfail scfail-downlast membar-busy noacct bars-busy bars-down wide-text"
+	for fx in $swept; do digest_series "$fx" "$T_DIR/dig-$fx" & pids+=($!); done
+	wait "${pids[@]}"
+	for fx in $swept; do
+		if ! [ -s "$T_DIR/dig-$fx" ]; then T_FAIL+=("$fx: the series left no result"); continue; fi
+		while IFS= read -r bad; do [ -z "$bad" ] || T_FAIL+=("$fx: $bad"); done < "$T_DIR/dig-$fx.fail"
+		T_CALLS=$((T_CALLS + $(cat "$T_DIR/dig-$fx.calls")))
+		bad=$(digest_check "$T_DIR/dig-$fx" | head -n 5 | paste -sd ';')
+		need "$fx: every W 21..120 by E1${bad:+ ($bad)}" test -z "$bad"
+	done
+	for pin in "scfail-downlast:25:nodes: 1 down*, … · …" \
+	           "scfail-downlast:36:nodes: 1 down*, … · 58/152 cpu · …" \
+	           "scfail-downlast:49:nodes: 1 down*, … · 58/152 cpu · 265/!1085G mem" \
+	           "scfail-downlast:55:nodes: 1 mixed, 1 down* · 58/152 cpu · 265/!1085G mem" \
+	           "big40:25:nodes: 3 down*, … · …" \
+	           "big40:80:nodes: 3 down*, 2 drained, 2 draining, … · 1020/2560 cpu · 3135/!10240G mem" \
+	           "big40:87:nodes: 12 mixed, 3 down*, 2 drained, 2 draining, … · 1020/2560 cpu · 3135/!10240G mem" \
+	           "big40:107:nodes: 12 mixed, 10 allocated, 11 idle, 3 down*, 2 drained, 2 draining · 1020/2560 cpu · 3135/!10240G mem" \
+	           "scfail:21:nodes: … · …" "scfail:27:nodes: … · 82/152 cpu · …" \
+	           "scfail:40:nodes: … · 82/152 cpu · 335/!1085G mem" "scfail:49:nodes: 1 mixed, … · 82/152 cpu · 335/!1085G mem" \
+	           "scfail:59:nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/!1085G mem" \
+	           "noacct:59:nodes: 1 allocated, 1 down* · 128/256 cpu · 443/1006G mem" \
+	           "noacct:49:nodes: 1 down*, … · 128/256 cpu · 443/1006G mem" \
+	           "noacct:37:nodes: 1 down*, … · 128/256 cpu · …" "noacct:23:nodes: 1 down*, … · …"; do
+		fx=${pin%%:*} pin=${pin#*:}; want=${pin#*:} pin=${pin%%:*}
+		got=$(digest_at "$T_DIR/dig-$fx" "$pin")
+		need "$fx W=$pin: '$want'${got:+ (has '$got')}" test "$got" = "$want"
+	done
+	# --color: the ! of a total red and alone; a state's own ! (idle!) is no mark
+	for fx in scfail scfail-idlebang; do
+		sq_run "$fx" SQ_HEIGHT=4 -- --compact --color
+		need "$fx --color: only the ! after the / is coloured, ESC[31m!ESC[0m, nothing else in the line" eval '
+			rc_is 0 && [ "$(grep -F "nodes: " "$OUT" | LC_ALL=C grep -o "$ESC\[[0-9;]*m" | paste -sd " " | tr -d "$ESC")" = "[31m [0m" ] &&
+			grep -F "nodes: " "$OUT" | grep -qF "/$ESC[31m!$ESC[0m"'
+	done
+	need "scfail-idlebang: idle! is a healthy state, its ! no mark" eval 'plain | grep -qE "^ +nodes: 1 mixed, 1 idle! · 58/152 cpu · 265/!1085G mem$"'
+	# the ! cases: scontrol fine, a total unknown, CR_CORE, a node scontrol did not list
+	for pin in "membar-busy:nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/1052G mem" \
+	           "scfail-memempty:nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/?G mem" \
+	           "crcore-scfail:nodes: 1 mixed, 1 allocated · 82/152 cpu" \
+	           "scnolist:nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/!1055G mem"; do
+		fx=${pin%%:*} want=${pin#*:}
+		sq_run "$fx" SQ_HEIGHT=4 -- --compact
+		need "$fx: '$want'" eval 'rc_is 0 && [ "$(digest_line)" = "$want" ]'
+	done
+}
+# ---- E3-E5 (DISPLAY-v4): readable node figures, the caption, which view -----
+# the dim lines under the nodes in their order: R (a node reason), S (the
+# skipped rows), U (E4's caption), M (the MEMNOTE place, NODES' text)
+node_notes() {
+	plain | gawk '/^ *↳ [0-9]+ unreadable node row/ { printf "S"; next } /^ *↳ sinfo gave no usable figure/ { printf "U"; next }
+		/^ *↳ memory counts RealMemory/ { printf "M"; next } / cpu .* mem / { n = 1; next } n && /^ +↳ / { printf "R" } END { print "" }'
+}
+node_caption_dim() { grep -F "↳ sinfo gave no usable figure" "$OUT" | grep -qF "$ESC[2m↳ sinfo gave no usable figure"; }
+c_node_figures() {   # DISPLAY-v4 E AC 3, 4, 5
+	T_TITLE="E3-E5: a figure sinfo gives no usable value for (none, a word, Memory 0 or 1, AllocMem or Memory N/A) reads -, · and ? and is named in a dim caption under the nodes, in a fixed order; FreeMem and CPUsLoad N/A stay quiet; AllocMem above Memory as Slurm says; the in-use view only on evidence"
+	local h want got bad=
+	# E3, one field and form each (fxE), figures exact
+	sq_run freemem-empty -- --full
+	need "FreeMem empty, scheduled: fb2-bioinf-0 allocated, its use unknown (▒ then ·), FreeMem named" eval '
+		rc_is 0 && err_empty && mem_part_is fb2-bioinf-0 "▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒· 93% 70/75G mem allocated" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for FreeMem (1 node): shown as unknown" ]'
+	sq_run crcore-freemem-empty -- --full
+	need "FreeMem empty, CR_CORE: fb2-bioinf-0 -% -/78G, all ·" eval '
+		rc_is 0 && mem_part_is fb2-bioinf-0 "················ -% -/78G mem allocated" && mem_part_is fb2-bioinf "████████░░░░░░░░ 48% 493/1007G mem mixed" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for FreeMem (1 node): shown as unknown" ]'
+	sq_run memory-empty -- --full
+	need "Memory empty: fb2-bioinf -% 265/- mem, all ·, Memory named" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "················ -% 265/- mem mixed" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for Memory (1 node): shown as unknown" ]'
+	sq_run memory-empty SQ_HEIGHT=4 -- --compact
+	need "... digest 335/?G mem" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/?G mem" ]'
+	sq_run allocmem-garbage -- --full
+	need "AllocMem n/a: fb2-bioinf -% -/977G, all ·, AllocMem named" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "················ -% -/977G mem mixed" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for AllocMem (1 node): shown as unknown" ]'
+	sq_run allocmem-garbage SQ_HEIGHT=4 -- --compact
+	need "... digest ?/1052G mem" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · ?/1052G mem" ]'
+	sq_run cpusload-garbage -- --full
+	need "CPUsLoad empty and x: the CPU bar as with N/A, ▒ then ·, CPUsLoad named" eval '
+		rc_is 0 && plain | grep -qE "^ +fb2-bioinf +▒{7}·{9} +45% " &&
+		plain | grep -qE "^ +fb2-bioinf-0 +▒{16} +100% " &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for CPUsLoad (2 nodes): shown as unknown" ]'
+	sq_run noalloc-triage -- --full
+	need "several fields: named in the fixed order AllocMem, Memory, FreeMem, CPUsLoad, with node counts" eval '
+		rc_is 0 && [ "$(node_caption)" = "↳ sinfo gave no usable figure for AllocMem (2 nodes), FreeMem (1 node): shown as unknown" ]'
+	sq_run bars-edges -- --full
+	need "bars-edges: the order holds across fields (Memory before CPUsLoad); zero02 -% 0/- mem, all ·" eval '
+		rc_is 0 && [ "$(node_caption)" = "↳ sinfo gave no usable figure for Memory (2 nodes), CPUsLoad (1 node): shown as unknown" ] &&
+		mem_part_is zero02 "················ -% 0/- mem idle"'
+	# Memory 1 (RealMemory not configured) and 0 are unknown totals
+	sq_run mem1-crcore -- --full
+	need "mem1-crcore (Memory=1): both nodes -% -/- mem, all ·, Memory (2 nodes)" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "················ -% -/- mem mixed" && mem_part_is fb2-bioinf-0 "················ -% -/- mem allocated" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for Memory (2 nodes): shown as unknown" ]'
+	sq_run mem1-busy SQ_HEIGHT=4 -- --compact
+	need "mem1-busy: digest 0/?G mem" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 0/?G mem" ]'
+	sq_run mem0 -- --full
+	need "mem0 (Memory=0): fb2-bioinf-0 -% 70/- mem, all ·" eval 'rc_is 0 && mem_part_is fb2-bioinf-0 "················ -% 70/- mem allocated"'
+	sq_run mem0 SQ_HEIGHT=4 -- --compact
+	need "... digest 335/?G mem" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/?G mem" ]'
+	sq_run alloc-gt-mem -- --full --color
+	need "AllocMem above Memory: as Slurm says, 11718% 8789/75G, the bar full █" eval '
+		rc_is 0 && mem_part_is fb2-bioinf-0 "████████████████ 11718% 8789/75G mem allocated" && [ "$(mem_bar_kinds fb2-bioinf-0)" = "█" ] && [ -z "$(node_caption)" ]'
+	sq_run allocNA-both -- --full
+	need "AllocMem N/A on both: -/977G and -/75G, all ·, AllocMem (2 nodes)" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "················ -% -/977G mem mixed" && mem_part_is fb2-bioinf-0 "················ -% -/75G mem allocated" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for AllocMem (2 nodes): shown as unknown" ]'
+	# FreeMem and CPUsLoad N/A: quiet, the node line as before
+	sq_run membar-down -- --full
+	need "membar-down (FreeMem, CPUsLoad N/A on a down node): ··· 0% 0/75G, no caption" eval '
+		rc_is 0 && mem_part_is fb2-bioinf-0 "················ 0% 0/75G mem down*" && [ -z "$(node_caption)" ]'
+	sq_run busy24 -- --full
+	need "busy24 (FreeMem N/A on node02): its line as before, no caption" eval '
+		rc_is 0 && plain | grep -qE "^ +node02 +░+ +0% +0/128 cpu +·+ +0% +0/503G mem +down\*$" && [ -z "$(node_caption)" ]'
+	sq_run bars-edges -- --full
+	need "bars-edges: zero02s CPUsLoad N/A is not named (its 1 CPUsLoad is ldrange, a range)" eval '
+		rc_is 0 && [ "$(LC_ALL=$utf8 gawk "/^ *ldrange /" <(plain) | grep -c .)" = 1 ] && node_caption | grep -qF "CPUsLoad (1 node)"'
+	sq_run membar-busy -- --full
+	need "every value readable: no caption" eval 'rc_is 0 && [ -z "$(node_caption)" ]'
+	# E4: where, dim, cut at the block's width, within COMPACT's height
+	sq_run notes3 -- --full --color
+	need "notes3: the skipped-rows note, the caption, the scontrol note, in that order, the caption dim" eval '
+		rc_is 0 && [ "$(node_notes)" = SUM ] && node_caption_dim'
+	sq_run bars-edges -- --full
+	need "bars-edges: a node reason, then the caption, last under the nodes" eval 'rc_is 0 && [ "$(node_notes)" = RU ]'
+	sq_run bars-edges SQ_WIDTH=60 -- --full
+	need "bars-edges at 60: the caption cut with … at the node block's width" eval '
+		rc_is 0 && node_caption | grep -q "…$" && [ "$(node_caption | LC_ALL=$utf8 gawk "{ print length(\$0) + 2 }")" -le "$(node_width)" ]'
+	for h in 6 8 10 11 12 13 14; do
+		sq_run notes3 SQ_HEIGHT=$h -- --compact
+		got=$(plain | wc -l)
+		{ rc_is 0 && lines_within "$h" && footer_last 5 5 0 0 && [[ SUM == *"$(node_notes)"* ]]; } || bad="$bad $h"
+		case $h in 6) want=4 ;; 8) want=8 ;; 10) want=10 ;; 12) want=11 ;; 14) want=14 ;; *) want=$got ;; esac
+		[ "$got" = "$want" ] || bad="$bad $h($got)"
+	done
+	need "notes3 COMPACT 120 x H 6..14: within H, the footer last, the notes in E4's order; 4, 8, 10, 11, 14 lines at H 6, 8, 10, 12, 14 (not at H =${bad:- none})" test -z "$bad"
+	sq_run notes3 SQ_HEIGHT=12 -- --compact
+	need "notes3 at 120x12: the node block in full with all three notes" eval 'rc_is 0 && [ "$(node_notes)" = SUM ] && [ "$(lines_matching " cpu .* mem " | grep -c .)" = 2 ]'
+	sq_run allocNA-both SQ_HEIGHT=12 -- --compact
+	need "allocNA-both at 120x12 with the caption: within 12 lines, the footer last, the caption shown" eval 'rc_is 0 && lines_within 12 && footer_last 5 5 0 0 && [ "$(node_notes)" = U ]'
+	# E5: which view
+	for c in allocmem-empty allocNA-both; do
+		sq_run $c -- --full
+		need "$c: the allocated view, no in-use figure (493, 76) anywhere" eval 'rc_is 0 && ! plain | grep -qE "(^| )(493|76)/" && mem_part fb2-bioinf | grep -qF " -/977G mem "'
+	done
+	sq_run crcore-idle -- --full
+	need "crcore-idle (nothing allocated, CR_CORE-shaped): the allocated view, 0/1007G" eval 'rc_is 0 && mem_part_is fb2-bioinf "░░░░░░░░░░░░░░░░ 0% 0/1007G mem idle"'
+	sq_run crcore-idle SQ_HEIGHT=4 -- --compact
+	need "... digest 0/1085G mem" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 2 idle · 0/152 cpu · 0/1085G mem" ]'
+	sq_run not-utf8 -- --full
+	need "not-utf8 (CPUs allocated, AllocMem 0): the in-use view" eval 'rc_is 0 && plain | grep -qE " cpu +█░+ +6% +8/125G mem +idle$"'
+	sq_run allocmem-onebusy-empty -- --full
+	need "one busy node AllocMem 271360, the other unknown: the allocated view, the unknown one - and ·" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" && mem_part_is fb2-bioinf-0 "················ -% -/75G mem allocated"'
+}
+# E1 and E4 with NODES' N10: a node scontrol listed twice, did not list, gave a
+# garbled, a -1 or a too large MemSpecLimit for counts RealMemory, so the
+# digest marks its total with !; the caption and N10's line together
+c_digest_n10() {   # DISPLAY-v4 E AC 1 (N10's cases) and E AC 4 (with NODES)
+	T_TITLE="E1/M3 with NODES' N10: each per-node case (twice, not listed, garbled, -1, at or above RealMemory) marks the digest's total with !, on --json as on -o; a MemSpecLimit of 0 none; E4's caption and N10's line together within COMPACT 120x12"
+	local d dj kind how fx env want
+	nodes_lines
+	for kind in twice nolist garbled minus big zero; do
+		case $kind in
+			twice)   d=$(dash_copy "n-$kind" "scontrol-node=$mb_big Comment=x\\n$mb_big"$'\n'"$mb_small")
+			         dj=$(json_fx membar-busy '{ print } /^    \{$/ && !s { s = 1 } s == 1 { buf = buf $0 "\n" } /^    \},$/ && s == 1 { s = 2; printf "%s", buf }') ;;
+			nolist)  d=$(dash_copy "n-$kind" "scontrol-node=$mb_small"); dj=$d ;;
+			garbled) d=$(dash_copy "n-$kind" "scontrol-node=$(line_with "$mb_big" "OS=Linux" 'OS=Linux RealMemory\x3d1 AllocMem\x3d0 FreeMem\x3d1 Sockets\x3d1 Boards\x3d1')"$'\n'"$mb_small")
+			         dj=$(json_fx membar-busy "$json_add" NODE=fb2-bioinf KEY=specialized_memory J=0) ;;
+			minus)   d=$(dash_copy "n-$kind" "scontrol-node=$(line_with "$mb_big" "MemSpecLimit=31000" "MemSpecLimit=-1")"$'\n'"$mb_small")
+			         dj=$(json_fx membar-busy '{ sub(/"specialized_memory": 31000,/, "\"specialized_memory\": -1,"); print }') ;;
+			big)     d=$(dash_copy "n-$kind" "scontrol-node=$(line_with "$mb_big" "MemSpecLimit=31000" "MemSpecLimit=1031000")"$'\n'"$mb_small"); dj=$d ;;
+			zero)    d=$(dash_copy "n-$kind" "scontrol-node=$(line_with "$mb_big" "MemSpecLimit=31000" "MemSpecLimit=0")"$'\n'"$mb_small"); dj=$d ;;
+		esac
+		case $kind in
+			nolist) want="nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/!1082G mem" ;;
+			zero)   want="nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/1082G mem" ;;
+			*)      want="nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/!1082G mem" ;;
+		esac
+		for how in json nojson; do
+			if [ $how = json ]; then fx=$dj env=; else fx=$d env=SQSTUB_NOJSON=1; fi
+			sq_run "$fx" $env SQ_HEIGHT=4 -- --compact --no-color
+			need "$kind, $how: '$want'" eval 'rc_is 0 && err_empty && [ "$(digest_line)" = "$want" ]'
+		done
+	done
+	# E4's caption and N10's line together, after a skipped row, within 12 lines
+	d=$(dash_copy n-notes "scontrol-node=$mb_small" "sinfo=CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=526168; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=x; AllocMem=271360
+CPUsState=24/0/0/24; NodeList=fb2-bioinf-0; FreeMem=2176; Memory=80000; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=23.81; AllocMem=71680
+CPUsState=garbage; NodeList=fb2-bioinf-1; FreeMem=2176; Memory=80000; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=1.00; AllocMem=1")
+	for how in json nojson; do
+		if [ $how = json ]; then env=; else env=SQSTUB_NOJSON=1; fi
+		sq_run "$d" $env SQ_HEIGHT=12 -- --compact --no-color
+		need "skipped row, CPUsLoad x and fb2-bioinf not listed, $how, 120x12: within 12 lines, the node block in full with the three notes in order, the footer last" eval '
+			rc_is 0 && err_empty && lines_within 12 && footer_last 5 5 0 0 && [ "$(node_notes)" = SUM ] &&
+			[ "$(node_caption)" = "↳ sinfo gave no usable figure for CPUsLoad (1 node): shown as unknown" ] &&
+			[ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf: scontrol did not list it" ]'
+	done
 }
 # scontrol_clean: scontrol was called, and no call of it saw an SCONTROL_* or SLURM_JSON
 scontrol_clean() {
@@ -8679,6 +8992,7 @@ cases=(
 	compact_no_size compact_error_screens
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
+	digest_fit node_figures digest_n10
 	membar_screens membar_detect membar_call membar_fail membar_partial membar_over membar_down membar_forged membar_json membar_fallback nodes_not_utf8 nodes_ctl_o
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ

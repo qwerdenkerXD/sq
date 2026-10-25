@@ -1,0 +1,7 @@
+@include ../_common/squeue-defaults
+i=12345678_[1000000-1000099%1]; j=hugeids; t=PD; T=PENDING; M=0:00; R=(JobArrayTaskLimit); S=N/A; r=JobArrayTaskLimit
+i=600_[5]; j=one-element-bracket-name; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=7_[0-3,5,7-15:2]; j=stride; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=9876543210_[1-2,4]; j=tenbase; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=4242; j=plain; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority
+i=11950_[1,3,5,7,9,11,13,15,17,19,21]; j=解析ジョブの長い名前; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority

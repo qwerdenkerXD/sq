@@ -1,7 +1,7 @@
-  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m07:49:42 UTC[0m
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m05:59:12 UTC[0m
 
-  [1mfb2-bioinf  [0m [32m█[32m█[32m█[2m░[2m░[2m░[2m░[0m  45%  [1m58[0m/128 cpu   [35m▓[35m▓[35m▓[2m░[2m░[2m░[2m░[0m  48%  [1m493[0m/1007G mem  [2mmixed[0m
-  [1mfb2-bioinf-0[0m [33m█[33m█[33m█[33m█[33m█[33m█[33m█[0m 100%  [1m24[0m/24  cpu   [35m▓[35m▓[35m▓[35m▓[35m▓[35m▓[35m▓[0m  97%  [1;31m 76[0m/78G   mem  [2mallocated[0m
+  [1mfb2-bioinf  [0m [32m█[32m█[32m█[2m░[2m░[2m░[2m░[0m  45%  [1m58[0m/128 cpu   [32m█[32m█[32m█[2m░[2m░[2m░[2m░[0m  48%  [1m493[0m/1007G mem  [2mmixed[0m
+  [1mfb2-bioinf-0[0m [33m█[33m█[33m█[33m█[33m█[33m█[33m█[0m 100%  [1m24[0m/24  cpu   [1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[0m  97%  [1;31m 76[0m/78G   mem  [2mallocated[0m
 
   [4mJOBID        NAME     USER     STATE   TIME       LEFT       CPU MEM  NODE/REA[0m
   [32m5101        [0m megahit  schroder [1;32mRUNNING[0m    3:12:40 4-20:47:20  16 100G fb2-bio…

@@ -1,0 +1,2 @@
+CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=526168; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=51.20; AllocMem=271360
+CPUsState=0/24/0/24; NodeList=fb2-bioinf-0; FreeMem=78000; Memory=80000; StateLong=idle!; Reason=none; TimeStamp=Unknown; CPUsLoad=0.10; AllocMem=0

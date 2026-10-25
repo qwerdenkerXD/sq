@@ -1,7 +1,7 @@
-  ▌ SLURM FranzGB  07:49:42 UTC
+  ▌ SLURM FranzGB  05:59:11 UTC
 
-  fb2-bioinf   ███░░░░  45%  58/128 cpu   ▓▓▓░░░░  48%  493/1007G mem  mixed
-  fb2-bioinf-0 ███████ 100%  24/24  cpu   ▓▓▓▓▓▓▓  97%   76/78G   mem  allocated
+  fb2-bioinf   ███░░░░  45%  58/128 cpu   ███░░░░  48%  493/1007G mem  mixed
+  fb2-bioinf-0 ███████ 100%  24/24  cpu   ███████  97%   76/78G   mem  allocated
 
   JOBID        NAME     USER     STATE   TIME       LEFT       CPU MEM  NODE/REA
   5101         megahit  schroder RUNNING    3:12:40 4-20:47:20  16 100G fb2-bio…
