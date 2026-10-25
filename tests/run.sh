@@ -4490,6 +4490,13 @@ c_node_figures() {   # DISPLAY-v4 E AC 3, 4, 5
 		rc_is 0 && [ "$(LC_ALL=$utf8 gawk "/^ *ldrange /" <(plain) | grep -c .)" = 1 ] && node_caption | grep -qF "CPUsLoad (1 node)"'
 	sq_run membar-busy -- --full
 	need "every value readable: no caption" eval 'rc_is 0 && [ -z "$(node_caption)" ]'
+	# both unknown on one busy node: every cell ·, the fields in E4's order
+	sq_run allocmem-memory-unknown -- --full --color
+	need "AllocMem N/A and Memory 0 on fb2-bioinf: -% -/- mem, every cell · (no ▒), AllocMem before Memory in the caption" eval '
+		rc_is 0 && mem_part_is fb2-bioinf "················ -% -/- mem mixed" && bar_kinds_are fb2-bioinf 2 "2:·" &&
+		[ "$(node_caption)" = "↳ sinfo gave no usable figure for AllocMem (1 node), Memory (1 node): shown as unknown" ]'
+	sq_run allocmem-memory-unknown SQ_HEIGHT=4 -- --compact
+	need "... digest ?/?G mem" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · ?/?G mem" ]'
 	# E4: where, dim, cut at the block's width, within COMPACT's height
 	sq_run notes3 -- --full --color
 	need "notes3: the skipped-rows note, the caption, the scontrol note, in that order, the caption dim" eval '

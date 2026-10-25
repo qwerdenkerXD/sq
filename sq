@@ -5591,7 +5591,8 @@ END{
     mp = mempc[r]
     sc = cells(used[r], load[r], tot[r], barc, down ? "31" : (p>85 ? "33" : "32"))
     if (MEMALLOC)                               # allocated, drawn as the CPU bar is
-      sm = cells(memalloc[r], (meminuse[r] < 0) ? -1 : memalloc[r], memden[r], barm,
+      sm = cells((memalloc[r] < 0 || memden[r] < 0) ? 0 : memalloc[r],   # unknown: every cell ·
+                 (meminuse[r] < 0) ? -1 : memalloc[r], memden[r], barm,
                  down ? "31" : (mp>85 ? "33" : "32"))
     else
       sm = cells(meminuse[r] < 0 ? 0 : meminuse[r], meminuse[r], memreal[r], barm,   # in use, as a fill
