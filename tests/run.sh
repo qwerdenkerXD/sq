@@ -9500,6 +9500,7 @@ c_whole_full() {   # WHOLE AC 6 (R-H3, R-H4, decision 4)
 		need "$fx FULL: no column dropped, no short form taken, nothing cut but text (breaches:${bad:- none})" eval '[ -z "${bad// /}" ]'
 	done
 }
+whole_no_minute() { sed -E 's/→ ([A-Z][a-z]{2}[0-9]{2} )?[0-9]{2}:[0-9]{2}/→ \1HH:MM/g'; }
 c_whole_c_mode() {   # WHOLE AC 9
 	T_TITLE="no UTF-8 locale (gawk in C): COMPACT on ASCII fixtures at W 21..60 step 3, with and without colour, byte for byte the UTF-8 screen"
 	local nobin=$T_DIR/nobin fx wd col want bad=
@@ -9508,9 +9509,10 @@ c_whole_c_mode() {   # WHOLE AC 9
 	for fx in busy24 noacct oddfin mix30 memalloc-r nboot; do
 		for wd in $(seq 21 3 60); do
 			for col in --no-color --color; do
-				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT=30 -- --compact $col; want=$RUN/screen; without_clock "$OUT" > "$want"
+				# a start estimate today reads HH:MM, which a minute rolling over between the runs moves
+				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT=30 -- --compact $col; want=$RUN/screen; without_clock "$OUT" | whole_no_minute > "$want"
 				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT=30 LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --compact $col
-				{ rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT"); } || bad="$bad $fx:$wd$col"
+				{ rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT" | whole_no_minute); } || bad="$bad $fx:$wd$col"
 			done
 		done
 	done
