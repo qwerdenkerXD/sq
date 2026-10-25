@@ -9227,6 +9227,31 @@ CPUsState=0/8/0/8; NodeList=extra2; FreeMem=7000; Memory=8000; StateLong=idle; R
 	done
 }
 
+# the gawk argument limit (WHOLE AC 14): Linux takes no single argument over
+# MAX_ARG_STRLEN (32 pages, 131072 bytes), and the dashboard's program alone
+# comes near it; over it, sq dies with "Argument list too long" before it
+# draws anything.  A gawk on PATH ahead of the real one logs every call's
+# longest argument, and for a call with --source how many parts it has
+c_gawk_arg_limit() {
+	T_TITLE="the dashboard's program reaches gawk as three --source parts (the libraries and the program), no argument of any of the run's gawk calls over 131072 bytes, and a COMPACT run draws its screen"
+	local shim=$T_DIR/argbin real; real=$(command -v gawk)
+	mkdir -p "$shim"
+	cat > "$shim/gawk" <<-SHIM
+		#!/usr/bin/env bash
+		LC_ALL=C; longest=0 parts=0
+		for a; do [ \${#a} -le \$longest ] || longest=\${#a}; [ "\$a" != --source ] || parts=\$((parts + 1)); done
+		printf '%s %s\n' "\$parts" "\$longest" >> "$T_DIR/arglens"
+		exec "$real" "\$@"
+	SHIM
+	chmod +x "$shim/gawk"
+	: > "$T_DIR/arglens"
+	sq_run busy24 PATH="$shim:$here/bin:$PATH" SQ_HEIGHT=24 SQ_WIDTH=100 -- --compact --no-color
+	need "a COMPACT run on the logging gawk draws its screen, the footer last" eval 'rc_is 0 && err_empty && plain | tail -n 1 | grep -qE "^ +151 jobs +128 running"'
+	need "the dashboard's call has three --source parts" eval '[ "$(gawk "\$1 > 0 { print \$1 }" "$T_DIR/arglens")" = 3 ]'
+	need "no argument of a gawk call over 131072 bytes (longest: $(sort -k2 -n "$T_DIR/arglens" | tail -n 1 | cut -d" " -f2))" eval '
+		[ -s "$T_DIR/arglens" ] && gawk "\$2 > 131072 { bad = 1 } END { exit bad }" "$T_DIR/arglens"'
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -9271,6 +9296,7 @@ cases=(
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
 	opts_jobid opts_repeat opts_check_order opts_sub_placement opts_o_attached opts_fallback_source opts_mem opts_docs
 	nodes_o_calls nodes_o_figures nodes_o_forged nodes_o_pairs nodes_o_fail nodes_o_bounds stub_nodes stub_fast nodes_o_cost nodes_nopart nodes_caption
+	gawk_arg_limit
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,

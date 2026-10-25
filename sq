@@ -4467,11 +4467,15 @@ for v in $sqv; do export "SQV_$v=${!v}"; done
 # 127 (grep's rc 1: none), so their cells are measured, cut and padded by
 # columns; an ASCII screen keeps the plain length() and printf of a cell
 wide=1; high_bytes "$tmp/nodes" "$tmp/jobs" "$tmp/recent"; [ $? != 1 ] || wide=0
+# The libraries and the program go as --source parts of their own: Linux takes
+# no single argument over 128 KiB (MAX_ARG_STRLEN), which the three together
+# come near (tests/run.sh gawk_arg_limit)
 env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" -v wide="$wide" \
                       -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
                       -v compact="$compact" -v reserve="$reserve" -v prompt="$prompt" -v uidmap="$uidmap" -v sqv="$sqv" \
                       -v screen="$screen" -v memon="$memon" -v myuid="$myuid" -v memfail="$memfail" -v totfail="$totfail" \
-                      -v qfields="$qfields" -v qpos_jobid="$qpos_jobid" -v qpos_uid="$qpos_uid" "$shared_awk$wide_awk"'
+                      -v qfields="$qfields" -v qpos_jobid="$qpos_jobid" -v qpos_uid="$qpos_uid" \
+                      --source "$shared_awk" --source "$wide_awk" --source '
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
   m = split(list, a, ",")
   for (i=1; i<=m; i++) a[i] = a[i]+0
