@@ -226,44 +226,97 @@ fi
 # The --json answer, as the fixture scontrol-node.json, must come back from the
 # stub byte for byte.  And sq's own readers, cut out of sq (between its "the
 # node readers" and "node readers end" lines, after its character classes,
-# which they use), must agree: node_json_read on --json with node_read on -o,
-# asked before and after it (the figures move between two calls, so either may
-# match), the state compared as its base word and the set of its flags (JSON
-# lists the flags in another order).  Each answer reaches them as it reaches
-# sq's: through sq's scrub -s, cut out of sq too (between "the scrub" and
-# "scrub end").
+# which they use), must agree as sq uses them where Slurm has no JSON (NODES):
+# - G, the names of sq job's figure call (sinfo --local -h -N -O with its six
+#   fields, framed as sq frames them), as node_names lists them;
+# - node_read on `scontrol -o show node G`, asked before and after --json (the
+#   figures move between two calls, so either may match), with node_json_read
+#   on --json: name, CPUs, real_memory, specialized_memory, and whether the
+#   node is unknown;
+# - G's -o answer has no "Node N not found" line (sinfo and scontrol see the
+#   same nodes);
+# - sinfo's figures with --json per node (CPUsState's first figure alloc_cpus
+#   and its fourth cpus, Memory real_memory, AllocMem alloc_memory,
+#   StateComplete in upper case the state, compared as its base word and the
+#   set of its flags, as JSON lists the flags in another order), and the rows
+#   of one node byte for byte alike outside PartitionName.
+# Each answer reaches them as it reaches sq's: through sq's scrub -s, cut out
+# of sq too (between "the scrub" and "scrub end").  Run it once as an operator
+# and once as a user who is none (V3: the premise that sinfo and scontrol show
+# one user the same nodes); the line names the user it ran as.
 eval "$(sed -n '/^# ---- the scrub/,/^# ---- scrub end/p' "$here/../sq")"
-nodes_dump() {   # nodes_dump json|text FILE: what sq's reader keeps, a node a line
-	sed -n -e '/^# ---- the character classes/,/^# ---- character classes end/p' \
-		-e '/^# ---- the node readers/,/^# ---- node readers end/p' "$here/../sq" > "$work/readers.awk"
+sed -n -e '/^# ---- the character classes/,/^# ---- character classes end/p' \
+	-e '/^# ---- the node readers/,/^# ---- node readers end/p' "$here/../sq" > "$work/readers.awk"
+flags_awk='function flags(st,   n, a, i, j, t) {     # the base word, then the flags sorted
+	n = split(st, a, "+")
+	for (i = 2; i <= n; i++) for (j = i + 1; j <= n; j++) if (a[j] < a[i]) { t = a[i]; a[i] = a[j]; a[j] = t }
+	t = a[1]; for (i = 2; i <= n; i++) t = t "+" a[i]
+	return t
+}'
+nodes_dump() {   # nodes_dump json|text FILE [GATE]: what sq's reader keeps, a node a line
 	scrub -s < "$2" > "$2.scrubbed"
-	LC_ALL=C.UTF-8 gawk -v how="$1" -v f="$2.scrubbed" -f "$work/readers.awk" -e '
-	function flags(st,   n, a, i, j, t) {     # the base word, then the flags sorted
-		n = split(st, a, "+")
-		for (i = 2; i <= n; i++) for (j = i + 1; j <= n; j++) if (a[j] < a[i]) { t = a[i]; a[i] = a[j]; a[j] = t }
-		t = a[1]; for (i = 2; i <= n; i++) t = t "+" a[i]
-		return t
-	}
+	LC_ALL=C.UTF-8 gawk -v how="$1" -v f="$2.scrubbed" -v g="${3:-}" -f "$work/readers.awk" -e '
 	END {
 		if (how == "json" && !node_json_read(f)) { print "not accepted"; exit }
-		if (how == "text") node_read(f)
-		for (n = 1; n <= NN; n++) printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n", NODE_NAME[n], NODE_CPUS[n], NODE_CPUALLOC[n],
-			NODE_REALMEM[n], NODE_ALLOCMEM[n], NODE_SPECMEM[n], flags(NODE_STATE[n]), NODE_PARTS[n], NODE_BAD[n]
+		if (how == "text") node_read(f, g)
+		for (n = 1; n <= NN; n++) printf "%s|%s|%s|%s|%s\n", NODE_NAME[n], NODE_CPUS[n], NODE_REALMEM[n], NODE_SPECMEM[n], (n in NODE_BAD) ? NODE_BAD[n] : "ok"
 	}' /dev/null
 }
 d=$work/scontrol; mkdir -p "$d/fx"
-if run_real "$d/o1" scontrol -o show node && run_real "$d" scontrol --json show node && run_real "$d/o2" scontrol -o show node; then
+sfmt=; for f in CPUsState NodeList PartitionName Memory AllocMem StateComplete; do sfmt="$sfmt${sfmt:+,}$f:0$N3"; done
+who=$(real id -un 2>/dev/null)
+if run_real "$d/fig" sinfo --local -h -N -O "$sfmt" &&
+   G=$(LC_ALL=C SQ_F="$d/fig/real.out" SQ_N="$N3" gawk -f "$work/readers.awk" -e 'END { n = node_names(ENVIRON["SQ_F"], ENVIRON["SQ_N"], 6, 1); if (n < 1) exit 1; print NODE_LIST }' /dev/null) &&
+   run_real "$d/o1" scontrol -o show node "$G" && run_real "$d" scontrol --json show node && run_real "$d/o2" scontrol -o show node "$G"; then
 	cp "$d/real.out" "$d/fx/scontrol-node.json"
 	run_stub "$d" "$d/fx" scontrol --json show node
 	verdict scontrol-json "$d" "$(LC_ALL=C grep -c '^NodeName=' "$d/o1/real.out")"
-	nodes_dump json "$d/real.out" > "$d/json.dump"; nodes_dump text "$d/o1/real.out" > "$d/o1.dump"; nodes_dump text "$d/o2/real.out" > "$d/o2.dump"
+	printf '%s\n' "${G//,/$'\n'}" > "$d/gate"; scrub -s < "$d/gate" > "$d/gate.scrubbed"
+	nodes_dump json "$d/real.out" > "$d/json.dump"
+	nodes_dump text "$d/o1/real.out" "$d/gate.scrubbed" > "$d/o1.dump"; nodes_dump text "$d/o2/real.out" "$d/gate.scrubbed" > "$d/o2.dump"
+	# --json lists every node, -o G only sinfo's: compare the nodes of G
+	LC_ALL=C gawk -F'|' 'NR == FNR { g[$0]; next } $1 in g' "$d/gate.scrubbed" "$d/json.dump" > "$d/json.g.dump"
 	if [ ! -s "$d/json.dump" ] || [ "$(cat "$d/json.dump")" = "not accepted" ]; then
 		printf 'DIFFER %-16s node_json_read: %s\n' scontrol-readers "$(head -1 "$d/json.dump")"; fails=$((fails+1))
-	elif cmp -s "$d/json.dump" "$d/o1.dump" || cmp -s "$d/json.dump" "$d/o2.dump"; then
-		printf 'MATCH  %-16s node_json_read == node_read: %d nodes\n' scontrol-readers "$(wc -l < "$d/json.dump")"
+	elif cmp -s "$d/json.g.dump" "$d/o1.dump" || cmp -s "$d/json.g.dump" "$d/o2.dump"; then
+		printf 'MATCH  %-16s node_json_read == node_read on -o G: %d nodes (as %s)\n' scontrol-readers "$(wc -l < "$d/o1.dump")" "$who"
 	else
-		printf 'DIFFER %-16s node_json_read != node_read on either -o:\n' scontrol-readers
-		diff "$d/o1.dump" "$d/json.dump" | sed 's/^/         | /'; fails=$((fails+1))
+		printf 'DIFFER %-16s node_json_read != node_read on either -o G (as %s):\n' scontrol-readers "$who"
+		diff "$d/o1.dump" "$d/json.g.dump" | sed 's/^/         | /'; fails=$((fails+1))
+	fi
+	if LC_ALL=C grep -q '^Node .* not found$' "$d/o1/real.out" "$d/o2/real.out"; then
+		printf 'DIFFER %-16s scontrol -o does not know a node sinfo lists (as %s):\n' scontrol-names "$who"
+		LC_ALL=C grep -h '^Node .* not found$' "$d/o1/real.out" | sed 's/^/         | /'; fails=$((fails+1))
+	else
+		printf 'MATCH  %-16s scontrol -o knows every node sinfo lists: %s (as %s)\n' scontrol-names "$G" "$who"
+	fi
+	# sinfo's figures with --json's, per node, and one node's rows alike
+	scrub -s < "$d/fig/real.out" > "$d/fig/real.scrubbed"
+	if J="$d/real.out.scrubbed" S="$d/fig/real.scrubbed" LC_ALL=C.UTF-8 SQ_N="$N3" gawk -f "$work/readers.awk" -e "$flags_awk" -e '
+		END {
+			if (!node_json_read(ENVIRON["J"])) { print "         | --json not accepted"; exit 1 }
+			ns = read_rows(ENVIRON["S"], ENVIRON["SQ_N"])
+			for (r = 1; r <= ns; r++) {
+				nm = ROW[r, 2]; gsub(CNTRL, "?", nm)
+				sig = ROW[r, 1] "|" ROW[r, 4] "|" ROW[r, 5] "|" ROW[r, 6]
+				if (nm in seen) { if (seen[nm] != sig) { print "         | " nm ": rows differ outside PartitionName"; bad = 1 }; continue }
+				seen[nm] = sig
+				if (!(nm in NODE_AT)) { print "         | " nm ": not in --json"; bad = 1; continue }
+				i = NODE_AT[nm]; split(ROW[r, 1], c, "/")
+				got = c[1] "/" c[4] "/" ROW[r, 4] "/" ROW[r, 5] "/" flags(toupper(ROW[r, 6]))
+				want = NODE_CPUALLOC[i] "/" NODE_CPUS[i] "/" NODE_REALMEM[i] "/" NODE_ALLOCMEM[i] "/" flags(NODE_STATE[i])
+				if (got != want) { print "         | " nm ": sinfo " got ", --json " want; bad = 1 }
+			}
+			exit bad
+		}
+		function read_rows(file, nonce,   saved, ln, f, n, i) {
+			saved = RS; RS = nonce "\n"
+			while ((getline ln < file) > 0) { split(ln, f, nonce); n++; for (i = 1; i <= 6; i++) ROW[n, i] = f[i] }
+			RS = saved; return n
+		}' /dev/null > "$d/fig.cmp" 2>&1; then
+		printf 'MATCH  %-16s sinfo figures == --json per node, rows of a node alike (as %s)\n' sinfo-figures "$who"
+	else
+		printf 'DIFFER %-16s sinfo figures != --json (as %s):\n' sinfo-figures "$who"; cat "$d/fig.cmp"; fails=$((fails+1))
 	fi
 fi
 

@@ -39,20 +39,30 @@ A negative control: rendering the sacct fixture with `-P` instead of `-p` differ
 from the real output at byte 249 (the missing trailing delimiter), so the
 comparison can fail.
 
-## scontrol show node (automated, BATCH-K)
+## scontrol show node (automated, BATCH-K; NODES)
 
-`faithfulness.sh` asks `scontrol -o show node`, `scontrol --json show node` and
-`-o` again, and
+`faithfulness.sh` asks sq job's figure call (`sinfo --local -h -N -O` with its
+six fields, framed as sq frames them), lists its node names G as sq does, asks
+`scontrol -o show node G`, `scontrol --json show node` and `-o show node G`
+again, and
 
 - byte-compares the `--json` answer with the stub's (the answer as the fixture
   `scontrol-node.json`, printed verbatim);
 - runs sq's own readers, cut out of `sq` between its "the node readers" and
-  "node readers end" lines: `node_json_read` on the `--json` answer must keep
-  what `node_read` keeps from either `-o` answer (the figures may move between
-  two calls), each node's state compared as its base word and the set of its
-  flags, as JSON lists the flags in another order than `-o`.
+  "node readers end" lines: `node_json_read` on the `--json` answer must keep,
+  for the nodes of G, the name, CPUs, real memory and MemSpecLimit `node_read`
+  keeps from either `-o G` answer (the figures may move between two calls);
+- checks that the `-o G` answers hold no "Node N not found" line;
+- compares sinfo's figures with `--json`'s per node (allocated and total CPUs,
+  memory, allocated memory, the state as its base word and the set of its
+  flags, as JSON lists the flags in another order) and the rows of one node
+  (one per partition) with each other outside PartitionName.
 
-Not yet run live: bioserver was unreachable (ssh timed out) on 2026-10-23. On
+Run it once as an operator and once as a user who is none: the NODES design
+rests on sinfo and scontrol showing one user the same nodes (V3). Not yet run
+with these checks (they need bioserver).
+
+Before NODES (the unlisted `-o` and the old reader): not yet run live, bioserver was unreachable (ssh timed out) on 2026-10-23. On
 the same-moment captures of 2026-10-23 (attack-batchK3: `live.json`, `live.o`,
 json-c 0.17, Slurm 23.11.4) both hold: the stub prints `live.json` byte for
 byte (and its json-c 0.13.1 and 0.16 reprints), and both readers keep
