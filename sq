@@ -37,6 +37,7 @@
 #   sq --color / --no-color force colour on or off (--colour, --no-colour)
 #   sq --compact / --full   fit the screen / show everything (see below)
 #   sq --reserve N          COMPACT leaves N lines of the screen unused
+#                           (on a terminal one more, for the prompt)
 #   sq -h / --help          this help
 #   watch -tc -n 5 sq       live dashboard; keep -t, or watch's own header
 #                           pushes the footer off screen (or --reserve 2)
@@ -4213,6 +4214,12 @@ statetmp=${statedir:+$statedir/alerted.$$}      # renamed over alerted at the en
 # honest probe is to open it
 hastty=0
 [ -c /dev/tty ] && { : >/dev/tty; } 2>/dev/null && hastty=1
+# N lines that each end in a newline take N+1 rows of a terminal, so the
+# prompt after them would scroll the title off: COMPACT leaves that row free
+# on a terminal whose height sq measured itself (LINES, stty, tput, the
+# fallback).  SQ_HEIGHT is the height to fill, exactly; watch reads a pipe
+prompt=0
+[ -t 1 ] && [ -z "${SQ_HEIGHT:-}" ] && prompt=1
 
 # a failure only rings while it is this fresh, which is what makes a first run,
 # a cleared cache and a week of downtime behave sanely
@@ -4462,7 +4469,7 @@ for v in $sqv; do export "SQV_$v=${!v}"; done
 wide=1; high_bytes "$tmp/nodes" "$tmp/jobs" "$tmp/recent"; [ $? != 1 ] || wide=0
 env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" -v wide="$wide" \
                       -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
-                      -v compact="$compact" -v reserve="$reserve" -v uidmap="$uidmap" -v sqv="$sqv" \
+                      -v compact="$compact" -v reserve="$reserve" -v prompt="$prompt" -v uidmap="$uidmap" -v sqv="$sqv" \
                       -v screen="$screen" -v memon="$memon" -v myuid="$myuid" -v memfail="$memfail" -v totfail="$totfail" \
                       -v qfields="$qfields" -v qpos_jobid="$qpos_jobid" -v qpos_uid="$qpos_uid" "$shared_awk$wide_awk"'
 function compress(list,   a, m, i, out, start, prev) {    # 0,1,2,5 -> 0-2,5
@@ -5207,7 +5214,7 @@ END{
     FAILJ = j; FAILG = ord[j]                   # the newest job; the block reaches
     FMIN = (j + 1 >= d) ? d : j + 1             # down to it at least
     if (FMIN > FSLOTS) FMIN = FSLOTS
-    avail = lines - reserve
+    avail = lines - reserve - prompt
     fit()
   } else {                                      # FULL: everything
     for (x in SHOWN) SHOW[SHOWN[x]] = 1

@@ -136,6 +136,9 @@ sq -u "$USER" -p gpu      # squeue's filters and flags, read by their full long
                           #  apart (-a -r, not -ar).  Some names are refused too,
                           #  where they would replace the output sq parses
 sq -C                     # centred in both axes
+ssh -qt host sq           # over ssh: -t for a terminal (COMPACT); without -q,
+                          #  ssh's "Connection to … closed." line takes the row
+                          #  sq leaves for the prompt (or give it --reserve 1)
 sq log 12345              # a job's output file, followed while it runs (below)
 sq job 12345              # one job, and its efficiency once it ended (below)
 ```
@@ -151,7 +154,7 @@ sq job 12345              # one job, and its efficiency once it ended (below)
 | `--no-bell` | Never ring the bell. |
 | `--color` / `--no-color` | Force colour on or off. |
 | `--compact` / `--full` | Fit the screen / show every job, whatever the output goes to. Giving both is an error. |
-| `--reserve N` | COMPACT leaves N lines of the screen unused, e.g. for `watch`'s own header. If only the footer fits, only the footer is drawn. |
+| `--reserve N` | COMPACT leaves N lines of the screen unused, e.g. for `watch`'s own header (on a terminal one more, for the prompt). If only the footer fits, only the footer is drawn. |
 | `-h`, `--help` | Help. |
 
 | Variable | Effect |

@@ -3875,6 +3875,78 @@ c_auto_compact() {   # detection settled by measurement
 	sq_run busy24 -SQ_WIDTH -SQ_HEIGHT COLUMNS=100 LINES=24 --
 	need "COLUMNS+LINES into a file: COMPACT within LINES" busy_compact 24
 }
+# ---- G1 (DISPLAY-v4): on a terminal COMPACT leaves the prompt's row free ----
+# first_tenth: wait for the first tenth of a second, so two runs started now
+# read the same second (a run takes well under 0.9 s at low load)
+first_tenth() { local n; for n in $(seq 200); do [ "$(date +%N)" -lt 100000000 ] && return 0; sleep 0.01; done; }
+# pty_pipe FIXTURE ROWS COLS "PTY VARS" "PIPE VARS" [sq args]: sq on a ROWS x
+# COLS pty (colour by detection), and sq into a pipe with --color and the PIPE
+# VARS (watch's COLUMNS and LINES, say), the two started together in the first
+# tenth of a second.  PAIR_SAME 1 when they print the same bytes (the pty's CRs
+# aside), in this try or one of two more: a relative time (the title clock,
+# AGO, ELAPSED, → est) can tick between the two once, a change differs every
+# time.  PTY_LINES: the pty's line count, PAIR_RUNS the tries
+pty_pipe() {
+	local fx=$1 rows=$2 cols=$3 try prun pipe_run; local -a pvars qvars penv pargv
+	read -ra pvars <<< "$4"; read -ra qvars <<< "$5"; shift 5
+	PAIR_SAME=0 PAIR_RUNS=0
+	for try in 1 2 3; do
+		sq_env "$fx" TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT "${pvars[@]}" -- "$@"
+		prun=$RUN penv=("${ENVLIST[@]}") pargv=("${SQ_ARGV[@]}")
+		sq_env "$fx" TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT "${qvars[@]}" -- --color "$@"
+		pipe_run=$RUN
+		first_tenth
+		( OUT=$prun/out ERR=$prun/err PTY_ROWS=$rows PTY_COLS=$cols; pty_exec "${penv[@]}" -- "${pargv[@]}"; echo "$RC" > "$prun/rc" ) &
+		env -i "${ENVLIST[@]}" "$bound" -k 2 30 "$sq" "${SQ_ARGV[@]}" > "$OUT" 2> "$ERR" < /dev/null; echo $? > "$pipe_run/rc"
+		wait $!
+		use_pair_run "$pipe_run"; note_run; use_pair_run "$prun"; note_run
+		PAIR_RUNS=$try PTY_LINES=$(plain | wc -l)
+		tr -d '\r' < "$prun/out" | cmp -s - "$pipe_run/out" && [ "$(cat "$prun/rc")" = 0 ] && [ "$(cat "$pipe_run/rc")" = 0 ] && { PAIR_SAME=1; return; }
+	done
+}
+use_pair_run() { RUN=$1; OUT=$RUN/out ERR=$RUN/err LOG=$RUN/log; RC=$(cat "$RUN/rc"); }
+c_compact_prompt_row() {
+	T_TITLE="G1: on a terminal COMPACT fits one row less, for the prompt, byte for byte what a pipe prints with watch's COLUMNS and LINES one less; SQ_HEIGHT is exact; FULL unchanged"
+	local c fx rows cols want extra
+	# FIXTURE ROWS COLS LINES-THE-PTY-PRINTS PTY-VARS (, for none) sq-ARGS
+	for c in "noacct 20 80 19 , " "noacct 20 80 19 , -C" "noacct 20 80 17 , --reserve 2" "noacct 20 80 19 LINES=20 " \
+	         "busy24 24 100 23 , " "mixed 20 80 18 , " "mixed 20 80 18 , -C" "mixed 30 80 18 , " "mixed 30 80 23 , -C" \
+	         "membar-busy 12 120 11 , "; do
+		read -r fx rows cols want extra args <<< "$c"; [ "$extra" != , ] || extra=
+		read -ra argv <<< "$args"
+		pty_pipe "$fx" "$rows" "$cols" "$extra" "COLUMNS=$cols LINES=$((rows - 1))" "${argv[@]}"
+		need "$fx ${rows}x$cols${extra:+ $extra}${args:+ $args}: the pty prints what a pipe at COLUMNS=$cols LINES=$((rows - 1)) does (tries: $PAIR_RUNS)" test "$PAIR_SAME" = 1
+		need "$fx ${rows}x$cols${extra:+ $extra}${args:+ $args}: $want lines (has $PTY_LINES)" test "$PTY_LINES" = "$want"
+	done
+	# the height sq measures itself: SQ_HEIGHT empty, or LINES no usable number (the 24-line fallback)
+	for c in "SQ_HEIGHT= 19" "LINES=abc 23" "LINES=0 23"; do
+		read -r extra want <<< "$c"
+		PTY=1 PTY_ROWS=20 PTY_COLS=80 sq_run noacct TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT "$extra" --
+		need "noacct on a 20-row pty, $extra: rc 0, $want lines, the footer last" eval 'rc_is 0 && [ "$(plain | wc -l)" = '"$want"' ] && footer_last 151 128 23 0'
+	done
+	# SQ_HEIGHT is the height to fill, exactly: as a pipe with it
+	pty_pipe noacct 20 80 "SQ_HEIGHT=15" "COLUMNS=80 LINES=20 SQ_HEIGHT=15"
+	need "SQ_HEIGHT=15 on a 20-row pty: what a pipe at SQ_HEIGHT=15 prints (tries: $PAIR_RUNS)" test "$PAIR_SAME" = 1
+	need "... 15 lines (has $PTY_LINES)" test "$PTY_LINES" = 15
+	# ... down to the smallest: 1 the footer alone, 2 the title and the footer, as before
+	for h in 1 2; do
+		pty_pipe noacct 20 80 "SQ_HEIGHT=$h" "COLUMNS=80 LINES=20 SQ_HEIGHT=$h"
+		need "SQ_HEIGHT=$h on a 20-row pty: what a pipe at SQ_HEIGHT=$h prints, $h line(s), the footer last (tries: $PAIR_RUNS, lines: $PTY_LINES)" eval '
+			[ "$PAIR_SAME" = 1 ] && [ "$PTY_LINES" = '"$h"' ] && footer_last 151 128 23 0'
+	done
+	# FULL on a terminal is not fitted: what a pipe prints
+	pty_pipe noacct 20 80 "" "COLUMNS=80" --full
+	need "--full on a 20-row pty: what a pipe prints with --full (tries: $PAIR_RUNS)" test "$PAIR_SAME" = 1
+}
+c_display_docs() {
+	T_TITLE="DISPLAY-v4's docs: sq -h and the README's --reserve row name the prompt's row, the README's Usage the ssh -qt note (G1 AC5)"
+	local readme=${here%/*}/README.md
+	sq_run empty -- -h
+	need "sq -h: the --reserve line and its prompt row" eval 'rc_is 0 && plain | grep -A1 -E "^ *sq --reserve N +COMPACT leaves N lines of the screen unused$" | tail -n 1 | grep -qE "^ +\(on a terminal one more, for the prompt\)$"'
+	need "README: the --reserve row says it" grep -qF '| `--reserve N` | COMPACT leaves N lines of the screen unused, e.g. for `watch`'"'"'s own header (on a terminal one more, for the prompt).' "$readme"
+	need "README: Usage, ssh -qt and the closing line, or --reserve 1" eval 'grep -qE "^ssh -qt host sq +# " "$readme" && grep -qF "ssh'"'"'s \"Connection to … closed.\" line takes the row" "$readme" && grep -qF "(or give it --reserve 1)" "$readme"'
+	stubs_answer
+}
 c_auto_full() {   # detection settled by measurement; true today already
 	T_TITLE="no flag, no terminal: COLUMNS alone, LINES alone, neither, or SQ_HEIGHT alone all mean FULL"
 	local e; local -a env
@@ -8603,7 +8675,7 @@ cases=(
 	compact_sweep_quiet40 compact_sweep_faults
 	recent_max_full full_recent_fits compact_recent_max compact_no_folding compact_colour compact_oldfail compact_fold_elapsed compact_low_heights full_flag compact_full_both
 	reserve_refused compact_reserve reservation_forwarded
-	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full
+	sq_compact_env sq_compact_bad sq_compact_zero_pty auto_compact auto_full compact_prompt_row display_docs
 	compact_no_size compact_error_screens
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
@@ -8630,7 +8702,7 @@ timed_cases=" squeue_hangs squeue_ignores_term scrub_bounded tables_pass_cost ca
 	membar_json membar_fallback jobmem_outcomes jobmem_throttle job_own
 	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract
 	why_nodes_json why_tail_hung why_budget why_parallel why_signals
-	nodes_o_fail nodes_o_bounds stub_fast nodes_o_cost "
+	nodes_o_fail nodes_o_bounds stub_fast nodes_o_cost compact_prompt_row "
 timed_cases=" $(printf '%s ' $timed_cases)"       # one space around each name
 for c in $timed_cases; do
 	[[ " ${cases[*]} " == *" $c "* ]] || { echo "run.sh: timed_cases names $c, which is no case" >&2; exit 2; }
