@@ -3030,7 +3030,7 @@ c_shrink_extent() {
 # Narrower than BASE_[…] ×N no cut keeps both, and the cell takes the plain
 # right cut: -o i,T at 25 columns leaves JOBID exactly 15, at 24 one short
 c_shrink_floor() {
-	T_TITLE="JOBID exactly BASE_[…] ×N wide reads 6000000_[…] ×67; one narrower, the plain right cut"
+	T_TITLE="JOBID exactly BASE_[…] ×N wide reads 6000000_[…] ×67; one narrower, BASE_… ×N (DISPLAY-v4 F2), the base id and the count whole"
 	local fx; fx=$(pending_fixture floor "6000000_[$shrink_ids]")
 	sq_run "$fx" SLURM_BITSTR_LEN=0 SQ_WIDTH=25 -- -o i,T
 	need "25: rc 0"                   rc_is 0
@@ -3039,7 +3039,7 @@ c_shrink_floor() {
 	need "25: footer 67/0/67/0"       footer_is 67 0 67 0
 	sq_run "$fx" SLURM_BITSTR_LEN=0 SQ_WIDTH=24 -- -o i,T
 	need "24: rc 0"                   rc_is 0
-	need "24: cell '6000000_[1,4,…', the right cut" row_cell queue "6000000_[1,4,…"
+	need "24: cell '6000000_… ×67', F2's next form" row_cell queue "6000000_… ×67"
 	need "24: footer 67/0/67/0"       footer_is 67 0 67 0
 }
 
@@ -5553,7 +5553,9 @@ c_jobmem_compact_arrays() {
 # pinned screens are the ones Franz accepted on 2026-10-20, with folded arrays
 # as the sum he chose: S0 and S1 (fsill, nobody: FULL at 110 in a pipe), S2
 # (the mirror call failing), S3 (whole for all: nobody at 80 on a screen) and
-# S4 (own form a in the unit rule: fsill at 80 on a screen).
+# S4 (own form a in the unit rule: fsill at 80 on a screen).  S3's and S4's
+# JOBID cells are DISPLAY-v4 F2's (11920_… ×16 where they read 11920_[4-1…),
+# re-pinned from its build, which renders them as the design's prototype does.
 # mirror_at: which squeue call of the run the mirror call was, for env_of
 mirror_at() { gawk -F'\t' '$1 == "CALL" && $2 == "squeue" { c++ } $1 == "CALL" && $2 == "squeue" && /tres-alloc/ && !/StateCompact/ { print c; exit }' "$LOG"; }
 c_memalloc_screens() {
@@ -5583,7 +5585,7 @@ c_memalloc_screens() {
 	mem_run memalloc SQ_WIDTH=80 SQ_HEIGHT=30 COLUMNS=80 LINES=30 -- --color --full
 	need "S4 as fsill at 80 on a screen: rc 0, stderr empty, the accepted screen; own form a in the unit rule (salmon 15G, fastqc 8G, multiqc ?4G) beside whole totals" eval '
 		rc_is 0 && err_empty && cmp -s <(without_clock "$fx/fsill__full-w80-h30.ansi") <(without_clock "$OUT") &&
-		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_[0-2…" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
+		row_has 11903 "$ESC[32m15G$ESC[0m" && row_has "11930_…" "$ESC[31m8G$ESC[0m" && row_has 11908 "$ESC[2m?$ESC[0m4G" && [ "$(mem_of 11909)" = 15G ]'
 }
 # MEM is cut last under -M too, but cut: with the feature off (-M, MEM is %m)
 # a screen narrower than every column at its floor takes MEM down to 5 as
