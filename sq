@@ -3637,6 +3637,8 @@ canon_opt() {
 mark_filter() {                  # $1 the filter's key, $2 as written
 	case " $seen " in
 		*" $1 "*) opt_hint "$1"
+			# -R takes one reservation, the others a list
+			if [ "$1" = -R ]; then die "$2 sets the same filter twice; squeue would keep only the last one, so name one reservation, e.g. sq $1 $vlist"; fi
 			die "$2 sets the same filter twice; squeue would keep only the last one, so write one list instead, e.g. sq $1 $vlist" ;;
 	esac
 	seen="$seen $1"

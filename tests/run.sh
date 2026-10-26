@@ -8470,7 +8470,7 @@ c_opts_jobid() {   # AC17
 	o_refused "'0' is not a subcommand; sq -h lists them" -- -j 5 0
 }
 c_opts_repeat() {   # AC18
-	T_TITLE="a filter set twice in any spelling is refused naming the second, its example a real list (-R: one name); -u/--me and -A/-U are one key; the environment never repeats, -S may"
+	T_TITLE="a filter set twice in any spelling is refused naming the second, its example a real list (-R: one reservation, named so); -u/--me and -A/-U are one key; the environment never repeats, -S may"
 	local login; login=$(login_of_stub) tail="squeue would keep only the last one, so write one list instead, e.g. sq"
 	o_refused "-u sets the same filter twice; $tail -u $login,alice" -- -u a -ub
 	o_refused "--partition sets the same filter twice; $tail -p batch,gpu" -- -p a --partition=b
@@ -8478,7 +8478,8 @@ c_opts_repeat() {   # AC18
 	o_refused "-n sets the same filter twice; $tail -n myjob,otherjob" -- -n a -n b
 	o_refused "--nodelist sets the same filter twice; $tail -w node01,node02" -- -w a --nodelist=b
 	o_refused "-L sets the same filter twice; $tail -L matlab,ansys" -- -L a -L b
-	o_refused "--reservation sets the same filter twice; $tail -R maint" -- -R a --reservation b
+	o_refused "--reservation sets the same filter twice; squeue would keep only the last one, so name one reservation, e.g. sq -R maint" -- -R a --reservation b
+	o_refused "-R sets the same filter twice; squeue would keep only the last one, so name one reservation, e.g. sq -R maint" -- -R a -R b
 	o_refused "--me sets the same filter twice; $tail -u $login,alice" -- --me --me
 	o_refused "--me sets the same filter twice; $tail -u $login,alice" -- -u b --me
 	o_refused "-u sets the same filter twice; $tail -u $login,alice" -- --me -u b
