@@ -1380,7 +1380,7 @@ jobmem_snapshot() {
 # written as the new snapshot.  -w: every call through collect -w, as a
 # subcommand makes them
 jobmem_collect() {   # jobmem_collect [-w]
-	local w=${1-} memids memrc sstat_limit allocrc inherited
+	local w=${1-} memrc sstat_limit allocrc inherited list name k=0
 	: > "$tmp/memalloc"; : > "$tmp/memread"
 	# framed like the fallback's call: the format in SQUEUE_FORMAT2, so the
 	# queue nonce never reaches a command line.  StateCompact is %t's letter.
@@ -1402,14 +1402,28 @@ jobmem_collect() {   # jobmem_collect [-w]
 		END { exit bad }' "$tmp/alloc" > "$tmp/memalloc"
 	then memfail=1; : > "$tmp/memalloc"; return
 	fi
-	memids=$(env LC_ALL=C gawk -F '\t' '$2 == "R" && $3 > 0 && $4 == "1" { printf "%s%s", (n++ ? "," : ""), $1 }' "$tmp/memalloc")
+	# the ids to read, as sstat -j lists of at most 32 KiB each, a list a line:
+	# no argument may grow with the queue (Linux takes none over 128 KiB, and
+	# sq keeps each under 64 KiB), so a long list is asked in parts
+	env LC_ALL=C gawk -F '\t' '$2 == "R" && $3 > 0 && $4 == "1" {
+		if (list != "" && length(list) + 1 + length($1) > 32768) { print list; list = "" }
+		list = list (list == "" ? "" : ",") $1 }
+		END { if (list != "") print list }' "$tmp/memalloc" > "$tmp/memlists"
 	jobmem_snapshot && return
-	[ -n "$memids" ] || return 0
+	[ -s "$tmp/memlists" ] || return 0
 	# its own budget, min(SQ_TIMEOUT, 2) s: a node that does not
 	# answer must not hold every refresh for the whole timeout
 	sstat_limit=$(env LC_ALL=C gawk -v t="$tmo" 'BEGIN { print (t + 0 < 2) ? t : 2 }')
-	collect -t "$sstat_limit" $w sstat sstat -n -p -a --noconvert -j "$memids" -o JobID,TRESUsageInTot
-	memrc=$?
+	# a call per list, the first into sstat as ever, the others appended to
+	# it; memids "<id> TAB <rc>": each id with the exit code of its own call
+	: > "$tmp/memids"
+	while IFS= read -r list <&9; do      # on fd 9: the calls keep sq's stdin
+		k=$((k + 1)); name=sstat; [ $k = 1 ] || name=sstat.part
+		collect -t "$sstat_limit" $w "$name" sstat -n -p -a --noconvert -j "$list" -o JobID,TRESUsageInTot
+		memrc=$?
+		[ $k = 1 ] || { cat "$tmp/sstat.part" >> "$tmp/sstat"; cat "$tmp/sstat.part.err" >> "$tmp/sstat.err"; }
+		printf '%s\n' "$list" | tr ',' '\n' | sed "s/\$/\t$memrc/" >> "$tmp/memids"
+	done 9< "$tmp/memlists"
 	# A job reads "ok" with a complete row of its own (-p ends every
 	# row in "|"), each step once, as the id of an array's base task
 	# also returns its other tasks' steps; its bytes are the sum of
@@ -1417,9 +1431,9 @@ jobmem_collect() {   # jobmem_collect [-w]
 	# names the job ("job N", "StepId=N.", bar "No steps running"), or
 	# its rows carry no mem= at all; "none" otherwise.  A line naming
 	# no job asked for is ignored.  Each stderr line is read once.
-	env LC_ALL=C gawk -v ids="$memids" -v rc="$memrc" '
-		BEGIN { n = split(ids, Q, ","); for (i = 1; i <= n; i++) REQ[Q[i]] = 1 }
-		ARGIND == 1 {
+	env LC_ALL=C gawk '
+		ARGIND == 1 { split($0, f, "\t"); Q[++n] = f[1]; REQ[f[1]] = 1; RC[f[1]] = f[2]; next }
+		ARGIND == 2 {
 			if (!match($0, /^([0-9]+)[.][A-Za-z0-9_+]+[|]([^|]*)[|]$/, m) || !(m[1] in REQ)) next
 			if ((sid = substr($0, 1, index($0, "|") - 1)) in SEEN) next
 			SEEN[sid] = 1; ROWS[m[1]] = 1
@@ -1440,11 +1454,11 @@ jobmem_collect() {   # jobmem_collect [-w]
 		END {
 			for (i = 1; i <= n; i++) {
 				id = Q[i]
-				o = (rc != 0 || (id in FAIL) || ((id in ROWS) && !(id in HASMEM))) ? "failed" \
+				o = (RC[id] != 0 || (id in FAIL) || ((id in ROWS) && !(id in HASMEM))) ? "failed" \
 				  : (id in ROWS) ? "ok" : "none"
 				printf "%s\t%s\t%.0f\n", id, o, (o == "ok") ? BYTES[id] : 0
 			}
-		}' "$tmp/sstat" "$tmp/sstat.err" > "$tmp/memread"
+		}' "$tmp/memids" "$tmp/sstat" "$tmp/sstat.err" > "$tmp/memread"
 	# renamed into place, so a reader never meets half a snapshot
 	if [ -n "$memdir" ] && memtmp=$(mktemp "$memdir/memuse.XXXXXX" 2>/dev/null); then
 		{ printf '%s\n' "$memnow"; cat "$tmp/memread"; } > "$memtmp" 2>/dev/null &&

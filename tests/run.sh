@@ -10038,7 +10038,7 @@ c_whole_accepted() {
 # draws anything.  A gawk on PATH ahead of the real one logs every call's
 # longest argument, and for a call with --source how many parts it has
 c_gawk_arg_limit() {
-	T_TITLE="no argument of any gawk call sq makes is over 64 KiB (half of Linux's 128 KiB MAX_ARG_STRLEN), over the dashboard FULL and COMPACT (memory columns, scontrol -o, C), sq job (why, sstat, arrays, scontrol -o) and sq log; the dashboard's program reaches gawk as four --source parts, sq job's as five; each run draws its screen"
+	T_TITLE="no argument of any gawk call sq makes is over 64 KiB (half of Linux's 128 KiB MAX_ARG_STRLEN), over the dashboard FULL and COMPACT (memory columns, 17 000 own running jobs, scontrol -o, C), sq job (why, sstat, arrays, scontrol -o) and sq log; the dashboard's program reaches gawk as four --source parts, sq job's as five; each run draws its screen"
 	local shim=$T_DIR/argbin real fx limit=65536; real=$(command -v gawk)
 	mkdir -p "$shim"
 	# each call: its --source parts, its longest argument, and what ran it
@@ -10063,6 +10063,17 @@ c_gawk_arg_limit() {
 		job_run "${fx%%:*}" "${argenv[@]}" GAWK_RUN=job -- --no-color job "${fx#*:}"
 		need "sq job ${fx#*:} (${fx%%:*}): rc 0, its report" eval 'rc_is 0 && plain | head -n 1 | grep -q "^▌ ${fx#*:}"'
 	done
+	# the caller's own running jobs reach sstat -j and the reading's gawk; 17 000
+	# of them are a list of 136 KB, over Linux's 128 KiB for one argument (the
+	# stub log %q-quotes the commas)
+	fx=$T_DIR/fx-many; mkdir -p "$fx"
+	for f in "$fixtures"/memalloc/*; do [ -f "$f" ] && sed "s|^@include \.\./|@include $fixtures/|" "$f" > "$fx/${f##*/}"; done
+	gawk 'BEGIN { for (i = 1; i <= 17000; i++) printf "JobID=%d; tres_alloc=cpu=1,mem=1G,node=1,billing=1\n", 2000000 + i }' >> "$fx/squeue-alloc"
+	sq_run "$fx" "${argenv[@]}" GAWK_RUN=dash SQSTUB_UID=1041 SQ_WIDTH=110 SQ_HEIGHT=30 -- --full --no-color
+	need "17 000 own running jobs: rc 0, stderr empty (no 'Argument list too long'), flye read 83/100G" eval '
+		rc_is 0 && err_empty && rows queue | grep -qE "^ +11895 +flye +fsill +RUNNING .* 83/100G "'
+	need "... sstat asked in 5 calls, each -j list at most 32768 bytes, every id once" eval '
+		[ "$(calls sstat)" = 5 ] && gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"sstat\" { if (!match(\$3, /-j [^ ]+/)) bad = 1; l = substr(\$3, RSTART + 3, RLENGTH - 3); gsub(/\\\\/, \"\", l); if (length(l) > 32768) bad = 1; n += split(l, X, \",\") } END { exit bad || n != 17000 + 6 }" "$LOG"'
 	fx=$(jfx_copy arglen-o resources-11964); o_path "$fx" nojson
 	why_run "$fx" "${argenv[@]}" GAWK_RUN=job $O_ENV -- --no-color job 11964
 	need "sq job 11964 on scontrol -o (no --json): rc 0, its report" eval 'rc_is 0 && plain | head -n 1 | grep -q "^▌ 11964"'
