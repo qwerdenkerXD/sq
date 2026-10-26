@@ -109,10 +109,16 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/sq-tests.XXXXXX") || exit 2
 all_sids= case_pgids= stopped_by= selected=()
 n_pass=0 n_fail=0 n_xfail=0 n_xpass=0
 suite_exit() {
-	local sid pgid
-	# a run stopped by a signal says so in one line, with how far it got
-	[ -z "$stopped_by" ] || printf '\nrun.sh: interrupted by %s, %d of %d cases done\n' "$stopped_by" \
-		$((n_pass + n_fail + n_xfail + n_xpass)) ${#selected[@]} >&2
+	local sid pgid finished shown
+	# a run stopped by a signal says so in one line, with how far it got: the
+	# cases finished, and under -j how many of them were shown (in case order)
+	if [ -n "$stopped_by" ]; then
+		finished=$((n_pass + n_fail + n_xfail + n_xpass)) shown=
+		if [ -d "${results-}" ]; then
+			shown=", $finished shown"; finished=$(find "$results" -name '*.status' | wc -l)
+		fi
+		printf '\nrun.sh: interrupted by %s, %d of %d cases done%s\n' "$stopped_by" "$finished" ${#selected[@]} "$shown" >&2
+	fi
 	# the cases -j runs, and a case's own background work in a serial run
 	# (bars_width_sweep's series), with every process under them, by pid; all
 	# reaped here, so none still writes into the work dir as it goes, and
@@ -9481,6 +9487,21 @@ c_invalid_colour() {
 		need "WIDE (a name with ö) $mode: INVALID bold red" eval 'rc_is 0 && LC_ALL=C grep -q "$ESC\[1;31m *INVALID$ESC\[0m" "$OUT"'
 	done
 }
+# run.sh itself, stopped: under -j its one line counts the cases finished,
+# also those not shown yet (a case later in order done before an earlier one)
+c_suite_interrupt() {
+	T_TITLE="run.sh -j 3 stopped by SIGTERM while wide_c_mode runs and two later cases are done: rc 143, one line 'interrupted by SIGTERM, 2 of 3 cases done, 0 shown', its work dir gone"
+	local pid
+	mkdir -p "$T_DIR/tmp"
+	TMPDIR=$T_DIR/tmp bash "$here/run.sh" -j 3 wide_c_mode refuse_t_empty refuse_s > "$T_DIR/run.out" 2> "$T_DIR/run.err" &
+	pid=$!
+	need "the two later cases finish first" waits_for 60 eval '[ "$(find "$T_DIR/tmp" -path "*/.results/*.status" 2>/dev/null | wc -l)" -ge 2 ]'
+	kill -TERM "$pid"; wait "$pid"; RC=$?
+	T_CALLS=$((T_CALLS + 1))   # the stubs answered the nested run's cases (their verdicts check that)
+	need "rc 143, stderr the one line, nothing shown, the work dir gone" eval 'rc_is 143 && [ "$(grep -c . "$T_DIR/run.err")" = 1 ] &&
+		grep -qxF "run.sh: interrupted by SIGTERM, 2 of 3 cases done, 0 shown" "$T_DIR/run.err" && ! grep -q "^PASS" "$T_DIR/run.out" &&
+		[ -z "$(find "$T_DIR/tmp" -mindepth 1 -maxdepth 1 -name "sq-tests.*")" ]'
+}
 c_whole_widths() {   # WHOLE ACs 1-3, 5, 10 at W 21..80
 	T_TITLE="COMPACT at every width 21..80 (H 30, with and without colour): no line wider than W, no screen taller than H, no digit, unit or state word cut, footer and title each in the first of its forms that fits, every line's colour closed; the last resort only on realid's 10-digit ids below 23 columns"
 	local fx args
@@ -10141,7 +10162,7 @@ cases=(
 	nodes_o_calls nodes_o_figures nodes_o_forged nodes_o_pairs nodes_o_fail nodes_o_bounds stub_nodes stub_fast nodes_o_cost nodes_nopart nodes_caption
 	whole_widths whole_narrow whole_monotone whole_full whole_c_mode whole_height whole_pins whole_captions whole_docs whole_accepted
 	whole_forms whole_orders whole_guard whole_v31
-	gawk_arg_limit plural_one invalid_colour
+	gawk_arg_limit plural_one invalid_colour suite_interrupt
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,
