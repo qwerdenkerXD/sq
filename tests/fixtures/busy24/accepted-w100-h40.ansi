@@ -1,0 +1,39 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m07:33:20 UTC[0m
+
+  [1mnode01[0m [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[0m 100%  [1m128[0m/128 cpu   [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[2m░[2m░[0m  88%  [1m443[0m/503G mem  [2mallocated[0m
+  [1mnode02[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m  0[0m/128 cpu   [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m  0[0m/503G mem  [2mdown*[0m
+         [2m↳ Not responding · since 2026-10-05[0m
+
+  [4mJOBID             NAME     USER  STATE   TIME    LEFT       CPU MEM NODE/REASON                   [0m
+  [33m4201             [0m assemble fsill [1;33mPENDING[0m    0:00 1-00:00:00   1  4G (DependencyNeverSatisfied)
+  [33m4202             [0m merge    fsill [1;33mPENDING[0m    0:00   12:00:00   1  4G (DependencyNeverSatisfied)
+  [33m4207             [0m polish   fsill [1;33mPENDING[0m    0:00    8:00:00   1  4G (ReqNodeNotAvail, Unavailable…
+  [2m… 20 jobs pending[0m
+  [32m3990_[0-13] ×14  [0m align    alice [1;32mRUNNING[0m 5:59:00    6:00:00   1  4G node01
+  [32m3990_[14-27] ×14 [0m align    alice [1;32mRUNNING[0m 5:52:00    6:07:00   1  4G node01
+  [32m3990_[28-41] ×14 [0m align    alice [1;32mRUNNING[0m 5:45:00    6:14:00   1  4G node01
+  [32m3990_[42-55] ×14 [0m align    alice [1;32mRUNNING[0m 4:38:00    7:21:00   1  4G node01
+  [32m3990_[56-69] ×14 [0m align    alice [1;32mRUNNING[0m 4:31:00    7:28:00   1  4G node01
+  [32m3990_[70-83] ×14 [0m align    alice [1;32mRUNNING[0m 4:24:00    7:35:00   1  4G node01
+  [32m3990_[84-97] ×14 [0m align    alice [1;32mRUNNING[0m 3:17:00    8:42:00   1  4G node01
+  [32m3990_[98-111] ×14[0m align    alice [1;32mRUNNING[0m 3:10:00    8:49:00   1  4G node01
+  [32m4100             [0m deseq    bob   [1;32mRUNNING[0m 0:00:00   20:00:00   1  4G node01
+  [32m4101             [0m plot     mkoch [1;32mRUNNING[0m 0:13:00   21:00:00   1  4G node01
+  [32m4102             [0m index    mkoch [1;32mRUNNING[0m 0:26:00   22:00:00   1  4G node01
+  [32m4103             [0m qc       bob   [1;32mRUNNING[0m 0:39:00   23:00:00   1  4G node01
+  [32m4104             [0m trim     mkoch [1;32mRUNNING[0m 1:52:00   20:00:00   1  4G node01
+  [32m4105             [0m fastp    mkoch [1;32mRUNNING[0m 1:05:00   21:00:00   1  4G node01
+  [32m4106             [0m bwa      bob   [1;32mRUNNING[0m 1:18:00   22:00:00   1  4G node01
+  [32m4107             [0m merge    mkoch [1;32mRUNNING[0m 1:31:00   23:00:00   1  4G node01
+  [32m4108             [0m polish   mkoch [1;32mRUNNING[0m 2:44:00   20:00:00   1  4G node01
+  [32m4109             [0m assemble bob   [1;32mRUNNING[0m 2:57:00   21:00:00   1  4G node01
+  [32m4110             [0m sort     mkoch [1;32mRUNNING[0m 2:10:00   22:00:00   1  4G node01
+  [32m4111             [0m dedup    mkoch [1;32mRUNNING[0m 2:23:00   23:00:00   1  4G node01
+  [32m4112             [0m call     bob   [1;32mRUNNING[0m 3:36:00   20:00:00   1  4G node01
+  [32m4113             [0m annot    mkoch [1;32mRUNNING[0m 3:49:00   21:00:00   1  4G node01
+  [32m4114             [0m vcf      mkoch [1;32mRUNNING[0m 3:02:00   22:00:00   1  4G node01
+  [32m4115             [0m report   bob   [1;32mRUNNING[0m 3:15:00   23:00:00   1  4G node01
+
+  [2mrecently finished: [0m[31m4188 qc FAILED 1[0m
+
+  [1m151[0m jobs   [32m128 running[0m   [33m23 pending[0m   [31m0 other[0m

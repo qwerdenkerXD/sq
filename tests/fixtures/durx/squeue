@@ -1,0 +1,7 @@
+@include ../_common/squeue-defaults
+i=9001; j=forever; L=UNLIMITED; l=UNLIMITED; M=365-00:00:01
+i=9002; j=weird; L=INVALID; M=INVALID
+i=9003; j=notset; L=NOT_SET; M=0:59
+i=9004; j=sec; L=0:01; M=59:59
+i=9005; j=long; L=99-23:59:59; M=100-00:00:00
+i=9006; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A; r=Resources; j=pend

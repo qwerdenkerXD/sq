@@ -1,0 +1,5 @@
+@include ../_common/squeue-defaults
+i=6101; j=sweep_[1,4,7,10,13,16,19,22]; R=n[01-03,05,07],gpu[1-2]; N=n[01-03,05,07],gpu[1-2]
+i=6102; j=run_1,000,000; R=n01,n02,n03,n04,n05
+i=6103; j=n=1,2,3,4; t=PD; T=PENDING; M=0:00; R=(ReqNodeNotAvail, UnavailableNodes:n01,n02,n03,n04); S=N/A; r=ReqNodeNotAvail, UnavailableNodes:n01,n02,n03,n04
+i=6104_[1,3,5,7,9,11,13]; j=odd; t=PD; T=PENDING; M=0:00; R=(Priority); S=N/A; r=Priority

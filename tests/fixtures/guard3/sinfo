@@ -1,0 +1,2 @@
+CPUsState=0/0/128/128; NodeList=n1; FreeMem=N/A; Memory=515000; StateLong=down*; Reason=went x 12:30:45; TimeStamp=2026-10-05T22:14:00; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/0/128/128; NodeList=n2; FreeMem=N/A; Memory=515000; StateLong=drained; Reason=maint at 9:30 today; TimeStamp=2026-10-05T22:14:00; CPUsLoad=0.00; AllocMem=0

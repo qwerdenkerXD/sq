@@ -1,0 +1,10 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m07:33:20 UTC[0m
+
+  [1mnode01[0m [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[0m 100%  [1m128[0m/128 cpu   [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[2m░[2m░[0m  88%  [1m446[0m/503G mem  [2mallocated[0m
+
+  [4mJOBID   NAME       USER    STATE    TIME  LEFT        CPU  MEM  NODE/REASON               [0m
+  [33m4201 [0m   assemble   fsill   [1;33mPENDING[0m  0:00  1-00:00:00    1   4G  (DependencyNeverSatisfied)
+
+  [2mrecently finished: [0m[31m4188 qc FAILED 1[0m
+
+  [1m151[0m jobs   [32m128 running[0m   [33m23 pending[0m   [31m0 other[0m

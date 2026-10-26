@@ -1,0 +1,10 @@
+@include ../_common/squeue-defaults
+i=7001; j=2026-10-05_maintenance
+i=7002; j=1-02:11:05_rerun
+i=7003; j=v2.3.1-beta-build
+i=7004; j=10.0.0.1-hostcheck
+i=7005; j=chr1:1000-2000-region
+i=7006; j=3.14159265358979
+i=7007; j=run-1-2-3-4-5-6-7
+i=7008; j=sample12345abc
+i=7009; j=x9:30=7-long-name

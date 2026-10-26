@@ -4369,7 +4369,7 @@ for ((i = 0; i < ${#nf_key[@]}; i++)); do
 		-u) sf=-u lbl=user
 		    if [ "${nf_src[i]}" = --me ]; then   # sacct has no --me, only -u <login>
 			    v=${login:=$(id -un)}
-			    [ -n "$v" ] || { sskip="--me has no login name to translate"; break; }
+			    [ -n "$v" ] || { sskip="--me has no login name to translate"; sfltname=--me; break; }
 		    fi ;;
 		-p) sf=-r lbl=part ;;
 		-A) sf=-A lbl=acct ;;
@@ -4380,13 +4380,14 @@ for ((i = 0; i < ${#nf_key[@]}; i++)); do
 		--local) slocal=--local; continue ;;
 		--federation) sfed=--federation; continue ;;
 		-t|-S|-a|-P|--hide|--noconvert) continue ;;
-		*) sskip="sq does not translate ${nf_src[i]} for sacct"; break ;;   # -n -w -L -R --sibling
+		*) sskip="sq does not translate ${nf_src[i]} for sacct"; sfltname=${nf_src[i]}; break ;;   # -n -w -L -R --sibling
 	esac
 	sargs+=("$sf" "$v"); sfilt="$sfilt · $lbl=$v"
 	[ "$sf" = -u ] && suser=1
 done
 sfilt=$(printf '%s' "$sfilt" | scrub)
 sskip=$(printf '%s' "$sskip" | scrub)
+rflt=$(printf '%s' "${sfltname:-}" | scrub)   # the filter the finished line's short markers name (H7)
 
 # an overlap filter, so a job that started days ago and ended inside the window
 # is returned - which is the whole point.  Never --state: that redefines -S/-E
@@ -4474,7 +4475,7 @@ wide=1; high_bytes "$tmp/nodes" "$tmp/jobs" "$tmp/recent"; [ $? != 1 ] || wide=0
 # no single argument over 128 KiB (MAX_ARG_STRLEN), which the three together
 # come near (tests/run.sh gawk_arg_limit)
 env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" -v wide="$wide" \
-                      -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rmax="$rmax" \
+                      -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rflt="$rflt" -v rmax="$rmax" \
                       -v compact="$compact" -v reserve="$reserve" -v prompt="$prompt" -v uidmap="$uidmap" -v sqv="$sqv" \
                       -v screen="$screen" -v memon="$memon" -v myuid="$myuid" -v memfail="$memfail" -v totfail="$totfail" \
                       -v qfields="$qfields" -v qpos_jobid="$qpos_jobid" -v qpos_uid="$qpos_uid" \
@@ -5048,44 +5049,81 @@ function lastcut(s, cols,   out, used, t, p, any, x) {
   return out (any ? "\033[0m" : "")
 }
 # Text cut to wd: the plain cut (clip), guarded.  For captions, prose lines and
-# the text cells of the tables alike
-function textcut(s, wd) { return (colw(s) <= wd) ? s : guard(s, clip(s, wd)) }
+# the text cells of the tables alike; NAMES for a name cell (cellcut)
+function textcut(s, wd, names) { return (colw(s) <= wd) ? s : guard(s, clip(s, wd), names) }
+# A table cell cut to wd (H8 "Names"): in NODE/REASON and REASON (KEYED), where
+# Slurm writes Key:value and Key=value, ":" and "=" end a key word, as in the
+# captions; in a job name and the other text cells only "=" does ("--mem=…", a
+# command line), ":" is an ordinary character ("chr1:1000-2000-re…", a
+# genomic region)
+function cellcut(s, wd, keyed) { return textcut(s, wd, !keyed) }
+# Could T, ending in a digit run and ":", read as a cut time (in a name, H8)?  A run of one or two
+# digits not glued to a letter ("1-02:11:", "12:"), or after the T of a date
+# ("2026-10-05T12:"); "chr1:" and "x9:" are names
+function cuttime(t,   b) {
+  match(t, /[0-9]+:$/); if (RLENGTH > 3) return 0
+  if (RSTART == 1) return 1
+  b = substr(t, RSTART - 1, 1)
+  if (b !~ /[A-Za-z]/) return 1
+  return b == "T" && RSTART > 2 && substr(t, RSTART - 2, 1) ~ /[0-9]/
+}
 # The guard: a plain cut C of S never leaves a digit right before its "…"
 # ("node0…" would name another node, "202…" another date, "4G…" another
 # size).  Each step moves the cut before the one word it fell in or right
 # after, one word at a time, until the end is clean
-function guard(s, c,   d) {
-  while (c != s && (d = guard_step(s, c)) != c) c = d
+function guard(s, c, names,   d) {
+  while (c != s && (d = guard_step(s, c, names)) != c) c = d
   return c
 }
-# One step of the guard.  A word ends at " ", ":", "=" or ",", so a key before
-# ":" or "=" and the whole items before "," stay ("UnavailableNodes:…",
-# "--mem=…", "fb2-bioinf,…").  The word the cut falls in, or right after, goes
-# when it holds a digit; a digit word ended by its separator ("9:…") goes too,
-# never a key.  Where no earlier word is left (a lone ↳, ⚠ or · is none), the
-# word backs up over its trailing digit run instead ("ticket#4711-2026" ->
-# "ticket#…", "node07" -> "node…"), and only where that leaves nothing does the
+# One step of the guard.  A word ends at " ", ":", "=" or "," (in a name, NAMES,
+# not at ":"), so a key before ":" or "=" and the whole items before "," stay
+# ("UnavailableNodes:…", "--mem=…", "fb2-bioinf,…", "node01,…": a whole item
+# stays also where it ends in a digit).  A digit is an ASCII digit.  The word
+# the cut falls in, or right after, goes when it holds a digit; a digit word
+# ended by ":" or "=" ("9:…") goes too, never a key.  Where no earlier word is
+# left (a lone ↳, ⚠ or · is none), the word backs up instead to its longest
+# clean prefix (backup_clean), and only where that leaves nothing does the
 # plain cut stand.  Nor does a cut end in a bare count whose label it cut away
 # ("CPUsLoad (1…" -> "CPUsLoad …")
-function guard_step(s, c,   pre, rest, x, k, p2, t, inw) {
+function guard_step(s, c, names,   pre, rest, x, k, p2, t, inw, wend) {
   if (c == s) return c
+  wend = names ? " =," : " :=,"                 # the characters that end a word
   pre = substr(c, 1, length(c) - length("…")); rest = substr(s, length(pre) + 1)
-  match(pre, /[^ :=,]*$/); x = substr(pre, RSTART); k = length(x)
-  inw = (x != "" && rest ~ /^[^ :=,]/)
-  if (x == "" && match(pre, /[^ :=,]*[0-9][:=,]+$/)) { x = substr(pre, RSTART); k = RLENGTH; inw = 0 }
-  if (inw) { match(rest, /^[^ :=,]*/); x = x substr(rest, 1, RLENGTH) }
+  match(pre, "[^" wend "]*$"); x = substr(pre, RSTART); k = length(x)
+  inw = (x != "" && rest ~ ("^[^" wend "]"))
+  if (!names && x == "" && match(pre, /[^ :=,]*[0-9][:=]+$/)) { x = substr(pre, RSTART); k = RLENGTH; inw = 0 }
+  if (inw) { match(rest, "^[^" wend "]*"); x = x substr(rest, 1, RLENGTH) }
   if (x ~ /[0-9]/) {                            # inside, or right after, a word that holds a digit
     p2 = substr(pre, 1, length(pre) - k); t = p2
     gsub(/↳|⚠|·/, "", t)
     if (t ~ /[^ ]/) c = p2 "…"                  # an earlier word is left: the cut falls before this one
     else {                                      # none: the first word backs up over its digits
-      t = pre; if (pre ~ /[0-9][:=,]?$/) sub(/[0-9][0-9.,:\/+-]*$/, "", t); p2 = t; gsub(/↳|⚠|·/, "", p2)
+      t = backup_clean(s, pre, names); p2 = t; gsub(/↳|⚠|·/, "", p2)
       if (p2 ~ /[^ ]/ && t !~ /[0-9]$/) c = t "…"
     }
   }
   pre = substr(c, 1, length(c) - length("…"))
   if (c != s && match(pre, /[ ]\(?[0-9]+ ?$/) && RSTART > 1) c = substr(pre, 1, RSTART) "…"
   return c
+}
+# The longest clean prefix of PRE, the text before a cut "…" of S: its trailing
+# digits go one run at a time, with a ":" or "=" after them (in a name only a
+# ":" that reads as a cut time, cuttime; a digit before "=" is clean there),
+# and the first end with no digit right before the "…" is kept, so a wider
+# screen shows at least what a narrower one shows ("ticket#4711-2026" ->
+# "ticket#4711-…", "n[01-03" -> "n[01-", "node07" -> "node").  A "." between
+# two digits belongs to the run (a decimal number, an IP: one number), so it
+# never stops at "3.…" or "10.0.0.…"
+function backup_clean(s, pre, names,   t) {
+  t = pre
+  while (1) {
+    if (t ~ /[0-9]$/) sub(/[0-9]+$/, "", t)
+    else if (t ~ /[0-9][.]$/ && substr(s, length(t) + 1, 1) ~ /[0-9]/) sub(/[.]$/, "", t)
+    else if (names && t ~ /[0-9]:$/ && cuttime(t)) sub(/:$/, "", t)
+    else if (!names && t ~ /[0-9][:=]$/) sub(/[:=]$/, "", t)
+    else break
+  }
+  return t
 }
 # textcut for a caption that names a node (the MEMNOTE of NODES): a node name is
 # never cut (W8), the cut falls before " on NAME" where it would fall inside it
@@ -5154,9 +5192,9 @@ function fin_line(g, wd,   mk, mk1, mk2, flt, F, f, nf, T, capx, st, ex, x, room
   mk = mk1 = mk2 = ""
   if (rsrc != "sacct") {                        # decisions 16 and 29: the marker
     mk = " (" (rwhyc == "filter" ? rwhy : "no accounting") ")"
-    if (rwhyc == "filter") {                    # the option the sentence names, else its first word
-      flt = rwhy; if (match(rwhy, /--?[A-Za-z][-A-Za-z0-9]*/)) flt = substr(rwhy, RSTART, RLENGTH); else sub(/ .*/, "", flt)
-      mk1 = " (" flt ": no sacct)"; mk2 = " (" flt ")"
+    if (rwhyc == "filter") {                    # the filter by its own token (-n, SQUEUE_NAMES, --me)
+      flt = rflt                                # the token the long sentence names, from the shell
+      mk1 = " (" flt (flt == "--me" ? ": no login)" : ": no sacct)"); mk2 = " (" flt ")"
     } else mk1 = mk2 = mk
   }
   cc = e(fcol(rst[g])); can = gcxl[g]
@@ -5187,7 +5225,7 @@ function fin_line(g, wd,   mk, mk1, mk2, flt, F, f, nf, T, capx, st, ex, x, room
     if (T[5] == 1) {                            # the name cut, where at least 3 of its columns stay
       room = wd - colw(capx idx " " st ex) - 1
       if (room < 3 || colw(rname[g]) <= room) continue
-      nmx = " " textcut(rname[g], room)
+      nmx = " " cellcut(rname[g], room, 0)
     }
     job = idx nmx " " st ex
     if (colw(capx job) <= wd) break
@@ -5240,22 +5278,26 @@ function qregrow(fix,   i, t) {
 # COMPACT: the duration columns (TIME, LEFT, LIMIT) in the short form, 5h59m,
 # as the finished table shows ELAPSED (rounded down, as the whole form of MEM
 # rounds): every one of them or none, and only where the table as a whole gets
-# narrower (a column of sub-hour values can widen by one).  QSHORT[i]: column i
-# is short, QLONGV its long cells for qlong_durations
+# narrower.  A cell keeps the form of Slurm wherever it fits the column, whose
+# width the cells that need the short form set (QDURW[i]: the widest cell in
+# the narrower of its two forms): "0:00" stays beside "5h59m", and no cell is
+# wider short than long.  QSHORT[i]: column i is short, QLONGV its long cells
+# for qlong_durations
 function qshort_durations(   i, r, x, mw, any, gain) {
   for (i=1; i<=n; i++) if (!QDROPPED[i] && !QSHORT[i] && (k[i] == "M" || k[i] == "L" || k[i] == "l")) {
     mw = 0
     for (r=1; r<=rows; r++) if (QSHOW[r]) {
-      x = v[r,i]; if (x ~ /^([0-9]+-)?[0-9]+(:[0-9]+){1,2}$/) x = elap(dur(x))
+      x = v[r,i]; if (x ~ /^([0-9]+-)?[0-9]+(:[0-9]+){1,2}$/ && length(elap(dur(x))) < length(x)) x = elap(dur(x))
       if (length(x) > mw) mw = length(x)
     }
+    QDURW[i] = mw
     gain += QCW[i] - mw
   }
   if (gain <= 0) return 0
   for (i=1; i<=n; i++) if (!QDROPPED[i] && !QSHORT[i] && (k[i] == "M" || k[i] == "L" || k[i] == "l")) {
     for (r=1; r<=rows; r++) QLONGV[r,i] = v[r,i]
     QSHORT[i] = any = 1
-    for (r=1; r<=rows; r++) if (v[r,i] ~ /^([0-9]+-)?[0-9]+(:[0-9]+){1,2}$/) {
+    for (r=1; r<=rows; r++) if (v[r,i] ~ /^([0-9]+-)?[0-9]+(:[0-9]+){1,2}$/ && length(v[r,i]) > QDURW[i]) {
       v[r,i] = elap(dur(v[r,i])); if (WIDE) CW[r,i] = colw(v[r,i])
     }
     qcontent(i); w[i] = wnat[i] = (QCW[i] > length(hd[i])) ? QCW[i] : length(hd[i])
@@ -5265,8 +5307,12 @@ function qshort_durations(   i, r, x, mw, any, gain) {
 }
 # The long durations of Slurm back as soon as they fit with the FLEX columns at 8 or
 # wider (H-1 c: the screens Franz accepted keep 5:59:00), also after a drop; where
-# they do not fit, the short forms stay as they were
+# they do not fit, the short forms stay as they were.  Measured beside the current
+# form of the id, JOBID as it stands; not in the F3 pass of DISPLAY, which
+# holds JOBID narrow: the spare goes to the next form of the id first, the
+# durations follow
 function qlong_durations(fix,   i, r, any, SW, SV, SC, t) {
+  if (fix && fix == idc) return
   for (i=1; i<=n; i++) if (QSHORT[i]) any = 1
   if (!any) return
   for (i=1; i<=n; i++) SW[i] = w[i]
@@ -5274,7 +5320,7 @@ function qlong_durations(fix,   i, r, any, SW, SV, SC, t) {
     for (r=1; r<=rows; r++) { SV[r,i] = v[r,i]; v[r,i] = QLONGV[r,i]; if (WIDE) CW[r,i] = colw(v[r,i]) }
     SC[i] = QCW[i]; qcontent(i); w[i] = (QCW[i] > length(hd[i])) ? QCW[i] : length(hd[i])
   }
-  for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && (i == idc || qkind(k[i]) == "text")) w[i] = wnat[i]
+  for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && qkind(k[i]) == "text") w[i] = wnat[i]
   tabw = qtab(); t = IDT; IDT = 1
   qflex(fix)
   if (tabw <= budget) {
@@ -5349,7 +5395,7 @@ function reason_fit(x, wd,   p, rs, es, i, y, best) {
   for (i = 1; i < length(rs); i++) {
     if (substr(rs, i, 1) !~ /[ :=,]/) continue
     y = substr(rs, 1, i)
-    if (y ~ /[0-9][ :=,]*$/) continue           # no digit right before the "…"
+    if (y ~ /[0-9][ :=]*$/) continue            # no digit right before the "…" ("node01," is a whole item)
     if (colw(y "…" es) <= wd) best = y "…"
   }
   if (best != "") return best es
@@ -5379,6 +5425,7 @@ function fdrop(fix, list,   L, j, i, big, nl) {
 }
 # COMPACT: the state column of the finished table takes the codes (stcode)
 function fcode(   r, g, x) {
+  rhd[3] = "ST"                                 # the code column is ST, as in the queue
   for (r=1; r<=shown; r++) { g = ord[r]; rv[g,3] = stcode(g) }
   RCWF[3] = 0
   for (r=1; r<=shown; r++) { g = ord[r]; if ((x = idw(rv[g,3])) > RCWF[3]) RCWF[3] = x; if (WIDE) FCW[g,3] = x }
@@ -5395,11 +5442,11 @@ function qrow(r,   js, jc, line, i, x, fw, cc, xw) {     # one queue row, colour
     if (QDROPPED[i]) continue
     x = (i == idc) ? idform(v[r,i], w[i]) : (i == rc) ? reason_fit(v[r,i], w[i]) : v[r,i]
     if (!WIDE) {                                    # text guarded, the rest (only the last resort) plain
-      if (length(x) > w[i]) x = (qkind(k[i]) == "text") ? textcut(x, w[i]) : substr(x, 1, w[i]-1) "…"
+      if (length(x) > w[i]) x = (qkind(k[i]) == "text") ? cellcut(x, w[i], k[i] ~ /^[Rr]$/) : substr(x, 1, w[i]-1) "…"
       fw = RIGHT[k[i]] ? w[i] : (i==NLAST ? -length(x) : -w[i])
     } else {
       xw = (x == v[r,i]) ? CW[r,i] : colw(x)
-      if (xw > w[i]) { x = (qkind(k[i]) == "text") ? textcut(x, w[i]) : clip(x, w[i]); xw = colw(x) }
+      if (xw > w[i]) { x = (qkind(k[i]) == "text") ? cellcut(x, w[i], k[i] ~ /^[Rr]$/) : clip(x, w[i]); xw = colw(x) }
       fw = 0
     }
     if (i == mc && (r in mem_coloured) && x == v[r,i]) {   # an own MEM cell, whole:
@@ -5980,7 +6027,7 @@ END{
     xw = 0
     for (r=1; r<=rows; r++) if (QSHOW[r]) {
       x = (i == rc) ? reason_fit(v[r,i], w[i]) : v[r,i]
-      xe = (idw(x) > w[i]) ? w[i] - idw(clip(x, w[i])) + idw(textcut(x, w[i])) : idw(x)
+      xe = (idw(x) > w[i]) ? w[i] - idw(clip(x, w[i])) + idw(cellcut(x, w[i], k[i] ~ /^[Rr]$/)) : idw(x)
       if (xe > xw) xw = xe
     }
     hl = (length(hd[i]) < w[i]) ? length(hd[i]) : w[i]
@@ -6189,10 +6236,10 @@ END{
         if (FDROPPED[i]) continue
         x = fcut(i, rv[best,i], rw[i])
         fw = rrt[i]+0 ? rw[i] : -rw[i]
-        if (!WIDE) { if (length(x) > rw[i]) x = (i == 2) ? textcut(x, rw[i]) : substr(x, 1, rw[i]-1) "…" }
+        if (!WIDE) { if (length(x) > rw[i]) x = (i == 2) ? cellcut(x, rw[i], 0) : substr(x, 1, rw[i]-1) "…" }
         else {                                  # cut and padded by columns
           xw = (x == rv[best,i]) ? FCW[best,i] : colw(x)
-          if (xw > rw[i]) { x = (i == 2) ? textcut(x, rw[i]) : clip(x, rw[i]); xw = colw(x) }
+          if (xw > rw[i]) { x = (i == 2) ? cellcut(x, rw[i], 0) : clip(x, rw[i]); xw = colw(x) }
           x = colpad(x, fw, xw); fw = 0
         }
         if (i==1 || i==3) line = line sprintf("%*s%s%*s%s", rgap[i], "", e(fc),  fw, x, e("0"))

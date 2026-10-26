@@ -1,0 +1,24 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m07:33:20 UTC[0m
+
+  [1mnode01[0m [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[0m 100%  [1m128[0m/128 cpu   [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[2m░[2m░[0m  88%  [1m443[0m/503G mem  [2mallocated[0m
+  [1mnode02[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m  0[0m/128 cpu   [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m  0[0m/503G mem  [2mdown*[0m
+         [2m↳ Not responding · since 2026-10-05[0m
+
+  [4mJOBID NAME     USER  STATE   TIME     LEFT       CPU MEM NODE/REASON                              [0m
+  [33m4201 [0m assemble fsill [1;33mPENDING[0m     0:00 1-00:00:00   1  4G (DependencyNeverSatisfied)
+  [33m4202 [0m merge    fsill [1;33mPENDING[0m     0:00   12:00:00   1  4G (DependencyNeverSatisfied)
+  [33m4207 [0m polish   fsill [1;33mPENDING[0m     0:00    8:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes:…
+  [2m… 20 jobs pending[0m
+  [32m4101 [0m plot     mkoch [1;32mRUNNING[0m 19:13:00    4:00:00   1  4G node01
+  [32m4103 [0m qc       bob   [1;32mRUNNING[0m 22:39:00 [33m   1:00:00[0m   1  4G node01
+  [32m4104 [0m trim     mkoch [1;32mRUNNING[0m 11:52:00   12:00:00   1  4G node01
+  [32m4106 [0m bwa      bob   [1;32mRUNNING[0m 16:18:00    7:00:00   1  4G node01
+  [32m4108 [0m polish   mkoch [1;32mRUNNING[0m 21:44:00 [33m   2:00:00[0m   1  4G node01
+  [32m4110 [0m sort     mkoch [1;32mRUNNING[0m 14:10:00    9:00:00   1  4G node01
+  [32m4112 [0m call     bob   [1;32mRUNNING[0m 18:36:00    5:00:00   1  4G node01
+  [32m4114 [0m vcf      mkoch [1;32mRUNNING[0m 13:02:00   10:00:00   1  4G node01
+  [2m… 120 jobs running[0m
+
+  [2mrecently finished: [0m[31m4188 qc FAILED 1[0m
+
+  [1m151[0m jobs   [32m128 running[0m   [33m23 pending[0m   [31m0 other[0m

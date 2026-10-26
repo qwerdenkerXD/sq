@@ -1,0 +1,8 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m07:33:20 UTC[0m
+  nodes: 1 allocated, 1 down* · 128/256 cpu · 443/1006G mem
+  [4mJOBID NAME     USER  STATE   TIME LEFT       CPU MEM NODE/REASON                               [0m
+  [33m4201 [0m assemble fsill [1;33mPENDING[0m 0:00 1-00:00:00   1  4G (DependencyNeverSatisfied)
+  [33m4202 [0m merge    fsill [1;33mPENDING[0m 0:00   12:00:00   1  4G (DependencyNeverSatisfied)
+  [33m4207 [0m polish   fsill [1;33mPENDING[0m 0:00    8:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes:node02)
+  [2mrecently finished: [0m[31m4188 qc FAILED 1[0m
+  [1m151[0m jobs   [32m128 running[0m   [33m23 pending[0m   [31m0 other[0m

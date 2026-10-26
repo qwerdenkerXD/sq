@@ -1,0 +1,8 @@
+  ▌ SLURM FranzGB  07:33:20 UTC
+  nodes: 1 allocated, 1 down* · 128/256 cpu · 443/1006G mem
+  JOBID NAME     USER  STATE   TIME LEFT       CPU MEM NODE/REASON                               
+  4201  assemble fsill PENDING 0:00 1-00:00:00   1  4G (DependencyNeverSatisfied)
+  4202  merge    fsill PENDING 0:00   12:00:00   1  4G (DependencyNeverSatisfied)
+  4207  polish   fsill PENDING 0:00    8:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes:node02)
+  recently finished: 4188 qc FAILED 1
+  151 jobs   128 running   23 pending   0 other

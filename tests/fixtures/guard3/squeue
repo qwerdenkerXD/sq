@@ -1,0 +1,6 @@
+# WHOLE's guard and estimate rules, each at a width where it alone decides
+# (whole_guard): a caption whose digit words need the guard twice
+# ("went x 12:30:45"), a digit word ended by ":" ("maint at 9:30 today"), and
+# beside a start estimate a reason whose item ends in a digit before a blank
+@include ../_common/squeue-defaults
+i=1301; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node01 node02); S=\{now+400d}; r=ReqNodeNotAvail, UnavailableNodes:node01 node02

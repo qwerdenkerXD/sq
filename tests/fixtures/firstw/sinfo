@@ -1,0 +1,2 @@
+CPUsState=0/0/32/32; NodeList=n01; FreeMem=N/A; Memory=128000; StateLong=drained; Reason=ECC 1,024 errors on DIMM B2,B3,B4; TimeStamp=2026-10-25T05:00:00; CPUsLoad=0.00; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n02; FreeMem=60000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=16.00; AllocMem=64000

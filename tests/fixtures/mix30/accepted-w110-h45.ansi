@@ -1,0 +1,45 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m07:33:20 UTC[0m
+
+  [1mnode01[0m [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[2m░[2m░[0m  93%  [1m60[0m/64 cpu   [32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m  41%  [1m104[0m/251G mem  [2mmixed[0m
+  [1mnode02[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m 0[0m/64 cpu   [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m  0[0m/251G mem  [2mdrained[0m
+         [2m↳ bad DIMM B2, replace · since 2026-10-04[0m
+
+  [4mJOBID           NAME     USER  STATE      TIME       LEFT        CPU MEM NODE/REASON                        [0m
+  [36m5101           [0m train    mkoch [1;36mCOMPLETING[0m    3:59:58 [1;31m       0:02[0m   4  4G node01
+  [33m5110           [0m polish   fsill [1;33mPENDING   [0m       0:00     8:00:00   1  4G (JobHeldAdmin)
+  [33m5111           [0m assemble alice [1;33mPENDING   [0m       0:00    12:00:00   1  4G (Priority)
+  [33m5112           [0m merge    alice [1;33mPENDING   [0m       0:00 10-00:00:00   1  4G (PartitionTimeLimit)
+  [33m5113           [0m align    bob   [1;33mPENDING   [0m       0:00     6:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes…
+  [33m5114           [0m qc       bob   [1;33mPENDING   [0m       0:00     1:00:00   1  4G (JobHeldUser)
+  [33m5115           [0m trim     alice [1;33mPENDING   [0m       0:00     2:00:00   1  4G (Resources) → 2027-11-30
+  [33m5118           [0m plot     alice [1;33mPENDING   [0m       0:00     1:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes…
+  [2m… 23 jobs pending[0m
+  [32m5050_[0-7] ×8  [0m map      alice [1;32mRUNNING   [0m    5:59:00     6:00:00   1  4G node01
+  [32m5050_[8-15] ×8 [0m map      alice [1;32mRUNNING   [0m    5:52:00     6:07:00   1  4G node01
+  [32m5050_[16-23] ×8[0m map      alice [1;32mRUNNING   [0m    5:45:00     6:14:00   1  4G node01
+  [32m5050_[24-31] ×8[0m map      alice [1;32mRUNNING   [0m    4:38:00     7:21:00   1  4G node01
+  [32m5060           [0m deseq    bob   [1;32mRUNNING   [0m    0:00:00    20:00:00   2  4G node01
+  [32m5061           [0m plot     mkoch [1;32mRUNNING   [0m    0:17:00    21:00:00   2  4G node01
+  [32m5062           [0m qc       bob   [1;32mRUNNING   [0m    0:34:00    22:00:00   2  4G node01
+  [32m5063           [0m trim     mkoch [1;32mRUNNING   [0m    0:51:00    20:00:00   2  4G node01
+  [32m5064           [0m fastp    bob   [1;32mRUNNING   [0m    1:08:00    21:00:00   2  4G node01
+  [32m5065           [0m sort     mkoch [1;32mRUNNING   [0m    1:25:00    22:00:00   2  4G node01
+  [32m5066           [0m dedup    bob   [1;32mRUNNING   [0m    1:42:00    20:00:00   2  4G node01
+  [32m5067           [0m call     mkoch [1;32mRUNNING   [0m    1:59:00    21:00:00   2  4G node01
+  [32m5068           [0m annot    bob   [1;32mRUNNING   [0m    2:16:00    22:00:00   2  4G node01
+  [32m5069           [0m vcf      mkoch [1;32mRUNNING   [0m    2:33:00    20:00:00   2  4G node01
+  [32m5070           [0m report   bob   [1;32mRUNNING   [0m    2:50:00    21:00:00   2  4G node01
+  [36m5045           [0m longrun  bob   [1;36mSUSPENDED [0m 2-03:11:09  4-20:48:51   1  4G node01
+
+  [2mrecently finished · last 2h[0m
+  [4mJOBID             NAME     STATE        EXIT    ELAPSED    AGO                                              [0m
+  [32m5098          [0m    [2mqc   [0m    [32mCOMPLETED[0m    [2m   0[0m    [2m  5m10s[0m    [2m18m[0m
+  [31m5097          [0m    [2mfastp[0m    [31mFAILED   [0m    [2m   2[0m    [2m  1m12s[0m    [2m21m[0m
+  [32m5095          [0m    [2mtrim [0m    [32mCOMPLETED[0m    [2m   0[0m    [2m 31m00s[0m    [2m25m[0m
+  [32m5090_[0-9] ×10[0m    [2mmap  [0m    [32mCOMPLETED[0m    [2m   0[0m    [2m 10m00s[0m    [2m31m[0m
+  [31m5088          [0m    [2mbwa  [0m    [31mTIMEOUT  [0m    [2m   0[0m    [2m  6h00m[0m    [2m41m[0m
+  [32m5085          [0m    [2mdeseq[0m    [32mCOMPLETED[0m    [2m   0[0m    [2m  1h10m[0m    [2m56m[0m
+  [32m5080          [0m    [2mplot [0m    [32mCOMPLETED[0m    [2m   0[0m    [2m  3m00s[0m    [2m 1h[0m
+  [32m5075          [0m    [2mindex[0m    [32mCOMPLETED[0m    [2m   0[0m    [2m 30m00s[0m    [2m 1h[0m
+
+  [1m75[0m jobs   [32m43 running[0m   [33m30 pending[0m   [31m2 other[0m

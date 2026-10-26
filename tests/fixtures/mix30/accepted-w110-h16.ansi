@@ -1,0 +1,16 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m07:33:20 UTC[0m
+
+  [1mnode01[0m [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[2m░[0m  93%  [1m60[0m/64 cpu   [32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m  41%  [1m104[0m/251G mem  [2mmixed[0m
+  [1mnode02[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m 0[0m/64 cpu   [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m  0[0m/251G mem  [2mdrained[0m
+         [2m↳ bad DIMM B2, replace · since 2026-10-04[0m
+
+  [4mJOBID NAME   USER  STATE   TIME LEFT        CPU MEM NODE/REASON                               [0m
+  [33m5110 [0m polish fsill [1;33mPENDING[0m 0:00     8:00:00   1  4G (JobHeldAdmin)
+  [33m5112 [0m merge  alice [1;33mPENDING[0m 0:00 10-00:00:00   1  4G (PartitionTimeLimit)
+  [33m5113 [0m align  bob   [1;33mPENDING[0m 0:00     6:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes:node02)
+  [33m5118 [0m plot   alice [1;33mPENDING[0m 0:00     1:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes:node02)
+  [2m… 26 jobs pending[0m
+
+  [2mrecently finished: [0m[31m5097 fastp FAILED 2[0m
+
+  [1m75[0m jobs   [32m43 running[0m   [33m30 pending[0m   [31m2 other[0m

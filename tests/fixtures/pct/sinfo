@@ -1,0 +1,2 @@
+CPUsState=128/0/0/128; NodeList=node01; FreeMem=61000; Memory=2; StateLong=allocated; Reason=none; TimeStamp=Unknown; CPUsLoad=99999.00; AllocMem=300
+CPUsState=0/0/128/128; NodeList=node02; FreeMem=N/A; Memory=515000; StateLong=down*; Reason=Not responding; TimeStamp=2026-10-05T22:14:00; CPUsLoad=0.00; AllocMem=0

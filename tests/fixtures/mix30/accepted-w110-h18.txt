@@ -1,0 +1,18 @@
+  ▌ SLURM FranzGB  07:33:20 UTC
+
+  node01 ███████████████████░  93%  60/64 cpu   ████████░░░░░░░░░░░░  41%  104/251G mem  mixed
+  node02 ░░░░░░░░░░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░░░░░░░░░   0%    0/251G mem  drained
+         ↳ bad DIMM B2, replace · since 2026-10-04
+
+  JOBID NAME   USER  STATE   TIME LEFT        CPU MEM NODE/REASON                               
+  5110  polish fsill PENDING 0:00     8:00:00   1  4G (JobHeldAdmin)
+  5112  merge  alice PENDING 0:00 10-00:00:00   1  4G (PartitionTimeLimit)
+  5113  align  bob   PENDING 0:00     6:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes:node02)
+  5118  plot   alice PENDING 0:00     1:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes:node02)
+  … 26 jobs pending
+  … 43 jobs running
+  … 2 jobs other
+
+  recently finished: 5097 fastp FAILED 2
+
+  75 jobs   43 running   30 pending   2 other

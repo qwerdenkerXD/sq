@@ -1,0 +1,10 @@
+  ▌ SLURM FranzGB  07:33:20 UTC
+
+  node01 ████████████████ 100%  128/128 cpu   ██████████████░░  88%  446/503G mem  allocated
+
+  JOBID   NAME       USER    STATE    TIME  LEFT        CPU  MEM  NODE/REASON               
+  4201    assemble   fsill   PENDING  0:00  1-00:00:00    1   4G  (DependencyNeverSatisfied)
+
+  recently finished: 4188 qc FAILED 1
+
+  151 jobs   128 running   23 pending   0 other

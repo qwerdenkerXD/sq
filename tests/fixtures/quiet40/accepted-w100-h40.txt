@@ -1,0 +1,24 @@
+  ▌ SLURM FranzGB  07:33:20 UTC
+
+  node01 ██░░░░░░░░░░░░░░  12%  4/32 cpu   ████░░░░░░░░░░░░  23%  29/125G mem  mixed
+  node02 █░░░░░░░░░░░░░░░   3%  1/32 cpu   █░░░░░░░░░░░░░░░   6%   8/125G mem  mixed
+
+  JOBID    NAME     USER     STATE      TIME       LEFT      CPU   MEM   NODE/REASON
+  4110     deseq    bob      PENDING       0:00    2:00:00     1    4G   (Resources)
+  4111     plot     alice    PENDING       0:00    1:00:00     1    4G   (Priority)
+  4101     align    alice    RUNNING    1:12:40    4:47:20     1    4G   node01
+  4102     align    alice    RUNNING    1:12:40    4:47:20     1    4G   node02
+  4103     trim     bob      RUNNING      22:05    1:37:55     1    4G   node01
+  4104     qc       fsill    RUNNING       3:10      56:50     1    4G   node01
+  4105     index    mkoch    RUNNING       0:41      29:19     1    4G   node01
+
+  recently finished · last 2h
+  JOBID            NAME     STATE        EXIT    ELAPSED    AGO                     
+  4099             trim     COMPLETED       0     41m10s    18m
+  4098             qc       FAILED          1        42s    23m
+  4090_[0-2] ×3    sweep    COMPLETED       0     20m00s    31m
+  4085             bwa      TIMEOUT         0      6h00m    49m
+  4080             deseq    COMPLETED       0      1h10m     1h
+  4075             plot     COMPLETED       0      3m00s     1h
+
+  7 jobs   5 running   2 pending   0 other
