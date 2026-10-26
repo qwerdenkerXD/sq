@@ -75,6 +75,7 @@ keep_failed=${SQ_KEEP_FAILED:-5}
 case $keep_failed in
 	*[!0-9]*|'') printf "run.sh: SQ_KEEP_FAILED is a number of runs, not '%s'\n" "$keep_failed" >&2; exit 2 ;;
 esac
+keep_failed=$((10#$keep_failed))   # base 10: 08 and 09 are numbers too, 010 is ten
 failroot=${TMPDIR:-/tmp}/sq-failed failrun= failstamp=$(date -u +%Y%m%dT%H%M%SZ)
 # prune_failed N: every run's evidence but the newest N goes, by the time it
 # was last written, unless a running suite holds its lock (flock -n); the
@@ -105,16 +106,37 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/sq-tests.XXXXXX") || exit 2
 # every session a background sq ran in (sq_start) is emptied on the way out
 # too, those of the cases -j runs at once as well (each its own process
 # group, in case_pgids, their sessions listed in $work/sids)
-all_sids= case_pgids=
+all_sids= case_pgids= stopped_by= selected=()
+n_pass=0 n_fail=0 n_xfail=0 n_xpass=0
 suite_exit() {
 	local sid pgid
-	for pgid in $case_pgids; do kill -KILL -- "-$pgid" 2>/dev/null; done
-	for sid in $all_sids $(cat "$work/sids" 2>/dev/null); do session_kill "$sid"; done
-	[ $keep = 1 ] || rm -rf "$work"
+	# a run stopped by a signal says so in one line, with how far it got
+	[ -z "$stopped_by" ] || printf '\nrun.sh: interrupted by %s, %d of %d cases done\n' "$stopped_by" \
+		$((n_pass + n_fail + n_xfail + n_xpass)) ${#selected[@]} >&2
+	# the cases -j runs, and a case's own background work in a serial run
+	# (bars_width_sweep's series), with every process under them, by pid; all
+	# reaped here, so none still writes into the work dir as it goes, and
+	# bash's "Killed" notice of each goes nowhere (wait passes over a case
+	# stopped as it died, so bash may tell of it a command later)
+	{	local tree=; for pgid in $case_pgids $(jobs -p); do tree="$tree $(proc_freeze "$pgid")"; done
+		for pgid in $case_pgids; do kill -KILL -- "-$pgid"; done
+		[ -z "${tree// }" ] || kill -KILL $tree
+		wait
+		for sid in $all_sids $(cat "$work/sids"); do session_kill "$sid"; done
+		[ $keep = 1 ] || rm -rf "$work"
+	} 2>/dev/null
+}
+# proc_freeze PID: PID and every process under it, each stopped before its
+# children are listed, so none forks one that escapes (timeout puts sq in a
+# process group of its own); their pids
+proc_freeze() {
+	local child
+	kill -STOP "$1" 2>/dev/null; echo "$1"
+	for child in $(ps -o pid= --ppid "$1" 2>/dev/null); do proc_freeze "$child"; done
 }
 trap suite_exit EXIT
 # a killed run still runs the EXIT trap, so its work dir goes too
-trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
+trap 'stopped_by=SIGHUP; exit 129' HUP; trap 'stopped_by=SIGINT; exit 130' INT; trap 'stopped_by=SIGTERM; exit 143' TERM
 
 ESC=$'\033'
 # the suite's own bound on sq, found before any case puts a fake timeout first
@@ -183,10 +205,10 @@ sq_start() {
 	: > "$RUN/pid"
 	# sh writes its pid and execs setsid, which (sh leading no process group)
 	# makes it a session leader and execs sq: one pid all along.  env first
-	# resets SIGINT and SIGQUIT to their default: a run.sh started with & from
-	# a non-interactive shell has them ignored, sq inherits that and cannot
-	# trap a signal ignored on entry
-	local launch='printf "%s\n" "$$" > "$0"; exec env --default-signal=INT,QUIT setsid "$@"'
+	# resets SIGINT, SIGQUIT and SIGHUP to their default: a run.sh started with
+	# & from a non-interactive shell has INT and QUIT ignored, one started
+	# under nohup HUP; sq inherits that and cannot trap a signal ignored on entry
+	local launch='printf "%s\n" "$$" > "$0"; exec env --default-signal=INT,QUIT,HUP setsid "$@"'
 	local -a cmd=(sh -c "$launch" "$RUN/pid" env -i "${ENVLIST[@]}" "$sq" "${SQ_ARGV[@]}")
 	# (bash's own "Killed" notice for a sq a case killed goes nowhere), and
 	# what still ran in its session the moment sq returned goes to left-at-exit
@@ -453,7 +475,6 @@ want()  { "${@:2}" || T_WANT+=("$1"); }
 today() { "${@:2}" || T_TODAY+=("$1"); }
 xfail() { T_XFAIL=$1; }
 
-n_pass=0 n_fail=0 n_xfail=0 n_xpass=0
 # verdict: the case's status into T_STATUS, and its line
 verdict() {
 	local status reason
@@ -1517,8 +1538,7 @@ c_tables_c1() {
 	local d=$T_DIR/fx-c1 gbin=$T_DIR/gbin nobin=$T_DIR/nobin glog=$T_DIR/gawk.log loc
 	mkdir -p "$d" "$nobin"
 	gawk_wrapper "$gbin" "$glog"
-	# a locale tool that knows no UTF-8 locale: gawk then runs in the caller's C
-	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	no_utf8_locale "$nobin"
 	printf '@include %s\n' "$fixtures/_common/empty" > "$d/sacct"
 	printf '@include %s\ni=3001; j=a\\xc2\\x9b2Jb\n' "$fixtures/_common/squeue-defaults" > "$d/squeue"
 	{ printf '@include %s\n' "$fixtures/_common/sinfo-two-idle"
@@ -1880,8 +1900,7 @@ c_wide_compact_fin() {
 c_wide_compact_fin_c() {
 	T_TITLE="COMPACT's one finished line under gawk in C where its caption once was cut (noacct, --reservation=x, 24 lines, 58-63 columns): valid UTF-8, within the width, as under UTF-8"
 	local nobin=$T_DIR/nobin w want
-	mkdir -p "$nobin"
-	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	no_utf8_locale "$nobin"
 	for w in 58 59 60 61 62 63; do
 		sq_run noacct SQ_WIDTH=$w SQ_HEIGHT=24 -- --compact --color --reservation=x
 		want=$(LC_ALL=C grep -a '^  .*finished (' "$OUT")
@@ -1918,8 +1937,7 @@ c_wide_twin_parts() {
 c_wide_c_floor() {
 	T_TITLE="gawk in C (no UTF-8 locale): shrink-finished at 50 (the id in its F2 form, 600_… ×67) and COMPACT's one node line (digest) at narrow widths draw the UTF-8 screen byte for byte"
 	local nobin=$T_DIR/nobin want spec fx mode w h
-	mkdir -p "$nobin"
-	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	no_utf8_locale "$nobin"
 	for spec in shrink-finished:full:50:30 shrink-finished:compact:50:20 \
 	            busy24:compact:30:8 busy24:compact:40:8 busy24:compact:50:8 busy24:compact:60:6 \
 	            mix30:compact:30:8 mix30:compact:40:8 mix30:compact:50:8 mix30:compact:60:6 \
@@ -2003,7 +2021,7 @@ c_wide_c_mode() {
 	T_TITLE="no UTF-8 locale (gawk in C): the wide screens as their twins at 50, 80 and 120; array-running's JOBID header and ×-rows as under UTF-8; LC_ALL=ja_JP.eucJP and de_DE.ISO-8859-1 give the LC_ALL=C screen, every gawk in C"
 	local nobin=$T_DIR/nobin loc=$T_DIR/loc gbin=$T_DIR/gbin glog=$T_DIR/gawk.log l want src charmap name
 	mkdir -p "$nobin" "$loc"
-	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	no_utf8_locale "$nobin"
 	local -a sweep_env=(LC_ALL=C "PATH=$nobin:$here/bin:$PATH") twin_env=()
 	twin_fx wide-text wide-seps wide-ascii
 	WIDTHS="50 80 120" twin_sweep wide-text "${wide_cols[@]}"
@@ -4772,7 +4790,7 @@ c_id_cells_wide_c() {   # DISPLAY-v4 F AC 6
 		rc_is 0 && cmp -s "$want" <(without_clock "$OUT" | sed 's/singlé/single/') || bad="$bad $w"
 	done
 	need "shrink-finished, a name with é (WIDE): the ASCII screen at every W 21..130 (not at W =${bad:- none})" test -z "$bad"
-	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	no_utf8_locale "$nobin"
 	for spec in shrink-finished:40 shrink-finished:44 shrink-finished:46 shrink-finished:60 sf-alice:44 sf-alice:46 \
 	            oddarr:57 oddarr:80 oddfin:38 oddfin:56 oddfin:58 oddfin:59 oddfin:60; do
 		IFS=: read -r fx w <<< "$spec"
@@ -7516,8 +7534,7 @@ c_why_nodes_json() {
 	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"fb2${u}009bx\"")
 	why_run "$d" -- --no-color job 11955
 	need "a name with \\u009b (CSI): a ?" eval 'rc_is 0 && err_empty && c1_off && why_has "    fb2?x         24              75G  too few CPUs, too little memory"'
-	mkdir -p "$T_DIR/nobin"
-	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$T_DIR/nobin/locale"; chmod +x "$T_DIR/nobin/locale"
+	no_utf8_locale "$T_DIR/nobin"
 	why_run "$d" LC_ALL=C PATH="$T_DIR/nobin:$here/bin:$PATH" -- --no-color job 11955
 	need "... under a gawk in C (no UTF-8 locale known): a ? too, no C1 on the screen" eval 'rc_is 0 && err_empty && c1_off && why_lines | grep -qE "^    fb2\?x +24 "'
 	d=$(json_fx "$bfx" "$json_name" NODE=fb2-bioinf-0 J="\"fb2${u}0026x\"")
@@ -9541,8 +9558,7 @@ c_whole_full() {   # WHOLE AC 6 (R-H3, R-H4, decision 4)
 c_whole_c_mode() {   # WHOLE AC 9
 	T_TITLE="no UTF-8 locale (gawk in C): COMPACT on ASCII fixtures at W 21..60 step 3, with and without colour, byte for byte the UTF-8 screen"
 	local nobin=$T_DIR/nobin fx wd col want bad=
-	mkdir -p "$nobin"
-	printf '#!/bin/sh\ncase "$1" in -a) printf "C\\nPOSIX\\n" ;; *) echo ANSI_X3.4-1968 ;; esac\n' > "$nobin/locale"; chmod +x "$nobin/locale"
+	no_utf8_locale "$nobin"
 	for fx in busy24 noacct oddfin mix30 memalloc-r nboot; do
 		for wd in $(seq 21 3 60); do
 			for col in --no-color --color; do
@@ -9993,7 +10009,7 @@ cases=(
 timed_cases=" squeue_hangs squeue_ignores_term scrub_bounded tables_pass_cost cancel_names
 	membar_json membar_fallback jobmem_outcomes jobmem_throttle job_own
 	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract
-	why_nodes_json why_tail_hung why_budget why_parallel why_signals
+	why_nodes_json why_tail_hung why_budget why_parallel why_signals job_screens
 	nodes_o_fail nodes_o_bounds stub_fast nodes_o_cost compact_prompt_row "
 timed_cases=" $(printf '%s ' $timed_cases)"       # one space around each name
 for c in $timed_cases; do
