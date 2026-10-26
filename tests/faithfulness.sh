@@ -157,9 +157,9 @@ compare squeue pct i,i,j,u,T,M,L,C,m,R,t,l,S,A,U "$N" squeue \
 	SQUEUE_FORMAT="%i$N%i$N%j$N%u$N%T$N%M$N%L$N%C$N%m$N%R$N%t$N%l$N%S$N%A$N%U$N" squeue -h -S t,i
 sfields=JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName
 compare sacct sacct "$sfields" "$N2" sacct \
-	SLURM_TIME_FORMAT=standard sacct -p --delimiter="$N2" -n -S "$since" -E now -a -o "$sfields"
+	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 sacct -p --delimiter="$N2" -n -S "$since" -E now -a -o "$sfields"
 compare squeue-all long JobID,StateCompact,State,exit_code,TimeUsed,EndTime,ArrayJobID,ArrayTaskID,UserName,Name "$N" squeue-all \
-	SLURM_TIME_FORMAT=standard \
+	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 \
 	SQUEUE_FORMAT2="JobID:$N,StateCompact:$N,State:$N,exit_code:$N,TimeUsed:$N,EndTime:$N,ArrayJobID:$N,ArrayTaskID:$N,UserName:$N,Name:$N" \
 	squeue -t all -h
 

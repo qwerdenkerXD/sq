@@ -1101,8 +1101,10 @@ function final_states(   ts, i) {
 # UTF-8 bytes, a character found by its lead byte (every text is valid UTF-8
 # once scrubbed), the bytes from octal escapes (json_bytes), as a static
 # byte class is fatal to a gawk under UTF-8.  tests/width_table.py
-# regenerates it from the list, the local glibc and python's unicodedata,
-# and can only widen it
+# regenerates it from the list, the local glibc and python's unicodedata:
+# it only widens it, but where the list records this very glibc alone and
+# this unicodedata's version, it makes the list equal those sources, a stray
+# entry narrowed too
 wide_awk='
 # ---- the width table: Unicode 16.0.0, glibc 2.39; tests/width_table.py writes it
 BEGIN {
