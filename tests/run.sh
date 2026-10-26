@@ -1911,6 +1911,30 @@ c_wide_compact_fin_c() {
 			[ "$(oracle_width "$(lines_matching "^  finished \(")")" -le '"$w"' ]'
 	done
 }
+# R2 4: the one finished line where caption and job fill the line exactly, and
+# one column short of that: its bytes pinned, colour and all, under UTF-8 and
+# under a gawk in C (R1's H: the caption is never cut into the line; WHOLE's
+# H7 gives the caption's shorter form, or no caption, instead)
+c_fin_caption_fills() {
+	T_TITLE="COMPACT's one finished line (noacct, 24 lines) at each width where caption and job fill it exactly and one column short: byte for byte, coloured, under UTF-8 and under a gawk in C"
+	local nobin=$T_DIR/nobin spec w flt want got how
+	no_utf8_locale "$nobin"
+	for spec in "24::" "25::finished: " "40::finished: " "41::finished (no accounting): " \
+	            "43::finished (no accounting): " "44::finished (no accounting): |qc" "52::finished (no accounting): |qc" \
+	            "53::recently finished (no accounting): |qc" \
+	            "40:--reservation=x:finished: " "41:--reservation=x:finished (--reservation): " \
+	            "53:--reservation=x:finished (--reservation): |qc" "54:--reservation=x:finished (--reservation: no sacct): |qc"; do
+		IFS=: read -r w flt want <<< "$spec"
+		case $want in *'|qc') want="$ESC[2m${want%|qc}$ESC[0m$ESC[31m4188 qc FAILED 1$ESC[0m" ;;
+		              *) want="$ESC[2m$want$ESC[0m$ESC[31m4188 FAILED 1$ESC[0m" ;; esac
+		for how in utf8 C; do
+			if [ $how = utf8 ]; then sq_run noacct SQ_WIDTH="$w" SQ_HEIGHT=24 -- --compact --color $flt
+			else sq_run noacct SQ_WIDTH="$w" SQ_HEIGHT=24 LC_ALL=C PATH="$nobin:$here/bin:$PATH" -- --compact --color $flt; fi
+			got=$(LC_ALL=C grep -a '4188' "$OUT")
+			need "W=$w${flt:+ $flt} ($how): the finished line '  $(printf '%s' "$want" | sed "s/$ESC\[[0-9;]*m//g")', byte for byte" eval 'rc_is 0 && err_empty && [ "$got" = "  $want" ]'
+		done
+	done
+}
 # a finished NAME cut by columns with a gap after "…": x and han, cut at an
 # odd boundary (x日本語のとても長いジョ… at 60 is 24 of 25 columns), padded
 # from its cut width, so STATE stays in its column
@@ -10008,7 +10032,7 @@ c_gawk_arg_limit() {
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_compact_fin_c wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty bell_state_odd centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_compact_fin_c fin_caption_fills wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty bell_state_odd centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
