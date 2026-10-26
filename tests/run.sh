@@ -2801,6 +2801,9 @@ c_shrink_locale() {
 # Where no locale tool answers (musl has none) gawk alone judges a locale: a
 # failing one first on PATH stands in for it
 without_clock() { sed -E '1s/[0-9]{2}:[0-9]{2}:[0-9]{2}//' "$1"; }
+# a start estimate's clock and date on stdin masked: it is the stub's \{now+3h},
+# so a minute (or a day) rolling over between two runs moves it
+mask_estimates() { sed -E 's/→ ([A-Z][a-z]{2}[0-9]{2} )?[0-9]{2}:[0-9]{2}/→ \1HH:MM/g; s/→ [0-9]{4}-[0-9]{2}-[0-9]{2}/→ DATE/g'; }
 c_locale_pinned() {
 	T_TITLE="under LC_ALL=C, and with no locale set at all, sq draws byte for byte the screen it draws under UTF-8, also where the locale tool fails"
 	local fx args want how nolocale=$T_DIR/nolocale
@@ -2990,17 +2993,19 @@ EOF
 # mid-bucket (12h30m, 3m30s), and a step of 2 s either way (SQSTUB_SKEW) draws
 # the same screen
 c_clock_step() {
-	T_TITLE="every fixture with a relative time draws the same screen when the clock steps 2 s back or forward after the stub answered"
+	T_TITLE="every fixture with a relative time draws the same screen when the clock steps 2 s back or forward after the stub answered, a start estimate's clock and date aside"
 	local dir fx want skew
 	for dir in "$fixtures"/*/; do
 		fx=${dir%/}; fx=${fx##*/}
 		case $fx in _common|sqjob) continue ;; esac
 		grep -qE '\\\{(now|epoch)|_common/(sacct|squeue-all)-defaults' "$dir"* 2>/dev/null || continue
+		# a start estimate moves with the stub's clock (it is \{now+3h} too), and
+		# its HH:MM with it whenever a minute edge falls between the runs
 		sq_run "$fx" -- --full --color
-		want=$RUN/screen; without_clock "$OUT" > "$want"
+		want=$RUN/screen; without_clock "$OUT" | mask_estimates > "$want"
 		for skew in -2 2; do
 			sq_run "$fx" SQSTUB_SKEW=$skew -- --full --color
-			need "$fx, the clock stepped ${skew}s: the same screen" eval 'cmp -s "$want" <(without_clock "$OUT")'
+			need "$fx, the clock stepped ${skew}s: the same screen, start estimates aside" eval 'cmp -s "$want" <(without_clock "$OUT" | mask_estimates)'
 		done
 	done
 }
@@ -8283,7 +8288,7 @@ c_opts_clusters() {   # AC10
 	o_twin
 }
 c_opts_short_words() {   # AC11
-	T_TITLE="other short words: unknown letters, long names with one dash (N2a first), '=' after a valueless letter, no option letter at all"
+	T_TITLE="other short words: unknown letters, long names with one dash (N2a first), '=' after a valueless letter, no option letter at all (a tab, a surrogate, beyond U+10FFFF); the echo scrubbed, then cut to 40"
 	local w
 	for w in -z -e -5; do o_refused "$w is not one of the short options sq forwards; sq -h lists them" -- "$w"; done
 	o_refused "subcommands come first: sq log …" -- -Z log 500
@@ -8313,6 +8318,21 @@ c_opts_short_words() {   # AC11
 	o_refused "'-x' holds U+202E, which is not an option letter" -- "-"$'\342\200\256'"x"
 	o_refused "'-ä' holds U+00E4, which is not an option letter" LC_ALL=C -- "-ä"
 	o_refused "'-␚' holds byte 0xE4, which is not an option letter" -- "-"$'\xe4'
+	# R2 9 (OPTS L1): N2c names a tab, and no valid UTF-8 by its first byte:
+	# a surrogate, a code point above U+10FFFF; the code points beside them by
+	# their U+ name
+	o_refused "'-' holds a tab, which is not an option letter" -- $'-\t'
+	o_refused "'-␚␚␚' holds byte 0xED, which is not an option letter" -- $'-\xed\xa0\x80'
+	local cp
+	for cp in D7FF:$'\xed\x9f\xbf' E000:$'\xee\x80\x80' 10FFFF:$'\xf4\x8f\xbf\xbf'; do
+		o_refused "'-${cp#*:}' holds U+${cp%%:*}, which is not an option letter" -- "-${cp#*:}"
+	done
+	o_refused "'-␚␚␚␚' holds byte 0xF4, which is not an option letter" -- $'-\xf4\x90\x80\x80'
+	# R2 9b (OPTS L2): a refused word is scrubbed, then cut to 40 characters:
+	# bidi controls and C0 among its first 40 go, and 40 clean ones show
+	local b40; b40=$(printf 'b%.0s' {1..40})
+	o_refused "'-ax${b40:0:37}' runs options together; write each option as its own word" -- "-ax"$'\u202e\u202e\u202e\u202e\u202e'"$b40"
+	o_refused "'-ax${b40:0:37}' runs options together; write each option as its own word" -- "-ax"$'\x01\x02\x03'"$b40"
 	o_refused "-i repeats squeue's own output; sq refreshes with 'watch -tc -n 5 sq'" -- -i
 	o_refused "-s lists job steps, which sq cannot frame safely; sq shows jobs" -- -s
 }
@@ -9638,9 +9658,9 @@ c_whole_c_mode() {   # WHOLE AC 9
 		for wd in $(seq 21 3 60); do
 			for col in --no-color --color; do
 				# a start estimate today reads HH:MM, which a minute rolling over between the runs moves
-				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT=30 -- --compact $col; want=$RUN/screen; without_clock "$OUT" | whole_mask_estimates > "$want"
+				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT=30 -- --compact $col; want=$RUN/screen; without_clock "$OUT" | mask_estimates > "$want"
 				sq_run "$fx" SQ_WIDTH="$wd" SQ_HEIGHT=30 LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --compact $col
-				{ rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT" | whole_mask_estimates); } || bad="$bad $fx:$wd$col"
+				{ rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT" | mask_estimates); } || bad="$bad $fx:$wd$col"
 			done
 		done
 	done
@@ -9883,7 +9903,7 @@ c_whole_orders() {   # WHOLE H6, H7, E-M3, R-M1: the orders inside a line kind
 	done
 }
 c_whole_guard() {   # WHOLE H8, H5, H4 L-3 and the long durations back, each where it alone decides
-	T_TITLE="the guard repeats (went x 12:30:45), drops a digit word ended by ':' (9:30), no bare count ends a cut (CPUsLoad (2), the reason beside an estimate ends at no digit word, '… n jobs' takes its short name, L-3 gives the guard's blanks to another text column, the long durations come back after a drop, the short ones only after the FLEX columns are at 8"
+	T_TITLE="the guard repeats (went x 12:30:45), drops a digit word ended by ':' (9:30), no bare count ends a cut (CPUsLoad (2), the reason beside an estimate ends at no digit word but keeps a whole list item (node01,…), '… n jobs' takes its short name, L-3 gives the guard's blanks to another text column, the long durations come back after a drop, the short ones only after the FLEX columns are at 8"
 	local wd
 	for wd in 21 22 23; do
 		sq_run guard3 SQ_WIDTH=$wd SQ_HEIGHT=30 -- --compact --no-color
@@ -9893,6 +9913,8 @@ c_whole_guard() {   # WHOLE H8, H5, H4 L-3 and the long durations back, each whe
 	need "guard3 W=21: ↳ maint at … (the digit word 9: goes)" words_line "↳ maint at …"
 	sq_run guard3 SQ_WIDTH=105 SQ_HEIGHT=30 -- --compact --no-color
 	need "guard3 W=105: the reason beside the estimate ends before node01 (H5)" matches " \(ReqNodeNotAvail, UnavailableNodes:… → $whole_date$"
+	sq_run estdig SQ_WIDTH=104 SQ_HEIGHT=30 -- --compact --no-color
+	need "estdig W=104: beside the estimate a list item ending in a digit stays whole before ',' (L2: node01,…)" matches " \(ReqNodeNotAvail, UnavailableNodes:node01,… → $whole_date$"
 	sq_run cpusload-garbage SQ_WIDTH=49 SQ_HEIGHT=30 -- --compact --no-color
 	need "cpusload-garbage W=49: no bare count ends the caption" words_line "↳ sinfo gave no usable figure for CPUsLoad …"
 	sq_run faults SQ_WIDTH=24 SQ_HEIGHT=12 -- --compact --no-color
@@ -9985,7 +10007,6 @@ c_whole_v31() {
 # them, but elapsed24-h24's one accepted line (UnavailableNodes:node0… ->
 # UnavailableNodes:…, X-A); the clock aside, and a start estimate's date and
 # minutes, which move with the day (AC 8, review LOW 5)
-whole_mask_estimates() { sed -E 's/→ ([A-Z][a-z]{2}[0-9]{2} )?[0-9]{2}:[0-9]{2}/→ \1HH:MM/g; s/→ [0-9]{4}-[0-9]{2}-[0-9]{2}/→ DATE/g'; }
 c_whole_accepted() {
 	T_TITLE="the 20 accepted screens, with and without colour, byte for byte, the clock aside (elapsed24-h24 with its accepted line UnavailableNodes:…)"
 	local c fx w h ext col
@@ -9997,7 +10018,7 @@ c_whole_accepted() {
 			ext=txt; [ $col = color ] && ext=ansi
 			sq_run "$fx" SQSTUB_HOST=FranzGB SQ_WIDTH=$w SQ_HEIGHT=$h -- --compact --$col
 			need "$fx ${w}x$h --$col: the accepted screen" eval '
-				rc_is 0 && err_empty && cmp -s <(without_clock "$fixtures/$fx/accepted-w$w-h$h.$ext" | whole_mask_estimates) <(without_clock "$OUT" | whole_mask_estimates)'
+				rc_is 0 && err_empty && cmp -s <(without_clock "$fixtures/$fx/accepted-w$w-h$h.$ext" | mask_estimates) <(without_clock "$OUT" | mask_estimates)'
 		done
 	done
 	sq_run elapsed24 SQSTUB_HOST=FranzGB SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --no-color

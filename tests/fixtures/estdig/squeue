@@ -1,0 +1,2 @@
+@include ../_common/squeue-defaults
+i=1201; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node01,node02,node03); S=\{now+400d}; r=ReqNodeNotAvail, UnavailableNodes:node01,node02,node03
