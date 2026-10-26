@@ -9434,7 +9434,7 @@ whole_counts() {
 # R2 15: a count of one takes the singular, at every place sq prints a count
 # with a plural noun: the footer's total, and sq job's throttle of an array
 c_plural_one() {
-	T_TITLE="one of a kind is singular: the footer of a queue of one job says '1 job' in each form that has the total; sq job's throttle %1 is 'at most 1 task at once', in a task's verdict and in the array's pending line"
+	T_TITLE="one of a kind is singular: the footer of a queue of one job says '1 job' in each form that has the total; sq job's throttle %1 is 'at most 1 task at once', in a task's verdict and in the array's pending line; a job of one CPU in the why section's rows is '1 CPU ', aligned"
 	local w want d
 	sq_run trailing-junk --
 	need "FULL: the footer '1 job  1 running  0 pending  0 other'" eval 'rc_is 0 && footer_is 1 1 0 0 && plain | tail -n 1 | grep -qE "^ *1 job +1 running"'
@@ -9450,6 +9450,14 @@ c_plural_one() {
 	sed 's/ArrayTaskID=215-216%5;/ArrayTaskID=215-216%1;/' "$jfx/array-11367/squeue-all" > "$d/squeue-all"
 	why_run "$d" -- --no-color job 11367
 	need "the array's pending record throttled to %1: '2 pending: the array runs at most 1 task at once'" eval 'rc_is 0 && why_lines | grep -qxF "  2 pending: the array runs at most 1 task at once"'
+	# the why section's job rows: a job of one CPU says "1 CPU ", its columns where "16 CPUs" has them
+	d=$(jfx_copy cpu1-ahead pending-est); sed -i 's/^\(JobID=11958;.*\)NumCPUs=64;/\1NumCPUs=1;/' "$d/squeue-queue"
+	why_run "$d" -- --no-color job 11962
+	need "a job ahead of one CPU: '11958  amadvi      1 CPU     500G  PENDING'" eval 'rc_is 0 && why_lines | grep -qF "    11958  amadvi      1 CPU     500G  PENDING (Resources), submitted "'
+	d=$(jfx_copy cpu1-blocker resources-11964); sed -i 's/^\(JobID=11950;.*\)NumCPUs=16;/\1NumCPUs=1;/' "$d/squeue-queue"
+	why_run "$d" -- --no-color job 11964
+	need "a job to end first of one CPU: '11950  fsill      1 CPU      64G', beside '32 CPUs'" eval 'rc_is 0 && why_lines | grep -qxF "    11950  fsill      1 CPU      64G  21h46m left" &&
+		why_lines | grep -qxF "    11875  schroder  32 CPUs    256G  no time limit"'
 }
 # R2 16: LEFT's INVALID (past its limit, being killed) is bold red wherever
 # the queue is drawn: under UTF-8, under a gawk in C, and on a screen whose

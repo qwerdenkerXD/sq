@@ -2076,6 +2076,7 @@ job_pss_since() {
 read -r -d '' job_awk <<'JOBAWK'
 function paint(c, s) { return (c == "") ? s : e(c) s e("0") }
 function plural(n, w) { return n " " w (n == 1 ? "" : "s") }
+function cpus_s(n) { return (n + 0 == 1) ? "" : "s" }   # "1 CPU ", "16 CPUs": the column stays put
 function trim(s) { gsub(/^ +| +$/, "", s); return s }
 function pct1(x) { return sprintf("%.1f%%", x) }
 function stcode(st) { sub(/ .*/, "", st); return (st in SC) ? SC[st] : st }   # CANCELLED by 1025: CA
@@ -2881,7 +2882,7 @@ function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio,
     }
     for (k = 1; k <= ahead && k <= 3; k++) {
       p = AH[k]
-      wl2(sprintf("%-*s  %s %3s CPUs  %6s  %s (%s), submitted %s ago", idw, qjob(p), colpad(RQ[p, "UserName"], -uw), RQ[p, "NumCPUs"],
+      wl2(sprintf("%-*s  %s %3s CPU%-1s  %6s  %s (%s), submitted %s ago", idw, qjob(p), colpad(RQ[p, "UserName"], -uw), RQ[p, "NumCPUs"], cpus_s(RQ[p, "NumCPUs"]),
                   memsize(tres_mem(RQ[p, "tres-alloc"]), 0), paint(stcolour("PD"), "PENDING"), RQ[p, "Reason"], ago(NOW - RQ[p, "SubmitTime"])))
     }
     if (ahead > 3) wl2("… and " (ahead - 3) " more")
@@ -2950,7 +2951,7 @@ function why_blockers(q, rq_c, rq_m,   k, i, p, nj, J, E, a, b, t, fc, fm, best,
   for (a = 1; a <= nbl; a++) {
     p = BL[a]
     if (RQ[p, "TimeLimit"] == "UNLIMITED") { unl = unl (unl == "" ? "" : ", ") qjob(p); if (isepoch(RQ[p, "EndTime"]) && (unlend == "" || RQ[p, "EndTime"] + 0 < unlend)) unlend = RQ[p, "EndTime"] + 0 }
-    wl2(sprintf("%-*s  %s %3s CPUs  %6s  %s", idw, qjob(p), colpad(RQ[p, "UserName"], -w), RQ[p, "NumCPUs"], memsize(tres_mem(RQ[p, "tres-alloc"]), 0),
+    wl2(sprintf("%-*s  %s %3s CPU%-1s  %6s  %s", idw, qjob(p), colpad(RQ[p, "UserName"], -w), RQ[p, "NumCPUs"], cpus_s(RQ[p, "NumCPUs"]), memsize(tres_mem(RQ[p, "tres-alloc"]), 0),
                 RQ[p, "TimeLimit"] == "UNLIMITED" ? "no time limit" : elap(dur(RQ[p, "TimeLeft"])) " left"))
   }
   est = R[q, "StartTime"]
