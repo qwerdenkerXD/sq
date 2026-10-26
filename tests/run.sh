@@ -8182,7 +8182,7 @@ EOF
 	o_refused "-v prints squeue's own parameters into the output sq parses" SQUEUE_USERS= -- -v
 }
 c_opts_env_inert() {   # AC5, AC6, AC7
-	T_TITLE="unknown SQUEUE_* names stay with squeue, SQUEUE_SORT is unset, SACCT_* leave the dashboard's sacct, --noheader keeps sacct and reaches no call"
+	T_TITLE="unknown SQUEUE_* names stay with squeue, SQUEUE_SORT is unset, SACCT_* leave the dashboard's sacct (that call alone), --noheader keeps sacct and reaches no call"
 	orun empty SQUEUE_FOO=1 SQUEUE_USER=bob --
 	need "SQUEUE_FOO=1 SQUEUE_USER=bob: S called, last 2h, no fallback, Q carries both" eval '
 		rc_is 0 && calls_are 1 1 0 1 && s_is -a && has "recently finished · last 2h" &&
@@ -8193,6 +8193,10 @@ c_opts_env_inert() {   # AC5, AC6, AC7
 	orun empty SACCT_FEDERATION=1 SACCT_LOCAL=1 SACCT_FORMAT=x --
 	need "SACCT_FEDERATION SACCT_LOCAL SACCT_FORMAT: S carries none, last 2h" eval '
 		rc_is 0 && s_is -a && has "recently finished · last 2h" && ! grep "^CALL	sacct" "$LOG" | grep -q SACCT_'
+	orun sacct-fails SACCT_FEDERATION=1 SACCT_FORMAT=x --
+	need "... sacct failing: S carries none, the fallback after it both again (unset for sacct's call alone)" eval '
+		rc_is 0 && calls_are 1 1 1 1 && ! grep "^CALL	sacct" "$LOG" | grep -q SACCT_ &&
+		fb=$(grep "^CALL	squeue	.* -t all " "$LOG") && [[ $fb == *"	SACCT_FEDERATION=1"* ]] && [[ $fb == *"	SACCT_FORMAT=x"* ]]'
 	job_run running-own SACCT_FEDERATION=1 SACCT_LOCAL=1 SACCT_FORMAT=x -- --no-color job 11950
 	need "... sq job 11950 as at 1eb0218: rc 0, its sacct calls without them" eval '
 		rc_is 0 && [ "$(calls sacct)" -ge 1 ] && ! grep "^CALL	sacct" "$LOG" | grep -q SACCT_'

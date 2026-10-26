@@ -4417,13 +4417,16 @@ rsrc=none; rwhy=$sskip rwhy_real=$sskip; rerr= rerr_real=; rwhyc=
 if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	aflag=(-a); [ "$suser" = 0 ] || aflag=()
 	# a caller's SACCT_* settings (SACCT_FEDERATION, SACCT_LOCAL,
-	# SACCT_FORMAT) would change the question, as for sq job
+	# SACCT_FORMAT) would change the question, as for sq job: unset for this
+	# call alone, and exported again after it as they were
+	sacct_env=(); for v in $(exported_names 'SACCT_*'); do sacct_env+=("$v=${!v}"); done
 	unset $(exported_names 'SACCT_*')
 	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 collect recent \
 		sacct -p --delimiter="$nonce2" -n -S "$since" -E now \
 		"${aflag[@]+"${aflag[@]}"}" "${sargs[@]+"${sargs[@]}"}" ${sarray:+"$sarray"} \
 		${slocal:+"$slocal"} ${sfed:+"$sfed"} -o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName
 	se=$?
+	[ ${#sacct_env[@]} -eq 0 ] || export "${sacct_env[@]}"
 	# rc=0 with no rows is not proof of success (-M/-r typos are silent), which
 	# is what the closed whitelist above is for; rc!=0 can still leave a partial
 	# file behind, so that is thrown away rather than rendered
