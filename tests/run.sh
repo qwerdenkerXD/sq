@@ -10030,23 +10030,50 @@ c_whole_accepted() {
 # draws anything.  A gawk on PATH ahead of the real one logs every call's
 # longest argument, and for a call with --source how many parts it has
 c_gawk_arg_limit() {
-	T_TITLE="the dashboard's program reaches gawk as three --source parts (the libraries and the program), no argument of any of the run's gawk calls over 131072 bytes, and a COMPACT run draws its screen"
-	local shim=$T_DIR/argbin real; real=$(command -v gawk)
+	T_TITLE="no argument of any gawk call sq makes is over 64 KiB (half of Linux's 128 KiB MAX_ARG_STRLEN), over the dashboard FULL and COMPACT (memory columns, scontrol -o, C), sq job (why, sstat, arrays, scontrol -o) and sq log; the dashboard's program reaches gawk as four --source parts, sq job's as five; each run draws its screen"
+	local shim=$T_DIR/argbin real fx limit=65536; real=$(command -v gawk)
 	mkdir -p "$shim"
+	# each call: its --source parts, its longest argument, and what ran it
 	cat > "$shim/gawk" <<-SHIM
 		#!/usr/bin/env bash
 		LC_ALL=C; longest=0 parts=0
 		for a; do [ \${#a} -le \$longest ] || longest=\${#a}; [ "\$a" != --source ] || parts=\$((parts + 1)); done
-		printf '%s %s\n' "\$parts" "\$longest" >> "$T_DIR/arglens"
+		printf '%s %s %s\n' "\$parts" "\$longest" "\${GAWK_RUN:-?}" >> "$T_DIR/arglens"
 		exec "$real" "\$@"
 	SHIM
 	chmod +x "$shim/gawk"
 	: > "$T_DIR/arglens"
-	sq_run busy24 PATH="$shim:$here/bin:$PATH" SQ_HEIGHT=24 SQ_WIDTH=100 -- --compact --no-color
+	local -a argenv=(PATH="$shim:$here/bin:$PATH")
+	sq_run busy24 "${argenv[@]}" GAWK_RUN=dash SQ_HEIGHT=24 SQ_WIDTH=100 -- --compact --no-color
 	need "a COMPACT run on the logging gawk draws its screen, the footer last" eval 'rc_is 0 && err_empty && plain | tail -n 1 | grep -qE "^ +151 jobs +128 running"'
-	need "the dashboard's call has three --source parts" eval '[ "$(gawk "\$1 > 0 { print \$1 }" "$T_DIR/arglens")" = 3 ]'
-	need "no argument of a gawk call over 131072 bytes (longest: $(sort -k2 -n "$T_DIR/arglens" | tail -n 1 | cut -d" " -f2))" eval '
-		[ -s "$T_DIR/arglens" ] && gawk "\$2 > 131072 { bad = 1 } END { exit bad }" "$T_DIR/arglens"'
+	sq_run memalloc "${argenv[@]}" GAWK_RUN=dash SQSTUB_UID=1041 SQ_WIDTH=110 SQ_HEIGHT=30 -- --full --color
+	need "memalloc FULL as fsill (the memory columns, sstat): rc 0, the footer last" eval 'rc_is 0 && err_empty && plain | tail -n 1 | grep -qE "^ +[0-9]+ jobs? "'
+	no_utf8_locale "$T_DIR/nobin"
+	sq_run mix30 GAWK_RUN=dash LC_ALL=C PATH="$T_DIR/nobin:$shim:$here/bin:$PATH" SQ_WIDTH=60 SQ_HEIGHT=30 -- --compact --no-color
+	need "mix30 COMPACT under a gawk in C: rc 0, the footer last" eval 'rc_is 0 && err_empty && plain | tail -n 1 | grep -qE "^ *[0-9]+ (jobs?|R) "'
+	for fx in finished-11912:11912 pending-est:11962 running-own:11950 array-11367:11367 resources-11964:11964; do
+		job_run "${fx%%:*}" "${argenv[@]}" GAWK_RUN=job -- --no-color job "${fx#*:}"
+		need "sq job ${fx#*:} (${fx%%:*}): rc 0, its report" eval 'rc_is 0 && plain | head -n 1 | grep -q "^▌ ${fx#*:}"'
+	done
+	fx=$(jfx_copy arglen-o resources-11964); o_path "$fx" nojson
+	why_run "$fx" "${argenv[@]}" GAWK_RUN=job $O_ENV -- --no-color job 11964
+	need "sq job 11964 on scontrol -o (no --json): rc 0, its report" eval 'rc_is 0 && plain | head -n 1 | grep -q "^▌ 11964"'
+	sq_run memalloc "${argenv[@]}" GAWK_RUN=dash SQSTUB_NOJSON=1 SQSTUB_UID=1041 SQ_WIDTH=110 SQ_HEIGHT=30 -- --full --no-color
+	need "memalloc FULL on scontrol -o (no --json): rc 0, the footer last" eval 'rc_is 0 && plain | tail -n 1 | grep -qE "^ +[0-9]+ jobs? "'
+	fx=$(log_fx arglen <<'LOGFX'
+StateCompact=CD
+@file create wd/out_500.log line\n
+LOGFX
+)
+	sq_run "$fx" "${argenv[@]}" GAWK_RUN=log -- log --no-follow 500
+	need "sq log: rc 0, the file" eval 'rc_is 0 && out_is "line
+"'
+	need "the dashboard's call has four --source parts (the libraries, its functions, its rules)" eval '
+		[ "$(gawk "\$3 == \"dash\" && \$1 > 0 { print \$1 }" "$T_DIR/arglens" | sort -u)" = 4 ]'
+	need "sq job's report call has five --source parts (the libraries, the report, its why)" eval '
+		[ "$(gawk "\$3 == \"job\" && \$1 > 0 { print \$1 }" "$T_DIR/arglens" | sort -u)" = 5 ]'
+	need "no argument of any of the $(grep -c . "$T_DIR/arglens") gawk calls over $limit bytes (longest: $(sort -k2 -n "$T_DIR/arglens" | tail -n 1 | cut -d" " -f2,3))" eval '
+		[ -s "$T_DIR/arglens" ] && gawk -v limit=$limit "\$2 > limit { bad = 1 } END { exit bad }" "$T_DIR/arglens"'
 }
 
 # ============================================================================

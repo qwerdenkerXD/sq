@@ -2462,6 +2462,11 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
   print_sections()
 }
 
+JOBAWK
+# The report's second part, read as one more --source of its own: Linux takes
+# no single argument over 128 KiB (MAX_ARG_STRLEN), and sq keeps each under
+# 64 KiB (tests/run.sh gawk_arg_limit)
+read -r -d '' job_why_awk <<'JOBAWK'
 # ---- why: plain words on why the job is where it is -----------------------------
 # Franz's decisions (2026-10-21): a section of sq job for a pending job (what
 # holds it) and an ended one (why it failed, who cancelled it), none for a
@@ -3378,7 +3383,8 @@ job_run() {   # job_run PHASE: the report's gawk, PHASE plan (what more the why 
 	[ "$1" != plan ] || as=pending                   # to show) or show
 	env LC_ALL="$gloc" gawk -v phase="$1" -v job="$job" -v task="$task" -v myuid="$myuid" -v qstat="$qstat" \
 		-v astat="$as" -v memfail="$memfail" -v pss="$job_pss" -v tmo="$job_atmo" \
-		-v qfields="$job_qfields" -v afields="$job_afields" "$shared_awk$fname_awk$wide_awk$job_awk"
+		-v qfields="$job_qfields" -v afields="$job_afields" \
+		--source "$shared_awk" --source "$fname_awk" --source "$wide_awk" --source "$job_awk" --source "$job_why_awk"
 }
 
 sub_job() {
@@ -4476,9 +4482,10 @@ for v in $sqv; do export "SQV_$v=${!v}"; done
 # 127 (grep's rc 1: none), so their cells are measured, cut and padded by
 # columns; an ASCII screen keeps the plain length() and printf of a cell
 wide=1; high_bytes "$tmp/nodes" "$tmp/jobs" "$tmp/recent"; [ $? != 1 ] || wide=0
-# The libraries and the program go as --source parts of their own: Linux takes
-# no single argument over 128 KiB (MAX_ARG_STRLEN), which the three together
-# come near (tests/run.sh gawk_arg_limit)
+# The libraries and the program go as --source parts of their own, the
+# program in two (its functions, then its rules): Linux takes no single
+# argument over 128 KiB (MAX_ARG_STRLEN), and sq keeps each under 64 KiB
+# (tests/run.sh gawk_arg_limit)
 env LC_ALL="$gloc" gawk -v keys="$keys" -v cols="$cols" -v lines="$lines" -v hastty="$hastty" -v wide="$wide" \
                       -v horizon="$horizon" -v rsrc="$rsrc" -v rwhyc="$rwhyc" -v rflt="$rflt" -v rmax="$rmax" \
                       -v compact="$compact" -v reserve="$reserve" -v prompt="$prompt" -v uidmap="$uidmap" -v sqv="$sqv" \
@@ -5474,7 +5481,7 @@ function qrow(r,   js, jc, line, i, x, fw, cc, xw, xs) {     # one queue row, co
   }
   return line
 }
-
+' --source '
 BEGIN{
   split(sqv, sqvar, " ")                                  # each SQV_<name> the shell
   for (i in sqvar) SYMTAB[sqvar[i]] = ENVIRON["SQV_" sqvar[i]]   # exported, by its name
