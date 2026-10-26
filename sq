@@ -6039,15 +6039,12 @@ END{
       w[big]++; w[i]--
     }
   }
-  # a table narrower than target: its spare goes first to the next F2 form
-  # of the id (R-M1), then to the gaps, then to the widest text column
-  if (QBODY && idc && !QDROPPED[idc] && tabw < target) {
-    cm = 0; nx = 0
-    for (r=1; r<=rows; r++) if (QSHOW[r]) { xw = idw(idform(v[r,idc], w[idc])); if (xw > w[idc]) xw = w[idc]; if (xw > cm) cm = xw }
-    for (reach = w[idc] + 1; reach <= w[idc] + target - tabw && !nx; reach++)
-      for (r=1; r<=rows; r++) if (QSHOW[r]) { xw = idw(idform(v[r,idc], reach)); if (xw <= reach && xw > cm) nx = reach }
-    if (nx) { w[idc] = nx; tabw = qtab() }
-  }
+  # A table narrower than target has its spare for the gaps and the widest
+  # text column.  The next F2 form of the id (R-M1) never needs it here: a shave
+  # always ends at the budget, so a narrower table left every column, JOBID
+  # too, at its measured width (qlong_durations brings the long forms back
+  # only where nothing was shaved), and after the F3 pass above the spare is
+  # at most what JOBID gave up, below its next form
   if (QBODY && tabw < target) {                 # table grows: gaps first, capped, then
     extra = target - tabw                       # the widest text column soaks up the rest
     room  = (nqcols > 1) ? (nqcols-1) * (GAP_MAX - 1) : 0
