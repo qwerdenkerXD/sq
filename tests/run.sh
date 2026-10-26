@@ -2049,7 +2049,7 @@ c_wide_job_ahead() {
 # every gawk in C (it was the caller's locale, whose eucJP read UTF-8 bytes
 # as its own characters and whose [[:cntrl:]] ate a byte of "…")
 c_wide_c_mode() {
-	T_TITLE="no UTF-8 locale (gawk in C): the wide screens as their twins at 50, 80 and 120; array-running's JOBID header and ×-rows as under UTF-8; LC_ALL=ja_JP.eucJP and de_DE.ISO-8859-1 give the LC_ALL=C screen, every gawk in C"
+	T_TITLE="no UTF-8 locale (gawk in C): the wide screens as their twins at 50, 80 and 120; array-running's JOBID header and ×-rows as under UTF-8; LC_ALL=ja_JP.eucJP and de_DE.ISO-8859-1 give the LC_ALL=C screen (start estimates aside), every gawk in C"
 	local nobin=$T_DIR/nobin loc=$T_DIR/loc gbin=$T_DIR/gbin glog=$T_DIR/gawk.log l want src charmap name
 	mkdir -p "$nobin" "$loc"
 	no_utf8_locale "$nobin"
@@ -2072,12 +2072,13 @@ c_wide_c_mode() {
 		fi
 	done
 	gawk_wrapper "$gbin" "$glog"
-	sq_run wide-text SQ_WIDTH=80 "${sweep_env[@]}" -- --color "${wide_cols[@]}"; want=$RUN/screen.C; without_clock "$OUT" > "$want"
+	# wide-text's start estimates are the stub's \{now+3h}: a minute edge between the runs moves them
+	sq_run wide-text SQ_WIDTH=80 "${sweep_env[@]}" -- --color "${wide_cols[@]}"; want=$RUN/screen.C; without_clock "$OUT" | mask_estimates > "$want"
 	for name in ja_JP.eucJP de_DE.ISO-8859-1; do
 		: > "$glog"
 		sq_run wide-text SQ_WIDTH=80 LC_ALL=$name LOCPATH="$loc" "PATH=$gbin:$nobin:$here/bin:$PATH" -- --color "${wide_cols[@]}"
 		need "LC_ALL=$name: rc 0, stderr empty, the LC_ALL=C screen byte for byte, every gawk in C" eval '
-			rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT") && grep -q "^call" "$glog" && ! grep "^call" "$glog" | grep -qvx "call C"'
+			rc_is 0 && err_empty && cmp -s "$want" <(without_clock "$OUT" | mask_estimates) && grep -q "^call" "$glog" && ! grep "^call" "$glog" | grep -qvx "call C"'
 	done
 }
 
