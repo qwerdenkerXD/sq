@@ -2669,7 +2669,7 @@ function why_pending(q, r,   reason, p, m, v) {
     wl(vword(v, isepoch(R[q, "StartTime"]) && R[q, "StartTime"] > NOW ? "it asked not to start before " stamp(R[q, "StartTime"]) " (--begin)" \
                                                                       : "its begin time has passed; the scheduler starts it on a next pass"))
   else if (reason == "JobArrayTaskLimit")
-    wl(vword(v, match(TASKS_EXPR, /%([0-9]+)$/, m) ? "its array runs at most " m[1] " tasks at once; this one starts when one of them ends" \
+    wl(vword(v, match(TASKS_EXPR, /%([0-9]+)$/, m) ? "its array runs at most " m[1] (m[1] + 0 == 1 ? " task" : " tasks") " at once; this one starts when one of them ends" \
                                                    : "its array runs only so many tasks at once; this one starts when one of them ends"))
   else if (reason == "None")        wl(vword(v, "the scheduler has not looked at it yet"))
   else if (reason == "Prolog")      wl(vword(v, "its node runs the prolog; it is about to start"))
@@ -3091,7 +3091,7 @@ function why_array(   i, r, id, c, by, never, key, k, s, n, GN, GI, GK, a, b, t,
     if (R[r, "StateCompact"] != "PD" || onetask(r)) continue
     x = R[r, "Reason"]
     wl(ntasks(job "_[" R[r, "ArrayTaskID"] "]", ID) " pending: " \
-       ((x == "JobArrayTaskLimit" && match(R[r, "ArrayTaskID"], /%([0-9]+)$/, m)) ? "the array runs at most " m[1] " tasks at once" : "Slurm's reason: " x))
+       ((x == "JobArrayTaskLimit" && match(R[r, "ArrayTaskID"], /%([0-9]+)$/, m)) ? "the array runs at most " m[1] (m[1] + 0 == 1 ? " task" : " tasks") " at once" : "Slurm's reason: " x))
   }
   if (first != "") wn("sq job " first " says more about one of them")
 }
@@ -5166,13 +5166,13 @@ function footer_line(wd,   a, b, c, dd, L, F, T, f, nf, i, x, gap, last, margin)
   a = QKNOWN ? qjobs+0 : "?"; b = QKNOWN ? cnt["R"]+0 : "?"; c = QKNOWN ? cnt["PD"]+0 : "?"
   dd = QKNOWN ? qjobs - cnt["R"] - cnt["PD"] : "?"
   # a form: its gap, codes (1) or words (0), the first and the last part kept
-  # (1 jobs, 2 running, 3 pending, 4 other), and "m" where it gives the margin
+  # (1 the total of jobs, 2 running, 3 pending, 4 other), and "m" where it gives the margin
   nf = split("3 0 1 4|2 0 1 4|1 0 1 4|1 1 1 4|1 1 1 4 m|1 1 2 4|1 1 2 4 m|1 1 2 3|1 1 2 3 m|1 1 2 2|1 1 2 2 m", F, "|")
   FOOTMARGIN = 1
   for (f = 1; f <= nf; f++) {
     split(F[f], T, " "); gap = sprintf("%*s", T[1], ""); last = T[4]
     margin = (T[5] == "m") ? left : 0
-    L[1] = e("1") a e("0") " jobs"
+    L[1] = e("1") a e("0") (a == 1 ? " job" : " jobs")
     L[2] = e("32") b (T[2] ? " R" : " running") e("0")
     L[3] = e("33") c (T[2] ? " PD" : " pending") e("0")
     L[4] = e("31") dd " other" e("0")

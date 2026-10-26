@@ -360,7 +360,7 @@ section() {   # section queue|recent|footer: that block's lines (SRC=cplain: cel
 		want == "queue"  && first ~ /^ *(queue is empty|job list unavailable|no readable rows|⚠ queue output)/ { print; exit }
 		want == "queue"  && first ~ HDR { print; exit }
 		want == "recent" && first ~ /^ *(recently finished|finished jobs unavailable)/ { print; exit }
-		want == "footer" && first ~ /^ *([0-9]+|\?) jobs / { print; exit }'
+		want == "footer" && first ~ /^ *([0-9]+|\?) jobs? / { print; exit }'
 }
 rows() {      # rows queue|recent: the data rows of a table, header and notes left out
 	section "$1" | LC_ALL=$utf8 gawk 'NR == 1 && /^ *[A-Z][A-Z\/_()]*( +[A-Z][A-Z\/_()]*)* *$/ { next }   # the queue header
@@ -398,8 +398,9 @@ column_aligned() {   # column_aligned HEADER, e.g. USER (in columns)
 		END { exit !(p >= 2 && n > 0 && !bad) }'
 }
 footer_is() { # footer_is JOBS RUNNING PENDING OTHER
-	section footer | grep -qE "^ *$1 jobs +$2 running +$3 pending +$4 other\$"
+	section footer | grep -qE "^ *$1 $(jobs_noun "$1") +$2 running +$3 pending +$4 other\$"
 }
+jobs_noun() { [ "$1" = 1 ] && echo job || echo jobs; }   # jobs_noun N: the footer's noun for N jobs
 # the counts sq does not know: "?" for each, on the last line, the one footer
 footer_sgr() { tail -n 1 "$OUT" | LC_ALL=C grep -o "$ESC\[[0-9;]*m" | tr -d "$ESC" | paste -sd' '; }   # the footer's SGRs, ESC left out
 footer_unknown() { [ "$(section footer | wc -l)" -eq 1 ] && plain | tail -n 1 | grep -qE '^ *\? jobs +\? running +\? pending +\? other$'; }
@@ -2562,7 +2563,7 @@ c_pending_strided() {
 	need "footer 7/0/7/0"             footer_is 7 0 7 0
 	need "no unreadable note"         no_skips
 	need "4b(i): shown but counted 1" eval '
-		! { rows queue | grep -q "^ *7001_" && section footer | grep -qE "^ *1 jobs "; }'
+		! { rows queue | grep -q "^ *7001_" && section footer | grep -qE "^ *1 jobs? "; }'
 }
 c_pending_long() {
 	T_TITLE="a pending id over 31 characters arrives whole (SLURM_BITSTR_LEN=0) and is shown as 10 jobs"
@@ -2574,7 +2575,7 @@ c_pending_long() {
 	need "footer 10/0/10/0"           footer_is 10 0 10 0
 	need "no unreadable note"         no_skips
 	need "4b(i): shown but counted 1" eval '
-		! { rows queue | grep -q "^ *11137_" && section footer | grep -qE "^ *1 jobs "; }'
+		! { rows queue | grep -q "^ *11137_" && section footer | grep -qE "^ *1 jobs? "; }'
 }
 # Acceptance 6: a malformed bracket is skipped with the existing note, never
 # counted 0, negative, NaN or 1.  The run inherits SLURM_BITSTR_LEN=0 (a user
@@ -3165,7 +3166,7 @@ screen() {
 		{ t = $0; sub(/^ +/, "", t); sub(/ +$/, "", t) }
 		NR == 1 && t ~ /^▌ SLURM /                    { print "TITLE\t" t; next }
 		t == ""                                       { print "BLANK\t"; zone = ""; next }
-		t ~ /^([0-9]+|\?) jobs +([0-9]+|\?) running / { print "FOOTER\t" t; zone = ""; next }
+		t ~ /^([0-9]+|\?) jobs? +([0-9]+|\?) running / { print "FOOTER\t" t; zone = ""; next }
 		t ~ /^recently finished( \([^)]*\))?: /       { print "FINLINE\t" t; zone = ""; next }
 		t ~ /^(recently finished|finished jobs unavailable)/ { print "FINCAP\t" t; zone = "f"; next }
 		zone == "f" && t ~ HDR                        { print "FHDR\t" t; next }
@@ -3198,7 +3199,7 @@ lines_within() { [ "$(plain | wc -l)" -le "$1" ]; }
 blanks_are()   { [ "$(labelled BLANK | wc -l)" -eq "$1" ]; }
 footer_last()  { # footer_last JOBS RUNNING PENDING OTHER: the one footer, on the last line
 	[ "$(labelled FOOTER | wc -l)" -eq 1 ] &&
-	plain | tail -n 1 | grep -qE "^ *$1 jobs +$2 running +$3 pending +$4 other\$"
+	plain | tail -n 1 | grep -qE "^ *$1 $(jobs_noun "$1") +$2 running +$3 pending +$4 other\$"
 }
 # the title is "▌ SLURM <host>  HH:MM:SS ZONE", nothing more, whatever the host is called
 # (CALL (made inside the target screens, listed to Franz, overrulable): no "· compact" mode marker)
@@ -9341,7 +9342,7 @@ whole_check() {
 				nf = split("3 0 1 4|2 0 1 4|1 0 1 4|1 1 1 4|1 1 1 4 m|1 1 2 4|1 1 2 4 m|1 1 2 3|1 1 2 3 m|1 1 2 2|1 1 2 2 m", FF, "|")
 				for (k = 1; k <= nf; k++) {
 					split(FF[k], T, " "); g = sprintf("%*s", T[1], "")
-					P[1] = Q[1] " jobs"; P[2] = Q[2] (T[2] ? " R" : " running"); P[3] = Q[3] (T[2] ? " PD" : " pending"); P[4] = Q[4] " other"
+					P[1] = Q[1] (Q[1] == 1 ? " job" : " jobs"); P[2] = Q[2] (T[2] ? " R" : " running"); P[3] = Q[3] (T[2] ? " PD" : " pending"); P[4] = Q[4] " other"
 					want = ""; for (j = T[3]; j <= T[4]; j++) want = want (want != "" ? g : "") P[j]
 					if (length(want) <= w - 2 + (T[5] == "m" ? 2 : 0)) break
 				}
@@ -9352,7 +9353,7 @@ whole_check() {
 			if (narrow) exit
 			N = "([0-9]+|\\?)"
 			f = L[NR]
-			if (f !~ "^ *(" N " jobs +" N " running +" N " pending +" N " other|(" N " jobs +)?" N " R( +" N " PD( +" N " other)?)?)$")
+			if (f !~ "^ *(" N " jobs? +" N " running +" N " pending +" N " other|(" N " jobs? +)?" N " R( +" N " PD( +" N " other)?)?)$")
 				print "footer: " f
 			for (i = 1; i <= NR && L[i] == ""; i++) ;
 			t = L[i]; gsub(/\356\200\200/, "", t)
@@ -9385,6 +9386,26 @@ whole_counts() {
 	local fx=$1; shift
 	sq_run "$fx" SQSTUB_HOST=$whole_host SQ_WIDTH=250 -- --full "$@"
 	plain | tail -n 1 | gawk '{ print $1, $3, $5, $7 }'
+}
+# R2 15: a count of one takes the singular, at every place sq prints a count
+# with a plural noun: the footer's total, and sq job's throttle of an array
+c_plural_one() {
+	T_TITLE="one of a kind is singular: the footer of a queue of one job says '1 job' in each form that has the total; sq job's throttle %1 is 'at most 1 task at once', in a task's verdict and in the array's pending line"
+	local w want d
+	sq_run trailing-junk --
+	need "FULL: the footer '1 job  1 running  0 pending  0 other'" eval 'rc_is 0 && footer_is 1 1 0 0 && plain | tail -n 1 | grep -qE "^ *1 job +1 running"'
+	for want in "40:  1 job  1 running  0 pending  0 other" "30:  1 job 1 R 0 PD 0 other" "24:  1 job 1 R 0 PD 0 other" "18:  1 R 0 PD 0 other"; do
+		w=${want%%:*}
+		sq_run trailing-junk SQ_WIDTH="$w" SQ_HEIGHT=12 -- --compact --no-color
+		need "COMPACT W=$w: the footer '${want#*:}'" eval 'rc_is 0 && [ "$(plain | tail -n 1)" = "${want#*:}" ]'
+	done
+	d=$(pend_fx one ArrayJobID=800 ArrayTaskID=5-9%1 Reason=JobArrayTaskLimit)
+	why_run "$d" -- --no-color job 800_7
+	need "a task of an array throttled to %1: 'at most 1 task at once'" eval 'rc_is 0 && [ "$(why_lines | head -n 1)" = "  waits its turn: its array runs at most 1 task at once; this one starts when one of them ends" ]'
+	d=$T_DIR/fx-arr1; mkdir -p "$d"; cp "$jfx/array-11367/passwd" "$jfx/array-11367/sacct" "$d/"
+	sed 's/ArrayTaskID=215-216%5;/ArrayTaskID=215-216%1;/' "$jfx/array-11367/squeue-all" > "$d/squeue-all"
+	why_run "$d" -- --no-color job 11367
+	need "the array's pending record throttled to %1: '2 pending: the array runs at most 1 task at once'" eval 'rc_is 0 && why_lines | grep -qxF "  2 pending: the array runs at most 1 task at once"'
 }
 c_whole_widths() {   # WHOLE ACs 1-3, 5, 10 at W 21..80
 	T_TITLE="COMPACT at every width 21..80 (H 30, with and without colour): no line wider than W, no screen taller than H, no digit, unit or state word cut, footer and title each in the first of its forms that fits, every line's colour closed; the last resort only on realid's 10-digit ids below 23 columns"
@@ -10007,7 +10028,7 @@ cases=(
 	nodes_o_calls nodes_o_figures nodes_o_forged nodes_o_pairs nodes_o_fail nodes_o_bounds stub_nodes stub_fast nodes_o_cost nodes_nopart nodes_caption
 	whole_widths whole_narrow whole_monotone whole_full whole_c_mode whole_height whole_pins whole_captions whole_docs whole_accepted
 	whole_forms whole_orders whole_guard whole_v31
-	gawk_arg_limit
+	gawk_arg_limit plural_one
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,
