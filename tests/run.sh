@@ -8223,6 +8223,11 @@ c_opts_env_inert() {   # AC5, AC6, AC7
 	need "SQUEUE_FOO=1 SQUEUE_USER=bob: S called, last 2h, no fallback, Q carries both" eval '
 		rc_is 0 && calls_are 1 1 0 1 && s_is -a && has "recently finished · last 2h" &&
 		[ "$(env_of squeue 1 SQUEUE_FOO)" = 1 ] && [ "$(env_of squeue 1 SQUEUE_USER)" = bob ]'
+	orun memalloc SQUEUE_FOO=1 SQSTUB_UID=1041 --
+	need "... as fsill with MEM: JOBMEM's allocation call without it, the mirror call after it with it again (unexported for that call alone)" eval '
+		rc_is 0 && [ "$(calls alloc)" = 1 ] && [ "$(calls mirror)" = 1 ] &&
+		! grep "^CALL	squeue	" "$LOG" | grep "StateCompact" | grep "tres-alloc" | grep -q "SQUEUE_FOO" &&
+		grep "^CALL	squeue	" "$LOG" | grep "tres-alloc" | grep -v "StateCompact" | grep -q "	SQUEUE_FOO=1"'
 	orun empty SQUEUE_SORT=x --
 	need "SQUEUE_SORT=x: rc 0, last 2h, no call carries it" eval '
 		rc_is 0 && calls_are 1 1 0 1 && has "recently finished · last 2h" && ! grep "^CALL" "$LOG" | grep -q SQUEUE_SORT'

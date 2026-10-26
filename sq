@@ -309,6 +309,13 @@ exported_names() {
 ' "$name"; break ;; esac; done
 	done
 }
+# hold_exports VAR PATTERN...: those exported variables unexported for a call,
+# their names into VAR; release_exports VAR exports them again, as they were
+hold_exports() {
+	printf -v "$1" '%s' "$(exported_names "${@:2}")"
+	[ -z "${!1}" ] || export -n ${!1}
+}
+release_exports() { [ -z "${!1}" ] || export ${!1}; }
 # Every collector runs through collect, so its own stderr (NAME.err) and
 # timeout's (NAME.tmo) land apart: the client's fd 3 becomes its stderr, and
 # timeout keeps fd 2.  sh -c exec keeps the pid, so TERM and KILL reach the
@@ -1380,19 +1387,18 @@ jobmem_snapshot() {
 # written as the new snapshot.  -w: every call through collect -w, as a
 # subcommand makes them
 jobmem_collect() {   # jobmem_collect [-w]
-	local w=${1-} memrc sstat_limit allocrc inherited list name k=0
+	local w=${1-} memrc sstat_limit allocrc held list name k=0
 	: > "$tmp/memalloc"; : > "$tmp/memread"
 	# framed like the fallback's call: the format in SQUEUE_FORMAT2, so the
 	# queue nonce never reaches a command line.  StateCompact is %t's letter.
 	# The caller's SQUEUE_* filters (SQUEUE_STATES, SQUEUE_PARTITION, ...)
 	# would narrow it as the screen's options would: unexported for this
 	# call alone, as the screen's calls after it still take them
-	inherited=$(exported_names 'SQUEUE_*')
-	[ -z "$inherited" ] || export -n $inherited
+	hold_exports held 'SQUEUE_*'
 	SQUEUE_FORMAT2="JobID:$nonce,StateCompact:$nonce,tres-alloc:$nonce,NumNodes:$nonce" \
 		collect $w alloc squeue -h -u "$myuid"
 	allocrc=$?
-	[ -z "$inherited" ] || export $inherited
+	release_exports held
 	# a job without mem= has no known allocation (0).  Output that is not
 	# every record whole fails the call as a non-zero exit does
 	if [ $allocrc -ne 0 ] || ! env LC_ALL=C gawk "$shared_awk"'
@@ -4438,16 +4444,15 @@ rsrc=none; rwhy=$sskip rwhy_real=$sskip; rerr= rerr_real=; rwhyc=
 if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	aflag=(-a); [ "$suser" = 0 ] || aflag=()
 	# a caller's SACCT_* settings (SACCT_FEDERATION, SACCT_LOCAL,
-	# SACCT_FORMAT) would change the question, as for sq job: unset for this
-	# call alone, and exported again after it as they were
-	sacct_env=(); for v in $(exported_names 'SACCT_*'); do sacct_env+=("$v=${!v}"); done
-	unset $(exported_names 'SACCT_*')
+	# SACCT_FORMAT) would change the question, as for sq job: unexported for
+	# this call alone
+	hold_exports sacct_held 'SACCT_*'
 	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 collect recent \
 		sacct -p --delimiter="$nonce2" -n -S "$since" -E now \
 		"${aflag[@]+"${aflag[@]}"}" "${sargs[@]+"${sargs[@]}"}" ${sarray:+"$sarray"} \
 		${slocal:+"$slocal"} ${sfed:+"$sfed"} -o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName
 	se=$?
-	[ ${#sacct_env[@]} -eq 0 ] || export "${sacct_env[@]}"
+	release_exports sacct_held
 	# rc=0 with no rows is not proof of success (-M/-r typos are silent), which
 	# is what the closed whitelist above is for; rc!=0 can still leave a partial
 	# file behind, so that is thrown away rather than rendered
