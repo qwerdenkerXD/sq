@@ -5439,7 +5439,7 @@ function fcode(   r, g, x) {
 
 # Where WIDE, a cell is cut and padded by columns: from the width the measure
 # took (CW) while it is whole, the pad done here and printf given width 0
-function qrow(r,   js, jc, line, i, x, fw, cc, xw) {     # one queue row, coloured
+function qrow(r,   js, jc, line, i, x, fw, cc, xw, xs) {     # one queue row, coloured
   js = state[r]
   jc = (js=="R") ? "32" : (js=="PD") ? "33" : (js ~ /^(F|CA|TO|NF|OOM|ST|BF|DL)/) ? "31" : "36"
   line = lm
@@ -5458,12 +5458,13 @@ function qrow(r,   js, jc, line, i, x, fw, cc, xw) {     # one queue row, colour
       line = line sprintf("%*s%*s%s", gap[i], "", w[i] - (WIDE ? xw : length(x)), "", mem_coloured[r])   # its own
       continue                                      # colours, right-aligned
     }
+    xs = x                                          # the cell as shown, before any pad
     if (WIDE && (i < NLAST || RIGHT[k[i]])) x = colpad(x, RIGHT[k[i]] ? w[i] : -w[i], xw)   # the last left-aligned unpadded
     cc = ""
     if (i == mc && (r in cell_colour)) cc = cell_colour[r]
     else if (i == idc)               cc = jc
     else if (k[i]=="t" || k[i]=="T") cc = "1;" jc
-    else if (i == lc && x == "INVALID") cc = "1;31"    # past its limit, being killed
+    else if (i == lc && xs == "INVALID") cc = "1;31"   # past its limit, being killed
     else if (i == lc && lfrac[r] >= 0) {
       if      (lfrac[r] < 0.02) cc = "1;31"
       else if (lfrac[r] < 0.10) cc = "33"

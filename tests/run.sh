@@ -9407,6 +9407,28 @@ c_plural_one() {
 	why_run "$d" -- --no-color job 11367
 	need "the array's pending record throttled to %1: '2 pending: the array runs at most 1 task at once'" eval 'rc_is 0 && why_lines | grep -qxF "  2 pending: the array runs at most 1 task at once"'
 }
+# R2 16: LEFT's INVALID (past its limit, being killed) is bold red wherever
+# the queue is drawn: under UTF-8, under a gawk in C, and on a screen whose
+# cells are measured by columns (WIDE, a name beyond ASCII)
+c_invalid_colour() {
+	T_TITLE="LEFT INVALID is bold red under UTF-8, under a gawk in C and on a WIDE screen, FULL and COMPACT; the C screen's other colours as before"
+	local d=$T_DIR/fx-wide mode f
+	no_utf8_locale "$T_DIR/nobin"
+	mkdir -p "$d"
+	for f in sinfo sacct squeue; do   # durx, one job name made wide (ö)
+		sed "s|@include ../_common/|@include $fixtures/_common/|; s/j=forever;/j=f\xc3\xb6rever;/" "$fixtures/durx/$f" > "$d/$f"
+	done
+	for mode in --full --compact; do
+		sq_run durx -- "$mode" --color
+		need "UTF-8 $mode: INVALID bold red" eval 'rc_is 0 && LC_ALL=C grep -q "$ESC\[1;31m *INVALID$ESC\[0m" "$OUT"'
+		cp "$OUT" "$T_DIR/utf8$mode"
+		sq_run durx LC_ALL=C PATH="$T_DIR/nobin:$here/bin:$PATH" -- "$mode" --color
+		need "gawk in C $mode: INVALID bold red, the screen byte for byte UTF-8's" eval 'rc_is 0 && LC_ALL=C grep -q "$ESC\[1;31m *INVALID$ESC\[0m" "$OUT" &&
+			cmp -s <(without_clock "$T_DIR/utf8$mode") <(without_clock "$OUT")'
+		sq_run "$d" -- "$mode" --color
+		need "WIDE (a name with ö) $mode: INVALID bold red" eval 'rc_is 0 && LC_ALL=C grep -q "$ESC\[1;31m *INVALID$ESC\[0m" "$OUT"'
+	done
+}
 c_whole_widths() {   # WHOLE ACs 1-3, 5, 10 at W 21..80
 	T_TITLE="COMPACT at every width 21..80 (H 30, with and without colour): no line wider than W, no screen taller than H, no digit, unit or state word cut, footer and title each in the first of its forms that fits, every line's colour closed; the last resort only on realid's 10-digit ids below 23 columns"
 	local fx args
@@ -10028,7 +10050,7 @@ cases=(
 	nodes_o_calls nodes_o_figures nodes_o_forged nodes_o_pairs nodes_o_fail nodes_o_bounds stub_nodes stub_fast nodes_o_cost nodes_nopart nodes_caption
 	whole_widths whole_narrow whole_monotone whole_full whole_c_mode whole_height whole_pins whole_captions whole_docs whole_accepted
 	whole_forms whole_orders whole_guard whole_v31
-	gawk_arg_limit plural_one
+	gawk_arg_limit plural_one invalid_colour
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,
