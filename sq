@@ -3571,11 +3571,11 @@ opt_hint() {
 		-q) vnoun='a QoS name';         vex=normal;    vlist=normal,long ;;
 		-j) vnoun='a job id';           vex=12345;     vlist=12345,12346 ;;
 		-M) vnoun='a cluster name';     vex=mycluster; vlist=cluster1,cluster2 ;;
-		-n) vnoun='a job name';         vex=myjob ;;
-		-t) vnoun='a state list';       vex=R,PD ;;
-		-w) vnoun='a node list';        vex=node01 ;;
-		-L) vnoun='a license name';     vex=matlab ;;
-		-R) vnoun='a reservation name'; vex=maint ;;
+		-n) vnoun='a job name';         vex=myjob;     vlist=myjob,otherjob ;;
+		-t) vnoun='a state list';       vex=R,PD;      vlist=R,PD ;;
+		-w) vnoun='a node list';        vex=node01;    vlist=node01,node02 ;;
+		-L) vnoun='a license name';     vex=matlab;    vlist=matlab,ansys ;;
+		-R) vnoun='a reservation name'; vex=maint;     vlist=maint ;;   # squeue's -R takes one name
 		-S) vnoun='a sort key list';    vex=-i ;;
 		-o) vnoun='a column list';      vex=i,j,u ;;
 	esac
