@@ -10,8 +10,9 @@
 # measure time or load (timed_cases) run one after the other after the rest.
 #
 # --pin writes what sq prints into the pinned screens of sq job and its why
-# section (tests/fixtures/sqjob/screens) instead of comparing with them, for
-# a change that is meant to change them; git diff then shows what changed.
+# section (tests/fixtures/sqjob/screens) and into the goldens of R3-3
+# (tests/goldens/r3) instead of comparing with them, for a change that is
+# meant to change them; git diff then shows what changed.
 #
 # A failed case's run directories stay without -k too, as a flake may not
 # come back for a rerun: under ${TMPDIR:-/tmp}/sq-failed/<UTC start>.<pid>/,
@@ -4749,8 +4750,8 @@ c_node_figures() {   # DISPLAY-v4 E AC 3, 4, 5
 	need "AllocMem unknown while scontrol fails: ?/!1085G mem, the unknown sum and the RealMemory total both marked" eval '
 		rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · ?/!1085G mem" ]'
 	sq_run down-stale-crcore -- --full --color
-	need "E2 in use on a down node (CR_CORE): its fill red, 31:█ then ░" eval '
-		rc_is 0 && mem_part_is fb2-bioinf-0 "████████████████ 97% 76/78G mem down*" && bar_kinds_are fb2-bioinf-0 2 "31:█"'
+	need "E2 in use on a down node (CR_CORE), its FreeMem no longer refreshed (R3-3): unknown, its cells red ·" eval '
+		rc_is 0 && mem_part_is fb2-bioinf-0 "················ -% -/78G mem down*" && bar_kinds_are fb2-bioinf-0 2 "31:·"'
 	# E4: where, dim, cut at the block's width, within COMPACT's height
 	sq_run notes3 -- --full --color
 	need "notes3: the skipped-rows note, the caption, the scontrol note, in that order, the caption dim" eval '
@@ -5090,6 +5091,105 @@ c_membar_call() {
 	need "sinfo failing: no scontrol call" eval '[ "$(calls sinfo)" = 1 ] && [ "$(calls scontrol)" = 0 ]'
 }
 membar_note() { plain | grep -E '^ *↳ memory counts RealMemory' | sed -E 's/^ +//'; }
+# ---- R3-3: memory in use on a node Slurm no longer refreshes ---------------
+# In the in-use view (CR_CORE) memory in use is RealMemory - FreeMem; slurmctld
+# keeps a node's last FreeMem where it no longer pings it, or it does not answer
+# (its state, up to a "+", ends in * ~ % # ^ or begins inval or future): that
+# memory reads unknown, quietly.  A fault node's unknown cells stay red there.
+r3gold=$here/goldens/r3
+# golden_is FILE: stdout is FILE (as 7fd9bd6 drew it), the title's clock and
+# the start estimates aside; with --pin it becomes FILE
+golden_is() {
+	if [ $pin = 1 ]; then mkdir -p "${1%/*}"; cp "$OUT" "$1"; return 0; fi
+	cmp -s <(without_clock "$1" | mask_estimates) <(without_clock "$OUT" | mask_estimates)
+}
+cpu_part() { plain | gawk -v n="$1" '$1 == n { sub(/ cpu .*/, " cpu"); print; exit }'; }   # cpu_part NODE: NODE's line up to its CPU figure
+c_stale_inuse() {   # R3-3 AC 1-3, 5, 8
+	T_TITLE="in-use view: a node Slurm no longer refreshes (* ~ % # ^, inval, future; read up to a +) reads its memory in use as -, quietly; a fault node's unknown cells red, every other dim; the figure column measured after; CPU bars as before"
+	local n want
+	sq_run down-stale-crcore -- --full --color
+	need "down-stale-crcore: fb2-bioinf-0 down* reads -% -/78G, its cells red ·, no caption; fb2-bioinf as before" eval '
+		rc_is 0 && mem_part_is fb2-bioinf-0 "················ -% -/78G mem down*" && bar_kinds_are fb2-bioinf-0 2 "31:·" &&
+		[ -z "$(node_caption)" ] && mem_part_is fb2-bioinf "████████░░░░░░░░ 48% 493/1007G mem mixed"'
+	sq_run stale-states-crcore -- --full
+	need "stale-states-crcore: rc 0, no caption" eval 'rc_is 0 && [ -z "$(node_caption)" ]'
+	for n in n02:down* n04:idle~ n05:mixed* n07:idle# n10:inval; do
+		need "${n%%:*} ${n#*:}: -% -/125G" mem_part_is "${n%%:*}" "················ -% -/125G mem ${n#*:}"
+	done
+	need "n01, n03 down, n06 drained, n08 mixed@, n09 idle!: their figures" eval '
+		mem_part_is n01 "████████░░░░░░░░ 50% 62/125G mem mixed" && mem_part_is n03 "█░░░░░░░░░░░░░░░ 6% 8/125G mem down" &&
+		mem_part_is n06 "░░░░░░░░░░░░░░░░ 2% 3/125G mem drained" && mem_part_is n08 "████░░░░░░░░░░░░ 21% 27/125G mem mixed@" &&
+		mem_part_is n09 "░░░░░░░░░░░░░░░░ 1% 2/125G mem idle!"'
+	need "the used-figure column measured after the rule: 2 wide (n01 ' 62/125G'), aligned on every line" eval '
+		plain | grep -qE "^ +n01 .* 50%  62/125G mem  mixed$" &&
+		[ "$(plain | LC_ALL=$utf8 gawk "/ mem  / { print index(\$0, \"/125G mem\") }" | sort -u | wc -l)" = 1 ]'
+	sq_run stale-edges SQ_WIDTH=120 -- --full --color
+	need "stale-edges: rc 0" rc_is 0
+	for n in n01:down* n02:idle~ n03:mixed# n04:drained* n05:draining* n06:maint* n07:reboot^ n08:idle% n09:allocated* \
+	         n10:completing* n11:fail* n15:down~ n17:future n18:unknown* n19:inval n24:mixed*; do
+		need "${n%%:*} ${n#*:}: unknown" mem_part_is "${n%%:*}" "················ -% -/125G mem ${n#*:}"
+	done
+	need "n25 (Memory empty) and n26 unknown" eval 'mem_part_is n25 "················ -% -/- mem mixed*" && mem_part_is n26-a-very-long-node-name-x "················ -% -/1007G mem down*"'
+	need "n12 mixed\$, n13 idle@, n14 allocated!, n16 down\$, n20 planned, n21 mixed-, n22 down, n23 idle: their figures" eval '
+		mem_part_is n12 "████████░░░░░░░░ 46% 59/125G mem mixed\$" && mem_part_is n13 "███████░░░░░░░░░ 43% 55/125G mem idle@" &&
+		mem_part_is n14 "███████░░░░░░░░░ 40% 51/125G mem allocated!" && mem_part_is n16 "██████░░░░░░░░░░ 34% 43/125G mem down\$" &&
+		mem_part_is n20 "████░░░░░░░░░░░░ 21% 27/125G mem planned" && mem_part_is n21 "███░░░░░░░░░░░░░ 18% 23/125G mem mixed-" &&
+		mem_part_is n22 "███░░░░░░░░░░░░░ 15% 20/125G mem down" && mem_part_is n23 "██░░░░░░░░░░░░░░ 12% 16/125G mem idle"'
+	for n in n01 n04 n05 n11 n15 n18 n19 n26-a-very-long-node-name-x; do
+		need "$n, a fault: its unknown cells red" bar_kinds_are "$n" 2 "31:·"
+	done
+	for n in n02 n03 n06 n07 n08 n09 n10 n17 n24 n25; do
+		need "$n, no fault: its unknown cells dim" bar_kinds_are "$n" 2 "2:·"
+	done
+	need "every CPU bar as 7fd9bd6 drew it, n24's ▒▒▒▒▒▒▒▒········ included" eval '
+		plain | gawk "/ cpu / { sub(/ cpu .*/, \" cpu\"); print }" > "$T_DIR/cpu-now" &&
+		without_clock "$r3gold/stale-edges.full.w120.color" | sed -E "s/\x1b\[[0-9;]*m//g" | gawk "/ cpu / { sub(/ cpu .*/, \" cpu\"); print }" > "$T_DIR/cpu-then" &&
+		cmp -s "$T_DIR/cpu-now" "$T_DIR/cpu-then" && cpu_part n24 | grep -qF "▒▒▒▒▒▒▒▒········"'
+	sq_run ck-stale SQ_WIDTH=120 -- --full --color
+	need "ck-stale: rc 0" rc_is 0
+	need "k01 down (FreeMem N/A) and k02 drained (Memory empty): faults, their unknown cells red" eval 'bar_kinds_are k01 2 "31:·" && bar_kinds_are k02 2 "31:·"'
+	need "k03 idle (FreeMem N/A): dim" bar_kinds_are k03 2 "2:·"
+	need "k04 down~ and k08 drained*: stale faults, red; k07 future* and k10 perfctrs*: stale, dim" eval '
+		bar_kinds_are k04 2 "31:·" && bar_kinds_are k08 2 "31:·" && bar_kinds_are k07 2 "2:·" && bar_kinds_are k10 2 "2:·"'
+	need "k05 bare powered_down and k09 unknown: their red fill as before" eval '
+		mem_part_is k05 "████████████████ 97% 76/78G mem powered_down" && bar_kinds_are k05 2 "31:█" &&
+		mem_part_is k09 "████████████████ 97% 76/78G mem unknown" && bar_kinds_are k09 2 "31:█"'
+	need "the state up to its first +: k06 idle*+cloud is stale (dim -), k11 idle+drain* is not (its red fill)" eval '
+		mem_part_is k06 "················ -% -/78G mem idle*+cloud" && bar_kinds_are k06 2 "2:·" &&
+		mem_part_is k11 "████████████████ 97% 76/78G mem idle+drain*" && bar_kinds_are k11 2 "31:█"'
+	need "the CPU bars: k01, k02, k04 dim · (CPUsLoad N/A), as before" eval 'bar_kinds_are k01 1 "2:·" && bar_kinds_are k02 1 "2:·" && bar_kinds_are k04 1 "2:·"'
+	sq_run down-stale-crcore SQ_WIDTH=40 -- --compact --color
+	need "the percentage form (COMPACT W=40): a down stale row reads -% in bold, no red" eval '
+		rc_is 0 && plain_rows_with fb2-bioinf-0 | grep -qF "$ESC[1m  -%$ESC[0m" && ! plain_rows_with fb2-bioinf-0 | grep -qF "$ESC[1;31m"'
+	sq_run down-stale-crcore -- --full --no-color
+	want=$(cat "$OUT"); sq_run down-stale-crcore -- --full --color
+	need "without colour the same characters" eval '[ "$(without_clock "$OUT" | sed -E "s/\x1b\[[0-9;]*m//g")" = "$(printf "%s\n" "$want" | without_clock /dev/stdin)" ]'
+}
+# R3-3 AC 4: the allocated view and every fixture with a down, drained or * node
+# besides R3-3's own draw what 7fd9bd6 drew (goldens written by its sq: run.sh
+# --pin stale_untouched with SQ_UNDER_TEST naming it)
+stale_untouched_fx=(stale-alloc stale-states-alloc alloc-freemem ck-alloc busy24 membar-down bars-down scfail-downlast big40 big40faults guard guard3 pct)
+c_stale_untouched() {   # R3-3 AC 4, and the CPU bars of AC 5
+	T_TITLE="the allocated view and every other fixture with a down, drained or * node draw what 7fd9bd6 drew, colour on and off, FULL and COMPACT"
+	local fx
+	for fx in "${stale_untouched_fx[@]}"; do
+		sq_run "$fx" SQ_WIDTH=120 -- --full --color
+		need "$fx FULL --color: as 7fd9bd6" eval 'rc_is 0 && golden_is "$r3gold/$fx.full.w120.color"'
+		sq_run "$fx" SQ_WIDTH=80 SQ_HEIGHT=30 -- --compact --no-color
+		need "$fx COMPACT 80x30: as 7fd9bd6" eval 'rc_is 0 && golden_is "$r3gold/$fx.compact.w80h30"'
+	done
+	sq_run stale-edges SQ_WIDTH=120 -- --full --color
+	need "stale-edges' golden (its CPU bars, c_stale_inuse) is 7fd9bd6's" eval 'rc_is 0 && { [ $pin = 1 ] && golden_is "$r3gold/stale-edges.full.w120.color" || [ -s "$r3gold/stale-edges.full.w120.color" ]; }'
+}
+c_stale_docs() {   # R3-3 AC 7
+	T_TITLE="README: the in-use view's no-longer-refreshed nodes read -, a down one keeps its bar red, in the in-use memory bar its unknown cells too"
+	local text
+	sq_run down-stale-crcore -- --full
+	need "the dashboard: rc 0" rc_is 0
+	text=$(tr "\n" " " < "${here%/*}/README.md" | sed -E "s/ +/ /g")
+	need "Two caveats gains the stale set" eval 'grep -qF "necessarily jobs. In the in-use view, a node Slurm no longer refreshes reads \`-\`: one that does not respond, is powered down, powering up or down, rebooting, \`inval\` or \`future\` (\`*\`, \`~\`, \`#\`, \`%\`, \`^\`). Slurm keeps its last FreeMem. A down one keeps its bar red." <<< "$text"'
+	need "the bars sentence: in the in-use memory bar its unknown ones too" eval 'grep -qF "and a down node'"'"'s filled cells are red, in the in-use memory bar its unknown ones too." <<< "$text"'
+}
 # ---- R3-2: a node whose Memory sinfo gave no usable figure for -------------
 # Its total is unknown whatever scontrol says, so NODES' per-node line never
 # names it: only E4's caption (which counts it) speaks for it.
@@ -10373,7 +10473,7 @@ cases=(
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
 	digest_fit node_figures digest_n10 id_cells id_pins id_cells_wide_c
-	membar_screens membar_detect membar_call membar_fail membar_partial membar_over membar_down membar_forged membar_json membar_fallback membar_memory_unknown membar_memory_unknown_docs nodes_not_utf8 nodes_ctl_o
+	membar_screens membar_detect membar_call membar_fail membar_partial membar_over membar_down membar_forged membar_json membar_fallback membar_memory_unknown membar_memory_unknown_docs stale_inuse stale_untouched stale_docs nodes_not_utf8 nodes_ctl_o
 	exit_labels exit_compact exit_garbage exit_fallback exit_unread exit_edges job_exit_unread log_exit_unread exit_docs
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays

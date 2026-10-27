@@ -1,0 +1,25 @@
+  ▌ SLURM FranzGB  12:17:33 UTC
+
+  n01 ▒▒▒▒▒░░░░░░  46%  30/64 cpu   █████░░░░░░░  38%  98/256G mem  mixed
+  n02 ░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░   0%   0/256G mem  idle~
+  n03 ░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░   0%   0/256G mem  idle*
+  n04 ░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░   0%   0/256G mem  down~
+  n05 ░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░   0%   0/256G mem  powered_down
+  n06 ░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░   0%   0/256G mem  drained~
+  n07 ░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░   0%   0/256G mem  maint*
+  n08 ░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░   0%   0/256G mem  reboot^
+  n09 ▒▒▒▒▒░░░░░░  46%  30/64 cpu   █████░░░░░░░  38%  98/256G mem  mixed-
+  n10 ░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░   0%   0/256G mem  ?
+  n11 ▒▒▒▒▒░░░░░░  46%  30/64 cpu   █████░░░░░░░  38%  98/256G mem  mixed$
+  n12 ░░░░░░░░░░░   0%   0/64 cpu   ░░░░░░░░░░░░   0%   0/256G mem  idle@
+  ↳ memory counts RealMemory: scontrol failed (slurm_load_node error: Unable to…
+
+  JOBID          NAME      USER      STATE    TIME  LEFT   CPU MEM  NODE/REASON 
+  5101           megahit   schroder  RUNNING  3h12m  4d20h  16 100G fb2-bioinf
+  5102_[0-1] ×2  assemble  alice     RUNNING  3h12m  4d20h  16 128G fb2-bioinf
+  5105           blast     bob       RUNNING  1h02m 22h57m  10  37G fb2-bioinf
+  5106           hmmscan   erin      RUNNING  1d02h  1d21h  24  70G fb2-bioinf-0
+
+  recently finished · last 2h · nothing in this window
+
+  5 jobs   5 running   0 pending   0 other

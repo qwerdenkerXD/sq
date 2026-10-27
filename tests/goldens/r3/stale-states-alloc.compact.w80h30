@@ -1,0 +1,25 @@
+  ▌ SLURM FranzGB  12:17:16 UTC
+
+  n01 ███████░░░░░░░  50%  16/32 cpu   ███████░░░░░░░  50%  62/125G mem  mixed
+  n02 ░░░░░░░░░░░░░░   0%   0/32 cpu   ░░░░░░░░░░░░░░   0%   0/125G mem  down*
+      ↳ Not responding · since 2026-10-20
+  n03 ░░░░░░░░░░░░░░   0%   0/32 cpu   ░░░░░░░░░░░░░░   0%   0/125G mem  down
+      ↳ disk check · since 2026-10-25
+  n04 ░░░░░░░░░░░░░░   0%   0/32 cpu   ░░░░░░░░░░░░░░   0%   0/125G mem  idle~
+  n05 ███▒░░░░░░░░░░  25%   8/32 cpu   ████░░░░░░░░░░  25%  31/125G mem  mixed*
+  n06 ░░░░░░░░░░░░░░   0%   0/32 cpu   ░░░░░░░░░░░░░░   0%   0/125G mem  drained
+      ↳ maintenance · since 2026-10-26
+  n07 ░░░░░░░░░░░░░░   0%   0/32 cpu   ░░░░░░░░░░░░░░   0%   0/125G mem  idle#
+  n08 ██░░░░░░░░░░░░  12%   4/32 cpu   ░░░░░░░░░░░░░░   0%   0/125G mem  mixed@
+      ↳ reboot pending · since 2026-10-26
+  n09 ░░░░░░░░░░░░░░   0%   0/32 cpu   ░░░░░░░░░░░░░░   0%   0/125G mem  idle!
+  n10 ░░░░░░░░░░░░░░   0%   0/32 cpu   ░░░░░░░░░░░░░░   0%   0/125G mem  inval
+      ↳ Low RealMemory · since 2026-10-26
+
+  JOBID    NAME    USER     STATE      TIME     LEFT     CPU   MEM   NODE/REASON
+  900      run     alice    RUNNING    10:00    50:00      1    4G   node01
+  901      run2    alice    RUNNING    10:00    50:00      1    4G   node01
+
+  recently finished · last 2h · nothing in this window
+
+  2 jobs   2 running   0 pending   0 other

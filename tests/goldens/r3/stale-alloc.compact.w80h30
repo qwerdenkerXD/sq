@@ -1,0 +1,30 @@
+  ▌ SLURM FranzGB  12:17:14 UTC
+  n01                           0%   0/32 cpu     6%  8/125G  mem  down*
+  n02                           0%   0/32 cpu     6%  8/125G  mem  idle~
+  n03                          50%  16/32 cpu     6%  8/125G  mem  mixed#
+  n04                           0%   0/32 cpu     6%  8/125G  mem  drained*
+  n05                          50%  16/32 cpu     6%  8/125G  mem  draining*
+  n06                           0%   0/32 cpu     6%  8/125G  mem  maint*
+  n07                           0%   0/32 cpu     6%  8/125G  mem  reboot^
+  n08                           0%   0/32 cpu     6%  8/125G  mem  idle%
+  n09                          50%  16/32 cpu     6%  8/125G  mem  allocated*
+  n10                          50%  16/32 cpu     6%  8/125G  mem  completing*
+  n11                          50%  16/32 cpu     6%  8/125G  mem  fail*
+  n12                          50%  16/32 cpu     6%  8/125G  mem  mixed$
+  n13                           0%   0/32 cpu     6%  8/125G  mem  idle@
+  n14                          50%  16/32 cpu     6%  8/125G  mem  allocated!
+  n15                           0%   0/32 cpu     6%  8/125G  mem  down~
+  n16                           0%   0/32 cpu     6%  8/125G  mem  down$
+  n17                           0%   0/32 cpu     6%  8/125G  mem  future
+  n18                           0%   0/32 cpu     6%  8/125G  mem  unknown*
+  n19                           0%   0/32 cpu     6%  8/125G  mem  inval
+  n20                           0%   0/32 cpu     6%  8/125G  mem  planned
+  n21                          50%  16/32 cpu     6%  8/125G  mem  mixed-
+  n22                           0%   0/32 cpu     6%  8/125G  mem  down
+  n23                           0%   0/32 cpu     6%  8/125G  mem  idle
+  n24                          50%  16/32 cpu     6%  8/125G  mem  mixed*
+  n25                          50%  16/32 cpu     -%  8/-     mem  mixed*
+  n26-a-very-long-node-name-x   0%   0/32 cpu     0%  8/1007G mem  down*
+  ↳ sinfo gave no usable figure for Memory (1 node): shown as unknown
+  recently finished · last 2h · nothing in this window
+  2 jobs   2 running   0 pending   0 other

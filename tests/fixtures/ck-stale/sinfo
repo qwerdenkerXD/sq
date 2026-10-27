@@ -1,0 +1,12 @@
+CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=526168; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=51.20; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k01; FreeMem=N/A; Memory=80000; StateLong=down; Reason=admin down; TimeStamp=2026-10-20T21:14:03; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k02; FreeMem=2176; Memory=; StateLong=drained; Reason=bad dimm; TimeStamp=2026-10-20T21:14:03; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k03; FreeMem=N/A; Memory=80000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k04; FreeMem=2176; Memory=80000; StateLong=down~; Reason=powered; TimeStamp=2026-10-20T21:14:03; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k05; FreeMem=2176; Memory=80000; StateLong=powered_down; Reason=none; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k06; FreeMem=2176; Memory=80000; StateLong=idle*+cloud; Reason=none; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k07; FreeMem=2176; Memory=80000; StateLong=future*; Reason=none; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k08; FreeMem=2176; Memory=80000; StateLong=drained*; Reason=x; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k09; FreeMem=2176; Memory=80000; StateLong=unknown; Reason=none; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k10; FreeMem=2176; Memory=80000; StateLong=perfctrs*; Reason=none; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k11; FreeMem=2176; Memory=80000; StateLong=idle+drain*; Reason=none; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0

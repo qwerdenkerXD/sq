@@ -1,0 +1,4 @@
+# fb2-bioinf busy as in membar-busy, fb2-bioinf-0 not responding: CPUsLoad
+# and FreeMem N/A, nothing allocated
+CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=N/A; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=51.20; AllocMem=271360
+CPUsState=0/0/24/24; NodeList=fb2-bioinf-0; FreeMem=N/A; Memory=80000; StateLong=down*; Reason=Not responding; TimeStamp=2026-10-20T21:14:03; CPUsLoad=N/A; AllocMem=0

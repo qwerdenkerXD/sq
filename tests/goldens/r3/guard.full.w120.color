@@ -1,0 +1,17 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m12:17:34 UTC[0m
+
+  [1mn1[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m0[0m/128 cpu   [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m0[0m/503G mem                [2mdown*[0m
+     [2m↳ swap --mem=4G node[01-99] v2.3 1e5 done · since 2026-10-05[0m
+  [1mn2[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m0[0m/128 cpu   [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m0[0m/503G mem                [2mdrained[0m
+     [2m↳ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…[0m
+  [1mn3[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m0[0m/128 cpu   [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m0[0m/503G mem                [2mdrained[0m
+     [2m↳ 2026-10-05_maintenance_window_by_admin_team · since 2026-10-05[0m
+
+  [4mJOBID NAME                                                               USER  STATE   TIME  LEFT  CPU MEM NODE/REASON[0m
+  [32m900  [0m run --mem=4G node[01-99] v2.3 1e5                                  alice [1;32mRUNNING[0m 10:00 50:00   1  4G node01
+  [32m901  [0m xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… alice [1;32mRUNNING[0m 10:00 50:00   1  4G node01
+  [32m902  [0m x86_64 build                                                       alice [1;32mRUNNING[0m 10:00 50:00   1  4G node01
+
+  [2mrecently finished · last 2h · nothing in this window[0m
+
+  [1m3[0m jobs   [32m3 running[0m   [33m0 pending[0m   [31m0 other[0m

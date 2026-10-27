@@ -1,0 +1,5 @@
+CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=526168; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=51.20; AllocMem=8000
+CPUsState=0/0/24/24; NodeList=k01; FreeMem=N/A; Memory=80000; StateLong=down; Reason=admin down; TimeStamp=2026-10-20T21:14:03; CPUsLoad=N/A; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k02; FreeMem=2176; Memory=80000; StateLong=drained; Reason=bad dimm; TimeStamp=2026-10-20T21:14:03; CPUsLoad=0.00; AllocMem=x
+CPUsState=0/0/24/24; NodeList=k03; FreeMem=N/A; Memory=80000; StateLong=down; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/0/24/24; NodeList=k04; FreeMem=2176; Memory=80000; StateLong=down~; Reason=powered; TimeStamp=2026-10-20T21:14:03; CPUsLoad=0.00; AllocMem=0

@@ -1,0 +1,21 @@
+  ▌ SLURM FranzGB  12:17:22 UTC
+
+  fb2-bioinf ████▒░░░░░  45%  58/128 cpu   ░░░░░░░░░░   0%  8/1007G mem  mixed
+  k01        ··········   0%   0/24  cpu   ··········   0%  0/78G   mem  down
+             ↳ admin down · since 2026-10-20
+  k02        ░░░░░░░░░░   0%   0/24  cpu   ··········   -%  -/78G   mem  drained
+             ↳ bad dimm · since 2026-10-20
+  k03        ░░░░░░░░░░   0%   0/24  cpu   ··········   0%  0/78G   mem  down
+  k04        ░░░░░░░░░░   0%   0/24  cpu   ░░░░░░░░░░   0%  0/78G   mem  down~
+             ↳ powered · since 2026-10-20
+  ↳ sinfo gave no usable figure for AllocMem (1 node): shown as unknown
+
+  JOBID          NAME      USER      STATE    TIME  LEFT   CPU MEM  NODE/REASON 
+  5101           megahit   schroder  RUNNING  3h12m  4d20h  16 100G fb2-bioinf
+  5102_[0-1] ×2  assemble  alice     RUNNING  3h12m  4d20h  16 128G fb2-bioinf
+  5105           blast     bob       RUNNING  1h02m 22h57m  10  37G fb2-bioinf
+  5106           hmmscan   erin      RUNNING  1d02h  1d21h  24  70G fb2-bioinf-0
+
+  recently finished · last 2h · nothing in this window
+
+  5 jobs   5 running   0 pending   0 other

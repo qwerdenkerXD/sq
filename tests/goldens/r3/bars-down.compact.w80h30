@@ -1,0 +1,12 @@
+  ▌ SLURM FranzGB  12:17:29 UTC
+
+  fb2-bioinf   ████████░  87%  112/128 cpu   ██████░░░  64%  630/977G mem  mixed
+  fb2-bioinf-0 ·········   0%    0/24  cpu   ·········   0%    0/75G  mem  down*
+               ↳ Not responding · since 2026-10-06
+
+  JOBID          NAME      USER   STATE   TIME    LEFT       CPU MEM NODE/REASON
+  5001_[0-6] ×7  assemble  alice  RUNNING 3:12:40 4-20:47:20  16 90G fb2-bioinf
+
+  recently finished · last 2h · nothing in this window
+
+  7 jobs   7 running   0 pending   0 other

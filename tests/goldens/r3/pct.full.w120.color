@@ -1,0 +1,12 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m12:17:37 UTC[0m
+
+  [1mnode01[0m [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[0m 100%  [1m128[0m/128 cpu   [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[0m 15000%  [1m0[0m/0G   mem  [2mallocated[0m
+  [1mnode02[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m  0[0m/128 cpu   [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m0[0m/503G mem  [2mdown*[0m
+         [2m↳ Not responding · since 2026-10-05[0m
+
+  [4mJOBID    NAME    USER     STATE      TIME     LEFT     CPU    MEM    NODE/REASON        [0m
+  [32m900  [0m    run     alice    [1;32mRUNNING[0m    10:00    50:00      1     4G    node01
+
+  [2mrecently finished · last 2h · nothing in this window[0m
+
+  [1m1[0m job   [32m1 running[0m   [33m0 pending[0m   [31m0 other[0m

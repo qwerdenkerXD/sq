@@ -687,10 +687,11 @@ function jrc(id) { return jnone(id) ? -1 : JRC[id] + 0 }
 function jsg(id) { return jnone(id) ? -1 : JSG[id] + 0 }
 # one node bar of wd cells: a allocated and u in use, of tot.  █ in use within
 # the allocation (hue), ▒ allocated but idle (dim hue), ▓ in use beyond the
-# allocation (magenta), ░ free (dim), or · when the use is not known (u < 0).
-# Both counts round to the nearest cell; a load above the core count simply
-# fills the bar.  No cells, no escapes either
-function cells(a, u, tot, wd, hue,   na, nu, i, x) {
+# allocation (magenta), ░ free (dim), or · when the use is not known (u < 0),
+# dim, or in uhue where one is given (the red a fault node keeps in the in-use
+# memory bar).  Both counts round to the nearest cell; a load above the core
+# count simply fills the bar.  No cells, no escapes either
+function cells(a, u, tot, wd, hue, uhue,   na, nu, i, x) {
   if (wd <= 0) return ""
   na = tot ? int(a*wd/tot + 0.5) : 0
   nu = (u < 0) ? -1 : tot ? int(u*wd/tot + 0.5) : 0
@@ -698,7 +699,7 @@ function cells(a, u, tot, wd, hue,   na, nu, i, x) {
     if      (i < na && i < nu) x = x e(hue) "█"
     else if (i < na)           x = x e("2;" hue) "▒"
     else if (i < nu)           x = x e("35") "▓"
-    else                       x = x e("2") (nu < 0 ? "·" : "░")
+    else                       x = x e(nu < 0 && uhue != "" ? uhue : "2") (nu < 0 ? "·" : "░")
   return x e("0")
 }
 # ---- the MEM cell of the running jobs of the caller -------------------------
@@ -4885,6 +4886,16 @@ function nodefield(x, name, total) {
   if (x != "N/A" || name == "Memory" || name == "AllocMem") unread(name)
   return -1
 }
+# a node whose FreeMem slurmctld no longer refreshes: one it does not ping
+# (future, powered down, powering down or up, its reboot issued, an invalid
+# registration: ping_nodes.c:268-274 of Slurm 23.11.4; down and not responding:
+# 328-331) or that does not answer (not responding, *).  Seen in the state
+# word, read up to its first "+" (a flag such as +cloud follows the base state
+# and its mark), so not where * hides behind $, @ or ! (node_state_string),
+# nor in the bare power words of a node slurmctld has not heard from since it
+# started (FreeMem N/A anyway), nor under a SlurmdTimeout of 0, which pings no
+# responding node at all
+function nstale(st) { sub(/[+].*/, "", st); return st ~ /[*~%#^]$/ || st ~ /^(inval|future)/ }
 function unread(name) { if (!UNRN[name]++) UNRNOTE = 1 }   # UNRN: the nodes, by field
 # the caption under the nodes: each field with an unknown value counted, in a
 # fixed order, with its node count
@@ -5791,6 +5802,17 @@ END{
   # narrower dashboard than a healthy node block would give
   if (ntrunc || nbad) { nn = 0; wn = wu = wt = wf = wm = ws = 0 }
   if (nn) membar()
+  # The in-use view counts RealMemory less FreeMem, the free memory the node
+  # last reported.  Slurm no longer refreshes it on a node it does not ping, or
+  # that does not answer (nstale): memory in use there is unknown, quietly, as
+  # the state word on its line says why.  The used figures are measured again
+  if (nn && !MEMALLOC) {
+    wf = 0
+    for (r=1; r<=nn; r++) {
+      if (nstale(nst[r])) { memu[r] = "-"; mempc[r] = -1; meminuse[r] = -1 }
+      if (length(memu[r]) > wf) wf = length(memu[r])
+    }
+  }
   if (qtrunc || qbad) q = 0
   if (rtrunc || rbad) dq = 0
 
@@ -6237,7 +6259,7 @@ END{
                  down ? "31" : (mp>85 ? "33" : "32"))
     else
       sm = cells(meminuse[r] < 0 ? 0 : meminuse[r], meminuse[r], memreal[r], barm,   # in use, as a fill
-                 down ? "31" : (mp>95 ? "1;31" : (mp>85 ? "33" : "32")))
+                 down ? "31" : (mp>95 ? "1;31" : (mp>85 ? "33" : "32")), down ? "31" : "")   # unknown: a fault keeps its red
     if (NODEFORM == 2)                          # the percentages, each with its word
       out[++o] = sprintf("%s%s%-*s%s %s%3d%%%s cpu  %s%3s%%%s mem  %*s%s%s%s", lm, e("1"), WIDE ? 0 : wn,
                          WIDE ? colpad(node[r], -wn, NODECW[r]) : node[r], e("0"), e("1"), p, e("0"),

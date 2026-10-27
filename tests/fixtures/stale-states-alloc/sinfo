@@ -1,0 +1,13 @@
+# rules attack: stale-states-crcore in the ALLOCATED view (AllocMem on n01, n05)
+# rules attack: stale-states-crcore in the ALLOCATED view (AllocMem on n01, n05)
+# rules attack: stale-states-crcore in the ALLOCATED view (AllocMem on n01, n05)
+CPUsState=16/16/0/32; NodeList=n01; FreeMem=64000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=15.80; AllocMem=64000
+CPUsState=0/0/32/32; NodeList=n02; FreeMem=4000; Memory=128000; StateLong=down*; Reason=Not responding; TimeStamp=2026-10-20T21:14:03; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n03; FreeMem=120000; Memory=128000; StateLong=down; Reason=disk check; TimeStamp=2026-10-25T08:00:00; CPUsLoad=0.10; AllocMem=0
+CPUsState=0/32/0/32; NodeList=n04; FreeMem=90000; Memory=128000; StateLong=idle~; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=8/24/0/32; NodeList=n05; FreeMem=30000; Memory=128000; StateLong=mixed*; Reason=none; TimeStamp=Unknown; CPUsLoad=7.90; AllocMem=32000
+CPUsState=0/0/32/32; NodeList=n06; FreeMem=125000; Memory=128000; StateLong=drained; Reason=maintenance; TimeStamp=2026-10-26T06:00:00; CPUsLoad=0.02; AllocMem=0
+CPUsState=0/32/0/32; NodeList=n07; FreeMem=95000; Memory=128000; StateLong=idle#; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=4/28/0/32; NodeList=n08; FreeMem=100000; Memory=128000; StateLong=mixed@; Reason=reboot pending; TimeStamp=2026-10-26T07:00:00; CPUsLoad=4.00; AllocMem=0
+CPUsState=0/32/0/32; NodeList=n09; FreeMem=126000; Memory=128000; StateLong=idle!; Reason=none; TimeStamp=Unknown; CPUsLoad=0.01; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n10; FreeMem=50000; Memory=128000; StateLong=inval; Reason=Low RealMemory; TimeStamp=2026-10-26T05:00:00; CPUsLoad=0.00; AllocMem=0

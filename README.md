@@ -70,7 +70,8 @@ watch -tc -n 1 'sq -C'
   marks with `!` a total that counts RealMemory for any node (`335/!1085G mem`), and an unknown
   sum with `?`. When the summary line must drop parts to fit, it drops whole ones, and the fault
   states (`down*`, `drained`, …) are kept longest. Bars
-  turn yellow past 85%, memory in use red past 95%, and a down node's filled cells are red.
+  turn yellow past 85%, memory in use red past 95%, and a down node's filled cells are red, in the
+  in-use memory bar its unknown ones too.
   A figure sinfo gives no usable value for (none, a word, a Memory of 0 or 1) reads `-` or `·`,
   with a dim line naming it (`↳ sinfo gave no usable figure for Memory (2 nodes): shown as
   unknown`), except FreeMem and CPUsLoad `N/A`, which read unknown without the line: Slurm prints
@@ -79,7 +80,9 @@ watch -tc -n 1 'sq -C'
   slurmctld's node pings, so it trails the node by minutes, and it counts processes outside Slurm
   too. Memory in use (`CR_CORE` only) is RealMemory − FreeMem, and FreeMem follows the kernel's
   `MemFree`, so page cache and the OS count as used: use beyond the allocation is not
-  necessarily jobs.
+  necessarily jobs. In the in-use view, a node Slurm no longer refreshes reads `-`: one that
+  does not respond, is powered down, powering up or down, rebooting, `inval` or `future` (`*`,
+  `~`, `#`, `%`, `^`). Slurm keeps its last FreeMem. A down one keeps its bar red.
 - **MEM is each job's total memory,** what a running job holds and what a pending one asks for,
   not squeue's `%m`, which is per node or per CPU: a `--mem-per-cpu=8G -c 4` job reads `32G`,
   not `8G`, and a folded row the sum over its jobs. Details under [Good to know](#good-to-know).

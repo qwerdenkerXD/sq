@@ -1,0 +1,17 @@
+  ▌ SLURM FranzGB  12:17:35 UTC
+
+  n1 ░░░░░░░░░░░░░░░   0%  0/128 cpu   ···············   0%  0/503G mem  down*
+     ↳ swap --mem=4G node[01-99] v2.3 1e5 done · since 2026-10-05
+  n2 ░░░░░░░░░░░░░░░   0%  0/128 cpu   ···············   0%  0/503G mem  drained
+     ↳ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+  n3 ░░░░░░░░░░░░░░░   0%  0/128 cpu   ···············   0%  0/503G mem  drained
+     ↳ 2026-10-05_maintenance_window_by_admin_team · since 2026-10-05
+
+  JOBID NAME                       USER  STATE   TIME  LEFT  CPU MEM NODE/REASON
+  900   run --mem=4G node[01-99] … alice RUNNING 10:00 50:00   1  4G node01
+  901   xxxxxxxxxxxxxxxxxxxxxxxxx… alice RUNNING 10:00 50:00   1  4G node01
+  902   x86_64 build               alice RUNNING 10:00 50:00   1  4G node01
+
+  recently finished · last 2h · nothing in this window
+
+  3 jobs   3 running   0 pending   0 other

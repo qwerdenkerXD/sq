@@ -1,0 +1,27 @@
+# R3-3 attack (edges): the in-use view, every suffix family, combos, hidden *
+CPUsState=0/0/32/32; NodeList=n01; FreeMem=24000; Memory=128000; StateLong=down*; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/32/0/32; NodeList=n02; FreeMem=28000; Memory=128000; StateLong=idle~; Reason=none; TimeStamp=Unknown; CPUsLoad=0.20; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n03; FreeMem=32000; Memory=128000; StateLong=mixed#; Reason=none; TimeStamp=Unknown; CPUsLoad=15.50; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n04; FreeMem=36000; Memory=128000; StateLong=drained*; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n05; FreeMem=40000; Memory=128000; StateLong=draining*; Reason=none; TimeStamp=Unknown; CPUsLoad=15.50; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n06; FreeMem=44000; Memory=128000; StateLong=maint*; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/32/0/32; NodeList=n07; FreeMem=48000; Memory=128000; StateLong=reboot^; Reason=none; TimeStamp=Unknown; CPUsLoad=0.20; AllocMem=0
+CPUsState=0/32/0/32; NodeList=n08; FreeMem=52000; Memory=128000; StateLong=idle%; Reason=none; TimeStamp=Unknown; CPUsLoad=0.20; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n09; FreeMem=56000; Memory=128000; StateLong=allocated*; Reason=none; TimeStamp=Unknown; CPUsLoad=15.50; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n10; FreeMem=60000; Memory=128000; StateLong=completing*; Reason=none; TimeStamp=Unknown; CPUsLoad=15.50; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n11; FreeMem=64000; Memory=128000; StateLong=fail*; Reason=none; TimeStamp=Unknown; CPUsLoad=15.50; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n12; FreeMem=68000; Memory=128000; StateLong=mixed$; Reason=none; TimeStamp=Unknown; CPUsLoad=15.50; AllocMem=0
+CPUsState=0/32/0/32; NodeList=n13; FreeMem=72000; Memory=128000; StateLong=idle@; Reason=none; TimeStamp=Unknown; CPUsLoad=0.20; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n14; FreeMem=76000; Memory=128000; StateLong=allocated!; Reason=none; TimeStamp=Unknown; CPUsLoad=15.50; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n15; FreeMem=80000; Memory=128000; StateLong=down~; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n16; FreeMem=84000; Memory=128000; StateLong=down$; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n17; FreeMem=88000; Memory=128000; StateLong=future; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n18; FreeMem=92000; Memory=128000; StateLong=unknown*; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n19; FreeMem=96000; Memory=128000; StateLong=inval; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/32/0/32; NodeList=n20; FreeMem=100000; Memory=128000; StateLong=planned; Reason=none; TimeStamp=Unknown; CPUsLoad=0.20; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n21; FreeMem=104000; Memory=128000; StateLong=mixed-; Reason=none; TimeStamp=Unknown; CPUsLoad=15.50; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n22; FreeMem=108000; Memory=128000; StateLong=down; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/32/0/32; NodeList=n23; FreeMem=112000; Memory=128000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.20; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n24; FreeMem=N/A; Memory=128000; StateLong=mixed*; Reason=none; TimeStamp=Unknown; CPUsLoad=N/A; AllocMem=0
+CPUsState=16/16/0/32; NodeList=n25; FreeMem=1000; Memory=; StateLong=mixed*; Reason=none; TimeStamp=Unknown; CPUsLoad=15.00; AllocMem=0
+CPUsState=0/0/32/32; NodeList=n26-a-very-long-node-name-x; FreeMem=4000; Memory=1031000; StateLong=down*; Reason=Not responding; TimeStamp=2026-10-20T21:14:03; CPUsLoad=0.00; AllocMem=0

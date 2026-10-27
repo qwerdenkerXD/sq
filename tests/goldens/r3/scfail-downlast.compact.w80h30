@@ -1,0 +1,16 @@
+  ▌ SLURM FranzGB  12:17:31 UTC
+
+  fb2-bioinf   ████░░░░░  45%  58/128 cpu   ██░░░░░░░  26%  265/1007G mem  mixed
+  fb2-bioinf-0 ░░░░░░░░░   0%   0/24  cpu   ░░░░░░░░░   0%    0/78G   mem  down*
+               ↳ Not responding · since 2026-10-20
+  ↳ memory counts RealMemory: scontrol failed (slurm_load_node error: Unable to…
+
+  JOBID          NAME      USER      STATE    TIME  LEFT   CPU MEM  NODE/REASON 
+  5101           megahit   schroder  RUNNING  3h12m  4d20h  16 100G fb2-bioinf
+  5102_[0-1] ×2  assemble  alice     RUNNING  3h12m  4d20h  16 128G fb2-bioinf
+  5105           blast     bob       RUNNING  1h02m 22h57m  10  37G fb2-bioinf
+  5106           hmmscan   erin      RUNNING  1d02h  1d21h  24  70G fb2-bioinf-0
+
+  recently finished · last 2h · nothing in this window
+
+  5 jobs   5 running   0 pending   0 other

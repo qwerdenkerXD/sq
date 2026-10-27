@@ -1,0 +1,13 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m12:17:36 UTC[0m
+
+  [1mn1[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m0[0m/128 cpu   [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m0[0m/503G mem      [2mdown*[0m
+     [2m↳ went x 12:30:45 · since 2026-10-05[0m
+  [1mn2[0m [2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m   0%  [1m0[0m/128 cpu   [2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[2m·[0m   0%  [1m0[0m/503G mem      [2mdrained[0m
+     [2m↳ maint at 9:30 today · since 2026-10-05[0m
+
+  [4mJOBID NAME USER  STATE   TIME LEFT    CPU MEM NODE/REASON                                                   [0m
+  [33m1301 [0m prep alice [1;33mPENDING[0m 0:00 1:00:00   1  4G (ReqNodeNotAvail, UnavailableNodes:node01 node02) → 2027-12-01
+
+  [2mrecently finished · last 2h · nothing in this window[0m
+
+  [1m1[0m job   [32m0 running[0m   [33m1 pending[0m   [31m0 other[0m
