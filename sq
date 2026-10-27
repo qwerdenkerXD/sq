@@ -60,9 +60,9 @@
 # smallest screens the nodes to one summary line.  COMPACT fits every width
 # it can measure, below 21 columns too: its lines take shorter forms of whole
 # parts (sinfo's short node states, durations as 5h59m once the text columns
-# are at 8, fewer columns, Slurm's state codes last), and a line is cut only
-# below its shortest form.  FULL takes none of these forms: its long lines
-# wrap.
+# are at 8, start estimates, fewer columns, Slurm's state codes last), and a
+# line is cut only below its shortest form.  FULL takes none of these forms:
+# its long lines wrap.
 # COMPACT is chosen when stdout is a terminal or COLUMNS and LINES are both
 # exported (watch does that), FULL in a pipe or a file; --compact, --full and
 # SQ_COMPACT decide instead, the flags first.
@@ -5349,9 +5349,11 @@ function qtab(   i, c, t) { for (i=1; i<=n; i++) if (!QDROPPED[i]) { t += w[i]; 
 # The floor of column i, below which only the last resort narrows it: text 5;
 # a number or a word its widest cell (QCW), its header not below min(header, 5);
 # JOBID the floor of its tier (IDT 1: a bracket inside its terms with its ×N, an id
-# whole; IDT 2: BASE_… and a task id N_…), and not below 5 for its header
+# whole; IDT 2: BASE_… and a task id N_…), and not below 5 for its header;
+# NODE/REASON, while start estimates are held, the widest of them (ESTFL)
 function qfloor(i,   t) {
   if (i == idc) { t = (IDT == 2) ? IDFL : IDFL1; return (t < 5) ? 5 : t }
+  if (i == rc && ESTFL > 5) return ESTFL
   if (qkind(k[i]) == "text") return 5
   return (QCW[i] > 5 || QCW[i] >= length(hd[i])) ? QCW[i] : (length(hd[i]) < 5 ? length(hd[i]) : 5)
 }
@@ -5359,11 +5361,12 @@ function qcontent(i,   r, x) {                 # QCW[i]: the widest cell of colu
   QCW[i] = 0
   for (r=1; r<=rows; r++) if (QSHOW[r] && (x = (WIDE ? colw(v[r,i]) : length(v[r,i]))) > QCW[i]) QCW[i] = x
 }
-# The FLEX columns to 8, longest first, the first step of the shave
+# The FLEX columns to 8, longest first, the first step of the shave; NODE/REASON
+# not below the start estimates it holds (ESTFL), where they are wider
 function qflex(fix,   big, i) {
   while (tabw > budget) {
     big = 0
-    for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && FLEX[k[i]] && w[i] > 8 && w[i] > w[big]) big = i
+    for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && FLEX[k[i]] && w[i] > ((i == rc && ESTFL > 8) ? ESTFL : 8) && w[i] > w[big]) big = i
     if (!big) break
     w[big]--; tabw--
   }
@@ -5435,8 +5438,10 @@ function qlong_durations(fix,   i, r, any, SW, SV, SC, t) {
 }
 # COMPACT: columns go whole.  First every column the list does not name, from
 # the right (a column a -o adds, O-A), then the list in its order (D-A): CPU,
-# TIME, USER, MEM, LEFT, NAME.  JOBID, STATE/ST, NODE/REASON and REASON never go
-function qdrop(fix,   i, j, L, nl, c) {
+# TIME, USER, MEM, LEFT, NAME.  JOBID, STATE/ST, NODE/REASON and REASON never go.
+# Where START goes, its dates move to NODE/REASON: their floor holds from there,
+# and they go (qest_go) before the second tier of JOBID, as in qfit
+function qdrop(fix,   i, j, L, nl, c, tier) {
   nl = split("C M u m L j", L, " ")
   while (tabw > budget) {
     c = 0
@@ -5446,7 +5451,11 @@ function qdrop(fix,   i, j, L, nl, c) {
     }
     for (j=1; j<=nl && !c; j++) for (i=1; i<=n; i++) if (!QDROPPED[i] && i != fix && k[i] == L[j]) { c = i; break }
     if (!c) return
-    QDROPPED[c] = 1; qregrow(fix)
+    QDROPPED[c] = 1
+    if (k[c] != "S") { qregrow(fix); continue }
+    tier = IDT; qestfloor(); IDT = 1; qregrow(fix)
+    if (tabw > budget) qest_go(fix)
+    if (tabw > budget && tier == 2) { IDT = 2; qshrink(fix) }
   }
 }
 # COMPACT: the state column takes the codes of Slurm (PD, R, CG; header ST), the
@@ -5461,17 +5470,46 @@ function qcode(fix,   i, r, any) {
   if (!any) return
   tabw = qtab(); qregrow(fix)
 }
+# COMPACT: a start estimate is a part of the ladder (H4, H5), not of its
+# cell.  While the estimates are held, the floor of NODE/REASON and its FLEX
+# limit are the widest "→ EST" of the rows shown (ESTFL; 0: none, FULL, or a
+# START column shown, which holds their dates), so nothing comes back at W+1
+# that would leave one out
+function qestfloor(   r, x) {
+  ESTFL = 0
+  if (!rc || !compact) return
+  for (x=1; x<=n; x++) if (k[x] == "S" && !QDROPPED[x]) return
+  for (r=1; r<=rows; r++) if (QSHOW[r] && QEST[r] != "" && (x = colw(" → " QEST[r]) - 1) > ESTFL) ESTFL = x
+}
+# COMPACT: the start estimates go, whole, by width, the widest first: all of
+# the widest width at once, while the table is too wide.  Their rows read the
+# reason as text; the floor of NODE/REASON is the widest estimate left, its
+# measured width taken again; the freed columns go back as after a drop
+function qest_go(fix,   r, x) {
+  while (tabw > budget && ESTFL) {
+    for (r=1; r<=rows; r++) if (QSHOW[r] && QEST[r] != "" && colw(" → " QEST[r]) - 1 == ESTFL) {
+      v[r,rc] = substr(v[r,rc], 1, length(v[r,rc]) - length(" → " QEST[r])); QEST[r] = ""
+      if (WIDE) CW[r,rc] = colw(v[r,rc])
+    }
+    qestfloor()
+    wnat[rc] = length(hd[rc])
+    for (r=1; r<=rows; r++) if (QSHOW[r] && (x = (WIDE ? CW[r,rc] : length(v[r,rc]))) > wnat[rc]) wnat[rc] = x
+    qregrow(fix)
+  }
+}
 # The queue table fitted to the budget (H4), FIX a column held as it is (0:
 # none): the FLEX columns to 8; the short durations of COMPACT; every column to
-# its first-tier floor, widest first, then JOBID to its second tier (FULL
-# stops here and wraps); COMPACT: columns go whole, the state takes its code,
-# the long durations come back where they fit, and the last resort cuts inside
-# the JOBID cell, every other column at its floor
+# its first-tier floor, widest first; COMPACT: the start estimates go, the
+# widest first; then JOBID to its second tier (FULL stops here and wraps);
+# COMPACT: columns go whole, the state takes its code, the long durations come
+# back where they fit, and the last resort cuts inside the JOBID cell, every
+# other column at its floor
 function qfit(fix,   keepw) {
   IDT = 1
   qflex(fix)
   if (compact && tabw > budget && qshort_durations()) qregrow(fix)
   qshrink(fix)
+  if (compact && tabw > budget) qest_go(fix)
   if (tabw > budget) { IDT = 2; qshrink(fix) }
   if (!compact) return
   if (tabw <= budget) { qlong_durations(fix); return }
@@ -5829,10 +5867,12 @@ END{
   }
 
   # ---- pending start estimates, before folding so they stay per-task ---
+  # (each also kept apart, rowest: H4 knows its width and lets it go whole)
   if (eta && rc)
     for (r=1; r<=q; r++)
-      if (qstate[r] == "PD" && (est = when(qstart[r])) != "")
-        raw[r,rc] = raw[r,rc] " → " est
+      if (qstate[r] == "PD" && (est = when(qstart[r])) != "") {
+        raw[r,rc] = raw[r,rc] " → " est; rowest[r] = est
+      }
 
   # ---- fold array tasks ----------------------------------------------
   for (r=1; r<=q; r++) {
@@ -5853,6 +5893,7 @@ END{
     } else {
       grp[key] = g = ++rows
       for (i=1; i<=n; i++) v[rows,i] = raw[r,i]
+      QEST[rows] = rowest[r]                    # a group shares its estimate: it is in the key
       state[rows] = qstate[r]; gtask[rows] = task; gn[rows] = 1; gbase[rows] = base
       gw[rows] = qw[r]; section[rows] = c; rsec[rows] = qsec[r]
       memadd(rows, r); totadd(rows, r)
@@ -6024,6 +6065,7 @@ END{
   if (idc) for (r=1; r<=rows; r++) if (QSHOW[r] && (x = idfl1_of(v[r,idc])) > IDFL1) IDFL1 = x
   if (idc) for (r=1; r<=rows; r++) if (QSHOW[r] && (x = idfl_of(v[r,idc])) > IDFL) IDFL = x
   for (i=1; i<=n; i++) wnat[i] = w[i]           # as measured, for the second pass
+  qestfloor()                                   # the start estimates held (H4)
   qfit(0)
 
   # FULL shows every finished job: SQ_SINCE already bounds the block, and cut
@@ -6114,7 +6156,8 @@ END{
   # a JOBID column whose widest cell, cut to whole terms, is narrower than the
   # column (not below its header) narrows to it, and the shrink runs again from
   # the measured widths with JOBID held: the freed columns go where the
-  # longest-first shave puts them, so every cut column gains, none loses
+  # longest-first shave puts them, so every cut column gains, none loses;
+  # what the first pass dropped or let go (a column, a start estimate) stays gone
   if (QBODY && idc) {
     cm = 0
     for (r=1; r<=rows; r++) if (QSHOW[r]) {

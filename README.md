@@ -42,9 +42,12 @@ watch -tc -n 1 'sq -C'
   COMPACT fits every width it can measure, below 21 columns too: on a narrow terminal its lines
   take shorter forms of whole parts, one step at a time: the nodes as name and state, then with
   sinfo's short state names (`alloc`, `drain*`), then the one summary line; durations as `5h59m`
-  once the text columns are down to 8; fewer columns (CPU, TIME, USER, MEM, LEFT and NAME go
-  whole, in that order); Slurm's state codes (`PD`, `R`) last. A line is cut only below its
-  shortest form. FULL takes none of these forms: its long lines wrap.
+  once the text columns are down to 8; a start estimate shows whole or not at all: on a narrow
+  screen the estimates go before any column and before an id's `×N`, the longest first
+  (`→ Nov15 07:33`, then `→ 2027-11-30`, then `→ 10:33`); a START column (`-o %S`) holds their
+  dates while it shows; fewer columns (CPU, TIME, USER, MEM, LEFT and NAME go whole, in that
+  order); Slurm's state codes (`PD`, `R`) last. A line is cut only below its shortest form. FULL
+  takes none of these forms: its long lines wrap.
 - **Fits the terminal's width.** Every column is sized to its content. When the table is too wide, the text
   columns (name, reason, command, node list, work dir) shrink first, longest first, cut with `…`.
   Numbers are never cut while anything else can give.

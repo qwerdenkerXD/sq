@@ -9913,7 +9913,8 @@ c_whole_narrow() {   # WHOLE AC 1 and 10 below 21 columns (E-L2), pipe and pty
 # of the queue and the finished table by name (ST as STATE, a header cut to
 # its floor by the first name it starts), F the node form (1 bars or figures,
 # 2 percentages, 3 name and state, 4 name and short state, 5 digest), D 1
-# where a duration of the queue is short (5h59m), 0 in Slurm's form, -1 none
+# where a duration of the queue is short (5h59m), 0 in Slurm's form, -1 none;
+# and "est=E", E the queue rows with a start estimate ("→")
 whole_short='allocated alloc mixed mix draining drng drained drain completing comp reserved resv future futr failing failg planned plnd unknown unk perfctrs npc reboot boot powering_down powring_dn powered_down powered_dn power_down pow_dn power_up pow_up cancel_reboot canc_r resume resm reboot_issued boot^'
 whole_nodes() {   # whole_nodes FIXTURE: "name=state ..." of a FULL screen
 	sq_run "$1" SQ_WIDTH=250 -- --full --no-color
@@ -9942,7 +9943,7 @@ whole_parts() {
 			for (i = 1; i <= NR && L[i] == ""; i++) ;
 			t = L[i]; tr = (t ~ /SLURM/) ? 0 : (t ~ ("▌ " host "  ")) ? 1 : (t ~ ("▌ " host " ")) ? 2 : (t ~ /▌/) ? 3 : 4
 			f = L[NR]; fc = (f ~ / R( |$)/); fp = gsub(/[0-9?]+ (jobs|running|pending|other|R|PD)/, "&", f)
-			fin = 0; mk = "-"; node = 0; dur = -1; q = f2 = ""
+			fin = 0; mk = "-"; node = 0; dur = -1; q = f2 = ""; est = 0
 			for (i = 1; i <= NR; i++) {
 				x = L[i]
 				if (match(x, /^ *(recently finished|finished)( \([^)]*\))?:? /)) {
@@ -9956,6 +9957,7 @@ whole_parts() {
 					else if (q == "") { q = cols(x, QH, nq); inq = 1; continue }
 				}
 				if (inq && x == "") inq = 0
+				if (inq && x ~ / → /) est++
 				if (inq && x ~ /(^| )[0-9]+[dhm][0-9][0-9][hms]( |$)/) dur = 1
 				else if (inq && !dur && x ~ /(^| )([0-9]+-)?[0-9]+:[0-9][0-9](:[0-9][0-9])?( |$)/) dur = 0
 				split(x, w, " ")
@@ -9972,7 +9974,7 @@ whole_parts() {
 				if (x ~ /^ *nodes: /) dig = 1
 			}
 			if (!node && dig) node = 5
-			printf "title=%d foot=%d/%d fin=%d:%s q=%s f=%s node=%d dur=%d\n", tr, fp, fc, fin, mk, q, f2, node, dur
+			printf "title=%d foot=%d/%d fin=%d:%s q=%s f=%s node=%d dur=%d est=%d\n", tr, fp, fc, fin, mk, q, f2, node, dur, est
 		}'
 }
 # whole_mono FIXTURE H "W..." [sq args]: the parts at each width, and every
@@ -9980,7 +9982,9 @@ whole_parts() {
 # counts or codes where words stood, a shorter finished caption or marker, a
 # column gone from either table, a narrower node form, short durations where
 # Slurm's stood at the same columns (H0: a column that goes hands its width
-# to the long durations too).  The breaches into WMONO, bad node lines into WNODE
+# to the long durations too; EST's AC 4: so may a start estimate that comes
+# back, which outranks the long durations).  The breaches into WMONO, bad
+# node lines into WNODE
 whole_mono() {
 	local fx=$1 h=$2 widths=$3 nodes wd p prev= pw=; shift 3
 	WMONO= WNODE=
@@ -10003,7 +10007,7 @@ whole_mono() {
 					if (!sub_of(get(a, "q"), get(b, "q"))) o = o " qcols"
 					if (!sub_of(get(a, "f"), get(b, "f"))) o = o " fcols"
 					if (get(b, "node") > get(a, "node") && get(a, "node") > 0) o = o " node"
-					if (get(a, "dur") == 0 && get(b, "dur") == 1 && get(a, "q") == get(b, "q")) o = o " durations"   # at equal columns: a dropped column may give its width to the long form
+					if (get(a, "dur") == 0 && get(b, "dur") == 1 && get(a, "q") == get(b, "q") && get(b, "est") + 0 <= get(a, "est") + 0) o = o " durations"   # at equal columns: a dropped column may give its width to the long form, and an estimate coming back may take it (EST AC 4)
 					if (o != "") printf " %s>%s:%s", wa, wb, substr(o, 2)
 				}')"
 		fi
@@ -10215,18 +10219,20 @@ c_whole_captions() {   # WHOLE AC 13 (R-L7): NODES' MEMNOTE under H8 and W8
 	sq_run nodes-cntrl SQ_WIDTH=44 SQ_HEIGHT=30 -- --compact --no-color
 	need "nodes-cntrl W=44: ↳ memory counts RealMemory on node? and …" words_line "↳ memory counts RealMemory on node? and …"
 }
-c_whole_docs() {   # WHOLE AC 12 (H12)
-	T_TITLE="sq -h and the README: COMPACT fits every measured width, below 21 columns too, by shorter forms of whole parts, a line cut only below its shortest form; FULL wraps; the README keeps 'Numbers are never cut while anything else can give'"
+c_whole_docs() {   # WHOLE AC 12 (H12), EST's AC 12
+	T_TITLE="sq -h and the README: COMPACT fits every measured width, below 21 columns too, by shorter forms of whole parts (start estimates among them), a line cut only below its shortest form; FULL wraps; the README keeps 'Numbers are never cut while anything else can give' and says how start estimates give (EST)"
 	local readme=${here%/*}/README.md
 	sq_run empty -- -h
 	need "sq -h: COMPACT fits every width, FULL wraps" eval 'rc_is 0 && plain | tr "\n" " " | sed -E "s/ +/ /g" |
-		grep -qF "COMPACT fits every width it can measure, below 21 columns too: its lines take shorter forms of whole parts (sinfo'"'"'s short node states, durations as 5h59m once the text columns are at 8, fewer columns, Slurm'"'"'s state codes last), and a line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap."'
+		grep -qF "COMPACT fits every width it can measure, below 21 columns too: its lines take shorter forms of whole parts (sinfo'"'"'s short node states, durations as 5h59m once the text columns are at 8, start estimates, fewer columns, Slurm'"'"'s state codes last), and a line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap."'
 	need "sq -h: no 'Below about 60 columns'" lacks "Below about 60 columns"
 	need "README: COMPACT fits every width, a line cut only below its shortest form, FULL wraps; no floor of 60 columns" eval '
 		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "COMPACT fits every width it can measure, below 21 columns too" &&
 		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "A line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap." &&
 		! grep -qF "cannot shrink below about 60 columns" "$readme"'
 	need "README: 'Numbers are never cut while anything else can give' stays" grep -qF "Numbers are never cut while anything else can give." "$readme"
+	need "README (EST, H12): a start estimate whole or not at all, before any column and an id's ×N, the longest first; a START column holds the dates" eval '
+		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "durations as \`5h59m\` once the text columns are down to 8; a start estimate shows whole or not at all: on a narrow screen the estimates go before any column and before an id'"'"'s \`×N\`, the longest first (\`→ Nov15 07:33\`, then \`→ 2027-11-30\`, then \`→ 10:33\`); a START column (\`-o %S\`) holds their dates while it shows; fewer columns"'
 	stubs_answer
 }
 
