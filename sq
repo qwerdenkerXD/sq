@@ -1387,7 +1387,7 @@ jobmem_snapshot() {
 # written as the new snapshot.  -w: every call through collect -w, as a
 # subcommand makes them
 jobmem_collect() {   # jobmem_collect [-w]
-	local w=${1-} memrc sstat_limit allocrc held list name k=0
+	local w=${1-} memrc sstat_limit sstat_end left lim allocrc held list name k=0
 	: > "$tmp/memalloc"; : > "$tmp/memread"
 	# framed like the fallback's call: the format in SQUEUE_FORMAT2, so the
 	# queue nonce never reaches a command line.  StateCompact is %t's letter.
@@ -1408,26 +1408,37 @@ jobmem_collect() {   # jobmem_collect [-w]
 		END { exit bad }' "$tmp/alloc" > "$tmp/memalloc"
 	then memfail=1; : > "$tmp/memalloc"; return
 	fi
-	# the ids to read, as sstat -j lists of at most 32 KiB each, a list a line:
-	# no argument may grow with the queue (Linux takes none over 128 KiB, and
-	# sq keeps each under 64 KiB), so a long list is asked in parts
+	# the ids to read, as sstat -j lists of at most 64 KiB each, a list a line:
+	# no argument may grow with the queue (Linux takes none over 128 KiB), so
+	# a long list is asked in parts
 	env LC_ALL=C gawk -F '\t' '$2 == "R" && $3 > 0 && $4 == "1" {
-		if (list != "" && length(list) + 1 + length($1) > 32768) { print list; list = "" }
+		if (list != "" && length(list) + 1 + length($1) > 65536) { print list; list = "" }
 		list = list (list == "" ? "" : ",") $1 }
 		END { if (list != "") print list }' "$tmp/memalloc" > "$tmp/memlists"
 	jobmem_snapshot && return
 	[ -s "$tmp/memlists" ] || return 0
-	# its own budget, min(SQ_TIMEOUT, 2) s: a node that does not
-	# answer must not hold every refresh for the whole timeout
+	# one budget for them all, min(SQ_TIMEOUT, 2) s from the first call: a
+	# node that does not answer must not hold every refresh for the whole
+	# timeout, however many lists there are
 	sstat_limit=$(env LC_ALL=C gawk -v t="$tmo" 'BEGIN { print (t + 0 < 2) ? t : 2 }')
-	# a call per list, the first into sstat as ever, the others appended to
-	# it; memids "<id> TAB <rc>": each id with the exit code of its own call
+	now_us sstat_end; us_of left "$sstat_limit"; sstat_end=$((sstat_end + left))
+	# a call per list, the first into sstat with the whole budget as ever,
+	# the others appended to it, each with what is left of the budget
+	# (job_limit: no more than sq job's deadline either); a list the budget
+	# does not reach (under 0.1 s left) is not asked and reads as a call that
+	# timed out.  memids "<id> TAB <rc>": each id with the exit code of its
+	# own call
 	: > "$tmp/memids"
 	while IFS= read -r list <&9; do      # on fd 9: the calls keep sq's stdin
 		k=$((k + 1)); name=sstat; [ $k = 1 ] || name=sstat.part
-		collect -t "$sstat_limit" $w "$name" sstat -n -p -a --noconvert -j "$list" -o JobID,TRESUsageInTot
-		memrc=$?
-		[ $k = 1 ] || { cat "$tmp/sstat.part" >> "$tmp/sstat"; cat "$tmp/sstat.part.err" >> "$tmp/sstat.err"; }
+		now_us left; left=$((sstat_end - left)); lim=$sstat_limit
+		if [ $k -gt 1 ] && [ "$left" -lt 100000 ]; then memrc=124
+		else
+			[ $k = 1 ] || job_limit lim "$((left / 1000000)).$(printf '%06d' $((left % 1000000)))"
+			collect -t "$lim" $w "$name" sstat -n -p -a --noconvert -j "$list" -o JobID,TRESUsageInTot
+			memrc=$?
+			[ $k = 1 ] || { cat "$tmp/sstat.part" >> "$tmp/sstat"; cat "$tmp/sstat.part.err" >> "$tmp/sstat.err"; }
+		fi
 		printf '%s\n' "$list" | tr ',' '\n' | sed "s/\$/\t$memrc/" >> "$tmp/memids"
 	done 9< "$tmp/memlists"
 	# A job reads "ok" with a complete row of its own (-p ends every

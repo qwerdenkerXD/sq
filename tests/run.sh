@@ -5688,6 +5688,36 @@ c_jobmem_compact_arrays() {
 # re-pinned from its build, which renders them as the design's prototype does.
 # mirror_at: which squeue call of the run the mirror call was, for env_of
 mirror_at() { gawk -F'\t' '$1 == "CALL" && $2 == "squeue" { c++ } $1 == "CALL" && $2 == "squeue" && /tres-alloc/ && !/StateCompact/ { print c; exit }' "$LOG"; }
+# The caller's own job ids reach sstat in lists of at most 64 KiB (R2): an id
+# reads "failed" only when its own list's call failed, and every call shares
+# one budget, min(SQ_TIMEOUT, 2) s from the first, the lists it does not reach
+# reading "failed" as a call that timed out.  memalloc as fsill with 9 000 more
+# own running jobs ahead of fsill's: two lists, flye, salmon and multiqc in the
+# second
+jobmem_lists_fx() {   # jobmem_lists_fx NAME SSTAT-STEP-1: the fixture's directory
+	local d=$T_DIR/fx-$1 f
+	mkdir -p "$d"
+	for f in "$fixtures"/memalloc/*; do [ -f "$f" ] && sed "s|^@include \.\./|@include $fixtures/|" "$f" > "$d/${f##*/}"; done
+	gawk '{ print } /^@defaults / { for (i = 1; i <= 9000; i++) printf "JobID=%d; tres_alloc=cpu=1,mem=1G,node=1,billing=1\n", 2000000 + i }' \
+		"$fixtures/memalloc/squeue-alloc" > "$d/squeue-alloc"
+	{ printf '@step 1\n%s\n@step 2\n' "$2"; grep -v '^#' "$fixtures/memalloc/sstat"; } > "$d/sstat"
+	printf '%s' "$d"
+}
+jobmem_lists_mem() { rows queue | gawk '$1 == "11895" || $1 == "11903" || $1 == "11908" { print $(NF - 1) }' | paste -sd' '; }   # flye's, salmon's, multiqc's MEM
+c_jobmem_lists() {
+	T_TITLE="sstat in lists: the first of two calls failing fails only its own ids (flye, salmon, multiqc in the second read 83/100G 7.7/15.2G ?/4G); the first hanging takes the whole budget (SQ_TIMEOUT=3: 2 s) and the second list is not asked, its ids failed"
+	local d start
+	d=$(jobmem_lists_fx fail '@exit 1')
+	sq_run "$d" SQSTUB_UID=1041 SQ_WIDTH=110 SQ_HEIGHT=30 -- --full --no-color
+	need "the first call failing: two sstat calls, flye, salmon, multiqc '83/100G 7.7/15.2G ?/4G' (got: $(jobmem_lists_mem))" eval '
+		rc_is 0 && err_empty && [ "$(calls sstat)" = 2 ] && [ "$(jobmem_lists_mem)" = "83/100G 7.7/15.2G ?/4G" ]'
+	d=$(jobmem_lists_fx hang '@hang 30')
+	start=$(date +%s%N)
+	sq_run "$d" SQSTUB_UID=1041 SQ_TIMEOUT=3 SQ_WIDTH=110 SQ_HEIGHT=30 -- --full --no-color
+	need "the first call hanging: one sstat call, the second list not asked, its ids failed: '!/100G !/15.2G !/4G' (got: $(jobmem_lists_mem))" eval '
+		rc_is 0 && err_empty && [ "$(calls sstat)" = 1 ] && [ "$(jobmem_lists_mem)" = "!/100G !/15.2G !/4G" ]'
+	need "... sq ends within 6 s of its start (the budget, not 2 s a list)" eval '[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 6000 ]'
+}
 c_memalloc_screens() {
 	T_TITLE="the accepted MEMALLOC screens byte for byte, clock aside: totals as fsill and as nobody in a pipe, a failed call marked, whole numbers for all and own form a in the unit rule on an 80-column screen"
 	local fx=$fixtures/memalloc
@@ -10100,8 +10130,8 @@ c_gawk_arg_limit() {
 	sq_run "$fx" "${argenv[@]}" GAWK_RUN=dash SQSTUB_UID=1041 SQ_WIDTH=110 SQ_HEIGHT=30 -- --full --no-color
 	need "17 000 own running jobs: rc 0, stderr empty (no 'Argument list too long'), flye read 83/100G" eval '
 		rc_is 0 && err_empty && rows queue | grep -qE "^ +11895 +flye +fsill +RUNNING .* 83/100G "'
-	need "... sstat asked in 5 calls, each -j list at most 32768 bytes, every id once" eval '
-		[ "$(calls sstat)" = 5 ] && gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"sstat\" { if (!match(\$3, /-j [^ ]+/)) bad = 1; l = substr(\$3, RSTART + 3, RLENGTH - 3); gsub(/\\\\/, \"\", l); if (length(l) > 32768) bad = 1; n += split(l, X, \",\") } END { exit bad || n != 17000 + 6 }" "$LOG"'
+	need "... sstat asked in 3 calls, each -j list at most 65536 bytes, every id once" eval '
+		[ "$(calls sstat)" = 3 ] && gawk -F"\t" "\$1 == \"CALL\" && \$2 == \"sstat\" { if (!match(\$3, /-j [^ ]+/)) bad = 1; l = substr(\$3, RSTART + 3, RLENGTH - 3); gsub(/\\\\/, \"\", l); if (length(l) > 65536) bad = 1; n += split(l, X, \",\") } END { exit bad || n != 17000 + 6 }" "$LOG"'
 	fx=$(jfx_copy arglen-o resources-11964); o_path "$fx" nojson
 	why_run "$fx" "${argenv[@]}" GAWK_RUN=job $O_ENV -- --no-color job 11964
 	need "sq job 11964 on scontrol -o (no --json): rc 0, its report" eval 'rc_is 0 && plain | head -n 1 | grep -q "^▌ 11964"'
@@ -10158,7 +10188,7 @@ cases=(
 	exit_labels exit_compact exit_garbage exit_fallback
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
-	memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow memalloc_floor_M
+	jobmem_lists memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow memalloc_floor_M
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
@@ -10180,7 +10210,7 @@ timed_cases=" squeue_hangs squeue_ignores_term scrub_bounded tables_pass_cost ca
 	membar_json membar_fallback jobmem_outcomes jobmem_throttle job_own
 	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract
 	why_nodes_json why_tail_hung why_budget why_parallel why_signals job_screens
-	nodes_o_fail nodes_o_bounds stub_fast nodes_o_cost compact_prompt_row "
+	nodes_o_fail nodes_o_bounds stub_fast nodes_o_cost compact_prompt_row jobmem_lists "
 timed_cases=" $(printf '%s ' $timed_cases)"       # one space around each name
 for c in $timed_cases; do
 	[[ " ${cases[*]} " == *" $c "* ]] || { echo "run.sh: timed_cases names $c, which is no case" >&2; exit 2; }
