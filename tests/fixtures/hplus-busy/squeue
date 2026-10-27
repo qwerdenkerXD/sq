@@ -1,0 +1,21 @@
+# EST (attack round 1, edges, its hplus): decision 8 with seven pending rows (one estimate today, one in 20 days) and twelve running rows of bob's: the rows shown change with H
+@include ../_common/squeue-defaults
+i=5001; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=\{now+3h}; r=Priority
+i=5002; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A; r=Priority
+i=5003; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A; r=Priority
+i=5004; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A; r=Priority
+i=5005; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A; r=Priority
+i=5006; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=N/A; r=Priority
+i=5007; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=\{now+20d}; r=Resources
+i=5101; j=align1; u=bob; M=1:11:00; L=2:00:00; C=8; m=16G; R=node01
+i=5102; j=align2; u=bob; M=1:12:00; L=2:00:00; C=8; m=16G; R=node01
+i=5103; j=align3; u=bob; M=1:13:00; L=2:00:00; C=8; m=16G; R=node01
+i=5104; j=align4; u=bob; M=1:14:00; L=2:00:00; C=8; m=16G; R=node01
+i=5105; j=align5; u=bob; M=1:15:00; L=2:00:00; C=8; m=16G; R=node01
+i=5106; j=align6; u=bob; M=1:16:00; L=2:00:00; C=8; m=16G; R=node01
+i=5107; j=align7; u=bob; M=1:17:00; L=2:00:00; C=8; m=16G; R=node01
+i=5108; j=align8; u=bob; M=1:18:00; L=2:00:00; C=8; m=16G; R=node01
+i=5109; j=align9; u=bob; M=1:19:00; L=2:00:00; C=8; m=16G; R=node01
+i=5110; j=align10; u=bob; M=1:20:00; L=2:00:00; C=8; m=16G; R=node01
+i=5111; j=align11; u=bob; M=1:21:00; L=2:00:00; C=8; m=16G; R=node01
+i=5112; j=align12; u=bob; M=1:22:00; L=2:00:00; C=8; m=16G; R=node01

@@ -1,0 +1,12 @@
+# EST (attack round 1, edges): estimates beside pending array brackets, a pending task id (7301_17) and folded running arrays: an id's ×N and a task are never lost for an estimate
+@include ../_common/squeue-defaults
+i=7300_[5-200%4]; j=sweep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(JobArrayTaskLimit); S=\{now+20d}; r=JobArrayTaskLimit
+i=7301_17; j=retry; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=\{now+400d}; r=Priority
+i=7302_[1,3,5,7,9,11]; j=odd; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=\{now+3h}; r=Resources
+i=7300_1; j=sweep; M=0:50:00; L=0:10:00
+i=7300_2; j=sweep; M=0:50:00; L=0:10:00
+i=7300_3; j=sweep; M=0:50:00; L=0:10:00
+i=7300_4; j=sweep; M=0:50:00; L=0:10:00
+i=7310_0; j=long-array-name-x; u=bob; M=2:00:00; L=8:00:00; C=16
+i=7310_1; j=long-array-name-x; u=bob; M=2:00:00; L=8:00:00; C=16
+i=7310_2; j=long-array-name-x; u=bob; M=2:00:00; L=8:00:00; C=16

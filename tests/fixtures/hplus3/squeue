@@ -1,0 +1,11 @@
+# est-attack-rules: decision 8 the other way round: the node-blocked pending row (kept at small H) has a near
+# estimate (7 columns); the two ordinary pending rows (kept only at larger H) have no estimate but wider number
+# cells (CPU 128, MEM 1000G)
+@include ../_common/squeue-defaults
+i=1401; j=align
+i=1402; j=align; u=bob; R=node02
+i=1403; j=plot; C=4; m=16G
+i=1404; j=train; M=2:10:00; L=1:50:00
+i=1410; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=\{now+3h}; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=1411; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; C=128; m=1000G; R=(Priority); S=N/A; r=Priority
+i=1412; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; C=128; m=1000G; R=(Priority); S=N/A; r=Priority

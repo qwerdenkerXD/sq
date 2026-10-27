@@ -1,0 +1,10 @@
+# est-attack-rules: est's pending rows with partition and account fields (for -o lists that add PART/ACCOUNT), plus two running rows
+@include ../_common/squeue-defaults
+i=1190; j=align; M=2:10:00; L=1:50:00; P=bioinf; a=lab-genomics; Q=4242
+i=1191; j=align; u=bob; R=node02; P=bioinf; a=lab-genomics; Q=4242
+i=1201; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=\{now+400d}; r=ReqNodeNotAvail, UnavailableNodes:node02; P=bioinf; a=lab-genomics; Q=4242
+i=1202; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=Unknown; r=Resources; P=bioinf; a=lab-genomics; Q=4242
+i=1203; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=N/A; r=Resources; P=bioinf; a=lab-genomics; Q=4242
+i=1204; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=2999-12-31T23:59:59; r=Priority; P=bioinf; a=lab-genomics; Q=4242
+i=1205; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=\{now+3h}; r=Priority; P=bioinf; a=lab-genomics; Q=4242
+i=1206; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=\{now+20d}; r=Priority; P=bioinf; a=lab-genomics; Q=4242

@@ -106,6 +106,8 @@
 #   SQSTUB_SKEW     seconds the clock steps once the stub has answered: -1
 #                   prints every \{now...} and \{epoch...} 1 s later, as a
 #                   clock stepped back 1 s would leave it for sq (default 0)
+#   SQSTUB_NOW      the stub's clock, an epoch (default: the real one); the
+#                   EST cases of tests/run.sh pin sq's clock to it too
 #
 # Formats, as the real tools take them (see tests/FAITHFULNESS.md):
 #   sinfo   -o FMT or -O FMT             %<letter> grammar or Field:0suffix

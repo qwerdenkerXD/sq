@@ -1,0 +1,11 @@
+# est-attack-rules: decision 8 under EST B2. Four running rows; one node-blocked pending row (collapse rank 3,
+# kept at small H) with a near estimate (7 columns); two ordinary pending rows (kept only at larger H) with an
+# estimate 400 days off (12 columns)
+@include ../_common/squeue-defaults
+i=1401; j=align
+i=1402; j=align; u=bob; R=node02
+i=1403; j=plot; C=4; m=16G
+i=1404; j=train; M=2:10:00; L=1:50:00
+i=1410; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=\{now+3h}; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=1411; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=\{now+400d}; r=Priority
+i=1412; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=\{now+400d}; r=Priority

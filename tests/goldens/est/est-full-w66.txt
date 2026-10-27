@@ -1,0 +1,16 @@
+  ▌ SLURM FranzGB  07:33:20 UTC
+
+  node01 ░░░░░░░░   0%  0/32 cpu   ░░░░░░░░   0%  0/125G mem  idle
+  node02 ░░░░░░░░   0%  0/32 cpu   ░░░░░░░░   0%  0/125G mem  idle
+
+  JOBID NAME USER  STATE   TIME LEFT    CPU MEM NODE/REASON       
+  1201  prep alice PENDING 0:00 1:00:00   1  4G → 2027-11-30
+  1202  prep alice PENDING 0:00 1:00:00   1  4G (Resources)
+  1203  prep alice PENDING 0:00 1:00:00   1  4G (Resources)
+  1204  prep alice PENDING 0:00 1:00:00   1  4G → 2999-12-31
+  1205  prep alice PENDING 0:00 1:00:00   1  4G (Priority) → 10:33
+  1206  prep alice PENDING 0:00 1:00:00   1  4G → Nov15 07:33
+
+  recently finished · last 2h · nothing in this window
+
+  6 jobs   0 running   6 pending   0 other

@@ -12,6 +12,9 @@
 # --pin writes what sq prints into the pinned screens of sq job and its why
 # section (tests/fixtures/sqjob/screens) instead of comparing with them, for
 # a change that is meant to change them; git diff then shows what changed.
+# The EST cases' goldens (tests/goldens/est: 291a4a8's screens and lists, of
+# est_columns est_full est_height_cols est_start) are pinned the same way,
+# from a build of 7fd9bd6 as SQ_UNDER_TEST.
 #
 # Frozen goldens (frozen_is, under tests/goldens/) were written by an older
 # build, e.g. 7fd9bd6's screens a change must leave as they were: --pin never
@@ -10420,6 +10423,394 @@ c_whole_accepted() {
 	sq_run elapsed24 SQSTUB_HOST=FranzGB SQ_WIDTH=100 SQ_HEIGHT=24 -- --compact --no-color
 	need "elapsed24 100x24: its accepted line" eval 'plain | grep -qE " \(ReqNodeNotAvail, UnavailableNodes:…$"'
 }
+
+# ---- EST: a start estimate never vanishes at W+1 (est-design.md, EST-v3) --
+# A start estimate is a part of H4's ladder (H5): while the estimates are
+# held, NODE/REASON's floor is the widest of them; they go whole, by width,
+# the widest first, after the text floors and before JOBID's second tier; a
+# START column (-o %S) holds their dates while it shows.  Their widths move
+# with the clock (today HH:MM, this year MonDD HH:MM, later a date), and these
+# cases pin them, so they run a copy of sq whose clock is pinned (est_pin) on
+# stubs that read the same moment (SQSTUB_NOW): 2026-10-26 07:33:20 UTC, the
+# design's.  Their goldens hold what 291a4a8 drew (7fd9bd6 draws it byte for
+# byte), the base AC 15 compares with: the column sets, ×N and tasks, FULL's
+# screens, the H grid.  They are written, from a build of 7fd9bd6, by
+#   SQ_UNDER_TEST=<7fd9bd6's sq> tests/run.sh --pin est_columns est_full est_height_cols est_start
+est_now=1793000000 est_now_iso=2026-10-26T07:33:20
+est_goldens=$here/goldens/est   # FIXTURE-WHAT.txt, apart from the fixtures (their sweeps and twins read every file there)
+# est_pin: the case's copy of sq (EST_SQ) whose every systime() and the
+# title's date read SQSTUB_NOW where it is set; a FAIL where sq has no
+# systime() or not exactly one title clock to pin
+est_pin() {
+	EST_SQ=$work/$T_NAME/sq-pinned EST_FOR=$T_NAME
+	LC_ALL=C gawk -v pinned="$EST_SQ" '
+		BEGIN { old = "now=$(date '\''+%H:%M:%S %Z'\'')"; new = "now=$(date ${SQSTUB_NOW:+-d @$SQSTUB_NOW} '\''+%H:%M:%S %Z'\'')" }
+		{	n += gsub(/systime\(\)/, "(ENVIRON[\"SQSTUB_NOW\"] != \"\" ? ENVIRON[\"SQSTUB_NOW\"] + 0 : systime())")
+			if ((p = index($0, old))) { $0 = substr($0, 1, p - 1) new substr($0, p + length(old)); d++ }
+			print > pinned }
+		END { exit !(n > 0 && d == 1) }' "$sq" && chmod +x "$EST_SQ" ||
+		{ T_FAIL+=("est_pin: sq has no systime() or not exactly one title clock (now=\$(date ...)) to pin"); return 1; }
+}
+# est_run FIXTURE [VAR=value]... -- [sq args]: sq_run on the clock-pinned sq,
+# at est_now, on host FranzGB
+est_run() {
+	[ "${EST_FOR-}" = "$T_NAME" ] || est_pin || return 1
+	local sq=$EST_SQ
+	sq_run "$1" SQSTUB_NOW=$est_now SQSTUB_HOST=$whole_host "${@:2}"
+}
+# est_view: the last screen's queue as one line, read by the header's column
+# positions (cellified): "q=COLS st=FORM est=ID=EST,... start=ID,...
+# ids=ID,... parts=PART,...".  COLS the columns by name (ST as STATE, a header
+# cut to its column by the first name it starts), FORM the state column's
+# header (STATE or ST, - none); est the rows with "→ EST" in NODE/REASON (a
+# row by its id's base, the part before "_"; a blank in EST as "_"); start
+# the rows whose START cell holds a date after now; ids the JOBID cells, a
+# ×N joined (7200_[…]×18); parts each ×N (BASE×N) and each task id whole (7301_17)
+est_view() {
+	cplain | LC_ALL=$utf8 gawk -v now="$est_now_iso" '
+		BEGIN { nq = split("JOBID NAME USER STATE TIME LEFT LIMIT CPU MEM NODE/REASON REASON PRIO NODES SUBMIT START END PART ACCOUNT QOS COMMAND WORKDIR", QH, " ") }
+		{ L[NR] = $0 }
+		END {
+			for (i = 1; i <= NR && L[i] !~ /^ *(JOBI|JOBID) / && L[i] !~ /^ *(recently )?finished/; i++) ;
+			q = ""; st = "-"; sp = 0; e = s = ids = parts = ""
+			if (i <= NR && L[i] ~ /^ *JOBI/) {
+				h = L[i]
+				for (j = 1; j <= length(h); j++) if (substr(h, j, 1) != " " && (j == 1 || substr(h, j - 1, 1) == " ")) {
+					match(substr(h, j), /^[^ ]+/); x = substr(h, j, RLENGTH)
+					if (x == "ST" || x == "STATE") st = x
+					if (x == "ST") x = "STATE"
+					for (c = 1; c <= nq && index(QH[c], x) != 1; c++) ;
+					q = q (q == "" ? "" : ",") (c <= nq ? QH[c] : "?" x)
+					if (c <= nq && QH[c] == "START") sp = j
+				}
+				for (r = i + 1; r <= NR && L[r] != ""; r++) {
+					t = L[r]; gsub(/\356\200\200/, "", t)
+					if (t ~ /^ *(…|↳|⚠)/) continue
+					split(t, F, " "); id = F[1]; b = id; sub(/_.*/, "", b)
+					cell = id (F[2] ~ /^×[0-9]+$/ ? F[2] : "")
+					ids = ids (ids == "" ? "" : ",") cell
+					if (F[2] ~ /^×[0-9]+$/) parts = parts (parts == "" ? "" : ",") b F[2]
+					if (id ~ /^[0-9]+_[0-9]+$/) parts = parts (parts == "" ? "" : ",") id
+					if (match(t, /→ ([A-Z][a-z][a-z][0-9][0-9] )?[0-9][0-9:-]+$/)) {
+						x = substr(t, RSTART + 2); sub(/^ +/, "", x); gsub(/ /, "_", x)
+						e = e (e == "" ? "" : ",") b "=" x
+					}
+					if (sp && (x = substr(L[r], sp, 19)) ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/ && x > now)
+						s = s (s == "" ? "" : ",") b
+				}
+			}
+			printf "q=%s st=%s est=%s start=%s ids=%s parts=%s\n", q, st, e, s, ids, parts
+		}'
+}
+# est_get KEY: that field of the last screen's est_view
+est_get() { est_view | tr ' ' '\n' | sed -n "s/^$1=//p"; }
+est_is()  { [ "$(est_get est)" = "$1" ]; }    # est_is "1201=2027-11-30,1205=10:33": the estimates shown, in row order
+qhdr_is() { [ "$(labelled QHDR | sed -E 's/ +/ /g')" = "$1" ]; }   # qhdr_is TEXT: the queue header, blanks squeezed
+# est_series FILE FIXTURE "WxH..." VIEW [VAR=value]... -- [sq args]: each
+# screen's VIEW (a function: est_view, est_hview) into FILE as "W H RC VIEW";
+# its runs apart (T_DIR, run_n), so several series run at once (as
+# background jobs of the case, after its est_pin); its FAILs into FILE.fail,
+# its stub calls into FILE.calls
+est_series() {
+	local file=$1 fx=$2 confs=$3 view=$4 c; shift 4
+	local -a envs=(); while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done; [ $# -gt 0 ] && shift
+	local T_DIR=$T_DIR/s-${file##*/} run_n=0 T_CALLS=0; local -a T_FAIL=(); mkdir -p "$T_DIR"
+	for c in $confs; do
+		est_run "$fx" SQ_WIDTH="${c%x*}" SQ_HEIGHT="${c#*x}" "${envs[@]}" -- "$@"
+		printf '%s %s %s %s\n' "${c%x*}" "${c#*x}" "$RC" "$($view)"
+	done > "$file"
+	printf '%s\n' "${T_FAIL[@]}" > "$file.fail"; echo "$T_CALLS" > "$file.calls"
+}
+# est_confs "W..." "H...": every WxH, H by H, the widths in their order
+est_confs() { local h w; for h in $2; do for w in $1; do printf '%sx%s ' "$w" "$h"; done; done; }
+# est_wait FILE...: the series of these files done (each a background job
+# of the case's, in EST_PIDS), their FAILs and stub calls taken over; a
+# series that left no screens is a FAIL
+est_wait() {
+	local f l
+	wait "${EST_PIDS[@]}"; EST_PIDS=()
+	for f; do
+		[ -s "$f" ] || T_FAIL+=("${f##*/}: the series left no screens")
+		[ ! -f "$f.fail" ] || while IFS= read -r l; do [ -z "$l" ] || T_FAIL+=("${f##*/}: $l"); done < "$f.fail"
+		[ ! -s "$f.calls" ] || T_CALLS=$((T_CALLS + $(cat "$f.calls")))
+	done
+}
+# est_mono FILE: the steps W -> W+1 (each H apart) where a row that showed its
+# start estimate (a "→" in NODE/REASON, or a date in a START column) shows
+# none, as " H:W>W+1(ids)"; and " W:rcN" for a run that failed
+est_mono() {
+	gawk '
+		function shown(   x, n, E, P, i, o) {
+			n = split(F["est"], E, ","); for (i = 1; i <= n; i++) { split(E[i], P, "="); o = o "," P[1] }
+			n = split(F["start"], E, ","); for (i = 1; i <= n; i++) o = o "," E[i]
+			return o ","
+		}
+		{	delete F; for (i = 4; i <= NF; i++) { p = index($i, "="); F[substr($i, 1, p - 1)] = substr($i, p + 1) }
+			w = $1; h = $2; now = shown()
+			if ($3 != 0) printf " %s:rc%s", w, $3
+			if ((h in PW) && PW[h] == w - 1) {
+				n = split(PS[h], E, ","); lost = ""
+				for (i = 1; i <= n; i++) if (E[i] != "" && index(now, "," E[i] ",") == 0) lost = lost (lost == "" ? "" : ",") E[i]
+				if (lost != "") printf " %s:%s>%s(%s)", h, PW[h], w, lost
+			}
+			PW[h] = w; PS[h] = now
+		}' "$1"
+}
+# est_golden FILE GOLDEN: --pin writes FILE's lines into GOLDEN (291a4a8's,
+# from a build of 7fd9bd6: see above); otherwise prints " W:H:what" for each
+# screen of FILE whose column set is not GOLDEN's, that shows ST where GOLDEN
+# shows STATE, or that lacks a ×N or a task GOLDEN shows (AC 15)
+est_golden() {
+	if [ $pin = 1 ]; then gawk '{ print $1, $2, $4, $5, $9 }' "$1" > "$2"; return 0; fi
+	[ -s "$2" ] || { echo " no golden ${2#"$here"/}"; return 0; }
+	gawk 'NR == FNR { G[$1, $2] = $3 " " $4 " " $5; next }
+		{	if (!(($1, $2) in G)) { printf " %s:%s:nogolden", $1, $2; next }
+			split(G[$1, $2], g, " ")
+			if ($4 != g[1]) printf " %s:%s:%s(291a4a8 %s)", $1, $2, $4, g[1]
+			if (g[2] == "st=STATE" && $5 != "st=STATE") printf " %s:%s:ST", $1, $2
+			n = split(substr(g[3], 7), P, ","); have = "," substr($9, 7) ","
+			for (i = 1; i <= n; i++) if (index(have, "," P[i] ",") == 0) printf " %s:%s:lost-%s", $1, $2, P[i]
+		}' "$2" "$1"
+}
+# est_screen_golden GOLDEN: --pin writes the last screen into GOLDEN, else the
+# screen is GOLDEN byte for byte
+est_screen_golden() {
+	if [ $pin = 1 ]; then cp "$OUT" "$1"; return 0; fi
+	cmp -s "$1" "$OUT"
+}
+
+c_est_monotone() {   # EST AC 4: an estimate shown at W is shown at W+1
+	T_TITLE="EST (AC 4): every row that shows a start estimate at W shows it at W+1, no exception: COMPACT W 21..130 at H 40, 6, 13 and 14, FULL W 40..130, on est, estreal, mixed, estlong, nboot, wide-text, estdig and estarr; est also with colour and in C"
+	local fx f nobin=$T_DIR/nobin lost files=() EST_PIDS=()
+	est_pin || return
+	no_utf8_locale "$nobin"
+	for fx in est estreal mixed estlong nboot wide-text estdig estarr; do
+		f=$T_DIR/mono-$fx; files+=("$f" "$f-full")
+		est_series "$f" "$fx" "$(est_confs "$(seq 21 130)" "40 6 13 14")" est_view -- --compact --no-color & EST_PIDS+=($!)
+		est_series "$f-full" "$fx" "$(est_confs "$(seq 40 130)" 50)" est_view -- --full --no-color & EST_PIDS+=($!)
+	done
+	est_wait "${files[@]}"
+	est_series "$T_DIR/mono-est-colour" est "$(est_confs "$(seq 21 130)" 40)" est_view -- --compact --color & EST_PIDS+=($!)
+	est_series "$T_DIR/mono-est-c" est "$(est_confs "$(seq 21 130)" 40)" est_view LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --compact --no-color & EST_PIDS+=($!)
+	est_wait "$T_DIR/mono-est-colour" "$T_DIR/mono-est-c"
+	for f in "${files[@]}" "$T_DIR/mono-est-colour" "$T_DIR/mono-est-c"; do
+		lost=$(est_mono "$f")
+		need "${f##*/mono-}: no estimate lost from W to W+1 (at H:W>W+1(rows):${lost:- none})" test -z "$lost"
+	done
+}
+c_est_pins() {   # EST AC 8: est, estreal, mixed, estarr, COMPACT H=40
+	T_TITLE="EST's pins (AC 8), COMPACT H=40: est W 41/42 and 52 none beside 291a4a8's columns, W 53-57 only 1205 → 10:33, W=58 the two dates and 1205, W=59 all four; estreal W=54 none, W 55-60 only 8003 → 12:33, W=61 all three; mixed W=50 none, W=63 → 2027-11-30, W=23 ST and none (the estimates go before the code); estarr W 59-61 291a4a8's ids and none, W=62 7201 → 12:33, W=70 7200_[…] ×18 → Oct28 07:33 and 7202 → 2027-11-30"
+	local wd
+	est_run est SQ_WIDTH=41 SQ_HEIGHT=40 -- --compact --no-color
+	need "est W=41: JOBID NAME STATE LEFT MEM NODE/REA, no estimate" eval 'rc_is 0 && qhdr_is "JOBID NAME STATE LEFT MEM NODE/REA" && est_is ""'
+	est_run est SQ_WIDTH=42 SQ_HEIGHT=40 -- --compact --no-color
+	need "est W=42: JOBID NAME USER STATE LEFT MEM NODE/, no estimate" eval 'qhdr_is "JOBID NAME USER STATE LEFT MEM NODE/" && est_is ""'
+	est_run est SQ_WIDTH=52 SQ_HEIGHT=40 -- --compact --no-color
+	need "est W=52: all nine columns, no estimate" eval 'qhdr_is "JOBID NAME USER STATE TIME LEFT CPU MEM NODE/R" && est_is ""'
+	for wd in 53 54 55 56 57; do
+		est_run est SQ_WIDTH=$wd SQ_HEIGHT=40 -- --compact --no-color
+		need "est W=$wd: only 1205 → 10:33" est_is "1205=10:33"
+	done
+	est_run est SQ_WIDTH=58 SQ_HEIGHT=40 -- --compact --no-color
+	need "est W=58: 1201 → 2027-11-30, 1204 → 2999-12-31, 1205 → 10:33, 1206 (Priority)" eval '
+		est_is "1201=2027-11-30,1204=2999-12-31,1205=10:33" && words_has "1206 prep alice PENDING 0s 1h00m 1 4G (Priority)"'
+	est_run est SQ_WIDTH=59 SQ_HEIGHT=40 -- --compact --no-color
+	need "est W=59: all four, 1206 → Nov15 07:33" est_is "1201=2027-11-30,1204=2999-12-31,1205=10:33,1206=Nov15_07:33"
+	est_run estreal SQ_WIDTH=54 SQ_HEIGHT=40 -- --compact --no-color
+	need "estreal W=54: no estimate" eval 'rc_is 0 && est_is ""'
+	for wd in 55 56 57 58 59 60; do
+		est_run estreal SQ_WIDTH=$wd SQ_HEIGHT=40 -- --compact --no-color
+		need "estreal W=$wd: only 8003 → 12:33 (the widest went first)" est_is "8003=12:33"
+	done
+	est_run estreal SQ_WIDTH=61 SQ_HEIGHT=40 -- --compact --no-color
+	need "estreal W=61: all three" est_is "8001=Oct29_07:33,8003=12:33,8004=Dec05_07:33"
+	est_run mixed SQ_WIDTH=50 SQ_HEIGHT=40 -- --compact --no-color
+	need "mixed W=50: JOBID NAME USER STATE LEFT MEM NODE/REAS, no estimate" eval 'rc_is 0 && qhdr_is "JOBID NAME USER STATE LEFT MEM NODE/REAS" && est_is ""'
+	est_run mixed SQ_WIDTH=63 SQ_HEIGHT=40 -- --compact --no-color
+	need "mixed W=63: 1103 → 2027-11-30" est_is "1103=2027-11-30"
+	est_run mixed SQ_WIDTH=23 SQ_HEIGHT=40 -- --compact --no-color
+	need "mixed W=23: JOBID ST NODE/REASON, no estimate (the estimates go before the code)" eval 'qhdr_is "JOBID ST NODE/REASON" && est_is ""'
+	est_run estarr SQ_WIDTH=59 SQ_HEIGHT=40 -- --compact --no-color
+	need "estarr W=59: 7200_… ×18 (291a4a8's id), no estimate" eval 'rc_is 0 && [ "$(est_get ids)" = "7100_[…]×4,7200_…×18,7201,7202,7203_[…]×4" ] && est_is ""'
+	for wd in 60 61; do
+		est_run estarr SQ_WIDTH=$wd SQ_HEIGHT=40 -- --compact --no-color
+		need "estarr W=$wd: 7200_[…] ×18 (291a4a8's id), no estimate" eval '[ "$(est_get ids)" = "7100_[…]×4,7200_[…]×18,7201,7202,7203_[…]×4" ] && est_is ""'
+	done
+	est_run estarr SQ_WIDTH=62 SQ_HEIGHT=40 -- --compact --no-color
+	need "estarr W=62: 7201 → 12:33 alone" est_is "7201=12:33"
+	est_run estarr SQ_WIDTH=70 SQ_HEIGHT=40 -- --compact --no-color
+	need "estarr W=70: 7200_[…] ×18 with → Oct28 07:33, 7201 → 12:33, 7202 → 2027-11-30" eval '
+		[ "$(est_get ids)" = "7100_[…]×4,7200_[…]×18,7201,7202,7203_[…]×4" ] && est_is "7200=Oct28_07:33,7201=12:33,7202=2027-11-30"'
+}
+c_est_columns() {   # EST AC 15: the estimates never cost a column, the long state, ×N or a task
+	T_TITLE="EST (AC 15): COMPACT H=40 W 21..100 on est, estreal, mixed, mix30, wide-text and estarr: the columns by name as 291a4a8 drew them, no ST where it showed STATE, every ×N and task it showed (its golden lists)"
+	local fx f bad files=() EST_PIDS=()
+	est_pin || return
+	for fx in est estreal mixed mix30 wide-text estarr; do
+		f=$T_DIR/cols-$fx; files+=("$f")
+		est_series "$f" "$fx" "$(est_confs "$(seq 21 100)" 40)" est_view -- --compact --no-color & EST_PIDS+=($!)
+	done
+	est_wait "${files[@]}"
+	for fx in est estreal mixed mix30 wide-text estarr; do
+		bad=$(est_golden "$T_DIR/cols-$fx" "$est_goldens/$fx-columns.txt")
+		need "$fx: 291a4a8's columns, state form, ×N and tasks at every width (not at W:H:${bad:- none})" test -z "$bad"
+	done
+}
+c_est_widest_first() {   # EST H4.3: the widest estimates go first
+	T_TITLE="EST (H4.3): the estimates go by width, the widest first: estreal W=55 shows 8003 → 12:33 and neither Oct29 nor Dec05"
+	est_run estreal SQ_WIDTH=55 SQ_HEIGHT=40 -- --compact --no-color
+	need "estreal W=55: → 12:33, no Oct29, no Dec05" eval 'rc_is 0 && has "→ 12:33" && lacks Oct29 && lacks Dec05'
+}
+c_est_trade() {   # EST AC 4's trade: short durations beside estimates coming back
+	T_TITLE="EST (AC 4's exception): est COMPACT H=40 W 57 -> 58, LEFT 1:00:00 -> 1h00m at the same columns while 1201's and 1204's estimates come back (the short durations go in step 2, before the estimates in step 3)"
+	local cols
+	est_run est SQ_WIDTH=57 SQ_HEIGHT=40 -- --compact --no-color; cols=$(est_get q)
+	need "est W=57: LEFT 1:00:00, 1205's estimate alone" eval 'rc_is 0 && words_has "1205 prep alice PENDING 0:00 1:00:00 " && est_is "1205=10:33"'
+	est_run est SQ_WIDTH=58 SQ_HEIGHT=40 -- --compact --no-color
+	need "est W=58: the same columns, LEFT 1h00m, 1201 and 1204 back" eval '
+		[ "$(est_get q)" = "$cols" ] && words_has "1205 prep alice PENDING 0s 1h00m " && est_is "1201=2027-11-30,1204=2999-12-31,1205=10:33"'
+}
+c_est_full() {   # EST F0: FULL as 291a4a8
+	T_TITLE="EST (F0): FULL holds no estimate floor: est, estreal and mixed at W 40, 64, 66, 80 and 100 byte for byte as 291a4a8 drew them (E-A's band: mixed W=64 (Resources), W=66 → 2027-11-30)"
+	local fx wd
+	for fx in est estreal mixed; do
+		for wd in 40 64 66 80 100; do
+			est_run "$fx" SQ_WIDTH=$wd -- --full --no-color
+			need "$fx FULL W=$wd: 291a4a8's screen" eval 'rc_is 0 && err_empty && est_screen_golden "$est_goldens/$fx-full-w$wd.txt"'
+		done
+	done
+	est_run mixed SQ_WIDTH=64 -- --full --no-color
+	need "mixed FULL W=64: (Resources), no estimate" eval 'has "(Resources)" && est_is ""'
+	est_run mixed SQ_WIDTH=66 -- --full --no-color
+	need "mixed FULL W=66: → 2027-11-30" est_is "1103=2027-11-30"
+}
+c_est_f3() {   # EST: DISPLAY F3's second pass (JOBID held) with the estimates
+	T_TITLE="EST (DISPLAY F3's second pass): estarr COMPACT H=40 at W 59, 60, 61, 62, 64 and 70, the ids and the estimates as the design's prototype draws them; what the first pass let go stays gone"
+	local c wd want_ids want_est
+	for c in "59|7100_[…]×4,7200_…×18,7201,7202,7203_[…]×4|" "60||" "61||" "62||7201=12:33" "64||7201=12:33" \
+	         "70||7200=Oct28_07:33,7201=12:33,7202=2027-11-30"; do
+		IFS='|' read -r wd want_ids want_est <<< "$c"
+		[ -n "$want_ids" ] || want_ids="7100_[…]×4,7200_[…]×18,7201,7202,7203_[…]×4"
+		est_run estarr SQ_WIDTH=$wd SQ_HEIGHT=40 -- --compact --no-color
+		need "estarr W=$wd: ids ${want_ids//,/ }; estimates ${want_est:-none}" eval 'rc_is 0 && [ "$(est_get ids)" = "$want_ids" ] && est_is "$want_est"'
+	done
+}
+# est_hview: the last screen's height and the job ids it shows (whole_ids)
+est_hview() { printf 'lines=%s ids=%s\n' "$(plain | wc -l)" "$(whole_ids | paste -sd, -)"; }
+c_est_height() {   # EST, decision 8: H11's hmono on the estimate fixtures
+	T_TITLE="EST (decision 8): COMPACT H 2..60 at W 40, 80 and 120 on est, estreal, mixed, mix30, estlong, nboot, guard3, wide-text, estdig and estarr (est and estarr with --reserve 3 too): no screen taller than H, every job id shown at H shown at H+1"
+	local run fx args f files=() EST_PIDS=() tall lost
+	est_pin || return
+	for run in est estreal mixed mix30 estlong nboot guard3 wide-text estdig estarr "est --reserve_3" "estarr --reserve_3"; do
+		read -r fx args <<< "$run"; f=$T_DIR/h-$fx${args//[ _]/}; files+=("$f")
+		# shellcheck disable=SC2086
+		est_series "$f" "$fx" "$(est_confs "40 80 120" "$(seq 2 60)" | tr ' ' '\n' | sort -t x -k1,1n -k2,2n | tr '\n' ' ')" est_hview -- --compact --no-color ${args//_/ } & EST_PIDS+=($!)
+	done
+	est_wait "${files[@]}"
+	for f in "${files[@]}"; do
+		tall=$(gawk '{ split($4, L, "="); if (L[2] > $2) printf " %s:%s", $1, $2 }' "$f")
+		lost=$(gawk '{ split($5, I, "="); now = "," I[2] ","
+			if (($1 in PH) && PH[$1] == $2 - 1) { n = split(PI[$1], P, ","); for (i = 1; i <= n; i++) if (P[i] != "" && index(now, "," P[i] ",") == 0) printf " %s:%s>%s(%s)", $1, PH[$1], $2, P[i] }
+			PH[$1] = $2; PI[$1] = I[2] }' "$f")
+		need "${f##*/h-}: no screen taller than H (at W:H:${tall:- none})" test -z "$tall"
+		need "${f##*/h-}: a taller screen never loses a job id (at W:H>H+1(id):${lost:- none})" test -z "$lost"
+	done
+}
+c_est_negative() {   # EST AC 8's negative controls: the attackers' worst screens
+	T_TITLE="EST's negative controls (AC 8): the attackers' worst screens show 291a4a8's columns and ×N/tasks, the estimates as pinned: mixed W=52, hplus2 W=49 H 18/19, hplus W=55 H 18/19, hplus-busy W=55 H 28/29, estopt's PART/ACCOUNT W 45/51, estarr W 50/51, arrtask W 46/47 (51/52 the column trade), far40 H=50 W 49/60, est W=50, hplus3 W=55 H 18/19 (the height exception)"
+	local c fx wd h o cols est ids
+	# FIXTURE W H "-o LIST"|- | 291a4a8's columns | the estimates | the ids
+	while IFS='|' read -r fx wd h o cols est ids; do
+		[ -n "$fx" ] || continue
+		if [ "$o" = - ]; then est_run "$fx" SQ_WIDTH=$wd SQ_HEIGHT=$h -- --compact --no-color
+		else est_run "$fx" SQ_WIDTH=$wd SQ_HEIGHT=$h -- --compact --no-color -o "$o"; fi
+		need "$fx W=$wd H=$h${o#-}: the columns ${cols//,/ }; estimates ${est:-none}${ids:+; ids ${ids//,/ }}" eval '
+			rc_is 0 && [ "$(est_get q)" = "$cols" ] && est_is "$est" && { [ -z "$ids" ] || [ "$(est_get ids)" = "$ids" ]; }'
+	done <<-'PINS'
+		mixed|52|40|-|JOBID,NAME,USER,STATE,TIME,LEFT,MEM,NODE/REASON||
+		hplus2|49|18|-|JOBID,NAME,USER,STATE,TIME,LEFT,MEM,NODE/REASON||
+		hplus2|49|19|-|JOBID,NAME,USER,STATE,TIME,LEFT,MEM,NODE/REASON||
+		hplus|55|18|-|JOBID,NAME,USER,STATE,TIME,LEFT,CPU,MEM,NODE/REASON|1410=10:33|
+		hplus|55|19|-|JOBID,NAME,USER,STATE,TIME,LEFT,CPU,MEM,NODE/REASON|1410=10:33|
+		hplus-busy|55|28|-|JOBID,NAME,USER,STATE,TIME,LEFT,CPU,MEM,NODE/REASON|5001=10:33|
+		hplus-busy|55|29|-|JOBID,NAME,USER,STATE,TIME,LEFT,CPU,MEM,NODE/REASON|5001=10:33|
+		estopt|45|40|%i %j %u %T %M %P %a %R|JOBID,NAME,USER,STATE,TIME,PART,NODE/REASON||
+		estopt|51|40|%i %j %u %T %M %P %a %R|JOBID,NAME,USER,STATE,TIME,PART,ACCOUNT,NODE/REASON||
+		estarr|50|40|-|JOBID,NAME,USER,STATE,TIME,LEFT,MEM,NODE/REASON||7100_…,7200_…,7201,7202,7203_…
+		estarr|51|40|-|JOBID,NAME,USER,STATE,TIME,LEFT,MEM,NODE/REASON||7100_…,7200_…,7201,7202,7203_…
+		arrtask|46|40|-|JOBID,NAME,USER,STATE,LEFT,MEM,NODE/REASON||7300_…,7301_17,7302_…,7300_…,7310_…
+		arrtask|47|40|-|JOBID,NAME,USER,STATE,LEFT,MEM,NODE/REASON||7300_…,7301_17,7302_…,7300_…,7310_…
+		arrtask|51|40|-|JOBID,NAME,USER,STATE,LEFT,MEM,NODE/REASON||
+		arrtask|52|40|-|JOBID,NAME,USER,STATE,TIME,LEFT,MEM,NODE/REASON||
+		far40|49|50|-|JOBID,NAME,USER,STATE,TIME,LEFT,MEM,NODE/REASON||
+		far40|60|50|-|JOBID,NAME,USER,STATE,TIME,LEFT,CPU,MEM,NODE/REASON|4100=2027-11-30|
+		est|50|40|-|JOBID,NAME,USER,STATE,TIME,LEFT,MEM,NODE/REASON||
+		hplus3|55|18|-|JOBID,NAME,USER,STATE,TIME,LEFT,CPU,MEM,NODE/REASON|1410=10:33|
+		hplus3|55|19|-|JOBID,NAME,USER,STATE,TIME,LEFT,CPU,MEM,NODE/REASON||
+	PINS
+}
+c_est_height_cols() {   # EST: the H grid against 291a4a8 (decision 8, the stated height exception)
+	T_TITLE="EST (decision 8): COMPACT H 8..30 x W 44..70 step 2 and 55 on hplus, hplus-busy, hplus2, hplus3, far40, mixed and mix30: 291a4a8's columns at every point (so no H -> H+1 step loses a column 291a4a8 keeps), and no step loses an estimate that 291a4a8 shows at H+1; hplus3 W=55 H 18 -> 19 the stated exception (→ 10:33, then none, as 291a4a8)"
+	local fx f bad lost files=() EST_PIDS=()
+	est_pin || return
+	for fx in hplus hplus-busy hplus2 hplus3 far40 mixed mix30; do
+		f=$T_DIR/grid-$fx; files+=("$f")
+		est_series "$f" "$fx" "$(est_confs "$(seq 44 2 70) 55" "$(seq 8 30)" | tr ' ' '\n' | sort -t x -k1,1n -k2,2n | tr '\n' ' ')" est_view -- --compact --no-color & EST_PIDS+=($!)
+	done
+	est_wait "${files[@]}"
+	for fx in hplus hplus-busy hplus2 hplus3 far40 mixed mix30; do
+		f=$T_DIR/grid-$fx
+		if [ $pin = 1 ]; then gawk '{ print $1, $2, $4, $6 }' "$f" > "$est_goldens/$fx-grid.txt"; continue; fi
+		bad=$(gawk 'NR == FNR { G[$1, $2] = $3; next } (($1, $2) in G) && $4 != G[$1, $2] { printf " %s:%s", $1, $2 } !(($1, $2) in G) { printf " %s:%s:nogolden", $1, $2 }' "$est_goldens/$fx-grid.txt" "$f")
+		# a row whose estimate went at H -> H+1 (W apart): 291a4a8 shows none for it at H+1
+		lost=$(gawk 'function rows(s,   n, E, P, i, o) { sub(/^est=/, "", s); n = split(s, E, ","); for (i = 1; i <= n; i++) { split(E[i], P, "="); o = o "," P[1] }; return o "," }
+			NR == FNR { G[$1, $2] = rows($4); next }
+			{ now = rows($6) }
+			($1 in PH) && PH[$1] == $2 - 1 { n = split(PR[$1], R, ","); for (i = 1; i <= n; i++) if (R[i] != "" && index(now, "," R[i] ",") == 0 && index(G[$1, $2], "," R[i] ",")) printf " %s:%s>%s(%s)", $1, PH[$1], $2, R[i] }
+			{ PH[$1] = $2; PR[$1] = now }' "$est_goldens/$fx-grid.txt" "$f")
+		need "$fx: 291a4a8's columns at every W:H (not at:${bad:- none})" test -z "$bad"
+		need "$fx: no estimate lost at H+1 that 291a4a8 shows there (at W:H>H+1(row):${lost:- none})" test -z "$lost"
+	done
+	[ $pin = 1 ] && return
+	need "hplus3 W=55: H=18 1410 → 10:33, H=19 none beside the arriving 1411/1412 (the stated exception, 291a4a8 alike)" eval '
+		grep -q "^55 18 0 .* est=1410=10:33 " "$T_DIR/grid-hplus3" && grep -q "^55 19 0 .* est= " "$T_DIR/grid-hplus3" &&
+		grep -q "^55 18 .* est=1410=10:33$" "$est_goldens/hplus3-grid.txt" && grep -q "^55 19 .* est=$" "$est_goldens/hplus3-grid.txt"'
+}
+c_est_start() {   # EST S: a START column holds the estimates' dates
+	T_TITLE="EST (S): estopt -o '%i %j %u %T %S %R' W 30 none, W 46 all four in NODE/REASON, W 53 START; -o '%i %j %T %S %R' W 30 1205 alone, W 40 all four, W 47 START; the arrow beside START a copy (W 52/53, 58/59, 57/58); arrtask -o '%i %j %T %S %R' W 21..60 no ×N or task fewer than 291a4a8; estopt with both START lists W 21..120: no estimate lost W -> W+1, a date in START counting as shown"
+	local c wd o cols est start f bad lost EST_PIDS=()
+	est_pin || return
+	# W | -o LIST | the columns | the estimates in NODE/REASON | the rows with a date in START
+	while IFS='|' read -r wd o cols est start; do
+		[ -n "$wd" ] || continue
+		est_run estopt SQ_WIDTH=$wd SQ_HEIGHT=40 -- --compact --no-color -o "$o"
+		need "estopt -o '$o' W=$wd: ${cols//,/ }; estimates ${est:-none}; START ${start:-none}" eval '
+			rc_is 0 && [ "$(est_get q)" = "$cols" ] && est_is "$est" && [ "$(est_get start)" = "$start" ]'
+	done <<-'PINS'
+		30|%i %j %u %T %S %R|JOBID,NAME,STATE,NODE/REASON||
+		46|%i %j %u %T %S %R|JOBID,NAME,USER,STATE,NODE/REASON|1201=2027-11-30,1204=2999-12-31,1205=10:33,1206=Nov15_07:33|
+		53|%i %j %u %T %S %R|JOBID,NAME,USER,STATE,START,NODE/REASON||1201,1204,1205,1206
+		30|%i %j %T %S %R|JOBID,NAME,STATE,NODE/REASON|1205=10:33|
+		40|%i %j %T %S %R|JOBID,NAME,STATE,NODE/REASON|1201=2027-11-30,1204=2999-12-31,1205=10:33,1206=Nov15_07:33|
+		47|%i %j %T %S %R|JOBID,NAME,STATE,START,NODE/REASON||1201,1204,1205,1206
+		52|%i %j %T %S %P %a %R|JOBID,NAME,STATE,START,NODE/REASON|1205=10:33|1201,1204,1205,1206
+		53|%i %j %T %S %P %a %R|JOBID,NAME,STATE,START,PART,NODE/REASON||1201,1204,1205,1206
+		58|%i %j %T %S %P %a %R|JOBID,NAME,STATE,START,PART,NODE/REASON|1205=10:33|1201,1204,1205,1206
+		59|%i %j %T %S %P %a %R|JOBID,NAME,STATE,START,PART,ACCOUNT,NODE/REASON||1201,1204,1205,1206
+		57|%i %j %T %P %S %Q %R|JOBID,NAME,STATE,PART,START,NODE/REASON|1205=10:33|1201,1204,1205,1206
+		58|%i %j %T %P %S %Q %R|JOBID,NAME,STATE,PART,START,PRIO,NODE/REASON||1201,1204,1205,1206
+	PINS
+	est_series "$T_DIR/start-arrtask" arrtask "$(est_confs "$(seq 21 60)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R' & EST_PIDS+=($!)
+	est_series "$T_DIR/start-u" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %u %T %S %R' & EST_PIDS+=($!)
+	est_series "$T_DIR/start-nou" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R' & EST_PIDS+=($!)
+	est_wait "$T_DIR/start-arrtask" "$T_DIR/start-u" "$T_DIR/start-nou"
+	bad=$(est_golden "$T_DIR/start-arrtask" "$est_goldens/arrtask-start-columns.txt")
+	need "arrtask -o '%i %j %T %S %R' W 21..60: 291a4a8's columns, ×N and tasks (not at W:H:${bad:- none})" test -z "$bad"
+	for f in start-u start-nou; do
+		lost=$(est_mono "$T_DIR/$f")
+		need "estopt $f: no estimate lost from W to W+1, START's dates counted (at H:W>W+1(rows):${lost:- none})" test -z "$lost"
+	done
+}
 # the gawk argument limit (WHOLE AC 14): Linux takes no single argument over
 # MAX_ARG_STRLEN (32 pages, 131072 bytes), and the dashboard's program alone
 # comes near it; over it, sq dies with "Argument list too long" before it
@@ -10529,6 +10920,7 @@ cases=(
 	nodes_o_calls nodes_o_figures nodes_o_forged nodes_o_pairs nodes_o_fail nodes_o_bounds stub_nodes stub_fast nodes_o_cost nodes_nopart nodes_caption
 	whole_widths whole_narrow whole_monotone whole_full whole_c_mode whole_height whole_pins whole_captions whole_docs whole_accepted
 	whole_forms whole_orders whole_guard whole_v31
+	est_monotone est_pins est_columns est_widest_first est_trade est_full est_f3 est_height est_negative est_height_cols est_start
 	gawk_arg_limit plural_one invalid_colour suite_interrupt
 )
 # The cases that measure time or load: a bound on how long sq or a call

@@ -1,0 +1,43 @@
+# EST (attack round 1, edges): one pending row with an estimate 400 days off and 28 running rows: the running rows must not pay TIME or CPU for the date
+@include ../_common/squeue-defaults
+i=4100; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=\{now+400d}; r=Resources
+i=4001; j=run1; u=alice; M=2:11:00; L=2:00:00; C=9; m=12G; R=node02
+i=4002; j=run2; u=bob; M=3:12:00; L=3:00:00; C=17; m=20G; R=node01
+i=4003; j=run3; u=carol; M=4:13:00; L=4:00:00; C=1; m=28G; R=node02
+i=4004; j=run4; u=; M=5:14:00; L=5:00:00; C=9; m=4G; R=node01
+i=4005; j=run5; u=alice; M=6:15:00; L=1:00:00; C=17; m=12G; R=node02
+i=4006; j=run6; u=bob; M=7:16:00; L=2:00:00; C=1; m=20G; R=node01
+i=4007; j=run7; u=carol; M=8:17:00; L=3:00:00; C=9; m=28G; R=node02
+i=4008; j=run8; u=; M=9:18:00; L=4:00:00; C=17; m=4G; R=node01
+i=4009; j=run9; u=alice; M=1:19:00; L=5:00:00; C=1; m=12G; R=node02
+i=4010; j=run10; u=bob; M=2:20:00; L=1:00:00; C=9; m=20G; R=node01
+i=4011; j=run11; u=carol; M=3:21:00; L=2:00:00; C=17; m=28G; R=node02
+i=4012; j=run12; u=; M=4:22:00; L=3:00:00; C=1; m=4G; R=node01
+i=4013; j=run13; u=alice; M=5:23:00; L=4:00:00; C=9; m=12G; R=node02
+i=4014; j=run14; u=bob; M=6:24:00; L=5:00:00; C=17; m=20G; R=node01
+i=4015; j=run15; u=carol; M=7:25:00; L=1:00:00; C=1; m=28G; R=node02
+i=4016; j=run16; u=; M=8:26:00; L=2:00:00; C=9; m=4G; R=node01
+i=4017; j=run17; u=alice; M=9:27:00; L=3:00:00; C=17; m=12G; R=node02
+i=4018; j=run18; u=bob; M=1:28:00; L=4:00:00; C=1; m=20G; R=node01
+i=4019; j=run19; u=carol; M=2:29:00; L=5:00:00; C=9; m=28G; R=node02
+i=4020; j=run20; u=; M=3:30:00; L=1:00:00; C=17; m=4G; R=node01
+i=4021; j=run21; u=alice; M=4:31:00; L=2:00:00; C=1; m=12G; R=node02
+i=4022; j=run22; u=bob; M=5:32:00; L=3:00:00; C=9; m=20G; R=node01
+i=4023; j=run23; u=carol; M=6:33:00; L=4:00:00; C=17; m=28G; R=node02
+i=4024; j=run24; u=; M=7:34:00; L=5:00:00; C=1; m=4G; R=node01
+i=4025; j=run25; u=alice; M=8:35:00; L=1:00:00; C=9; m=12G; R=node02
+i=4026; j=run26; u=bob; M=9:36:00; L=2:00:00; C=17; m=20G; R=node01
+i=4027; j=run27; u=carol; M=1:37:00; L=3:00:00; C=1; m=28G; R=node02
+i=4028; j=run28; u=; M=2:38:00; L=4:00:00; C=9; m=4G; R=node01
+i=4029; j=run29; u=alice; M=3:39:00; L=5:00:00; C=17; m=12G; R=node02
+i=4030; j=run30; u=bob; M=4:40:00; L=1:00:00; C=1; m=20G; R=node01
+i=4031; j=run31; u=carol; M=5:41:00; L=2:00:00; C=9; m=28G; R=node02
+i=4032; j=run32; u=; M=6:42:00; L=3:00:00; C=17; m=4G; R=node01
+i=4033; j=run33; u=alice; M=7:43:00; L=4:00:00; C=1; m=12G; R=node02
+i=4034; j=run34; u=bob; M=8:44:00; L=5:00:00; C=9; m=20G; R=node01
+i=4035; j=run35; u=carol; M=9:45:00; L=1:00:00; C=17; m=28G; R=node02
+i=4036; j=run36; u=; M=1:46:00; L=2:00:00; C=1; m=4G; R=node01
+i=4037; j=run37; u=alice; M=2:47:00; L=3:00:00; C=9; m=12G; R=node02
+i=4038; j=run38; u=bob; M=3:48:00; L=4:00:00; C=17; m=20G; R=node01
+i=4039; j=run39; u=carol; M=4:49:00; L=5:00:00; C=1; m=28G; R=node02
+i=4040; j=run40; u=; M=5:50:00; L=1:00:00; C=9; m=4G; R=node01

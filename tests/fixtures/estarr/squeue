@@ -1,0 +1,11 @@
+# EST's crafted fixture: start estimates beside array ids (a pending bracket with x18, a folded running array), so
+# DISPLAY F3's pass (JOBID held) runs with the estimates held; three estimate widths (7, 12, 13)
+@include ../_common/squeue-defaults
+i=7100_1; j=align-reads; M=1:10:00; L=2:50:00
+i=7100_2; j=align-reads; M=1:10:00; L=2:50:00
+i=7100_3; j=align-reads; M=1:10:00; L=2:50:00
+i=7100_4; j=align-reads; M=1:10:00; L=2:50:00
+i=7200_[3-20]; j=sweep-long-name; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Resources); S=\{now+2d}; r=Resources
+i=7201; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(Priority); S=\{now+5h}; r=Priority
+i=7202; j=prep; t=PD; T=PENDING; M=0:00; L=1:00:00; R=(ReqNodeNotAvail, UnavailableNodes:node02); S=\{now+400d}; r=ReqNodeNotAvail, UnavailableNodes:node02
+i=7203_[1-3,7]; j=qc; t=PD; T=PENDING; M=0:00; L=30:00; R=(Priority); S=N/A; r=Priority

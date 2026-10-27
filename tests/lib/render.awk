@@ -68,10 +68,11 @@ function offset(off,   sign, sec, u) {      # OFF in seconds, signed
   }
   return sign * sec
 }
-# The moment is the stub's clock less SQSTUB_SKEW seconds: SQSTUB_SKEW=-1 prints
-# every time 1 s later, as if the clock stepped back 1 s once the stub answered
-# (WSL steps it back about 1.5 s every 30 s)
-function stubnow() { return systime() - ENVIRON["SQSTUB_SKEW"] }
+# The moment is the stub's clock (SQSTUB_NOW where set, an epoch) less
+# SQSTUB_SKEW seconds: SQSTUB_SKEW=-1 prints every time 1 s later, as if the
+# clock stepped back 1 s once the stub answered (WSL steps it back about 1.5 s
+# every 30 s)
+function stubnow() { return (ENVIRON["SQSTUB_NOW"] != "" ? ENVIRON["SQSTUB_NOW"] : systime()) - ENVIRON["SQSTUB_SKEW"] }
 function reltime(off) { return strftime("%Y-%m-%dT%H:%M:%S", stubnow() + offset(off)) }
 function relepoch(off) { return sprintf("%d", stubnow() + offset(off)) }
 

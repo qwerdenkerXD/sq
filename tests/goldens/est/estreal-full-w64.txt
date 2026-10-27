@@ -1,0 +1,14 @@
+  ▌ SLURM FranzGB  07:33:20 UTC
+
+  node01 ░░░░░░░   0%  0/32 cpu   ░░░░░░░   0%  0/125G mem  idle
+  node02 ░░░░░░░   0%  0/32 cpu   ░░░░░░░   0%  0/125G mem  idle
+
+  JOBID NAME  USER  STATE   TIME       LEFT       CPU MEM NODE/R
+  8001  prep  alice PENDING       0:00    1:00:00   1  4G (ReqN…
+  8003  prep3 alice PENDING       0:00    1:00:00   1  4G (QOSM…
+  8004  prep4 alice PENDING       0:00    1:00:00   1  4G (Rese…
+  8005  samp… alice RUNNING 1-02:03:04 2-00:00:00   1  4G node01
+
+  recently finished · last 2h · nothing in this window
+
+  4 jobs   1 running   3 pending   0 other
