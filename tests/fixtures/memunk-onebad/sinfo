@@ -1,0 +1,4 @@
+# R3-2 attack (edges): Memory unknown in every form beside MemSpecLimit 0, >0, >RealMemory, garbled, not listed
+CPUsState=8/24/0/32; NodeList=a01; FreeMem=60000; Memory=; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=a02; FreeMem=60000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=a03; FreeMem=60000; Memory=N/A; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000

@@ -60,7 +60,8 @@ watch -tc -n 1 'sq -C'
   nodes says why; where scontrol gives no usable MemSpecLimit for a node (it does not list it,
   lists it twice, or its figures are unreadable), RealMemory counts for that node and the same
   line names it (`↳ memory counts RealMemory on fb2-bioinf: scontrol listed it twice`, or the
-  first of several). Where Slurm does not
+  first of several). A node whose memory size sinfo cannot give is counted only by the line
+  about sinfo's figures: its total is unknown, so it counts no RealMemory. Where Slurm does not
   schedule memory (`CR_CORE`: no node has any memory allocated, but some node has CPUs), the
   memory bar shows memory in use instead, from the node's own free-memory reading, which is
   exactly when you most need to watch it: memory in use draws as `█` in the bar's colours, `░`

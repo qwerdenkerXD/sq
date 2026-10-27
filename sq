@@ -4964,7 +4964,9 @@ function dfit(wd,   ks, kf, x, keep) {
 # for (garbled, none, or one not below RealMemory), and none for any node when no
 # answer was used.  The MEMNOTE line under the nodes says so: why no answer
 # was used, else which nodes count RealMemory and why (one line, the first
-# such node named).
+# such node named).  A node whose Memory sinfo gave no usable figure for counts
+# nothing, RealMemory included: its total is unknown, only the caption above
+# (which counts it) speaks for it, and this line never names it.
 # The in-use view is taken only on evidence: a node with CPUs allocated that
 # reads AllocMem 0.  Everything else gets the allocated view, the default:
 # some AllocMem above 0, nothing allocated anywhere, or every busy node with
@@ -4980,7 +4982,8 @@ function membar(   r, anyalloc, zerobusy, i, spec, kind, nk, first, KINDS, nkind
   wf = wm = 0
   for (r=1; r<=nn; r++) {
     i = (node[r] in NODE_AT) ? NODE_AT[node[r]] : 0
-    if (!i || (node[r] in NODE_NF) || (nodespecfmt == "text" && !node_listable(noderaw[r]))) kind = "nolist"
+    if (memreal[r] < 0) kind = ""               # Memory unknown: no kind, whatever scontrol says
+    else if (!i || (node[r] in NODE_NF) || (nodespecfmt == "text" && !node_listable(noderaw[r]))) kind = "nolist"
     else if (i in NODE_BAD) kind = (NODE_BAD[i] == "twice") ? "twice" : "bad"
     else if (NODE_SPECMEM[i] < 0 || (NODE_SPECMEM[i] > 0 && NODE_SPECMEM[i] >= memreal[r])) kind = "bad"   # 0: none kept
     else kind = ""

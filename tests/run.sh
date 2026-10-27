@@ -5090,6 +5090,45 @@ c_membar_call() {
 	need "sinfo failing: no scontrol call" eval '[ "$(calls sinfo)" = 1 ] && [ "$(calls scontrol)" = 0 ]'
 }
 membar_note() { plain | grep -E '^ *↳ memory counts RealMemory' | sed -E 's/^ +//'; }
+# ---- R3-2: a node whose Memory sinfo gave no usable figure for -------------
+# Its total is unknown whatever scontrol says, so NODES' per-node line never
+# names it: only E4's caption (which counts it) speaks for it.
+c_membar_memory_unknown() {   # R3-2 AC 1-4, 6, 7
+	T_TITLE="NODES: a node whose Memory is unknown gets no 'memory counts RealMemory' line, whatever its MemSpecLimit; the caption alone counts it, the known nodes are still named, the digest keeps its ?"
+	local fx json
+	for fx in mem0 memory-empty memory-na figure-digits allocmem-memory-unknown memunk-nolist; do
+		sq_run "$fx" -- --full
+		need "$fx: no MEMNOTE line, the caption stays" eval '
+			rc_is 0 && [ -z "$(membar_note)" ] && node_caption | grep -qE "^↳ sinfo gave no usable figure for (AllocMem \(1 node\), )?Memory \(1 node\): shown as unknown$"'
+	done
+	sq_run memunk-two -- --full
+	need "memunk-two: only the known node is named" eval '
+		rc_is 0 && [ "$(membar_note)" = "↳ memory counts RealMemory on fb2-bioinf-0: scontrol gave no usable MemSpecLimit" ]'
+	for json in "" SQSTUB_NOJSON=1; do
+		sq_run memunk-edges $json -- --full
+		need "memunk-edges ${json:---json}: m01-m06 (Memory -1, empty, N/A, 1, 0, 13 digits) not named, m07 is" eval '
+			rc_is 0 && [ "$(membar_note)" = "↳ memory counts RealMemory on m07 and 1 more node: scontrol gave no usable Mem…" ] &&
+			[ "$(node_caption)" = "↳ sinfo gave no usable figure for Memory (6 nodes): shown as unknown" ]'
+		sq_run memunk-all $json -- --full
+		need "memunk-all ${json:---json}: every Memory unknown, no MEMNOTE line" eval 'rc_is 0 && [ -z "$(membar_note)" ] && [ -n "$(node_caption)" ]'
+		sq_run memunk-onebad $json -- --full
+		need "memunk-onebad ${json:---json}: its named nodes were the unknown ones, no MEMNOTE line" eval 'rc_is 0 && [ -z "$(membar_note)" ] && [ -n "$(node_caption)" ]'
+	done
+	sq_run memunk-all SQ_HEIGHT=4 -- --compact
+	need "memunk-all COMPACT H=4: the digest holds ?G mem, no !" eval 'rc_is 0 && digest_line | grep -qF "/?G mem" && ! digest_line | grep -qF "!"'
+	for fx in mem0 memory-empty; do
+		sq_run "$fx" SQ_HEIGHT=4 -- --compact
+		need "$fx COMPACT H=4: the digest as before" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/?G mem" ]'
+		sq_run "$fx" SQ_HEIGHT=30 -- --compact
+		need "$fx COMPACT H=30: no MEMNOTE line, no taller than its height" eval 'rc_is 0 && [ -z "$(membar_note)" ] && [ "$(plain | wc -l)" -le 30 ]'
+	done
+}
+c_membar_memory_unknown_docs() {   # R3-2 AC 8
+	T_TITLE="README: a node whose memory size sinfo cannot give counts no RealMemory"
+	sq_run memunk-two -- --full
+	need "the dashboard: rc 0" rc_is 0
+	need "the memory-bar paragraph says so" eval 'tr "\n" " " < "${here%/*}/README.md" | sed -E "s/ +/ /g" | grep -qF "or the first of several). A node whose memory size sinfo cannot give is counted only by the line about sinfo'"'"'s figures: its total is unknown, so it counts no RealMemory. Where Slurm does not"'
+}
 c_membar_fail() {
 	T_TITLE="scontrol failing or silent: RealMemory counts and one dim line under the nodes says why, cut to the width; none under CR_CORE; COMPACT makes room for it, and its summary line counts RealMemory without it"
 	local d why='slurm_load_node error: Unable to contact slurm controller (connect failure)'
@@ -10334,7 +10373,7 @@ cases=(
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
 	digest_fit node_figures digest_n10 id_cells id_pins id_cells_wide_c
-	membar_screens membar_detect membar_call membar_fail membar_partial membar_over membar_down membar_forged membar_json membar_fallback nodes_not_utf8 nodes_ctl_o
+	membar_screens membar_detect membar_call membar_fail membar_partial membar_over membar_down membar_forged membar_json membar_fallback membar_memory_unknown membar_memory_unknown_docs nodes_not_utf8 nodes_ctl_o
 	exit_labels exit_compact exit_garbage exit_fallback exit_unread exit_edges job_exit_unread log_exit_unread exit_docs
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays

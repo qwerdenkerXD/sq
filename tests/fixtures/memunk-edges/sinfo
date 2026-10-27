@@ -1,0 +1,10 @@
+# R3-2 attack (edges): Memory unknown in every form beside MemSpecLimit 0, >0, >RealMemory, garbled, not listed
+CPUsState=8/24/0/32; NodeList=m01; FreeMem=60000; Memory=-1; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=m02; FreeMem=60000; Memory=; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=m03; FreeMem=60000; Memory=N/A; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=m04; FreeMem=60000; Memory=1; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=m05; FreeMem=60000; Memory=0; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=m06; FreeMem=60000; Memory=9999999999999; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=m07; FreeMem=60000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=m08; FreeMem=60000; Memory=128000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000
+CPUsState=8/24/0/32; NodeList=m09; FreeMem=60000; Memory=2; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=8.00; AllocMem=16000

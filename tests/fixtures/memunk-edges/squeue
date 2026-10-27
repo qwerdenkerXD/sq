@@ -1,0 +1,3 @@
+@include ../_common/squeue-defaults
+i=900; j=run; N=n01
+i=901; j=run2; N=n05
