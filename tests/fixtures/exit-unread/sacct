@@ -1,0 +1,30 @@
+# R3-1: ExitCode values Slurm 23.11.4 never prints (sacct: "%d:%d" of WEXITSTATUS less 128 from
+# 128, and WTERMSIG; src/sacct/print.c:822-846), next to the ones it does
+@include ../_common/sacct-defaults
+@defaults State=FAILED
+# the edge attack's two (fs22, fs23): newest first, so COMPACT's one line shows -1:0
+JobID=987654; JobName=neg1; ExitCode=-1:0; End=\{now-1m30s}
+JobID=987654.batch; User=; JobName=batch; ExitCode=-1:0; End=\{now-1m30s}
+JobID=987655; JobName=u32max; ExitCode=4294967295:0; End=\{now-3m30s}
+JobID=987655.batch; User=; JobName=batch; ExitCode=4294967295:0; End=\{now-3m30s}
+# a fold: a readable 1, an unreadable one, a 0: worst first, ? between 1 and 0
+JobID=7400_0; JobName=foldmix; ExitCode=1:0; End=\{now-2m30s}
+JobID=7400_1; JobName=foldmix; ExitCode=-1:0; End=\{now-2m30s}
+JobID=7400_2; JobName=foldmix; ExitCode=0:0; End=\{now-2m30s}
+# a readable non-zero on the batch step stands over an unreadable job row
+JobID=987656; JobName=stepknown; ExitCode=-1:0; End=\{now-4m30s}
+JobID=987656.batch; User=; JobName=batch; ExitCode=2:0; End=\{now-4m30s}
+# the signal readable, the exit status not; and the reverse
+JobID=987657; JobName=negsig; ExitCode=-1:9; End=\{now-5m30s}
+JobID=987658; JobName=sigjunk; ExitCode=0:-3; End=\{now-6m30s}
+# a COMPLETED job with an unreadable row: its colour stays the state's
+JobID=987659; JobName=okjunk; State=COMPLETED; ExitCode=4294967295:0; End=\{now-7m30s}
+# an empty step exit (NO_VAL, a step that recorded none) adds nothing, as today
+JobID=987660; JobName=emptystep; State=COMPLETED; ExitCode=0:0; End=\{now-8m30s}
+JobID=987660.0; User=; JobName=srun; State=COMPLETED; ExitCode=; End=\{now-8m30s}
+# v2: "?" beside an OOM in one fold: after the non-zero exit status, before every exit-0 label
+JobID=7401_0; JobName=foldoom; ExitCode=-1:0; End=\{now-9m30s}
+JobID=7401_1; JobName=foldoom; ExitCode=0:0; End=\{now-9m30s}
+JobID=7401_1.batch; User=; JobName=batch; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-9m30s}
+JobID=7401_2; JobName=foldoom; ExitCode=1:0; End=\{now-9m30s}
+JobID=7401_3; JobName=foldoom; ExitCode=0:9; End=\{now-9m30s}

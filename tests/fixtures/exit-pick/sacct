@@ -1,0 +1,17 @@
+# rules attack: rows that are each Slurm's form or not, folded per job
+@include ../_common/sacct-defaults
+@defaults State=FAILED
+# an OOM on a clean batch row beside a garbled job row: batch C "125 from any row wins"
+JobID=990001; JobName=oomjunk; State=OUT_OF_MEMORY; ExitCode=-1:0; End=\{now-1m30s}
+JobID=990001.batch; User=; JobName=batch; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-1m30s}
+# a clean SIGKILL on the batch row beside a garbled job row
+JobID=990002; JobName=sigjunk; ExitCode=4294967295:0; End=\{now-2m30s}
+JobID=990002.batch; User=; JobName=batch; ExitCode=0:9; End=\{now-2m30s}
+# a clean exit 2 on the job row beside a garbled step
+JobID=990003; JobName=rcjunk; ExitCode=2:0; End=\{now-3m30s}
+JobID=990003.0; User=; JobName=srun; ExitCode=0:1x; End=\{now-3m30s}
+# a fold of four tasks: 0/sig9, unreadable rc, unreadable N, exit 2
+JobID=7500_0; JobName=foldpick; ExitCode=0:9; End=\{now-4m30s}
+JobID=7500_1; JobName=foldpick; ExitCode=-1:0; End=\{now-4m30s}
+JobID=7500_2; JobName=foldpick; ExitCode=0:1x; End=\{now-4m30s}
+JobID=7500_3; JobName=foldpick; ExitCode=2:0; End=\{now-4m30s}

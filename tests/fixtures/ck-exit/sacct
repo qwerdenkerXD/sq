@@ -1,0 +1,31 @@
+# r3-check2: crafted ExitCode rows and folds
+@include ../_common/sacct-defaults
+@defaults State=FAILED
+JobID=801; JobName=ok-ext; State=COMPLETED; ExitCode=0:0; End=\{now-1m30s}
+JobID=801.batch; User=; JobName=batch; State=COMPLETED; ExitCode=0:0; End=\{now-1m30s}
+JobID=801.extern; User=; JobName=extern; State=COMPLETED; ExitCode=; End=\{now-1m30s}
+JobID=802; JobName=ok-badb; ExitCode=0:0; End=\{now-2m30s}
+JobID=802.batch; User=; JobName=batch; ExitCode=-1:0; End=\{now-2m30s}
+JobID=803; JobName=cx-15; State=CANCELLED by 1029; ExitCode=0:15; End=\{now-3m30s}
+JobID=803.batch; User=; JobName=batch; State=CANCELLED; ExitCode=-1:0; End=\{now-3m30s}
+JobID=804; JobName=neg-oom; ExitCode=-1:0; End=\{now-4m30s}
+JobID=804.batch; User=; JobName=batch; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-4m30s}
+JobID=805_0; JobName=f-unk-oom; ExitCode=-1:0; End=\{now-5m30s}
+JobID=805_1; JobName=f-unk-oom; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-5m30s}
+JobID=806_0; JobName=f-255-unk; ExitCode=0:x; End=\{now-6m30s}
+JobID=806_1; JobName=f-255-unk; ExitCode=255:0; End=\{now-6m30s}
+JobID=807_0; JobName=f-unk2; ExitCode=; End=\{now-7m30s}
+JobID=807_1; JobName=f-unk2; ExitCode=-1:9; End=\{now-7m30s}
+JobID=807_2; JobName=f-unk2; ExitCode=4294967295:0; End=\{now-7m30s}
+JobID=808; JobName=s-2:9; ExitCode=2:9; End=\{now-8m30s}
+JobID=809; JobName=s-0:127; ExitCode=0:127; End=\{now-9m30s}
+JobID=810; JobName=s-00000:0; ExitCode=00000:0; End=\{now-10m30s}
+JobID=811; JobName=s-nl-tab; ExitCode=0:	1; End=\{now-11m30s}
+JobID=812_0; JobName=f-unk-sig-0; ExitCode=-1:0; End=\{now-12m30s}
+JobID=812_1; JobName=f-unk-sig-0; ExitCode=0:9; End=\{now-12m30s}
+JobID=812_2; JobName=f-unk-sig-0; ExitCode=0:0; End=\{now-12m30s}
+JobID=812_3; JobName=f-unk-sig-0; ExitCode=0:53; End=\{now-12m30s}
+JobID=812_4; JobName=f-unk-sig-0; ExitCode=0:125; End=\{now-12m30s}
+JobID=813; JobName=s-255:127; ExitCode=255:127; End=\{now-13m30s}
+JobID=814; JobName=empty-only; ExitCode=; End=\{now-14m30s}
+JobID=814.batch; User=; JobName=batch; ExitCode=; End=\{now-14m30s}

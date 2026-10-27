@@ -1,6 +1,7 @@
 # ExitCode values sacct never prints ("%d:%d", each 0-127), one job each on its
-# allocation row; JobName names the input.  A field is read only if it is 1-3
-# ASCII digits, anything else counts as 0
+# allocation row; JobName names the input.  A row is read only as a wait
+# status, two fields of 1-3 ASCII digits, 0-255 and 0-127; anything else gives
+# no reading, so these jobs read "?" (R3-1), but 007:0 is 7
 @include ../_common/sacct-defaults
 @defaults State=FAILED
 JobID=101; JobName=v[0:]; ExitCode=0:
@@ -24,7 +25,7 @@ JobID=118; JobName=v[0:５３]; ExitCode=0:５３
 JobID=119; JobName=v[N/A]; ExitCode=N/A
 JobID=120; JobName=v[0:999]; ExitCode=0:999
 JobID=121; JobName=v[007:0]; ExitCode=007:0
-# a fold of junk: 0:-3 and 1234:0 read as 0:0, so the group lists 0/sig9 and 0
+# a fold beside junk: 0:-3 and 1234:0 give no reading, so the group lists ? and 0/sig9
 JobID=7300_0; JobName=junk; ExitCode=0:9
 JobID=7300_1; JobName=junk; ExitCode=0:-3
 JobID=7300_2; JobName=junk; ExitCode=1234:0

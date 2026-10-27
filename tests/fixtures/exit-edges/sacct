@@ -1,0 +1,47 @@
+# R3-1 attack (edges): multi-row mixes that tell the readings of the pick apart, folds, shapes
+@include ../_common/sacct-defaults
+@defaults State=FAILED
+JobID=501; JobName=m-sig9+2; ExitCode=-1:9; End=\{now-1m30s}
+JobID=501.batch; User=; JobName=batch; ExitCode=2:0; End=\{now-1m30s}
+JobID=502; JobName=m-0x+sig9; ExitCode=0:x; End=\{now-2m30s}
+JobID=502.batch; User=; JobName=batch; ExitCode=0:9; End=\{now-2m30s}
+JobID=503; JobName=m-neg+0+e; ExitCode=-1:0; End=\{now-3m30s}
+JobID=503.batch; User=; JobName=batch; ExitCode=0:0; End=\{now-3m30s}
+JobID=503.0; User=; JobName=srun; ExitCode=; End=\{now-3m30s}
+JobID=504; JobName=m-0+e+e; ExitCode=0:0; End=\{now-4m30s}
+JobID=504.0; User=; JobName=srun; ExitCode=; End=\{now-4m30s}
+JobID=504.1; User=; JobName=srun; ExitCode=; End=\{now-4m30s}
+JobID=505; JobName=s-2x; ExitCode=2:x; End=\{now-5m30s}
+JobID=506; JobName=m-1+oom+neg; ExitCode=1:0; End=\{now-6m30s}
+JobID=506.batch; User=; JobName=batch; ExitCode=0:125; End=\{now-6m30s}
+JobID=506.0; User=; JobName=srun; ExitCode=-1:0; End=\{now-6m30s}
+JobID=507; JobName=m-neg+oom; State=OUT_OF_MEMORY; ExitCode=-1:0; End=\{now-7m30s}
+JobID=507.batch; User=; JobName=batch; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-7m30s}
+JobID=508; JobName=m-e+e; ExitCode=; End=\{now-8m30s}
+JobID=508.batch; User=; JobName=batch; ExitCode=; End=\{now-8m30s}
+JobID=509; JobName=s-long; ExitCode=99999999999999999999999999999999999999999999999999:0; End=\{now-9m30s}
+JobID=510; JobName=s-fw; ExitCode=０:０; End=\{now-10m30s}
+JobID=511; JobName=s-colon; ExitCode=:; End=\{now-11m30s}
+JobID=512; JobName=s-256; ExitCode=256:0; End=\{now-12m30s}
+JobID=513; JobName=s-0:128; ExitCode=0:128; End=\{now-13m30s}
+JobID=514; JobName=s-0:127; ExitCode=0:127; End=\{now-14m30s}
+JobID=515; JobName=s-255; ExitCode=255:0; End=\{now-15m30s}
+JobID=516; JobName=s-trail; ExitCode=0:0\s; End=\{now-16m30s}
+JobID=517; JobName=s-ok; State=COMPLETED; ExitCode=0:0; End=\{now-17m30s}
+JobID=517.batch; User=; JobName=batch; State=COMPLETED; ExitCode=-1:0; End=\{now-17m30s}
+JobID=518; JobName=s-00:1; ExitCode=00:1; End=\{now-18m30s}
+# folds: every bad shape collapses to one "?"; an OOM and a "?" in one fold; the cap
+JobID=7500_0; JobName=fq; ExitCode=-1:9; End=\{now-19m30s}
+JobID=7500_1; JobName=fq; ExitCode=0:x; End=\{now-19m30s}
+JobID=7500_2; JobName=fq; ExitCode=-1:-1; End=\{now-19m30s}
+JobID=7500_3; JobName=fq; ExitCode=1:0; End=\{now-19m30s}
+JobID=7501_0; JobName=fo; ExitCode=-1:0; End=\{now-20m30s}
+JobID=7501_1; JobName=fo; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-20m30s}
+JobID=7501_2; JobName=fo; ExitCode=0:9; End=\{now-20m30s}
+JobID=7501_3; JobName=fo; ExitCode=0:0; End=\{now-20m30s}
+JobID=7502_0; JobName=fc; ExitCode=3:0; End=\{now-21m30s}
+JobID=7502_1; JobName=fc; ExitCode=2:0; End=\{now-21m30s}
+JobID=7502_2; JobName=fc; ExitCode=1:0; End=\{now-21m30s}
+JobID=7502_3; JobName=fc; ExitCode=-1:0; End=\{now-21m30s}
+JobID=7502_4; JobName=fc; State=OUT_OF_MEMORY; ExitCode=0:125; End=\{now-21m30s}
+JobID=7502_5; JobName=fc; ExitCode=0:9; End=\{now-21m30s}

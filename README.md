@@ -327,7 +327,8 @@ efficiency
   without your `SACCT_*` settings. A `SQUEUE_SIB` or `SQUEUE_SIBLING` set in a profile costs the
   accounting block, as `--sibling` does: sacct has no sibling view.
 - **Reading EXIT:** the exit code, then what ExitCode's second field says, taken from the job
-  and its steps (the first non-zero one, except that an out-of-memory always wins): `rc/sigN`
+  and its steps (the first non-zero one, except that an out-of-memory always wins; a row whose
+  ExitCode is no wait status, two numbers up to 255 and 127, is not read): `rc/sigN`
   is signal N as Slurm records it, `rc/oom` out of memory, and `rc/errN` the low 7 bits of a
   Slurm error code, not errno, from slurmd starting the job or step: 53 task I/O setup failed
   (the stdin, stdout or stderr file, or the link back to srun), 52 slurmstepd could not start
@@ -338,6 +339,8 @@ efficiency
   the user's ids failed (setuid/setgid), 54 the prolog failed or never started, 115 the spank
   plugin stack failed to initialize. So EXIT can show a step's OOM on a job that finished
   COMPLETED. A folded row lists its distinct exits, highest exit code first, then highest N.
+  An exit sq cannot read (nothing readable says non-zero, and a row could not be read or none
+  had a value) shows `?`, once, after every non-zero exit code and before exit 0, `0/oom` included.
   Known limits: a launch or communication failure can read as `sig11`, `sig12` or `sig13`
   (Slurm's own log calls it RaisedSignal); steps Slurm closes for a dead node read `sig9`; an
   OOM caught by OverMemoryKill or missed by the cgroup detection reads `sig9`; a real-time

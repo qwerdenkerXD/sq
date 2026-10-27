@@ -981,21 +981,20 @@ c_exit_compact() {
 	need "one line: 6200 with its exits rc first, then N, capped" \
 		fin_line_is "recently finished: 6200_[0-5] ×6 sweep FAILED 2,1,0/oom,…"
 }
-c_exit_garbage() {
-	T_TITLE="EXIT: a field that is not 1-3 ASCII digits reads as 0, so no 1e3, 53.9, +inf or -1 leaks through"
+c_exit_garbage() {   # R3-1 AC 5
+	T_TITLE="EXIT: a row whose ExitCode is no wait status (two fields, 0-255 and 0-127) gives no reading, so no 1e3, 53.9, +inf or -1 leaks through and none reads as 0"
 	local id
 	sq_run exits-garbage SQ_RECENT_MAX=50 --
 	need "rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
 	need "22 finished rows"                 eval '[ "$(nrows recent)" -eq 22 ]'
-	for id in 101 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119; do
-		need "$id ($(rows recent | gawk -v i=$id '$1 == i { print $2 }')): 0" exit_is $id 0
+	for id in 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120; do
+		need "$id ($(rows recent | gawk -v i=$id '$1 == i { print $2 }')): ?" exit_is $id "?"
 	done
-	need "':53' and '0:53:7': field 2 is 53"  eval 'exit_is 102 0/err53 && exit_is 103 0/err53'
-	need "three digits read: 0:999 is err999, 007:0 is 7" eval 'exit_is 120 0/err999 && exit_is 121 7'
-	need "a fold of junk: the junk is 0:0"    exit_is 7300_[0-2] "0/sig9,0"
+	need "a leading zero is in range: 007:0 is 7" exit_is 121 7
+	need "a fold beside junk: 0/sig9 and the unread rows' ?, once" exit_is 7300_[0-2] "?,0/sig9"
 }
 c_exit_fallback() {
-	T_TITLE="EXIT from squeue -t all, in 23.11's n:n form: 0:125 oom, 0:53 err53, 0:1 read as 1:0, empty and junk 0"
+	T_TITLE="EXIT from squeue -t all, in 23.11's n:n form: 0:125 oom, 0:53 err53, 0:1 read as 1:0, empty and no wait status ?"
 	sq_run exits-fallback --
 	need "rc 0, stderr empty, stubs: sacct, then the fallback" eval 'rc_is 0 && err_empty && calls_are 1 1 1 1'
 	need "15 finished rows, the running job not among them" eval '[ "$(nrows recent)" -eq 15 ] && ! row_cell recent 3001'
@@ -1004,9 +1003,160 @@ c_exit_fallback() {
 	need "0:1, slurmctld's raw 1, is exit 1, not signal 1" exit_is 6006 1
 	need "2:1 stays 2/sig1: only rc 0 with signal 1 is read as exit 1" exit_is 6010 2/sig1
 	need "1:1 stays 1/sig1 as well" exit_is 6015 1/sig1
-	need "the values are read, not the text: ' 0:1', 00:1, 0:01, 0:1:0 are exit 1 too" \
-		eval 'exit_is 6011 1 && exit_is 6012 1 && exit_is 6013 1 && exit_is 6014 1'
-	need "nothing (NO_VAL) and 0:1x are 0, 0:0 is 0" eval 'exit_is 6004 0 && exit_is 6008 0 && exit_is 6009 0'
+	need "leading zeros are in range: 00:1 and 0:01 are exit 1 too" eval 'exit_is 6012 1 && exit_is 6013 1'
+	need "no wait status (R3-1): ' 0:1' and 0:1:0 are ?" eval 'exit_is 6011 "?" && exit_is 6014 "?"'
+	need "nothing (NO_VAL) and 0:1x are ?, 0:0 is 0" eval 'exit_is 6004 "?" && exit_is 6008 "?" && exit_is 6009 0'
+}
+# ---- 7c. an ExitCode sq cannot read (R3-1) ---------------------------------
+# A row's ExitCode is read only as a wait status: two fields of 1-3 ASCII
+# digits, the exit status 0-255 and the signal 0-127.  Anything else gives no
+# reading; a job whose readable rows say nothing non-zero, while a row could
+# not be read or none had a value, reads "?", never 0.
+fin_exits() {   # every EXIT cell of the finished rows, in row order, one per line
+	rows recent | LC_ALL=$utf8 gawk '{ i = ($2 ~ /^×[0-9]+$/) ? 5 : 4
+		x = $i; for (j = i + 1; j <= NF - 2; j++) x = x " " $j; print x }'
+}
+one_unknown() {   # at most one "?" character in every EXIT cell (R3-1 AC 9)
+	! fin_exits | LC_ALL=$utf8 gawk '{ if (gsub(/\?/, "") > 1) bad = 1 } END { exit !bad }'
+}
+c_exit_unread() {   # R3-1 AC 2-4, 9, 10
+	T_TITLE="EXIT: nothing readable says non-zero while a row could not be read, or none had a value: ?, never 0; ? once in a fold, after every non-zero exit code and before every exit-0 label, 0/oom included"
+	sq_run exit-unread -- --full --color
+	need "rc 0, stderr empty, stubs called" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
+	need "the cells in row order: ?, 1,?,0, ?, 2, ?, ?, ?, 0, 1,?,0/oom,…" \
+		eval '[ "$(fin_exits | paste -sd"|")" = "?|1,?,0|?|2|?|?|?|0|1,?,0/oom,…" ]'
+	need "987659 reads ? and stays COMPLETED in green" eval 'exit_is 987659 "?" && plain_rows_with okjunk | grep -qF "$ESC[32mCOMPLETED"'
+	need "every cell has at most one ?" one_unknown
+	sq_run exit-unread SQ_WIDTH=100 SQ_HEIGHT=10 -- --compact
+	need "COMPACT's one line: 987654 FAILED ?" fin_line_is "recently finished: 987654 neg1 FAILED ?"
+	sq_run exit-unread SQ_WIDTH=40 -- --compact
+	need "COMPACT W=40, one item: a known non-zero exit over ?, 7401 reads 1,…" exit_is "7401_…" "1,…"
+	sq_run exit-unread-fallback -- --full
+	need "the fallback: 6051 ?, 6052 ?, 6053 255, 6054 1, 6055 ?" eval '
+		rc_is 0 && calls_are 1 1 1 1 && exit_is 6051 "?" && exit_is 6052 "?" && exit_is 6053 255 && exit_is 6054 1 && exit_is 6055 "?" && one_unknown'
+}
+c_exit_edges() {   # R3-1 AC 7-10
+	T_TITLE="EXIT on the attacks' rows: the fold of the readable rows, ? only where it is 0:0 and a row was unreadable; one ? per fold, between exit 1 and exit 0"
+	local id want
+	sq_run exit-edges SQ_RECENT_MAX=50 -- --full
+	need "rc 0, stderr empty" eval 'rc_is 0 && err_empty'
+	for want in 501:2 502:0/sig9 503:? 504:0 505:? 506:1/oom 507:0/oom 508:? 509:? 510:? 511:? 512:? 513:? \
+	            514:0/err127 515:255 516:? 517:? 518:0/sig1; do
+		id=${want%%:*}
+		need "$id: ${want#*:}" exit_is "$id" "${want#*:}"
+	done
+	need "the folds: 7500 1,?; 7501 ?,0/sig9,0 and its OOM task 0/oom; 7502 3,2,1,… and 7502_4 0/oom" eval '
+		exit_is "7500_[0-3]" "1,?" && exit_is "7501_[0,2-3]" "?,0/sig9,0" && exit_is 7501_1 0/oom &&
+		exit_is "7502_[0-3,5]" "3,2,1,…" && exit_is 7502_4 0/oom'
+	need "the folds' counts: ×4, ×3, ×5" eval 'row_cell recent "7500_[0-3] ×4" && row_cell recent "7501_[0,2-3] ×3" && row_cell recent "7502_[0-3,5] ×5"'
+	need "every cell has at most one ?" one_unknown
+	sq_run exit-edges SQ_RECENT_MAX=50 SQ_WIDTH=40 -- --compact
+	need "COMPACT W=40, one item: ? over every exit-0 label, 7501 reads ?,…" exit_is "7501_…" "?,…"
+	sq_run exit-pick SQ_RECENT_MAX=50 -- --full
+	need "exit-pick: 990001 0/oom, 990002 0/sig9, 990003 2, 7500 2,?,0/sig9" eval '
+		rc_is 0 && exit_is 990001 0/oom && exit_is 990002 0/sig9 && exit_is 990003 2 &&
+		row_cell recent "7500_[0-3] ×4" && exit_is "7500_[0-3]" "2,?,0/sig9" && one_unknown'
+	sq_run ck-exit SQ_RECENT_MAX=50 -- --full
+	need "ck-exit: 804 0/oom, 806 255,?, 812 ?,0/oom,0/err53,…, one ? per cell" eval '
+		rc_is 0 && exit_is 804 0/oom && exit_is "806_[0-1]" "255,?" && exit_is "812_[0-4]" "?,0/oom,0/err53,…" && one_unknown'
+}
+state_is() { kv_is state "$1"; }   # state_is TEXT: sq job's state line reads TEXT
+c_job_exit_unread() {   # R3-1 AC 11-18, 21-23
+	T_TITLE="sq job on an exit sq cannot read: exit ? with what sacct or squeue printed (scrubbed, 24 columns), the why words, the canceller first and naming only a signal, squeue's raw code only from a wait status, the dependency parent, the array"
+	local f loc
+	job_run neg1-11837 COLUMNS=120 -- --no-color job 11837
+	need "neg1: exit ? (sacct printed -1:0), and why says it cannot be read" eval '
+		rc_is 0 && err_empty && plain | grep -qxF "  state     FAILED · exit ? (sacct printed -1:0)" &&
+		why_has "  Slurm marked it FAILED, but its exit code cannot be read: sacct printed -1:0"'
+	job_run neg1-squeue-11837 COLUMNS=120 -- --no-color job 11837
+	need "neg1-squeue: the same, squeue printed" eval '
+		rc_is 0 && state_is "FAILED · exit ? (squeue printed -1:0)" &&
+		why_has "  Slurm marked it FAILED, but its exit code cannot be read: squeue printed -1:0"'
+	job_run sig9-11837 COLUMNS=120 -- --no-color job 11837
+	need "sig9 (-1:9 twice): exit ?, no signal named, why cannot be read, no killed by" eval '
+		rc_is 0 && state_is "FAILED · exit ? (sacct printed -1:9)" && ! plain | grep "^  state " | grep -q signal &&
+		why_has "  Slurm marked it FAILED, but its exit code cannot be read: sacct printed -1:9" && ! why_lines | grep -q "killed by"'
+	job_run sig9b2-11837 COLUMNS=120 -- --no-color job 11837
+	need "sig9b2 (-1:9, then 2:0): exit 2 and its hint" eval '
+		rc_is 0 && state_is "FAILED · exit 2" && why_lines | grep -qF "exit 2: often a usage error"'
+	for loc in "$utf8" C; do
+		job_run zx-11837 COLUMNS=120 LC_ALL=$loc -- --no-color job 11837
+		need "zx, LC_ALL=$loc: exit ? (sacct printed 0:x)" eval 'rc_is 0 && state_is "FAILED · exit ? (sacct printed 0:x)"'
+		job_run long-11837 COLUMNS=120 LC_ALL=$loc -- --no-color job 11837
+		need "long, LC_ALL=$loc: the 50 digits cut to 24 columns" eval 'rc_is 0 && state_is "FAILED · exit ? (sacct printed 99999999999999999999999…)"'
+		job_run fw-11837 COLUMNS=120 LC_ALL=$loc -- --no-color job 11837
+		need "fw, LC_ALL=$loc: the fullwidth 0:0 quoted" eval 'rc_is 0 && state_is "FAILED · exit ? (sacct printed ０:０)"'
+	done
+	job_run esc-11837 COLUMNS=120 -- --color job 11837
+	need "esc --color: the quote scrubbed and cut, no ESC but sq's own SGR" eval '
+		rc_is 0 && plain | grep "^  state " | grep -qF "exit ? (sacct printed ?[31m4294967295:0?2J-ex…)" && escapes_all_sgr'
+	job_run unread-sig-11837 COLUMNS=120 -- --no-color job 11837
+	need "rules sig (-1:0, then 0:9): exit 0/sig9 and killed by signal 9" eval '
+		rc_is 0 && state_is "FAILED · exit 0/sig9: signal 9 (SIGKILL)" && why_lines | grep -qF "killed by signal 9"'
+	job_run unread-rc2-11837 COLUMNS=120 -- --no-color job 11837
+	need "rules rc2 (2:0, then 0:x): exit 2 and its hint" eval '
+		rc_is 0 && state_is "FAILED · exit 2" && why_lines | grep -qF "exit 2: often a usage error"'
+	job_run unread-cxl-11837 COLUMNS=120 -- --no-color job 11837
+	need "rules cxl (0:0, cancelled 0:x): exit ?, the canceller with no signal" eval '
+		rc_is 0 && state_is "FAILED · exit ? (sacct printed 0:x)" && why_has "  the batch script was cancelled by its owner" &&
+		! plain | grep -qE "signal -1|which ended the job"'
+	job_run neg1-dep-11963 COLUMNS=120 -- --no-color job 11963
+	need "neg1-dep: the parent line reads exit ?" eval 'rc_is 0 && plain | grep -qxE "    11950  FAILED · exit \? · ended [0-9]+m ago"'
+	job_run neg1-array-11367 COLUMNS=120 -- --no-color job 11367
+	need "neg1-array: the unknown pair grouped as its own why" why_has "  2 failed with an exit code that cannot be read: 11367_37, 11367_150"
+	for f in raw-u32 raw-300 raw-256; do
+		job_run $f-11837 COLUMNS=120 -- --no-color job 11837
+		need "$f: squeue's raw code is no wait status, so none: exit 0, no exit recorded" eval '
+			rc_is 0 && plain | grep -qxF "  state     FAILED · exit 0" &&
+			why_has "  Slurm marked it FAILED, but neither the job nor a step recorded an exit code" &&
+			! grep -qE "4294967295|exit 300|exit 256" "$OUT"'
+	done
+	job_run cxl-0-125-11837 COLUMNS=120 -- --no-color job 11837
+	need "cxl-0-125: 0/oom, the canceller names no signal" eval '
+		rc_is 0 && state_is "FAILED · exit 0/oom: out of memory" && why_has "  the batch script was cancelled by its owner" && ! why_lines | grep -q "which ended the job with"'
+	job_run cxl-0-53-11837 COLUMNS=120 -- --no-color job 11837
+	need "cxl-0-53: 0/err53, the canceller names no signal" eval '
+		rc_is 0 && state_is "FAILED · exit 0/err53: Slurm error, its output file could not be opened" &&
+		why_has "  the batch script was cancelled by its owner" && ! why_lines | grep -q "which ended the job with"'
+	job_run cxl-sig9-11837 COLUMNS=120 -- --no-color job 11837
+	need "cxl-sig9: the canceller's tail names signal 9, as before" \
+		why_has "  the batch script was cancelled by its owner, which ended the job with signal 9 (SIGKILL, killed outright)"
+	job_run none-sa-11837 COLUMNS=120 -- --no-color job 11837
+	need "none-sa: exit ? (sacct printed none), why: no exit recorded" eval '
+		rc_is 0 && state_is "FAILED · exit ? (sacct printed none)" && why_has "  Slurm marked it FAILED, but neither the job nor a step recorded an exit code"'
+	job_run none-sq-11837 COLUMNS=120 -- --no-color job 11837
+	need "none-sq: exit ? (squeue printed none), why: no exit recorded" eval '
+		rc_is 0 && state_is "FAILED · exit ? (squeue printed none)" && why_has "  Slurm marked it FAILED, but neither the job nor a step recorded an exit code"'
+	job_run two-bad-11837 COLUMNS=120 -- --no-color job 11837
+	need "two-bad (empty, then 0:x): the first unreadable row quoted" eval '
+		rc_is 0 && state_is "FAILED · exit ? (sacct printed 0:x)" && why_has "  Slurm marked it FAILED, but its exit code cannot be read: sacct printed 0:x"'
+	job_run comp-neg-11837 COLUMNS=120 -- --no-color job 11837
+	need "comp-neg: COMPLETED · exit ? (sacct printed -1:0)" eval 'rc_is 0 && state_is "COMPLETED · exit ? (sacct printed -1:0)"'
+	job_run to-neg-11837 COLUMNS=120 -- --no-color job 11837
+	need "to-neg: TIMEOUT · exit ? (sacct printed -1:0)" eval 'rc_is 0 && state_is "TIMEOUT · exit ? (sacct printed -1:0)"'
+}
+c_log_exit_unread() {   # R3-1 AC 19
+	T_TITLE="sq log quotes squeue's exit_code verbatim, -1:0 too"
+	sq_run "$(log_fx neg1 <<'EOF2'
+StateCompact=F; exit_code=-1:0
+@file create wd/out_500.log done\n
+EOF2
+)" -- log 500
+	need "the end note: FAILED (exit code -1:0)" eval 'rc_is 0 && out_is "done
+" && err_is "sq log: job 500 ended: FAILED (exit code -1:0)"'
+}
+c_exit_docs() {   # R3-1 AC 20, 24
+	T_TITLE="README's Reading EXIT and sq -h name the ? of an exit sq cannot read"
+	local readme=${here%/*}/README.md
+	sq_run exit-unread --
+	need "the dashboard: rc 0" rc_is 0
+	need "README: a row that is no wait status is not read" grep -qF "always wins; a row whose" "$readme"
+	need "README: ... ExitCode is no wait status, two numbers up to 255 and 127, is not read)" grep -qF "ExitCode is no wait status, two numbers up to 255 and 127, is not read)" "$readme"
+	need "README: the fold's ?" eval 'tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "An exit sq cannot read (nothing readable says non-zero, and a row could not be read or none had a value) shows \`?\`, once, after every non-zero exit code and before exit 0, \`0/oom\` included."'
+	sq_run empty -- -h
+	need "sq -h: the EXIT labels, ? among them, no line wider than 81" eval '
+		rc_is 0 && plain | grep -qxF "EXIT: rc/sigN signal N, rc/oom out of memory, rc/errN low 7 bits of a Slurm" &&
+		plain | grep -qxF "error, ? an exit sq cannot read" && [ "$(plain | LC_ALL=$utf8 gawk "{ if (length(\$0) > m) m = length(\$0) } END { print m }")" -le 81 ]'
 }
 c_user_filter() {
 	T_TITLE="-u alice reaches squeue and sacct as -u alice, and sacct gets no -a"
@@ -10185,7 +10335,7 @@ cases=(
 	bars_width_sweep
 	digest_fit node_figures digest_n10 id_cells id_pins id_cells_wide_c
 	membar_screens membar_detect membar_call membar_fail membar_partial membar_over membar_down membar_forged membar_json membar_fallback nodes_not_utf8 nodes_ctl_o
-	exit_labels exit_compact exit_garbage exit_fallback
+	exit_labels exit_compact exit_garbage exit_fallback exit_unread exit_edges job_exit_unread log_exit_unread exit_docs
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays
 	jobmem_lists memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow memalloc_floor_M

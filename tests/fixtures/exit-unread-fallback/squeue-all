@@ -1,0 +1,8 @@
+@include ../_common/squeue-all-defaults
+@defaults StateCompact=F; State=FAILED
+JobID=3001; StateCompact=R; State=RUNNING; TimeUsed=10:00; EndTime=Unknown; Name=still-running
+JobID=6051; exit_code=-1:0; Name=neg1; EndTime=\{now-1m30s}
+JobID=6052; exit_code=4294967295:0; Name=u32max; EndTime=\{now-2m30s}
+JobID=6053; exit_code=255:0; Name=rc255; EndTime=\{now-3m30s}
+JobID=6054; exit_code=0:1; Name=ctldfail; EndTime=\{now-4m30s}
+JobID=6055; exit_code=; Name=noval; EndTime=\{now-5m30s}

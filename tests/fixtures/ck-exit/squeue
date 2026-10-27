@@ -1,0 +1,2 @@
+@include ../_common/squeue-defaults
+i=900; j=run

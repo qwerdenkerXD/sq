@@ -95,7 +95,8 @@
 # Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4,
 # and a bracket Slurm prints reads 9008_[4-9] x6 with or without -x: the
 # footer and "+N more" count every task in it, not the row.
-# EXIT: rc/sigN signal N, rc/oom out of memory, rc/errN low 7 bits of a Slurm error
+# EXIT: rc/sigN signal N, rc/oom out of memory, rc/errN low 7 bits of a Slurm
+# error, ? an exit sq cannot read
 # Finished jobs come from the accounting DB, so the window is SQ_SINCE and not
 # MinJobAge: a job that ended while nobody watched is still seen.  Step rows
 # are read along with it, because the allocation row of a signalled job
@@ -641,25 +642,49 @@ function elap(s) {                        # 3-12:04:05 -> 3d12h.  The zero-padde
   return int(s/86400) "d" sprintf("%02dh", int(s % 86400 / 3600))   # overrun the edge
 }
 function exlabel(rc, sg) {                # the second field of an ExitCode is a
-  if (sg == 0)   return rc ""             # signal only up to 31: Slurm stores its
-  if (sg <= 31)  return rc "/sig" sg      # own errors (53 = task I/O setup failed)
-  if (sg == 125) return rc "/oom"         # and its OOM marker, 125, in that slot too
+  if (rc < 0)    return "?"               # signal only up to 31: Slurm stores its
+  if (sg == 0)   return rc ""             # own errors (53 = task I/O setup failed)
+  if (sg <= 31)  return rc "/sig" sg      # and its OOM marker, 125, in that slot
+  if (sg == 125) return rc "/oom"         # too.  An exit sq cannot read (-1) is "?"
   return rc "/err" sg
 }
-# one field of an ExitCode: sacct prints 0-127 and the squeue fallback up to
-# 255 in the first, so anything but 1-3 digits ("1e3", "53.9", "+inf", "-1",
-# empty) reads as 0 instead of leaking through
-function exfield(s) { return (s ~ /^[0-9]{1,3}$/) ? s+0 : 0 }
+# one ExitCode, of one row, into P[1] and P[2]: a wait status, two fields, its
+# exit status 0-255 and its signal 0-127, each 1-3 ASCII digits (sacct prints
+# "%d:%d", squeue "%u:%u"); a leading zero is inside those ranges, so 007:0
+# reads 7:0.  1 for a reading; 0 for no value (a step that recorded no exit);
+# -1 for a value that is no wait status (-1:0, 4294967295:0, 0:x, 0:53:7,
+# N/A, 1e3), which gives no reading.  P[1] and P[2] are -1 unless read
+function exread(x, P,   a) {
+  P[1] = P[2] = -1
+  if (x == "") return 0
+  if (split(x, a, ":") != 2 || a[1] !~ /^[0-9]{1,3}$/ || a[2] !~ /^[0-9]{1,3}$/ || a[1] + 0 > 255 || a[2] + 0 > 127) return -1
+  P[1] = a[1] + 0; P[2] = a[2] + 0
+  return 1
+}
 # squeue decodes the raw exit_code of slurmctld, which sets 1 for a job it
 # ended itself (a deadline, a lost batch script, a node gone): squeue calls
-# that signal 1, so in the fallback (fb) 0:1 is read as 1:0, as slurmdbd stores it
-function xcm(id, x, fb,   a, rc, sg) {    # per job, over its allocation row and its
-  split(x, a, ":")                        # steps ("sacct -X" would say 0:0): the
-  rc = exfield(a[1]); sg = exfield(a[2])  # first non-zero return code and the first
+# that signal 1, so in the fallback (fb) 0:1 is read as 1:0, as slurmdbd stores it.
+# Per job, over its allocation row and its steps ("sacct -X" would say 0:0),
+# their readable rows only: the first non-zero return code and the first
+# non-zero second field, but an OOM always wins, never hidden behind an earlier
+# 15.  JBAD: some row could not be read, its text in JRAW (the first such row),
+# JSEEN: some row gave a reading, JSRC: which tool printed the rows
+function xcm(id, x, fb,   P, k, rc, sg) {
+  if (!(id in JSRC)) JSRC[id] = fb ? "squeue" : "sacct"
+  k = exread(x, P)
+  if (k < 0) { JBAD[id] = 1; if (!(id in JRAW)) JRAW[id] = x }
+  if (k <= 0) return
+  JSEEN[id] = 1; rc = P[1]; sg = P[2]
   if (fb && rc == 0 && sg == 1) { rc = 1; sg = 0 }
-  if (JRC[id] == 0 && rc != 0) JRC[id] = rc               # non-zero second field,
-  if (JSG[id] == 0 && sg != 0 || sg == 125) JSG[id] = sg  # but an OOM always wins,
-}                                         # never hidden behind an earlier 15
+  if (JRC[id] == 0 && rc != 0) JRC[id] = rc
+  if (JSG[id] == 0 && sg != 0 || sg == 125) JSG[id] = sg
+}
+# the pair of a job, read by every view: the fold of its readable rows, or -1
+# and -1 (shown "?") where that fold is 0:0 and some row could not be read or
+# none gave a reading
+function jnone(id) { return JRC[id] + 0 == 0 && JSG[id] + 0 == 0 && (JBAD[id] || !JSEEN[id]) }
+function jrc(id) { return jnone(id) ? -1 : JRC[id] + 0 }
+function jsg(id) { return jnone(id) ? -1 : JSG[id] + 0 }
 # one node bar of wd cells: a allocated and u in use, of tot.  █ in use within
 # the allocation (hue), ▒ allocated but idle (dim hue), ▓ in use beyond the
 # allocation (magenta), ░ free (dim), or · when the use is not known (u < 0).
@@ -2330,8 +2355,16 @@ function never_started(q, r) {
 # job had been killed
 function ended_state(state, c, q, r) { return (c == "NF") ? state " on " failed_node(q, r) : state " · " exit_text(c) }
 function failed_node(q, r) { return (r && A[r, "FailedNode"] != "") ? A[r, "FailedNode"] : q ? R[q, "NodeList"] : A[r, "NodeList"] }
-function exit_text(c,   t, sg) {
-  sg = JSG[jid] + 0; t = "exit " exlabel(JRC[jid] + 0, sg)
+# what Slurm printed in place of an exit code sq can read, for the words of
+# an unknown pair: "sacct printed -1:0" (scrubbed, cut to 24 columns), or
+# "sacct printed none" where no row had a value
+function exraw(id,   v) {
+  if (!(id in JRAW)) return JSRC[id] " printed none"
+  v = JRAW[id]; gsub(CNTRL, "?", v); return JSRC[id] " printed " clip(v, 24)
+}
+function exit_text(c,   t, sg, rc) {
+  rc = jrc(jid); sg = jsg(jid); t = "exit " exlabel(rc, sg)
+  if (rc < 0)    return t " (" exraw(jid) ")"
   if (sg == 0)   return t
   if (sg <= 31)  return t ": signal " sg ((sg in SIGNAME) ? " (" SIGNAME[sg] ")" : "")
   if (sg == 125) return t (c == "OOM" ? "" : ": out of memory")
@@ -2788,8 +2821,8 @@ function parent_state(pid,   p, a, c, x, left) {
     c = RP[p, "StateCompact"]
     if (c == "PD") return paint(stcolour(c), "PENDING") " (" RP[p, "Reason"] ")" (isepoch(RP[p, "StartTime"]) && RP[p, "StartTime"] > NOW ? " · Slurm's estimate: " when(RP[p, "StartTime"]) : " · no start estimate")
     if (c in DONE) {
-      split(RP[p, "exit_code"], x, ":")
-      return paint(stcolour(c), stname(c)) " · exit " exlabel(exfield(x[1]), exfield(x[2])) (isepoch(RP[p, "EndTime"]) ? " · ended " ago(NOW - RP[p, "EndTime"]) " ago" : "")
+      exread(RP[p, "exit_code"], x)
+      return paint(stcolour(c), stname(c)) " · exit " exlabel(x[1], x[2]) (isepoch(RP[p, "EndTime"]) ? " · ended " ago(NOW - RP[p, "EndTime"]) " ago" : "")
     }
     left = RP[p, "TimeLeft"]
     left = (left == "UNLIMITED") ? "no time limit" : (left == "INVALID") ? "past its time limit" : elap(dur(left)) " left of " elap(dur(RP[p, "TimeLimit"]))
@@ -2797,8 +2830,8 @@ function parent_state(pid,   p, a, c, x, left) {
   }
   for (a = 1; a <= npa; a++) if (AP[a, "JobID"] == pid) break
   if (a <= npa) {
-    split(AP[a, "ExitCode"], x, ":"); c = stcode(AP[a, "State"])
-    return paint(stcolour(c), stname(c)) ((c in DONE) ? " · exit " exlabel(exfield(x[1]), exfield(x[2])) (isepoch(AP[a, "End"]) ? " · ended " ago(NOW - AP[a, "End"]) " ago" : "") : "")
+    exread(AP[a, "ExitCode"], x); c = stcode(AP[a, "State"])
+    return paint(stcolour(c), stname(c)) ((c in DONE) ? " · exit " exlabel(x[1], x[2]) (isepoch(AP[a, "End"]) ? " · ended " ago(NOW - AP[a, "End"]) " ago" : "") : "")
   }
   if (ENVIRON["SQJ_WPQ"] == "fail") return "unknown: squeue did not answer"
   return "Slurm no longer knows it"
@@ -3045,11 +3078,15 @@ function why_cancelled(q, r,   by, how, sub_, end) {
   } else wl("cancelled " how "; who did it shows once accounting has recorded the end")
 }
 function why_failed(q, r,   rc, sg, k, s, by, sname, rawrc, m, node) {
-  rc = JRC[jid] + 0; sg = JSG[jid] + 0
+  rc = jrc(jid); sg = jsg(jid)
   node = q ? R[q, "NodeList"] : r ? A[r, "NodeList"] : ""
   for (k = 1; k <= nsteps[jid] && by == ""; k++) { s = step_row[jid, k]; by = canceller(A[s, "State"]); sname = stepname(A[s, "JobID"]) }
-  if (q && match(R[q, "exit_code"], /^([0-9]+):([0-9]+)$/, m) && m[2] + 0 == 0) rawrc = m[1] + 0
-  if (by != "") wl(sname " was cancelled by " who(by, OWNER, OWNER_UID) (sg ? ", which ended the job with " signame(sg) : ""))
+  if (q && exread(R[q, "exit_code"], m) > 0 && m[2] == 0) rawrc = m[1]   # a wait status only
+  # the canceller first (a fact of the State field), then an exit sq cannot
+  # read, before every branch that reads a field
+  if (by != "") wl(sname " was cancelled by " who(by, OWNER, OWNER_UID) (sg >= 1 && sg <= 31 ? ", which ended the job with " signame(sg) : ""))
+  else if (rc < 0) wl((jid in JRAW) ? "Slurm marked it FAILED, but its exit code cannot be read: " exraw(jid) \
+                                    : "Slurm marked it FAILED, but neither the job nor a step recorded an exit code")
   else if (sg >= 1 && sg <= 31) wl("killed by " signame(sg))
   else if (sg > 31 && sg != 125) {
     wl(sg == 53 ? "its script never started: Slurm could not open its output file" : "Slurm error " sg ((sg in SLERR) ? ": " SLERR[sg] : ""))
@@ -3097,7 +3134,7 @@ function why_tail(   info, which, me, host, k) {
 }
 
 # ---- an array: its tasks that did not complete, grouped by why
-function why_array(   i, r, id, c, by, never, key, k, s, n, GN, GI, GK, a, b, t, first, x, m) {
+function why_array(   i, r, id, c, by, never, key, k, s, n, GN, GI, GK, a, b, t, first, x, y, m) {
   for (i = 1; i <= ntask_rows; i++) {
     r = task_row[i]; id = A[r, "JobID"]; c = stcode(A[r, "State"])
     if (c == "CD" || !(c in DONE)) continue
@@ -3107,8 +3144,9 @@ function why_array(   i, r, id, c, by, never, key, k, s, n, GN, GI, GK, a, b, t,
     } else if (c == "F") {
       xcm(id, A[r, "ExitCode"])
       for (s = 1; s <= nsteps[id]; s++) xcm(id, A[step_row[id, s], "ExitCode"])
-      x = JSG[id] + 0
-      key = (x >= 1 && x <= 31) ? "failed by " signame(x) : (x > 31 && x != 125) ? "failed by Slurm error " x : "failed with exit " (JRC[id] + 0)
+      x = jsg(id); y = jrc(id)
+      key = (y < 0) ? "failed with an exit code that cannot be read" : (x >= 1 && x <= 31) ? "failed by " signame(x) \
+          : (x > 31 && x != 125) ? "failed by Slurm error " x : "failed with exit " y
       if (first == "") first = id
     } else {
       key = (c == "OOM") ? "ran out of memory" : (c == "TO") ? "reached the time limit" : (c == "NF") ? "lost their node" : "ended " stname(c)
@@ -4658,12 +4696,16 @@ function exset(list, cap,   a, m, i, seen, sk, idx, o, c, nd, x) {
     if (a[i] in seen) continue            # failure behind the ellipsis, because row
     seen[a[i]] = 1                        # order is task order.  The list holds raw
     split(a[i], x, ":")                   # "rc:N" pairs, so the order is numeric and
-    sk[sprintf("%03d:%03d", 999-x[1], 999-x[2])] = exlabel(x[1], x[2])   # no label
+    sk[exord(x[1]) ":" exord(x[2])] = exlabel(x[1], x[2])   # no label
   }                                       # text is ever parsed back
   nd = asorti(sk, idx)
   for (i=1; i<=nd; i++) if (++c <= cap) o = o (o?",":"") sk[idx[i]]
   return (nd > cap) ? o ",…" : o
 }
+# the sort key of one field of a pair, worst (largest) first; the unknown -1
+# between 1 and 0, so "?" follows every non-zero exit status and precedes
+# every exit-0 label, 0/oom included
+function exord(n) { return sprintf("%04d", (n < 0) ? 1997 : 1998 - 2 * n) }
 function fcol(code) {                     # one table drives finished-ness, the bell
   if (code == "") return "36"             # and the colour, so PREEMPTED and REVOKED
   if (code == "CD") return "32"           # stop reading as failures and an unknown
@@ -5819,7 +5861,7 @@ END{
       rst[d]=dsc[r]; rend[d]=rmin[d]=dend[r]; gbase2[d]=daj[r]
       guser[d]=duser[r]; gmin[d]=gmax[d]=dsec[r]
     }
-    ex = (JRC[did[r]]+0) ":" (JSG[did[r]]+0)    # raw, labelled by exset
+    ex = jrc(did[r]) ":" jsg(did[r])            # raw, labelled by exset
     grows[g]++
     gex[g]  = (grows[g] > 1 ? gex[g]  "," : "") ex
     gids[g] = (grows[g] > 1 ? gids[g] "," : "") did[r]
