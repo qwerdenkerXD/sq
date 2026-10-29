@@ -10544,9 +10544,10 @@ est_wait() {
 		[ ! -s "$f.calls" ] || T_CALLS=$((T_CALLS + $(cat "$f.calls")))
 	done
 }
-# est_mono FILE: the steps W -> W+1 (each H apart) where a row that showed its
-# start estimate (a "→" in NODE/REASON, or a date in a START column) shows
-# none, as " H:W>W+1(ids)"; and " W:rcN" for a run that failed
+# est_mono FILE: the steps from W to the next width of the series, W+1 or
+# further (each H apart), where a row that showed its start estimate (a "→"
+# in NODE/REASON, or a date in a START column) shows none, as
+# " H:W>W'(ids)"; and " W:rcN" for a run that failed
 est_mono() {
 	gawk '
 		function shown(   x, n, E, P, i, o) {
@@ -10557,7 +10558,7 @@ est_mono() {
 		{	delete F; for (i = 4; i <= NF; i++) { p = index($i, "="); F[substr($i, 1, p - 1)] = substr($i, p + 1) }
 			w = $1; h = $2; now = shown()
 			if ($3 != 0) printf " %s:rc%s", w, $3
-			if ((h in PW) && PW[h] == w - 1) {
+			if ((h in PW) && PW[h] < w) {
 				n = split(PS[h], E, ","); lost = ""
 				for (i = 1; i <= n; i++) if (E[i] != "" && index(now, "," E[i] ",") == 0) lost = lost (lost == "" ? "" : ",") E[i]
 				if (lost != "") printf " %s:%s>%s(%s)", h, PW[h], w, lost
@@ -10588,23 +10589,36 @@ est_screen_golden() {
 	cmp -s "$1" "$OUT"
 }
 
+# Its grid is the review's (LOW 6) plus nboot at H 13: of the earlier one (H
+# 6, 13 and 14 on all eight fixtures, FULL at every width on all eight) it
+# keeps every series where a mutant of the review's lost an estimate (nboot
+# H=13 the only one for B6 and B7, the estimates' step after the drops); FULL
+# cannot lose an estimate unless FULL changes, which est_full pins byte for byte
 c_est_monotone() {   # EST AC 4: an estimate shown at W is shown at W+1
-	T_TITLE="EST (AC 4): every row that shows a start estimate at W shows it at W+1, no exception: COMPACT W 21..130 at H 40, 6, 13 and 14, FULL W 40..130, on est, estreal, mixed, estlong, nboot, wide-text, estdig and estarr; est also with colour and in C"
-	local fx f nobin=$T_DIR/nobin lost files=() EST_PIDS=()
+	T_TITLE="EST (AC 4): every row that shows a start estimate at W shows it at W+1, no exception: COMPACT W 21..130 at H 40 on est, estreal, mixed, estlong, nboot, wide-text, estdig and estarr, est also with colour and in C, and at H 6, 13 and 14 on estreal, mixed and estarr, at H 13 on nboot; FULL at every third width of W 40..130 on est, estreal and mixed (an estimate shown at W shown at W+3)"
+	local fx h f nobin=$T_DIR/nobin lost files=() EST_PIDS=()
 	est_pin || return
 	no_utf8_locale "$nobin"
 	for fx in est estreal mixed estlong nboot wide-text estdig estarr; do
-		f=$T_DIR/mono-$fx; files+=("$f" "$f-full")
-		est_bg "$f" "$fx" "$(est_confs "$(seq 21 130)" "40 6 13 14")" est_view -- --compact --no-color
-		est_bg "$f-full" "$fx" "$(est_confs "$(seq 40 130)" 50)" est_view -- --full --no-color
+		f=$T_DIR/mono-$fx; files+=("$f")
+		est_bg "$f" "$fx" "$(est_confs "$(seq 21 130)" 40)" est_view -- --compact --no-color
 	done
-	est_wait "${files[@]}"
+	for fx in estreal mixed estarr "nboot 13"; do
+		read -r fx h <<< "$fx"
+		f=$T_DIR/mono-$fx-h; files+=("$f")
+		est_bg "$f" "$fx" "$(est_confs "$(seq 21 130)" "${h:-6 13 14}")" est_view -- --compact --no-color
+	done
+	for fx in est estreal mixed; do
+		f=$T_DIR/mono-$fx-full; files+=("$f")
+		est_bg "$f" "$fx" "$(est_confs "$(seq 40 3 130)" 50)" est_view -- --full --no-color
+	done
+	files+=("$T_DIR/mono-est-colour" "$T_DIR/mono-est-c")
 	est_bg "$T_DIR/mono-est-colour" est "$(est_confs "$(seq 21 130)" 40)" est_view -- --compact --color
 	est_bg "$T_DIR/mono-est-c" est "$(est_confs "$(seq 21 130)" 40)" est_view LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --compact --no-color
-	est_wait "$T_DIR/mono-est-colour" "$T_DIR/mono-est-c"
-	for f in "${files[@]}" "$T_DIR/mono-est-colour" "$T_DIR/mono-est-c"; do
+	est_wait "${files[@]}"
+	for f in "${files[@]}"; do
 		lost=$(est_mono "$f")
-		need "${f##*/mono-}: no estimate lost from W to W+1 (at H:W>W+1(rows):${lost:- none})" test -z "$lost"
+		need "${f##*/mono-}: no estimate lost from W to the next width (at H:W>W'(rows):${lost:- none})" test -z "$lost"
 	done
 }
 c_est_pins() {   # EST AC 8: est, estreal, mixed, estarr, COMPACT H=40; wide-text (the text floors first), arrtask (a task row's estimate), est W=55 (the FLEX limit)
