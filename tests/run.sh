@@ -3,16 +3,21 @@
 # of its output (counts, rows, captions, escapes, widths, exit codes), never a
 # snapshot of it.
 #
-#   tests/run.sh [-k|--keep] [--pin] [-j N] [NAME...]   NAME: run only the case of that name
+#   tests/run.sh [-k|--keep] [--pin | --pin-frozen] [-j N] [NAME...]   NAME: run only the case of that name
 #
 # -j N runs N cases at once (default 1, one after the other), each case whole
 # and its lines printed in the order of the cases as always; the cases that
 # measure time or load (timed_cases) run one after the other after the rest.
 #
 # --pin writes what sq prints into the pinned screens of sq job and its why
-# section (tests/fixtures/sqjob/screens) and into the goldens of R3-3
-# (tests/goldens/r3) instead of comparing with them, for a change that is
-# meant to change them; git diff then shows what changed.
+# section (tests/fixtures/sqjob/screens) instead of comparing with them, for
+# a change that is meant to change them; git diff then shows what changed.
+#
+# Frozen goldens (frozen_is, under tests/goldens/) were written by an older
+# build, e.g. 7fd9bd6's screens a change must leave as they were: --pin never
+# touches them.  --pin-frozen rewrites them, and only them, from the build
+# SQ_UNDER_TEST names (it refuses to run without one), e.g.
+#   SQ_UNDER_TEST=/path/to/7fd9bd6/sq tests/run.sh --pin-frozen stale_untouched
 #
 # A failed case's run directories stay without -k too, as a flake may not
 # come back for a rerun: under ${TMPDIR:-/tmp}/sq-failed/<UTC start>.<pid>/,
@@ -44,11 +49,12 @@ set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 sq=${SQ_UNDER_TEST:-${here%/*}/sq}    # SQ_UNDER_TEST: another build of sq, e.g. an installed one
 fixtures=$here/fixtures
-keep=0; pin=0; jobs=1; only=()
+keep=0; pin=0; pin_frozen=0; jobs=1; only=()
 while [ $# -gt 0 ]; do
 	case $1 in
 		-k|--keep) keep=1 ;;
 		--pin) pin=1 ;;
+		--pin-frozen) pin_frozen=1 ;;
 		-j) jobs=${2-}; [ $# -lt 2 ] || shift ;;
 		-j*) jobs=${1#-j} ;;
 		-h|--help) sed -n '2,/^# Results:/{/^# Results:/d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
@@ -57,6 +63,9 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+if [ $pin_frozen = 1 ] && [ -z "${SQ_UNDER_TEST:-}" ]; then
+	echo "run.sh: --pin-frozen writes goldens from an older build: name it in SQ_UNDER_TEST" >&2; exit 2
+fi
 case $jobs in
 	''|*[!0-9]*) printf "run.sh: -j takes how many cases run at once, not '%s'\n" "$jobs" >&2; exit 2 ;;
 esac
@@ -419,6 +428,13 @@ err_empty()  { [ ! -s "$ERR" ]; }
 # for a need's text: " (the first 200 bytes of stderr)" where there is any
 err_quoted() { [ ! -s "$ERR" ] || printf ' (%s)' "$(head -c 200 "$ERR" | tr '\n' ' ')"; }
 out_empty()  { [ ! -s "$OUT" ]; }
+# frozen_is FILE: stdout is FILE, a frozen golden an older build wrote (see the
+# head of this file), the title's clock and the start estimates aside; only
+# --pin-frozen rewrites it, never --pin
+frozen_is() {
+	if [ $pin_frozen = 1 ]; then mkdir -p "${1%/*}"; cp "$OUT" "$1"; return 0; fi
+	cmp -s <(without_clock "$1" | mask_estimates) <(without_clock "$OUT" | mask_estimates)
+}
 
 # ---- the stub log: one CALL line per invocation, see tests/lib/stub.sh ------
 calls() {     # calls sinfo|squeue|sacct|sstat|queue|fallback|alloc|mirror: how many
@@ -5106,13 +5122,7 @@ membar_note() { plain | grep -E '^ *↳ memory counts RealMemory' | sed -E 's/^ 
 # keeps a node's last FreeMem where it no longer pings it, or it does not answer
 # (its state, up to a "+", ends in * ~ % # ^ or begins inval or future): that
 # memory reads unknown, quietly.  A fault node's unknown cells stay red there.
-r3gold=$here/goldens/r3
-# golden_is FILE: stdout is FILE (as 7fd9bd6 drew it), the title's clock and
-# the start estimates aside; with --pin it becomes FILE
-golden_is() {
-	if [ $pin = 1 ]; then mkdir -p "${1%/*}"; cp "$OUT" "$1"; return 0; fi
-	cmp -s <(without_clock "$1" | mask_estimates) <(without_clock "$OUT" | mask_estimates)
-}
+r3gold=$here/goldens/r3   # frozen goldens (frozen_is): 7fd9bd6's screens
 cpu_part() { plain | gawk -v n="$1" '$1 == n { sub(/ cpu .*/, " cpu"); print; exit }'; }   # cpu_part NODE: NODE's line up to its CPU figure
 c_stale_inuse() {   # R3-3 AC 1-3, 5, 8
 	T_TITLE="in-use view: a node Slurm no longer refreshes (* ~ % # ^, inval, future; read up to a +) reads its memory in use as -, quietly; a fault node's unknown cells red, every other dim; the figure column measured after; CPU bars as before"
@@ -5182,20 +5192,20 @@ c_stale_inuse() {   # R3-3 AC 1-3, 5, 8
 	need "without colour the same characters" eval '[ "$(without_clock "$OUT" | sed -E "s/\x1b\[[0-9;]*m//g")" = "$(printf "%s\n" "$want" | without_clock /dev/stdin)" ]'
 }
 # R3-3 AC 4: the allocated view and every fixture with a down, drained or * node
-# besides R3-3's own draw what 7fd9bd6 drew (goldens written by its sq: run.sh
-# --pin stale_untouched with SQ_UNDER_TEST naming it)
+# besides R3-3's own draw what 7fd9bd6 drew (frozen goldens written by its sq:
+# run.sh --pin-frozen stale_untouched with SQ_UNDER_TEST naming it)
 stale_untouched_fx=(stale-alloc stale-states-alloc alloc-freemem ck-alloc busy24 membar-down bars-down scfail-downlast big40 big40faults guard guard3 pct)
 c_stale_untouched() {   # R3-3 AC 4, and the CPU bars of AC 5
 	T_TITLE="the allocated view and every other fixture with a down, drained or * node draw what 7fd9bd6 drew, colour on and off, FULL and COMPACT"
 	local fx
 	for fx in "${stale_untouched_fx[@]}"; do
 		sq_run "$fx" SQ_WIDTH=120 -- --full --color
-		need "$fx FULL --color: as 7fd9bd6" eval 'rc_is 0 && golden_is "$r3gold/$fx.full.w120.color"'
+		need "$fx FULL --color: as 7fd9bd6" eval 'rc_is 0 && frozen_is "$r3gold/$fx.full.w120.color"'
 		sq_run "$fx" SQ_WIDTH=80 SQ_HEIGHT=30 -- --compact --no-color
-		need "$fx COMPACT 80x30: as 7fd9bd6" eval 'rc_is 0 && golden_is "$r3gold/$fx.compact.w80h30"'
+		need "$fx COMPACT 80x30: as 7fd9bd6" eval 'rc_is 0 && frozen_is "$r3gold/$fx.compact.w80h30"'
 	done
 	sq_run stale-edges SQ_WIDTH=120 -- --full --color
-	need "stale-edges' golden (its CPU bars, c_stale_inuse) is 7fd9bd6's" eval 'rc_is 0 && { [ $pin = 1 ] && golden_is "$r3gold/stale-edges.full.w120.color" || [ -s "$r3gold/stale-edges.full.w120.color" ]; }'
+	need "stale-edges' golden (its CPU bars, c_stale_inuse) is 7fd9bd6's" eval 'rc_is 0 && { [ $pin_frozen = 1 ] && frozen_is "$r3gold/stale-edges.full.w120.color" || [ -s "$r3gold/stale-edges.full.w120.color" ]; }'
 }
 c_stale_docs() {   # R3-3 AC 7
 	T_TITLE="README: the in-use view's no-longer-refreshed nodes read -, a down one keeps its bar red, in the in-use memory bar its unknown cells too"
