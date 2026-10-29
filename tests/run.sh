@@ -12,15 +12,16 @@
 # --pin writes what sq prints into the pinned screens of sq job and its why
 # section (tests/fixtures/sqjob/screens) instead of comparing with them, for
 # a change that is meant to change them; git diff then shows what changed.
-# The EST cases' goldens (tests/goldens/est: 291a4a8's screens and lists, of
-# est_columns est_full est_height_cols est_start) are pinned the same way,
-# from a build of 7fd9bd6 as SQ_UNDER_TEST.
 #
 # Frozen goldens (frozen_is, under tests/goldens/) were written by an older
 # build, e.g. 7fd9bd6's screens a change must leave as they were: --pin never
 # touches them.  --pin-frozen rewrites them, and only them, from the build
 # SQ_UNDER_TEST names (it refuses to run without one), e.g.
 #   SQ_UNDER_TEST=/path/to/7fd9bd6/sq tests/run.sh --pin-frozen stale_untouched
+# The EST cases' goldens (tests/goldens/est: 291a4a8's screens and lists, of
+# est_columns est_full est_height_cols est_start) are frozen the same way,
+# from a build of 7fd9bd6; they hold the start estimates, so they are
+# compared whole (est_golden, est_screen_golden), not by frozen_is.
 #
 # A failed case's run directories stay without -k too, as a flake may not
 # come back for a rerun: under ${TMPDIR:-/tmp}/sq-failed/<UTC start>.<pid>/,
@@ -10434,8 +10435,10 @@ c_whole_accepted() {
 # stubs that read the same moment (SQSTUB_NOW): 2026-10-26 07:33:20 UTC, the
 # design's.  Their goldens hold what 291a4a8 drew (7fd9bd6 draws it byte for
 # byte), the base AC 15 compares with: the column sets, ×N and tasks, FULL's
-# screens, the H grid.  They are written, from a build of 7fd9bd6, by
-#   SQ_UNDER_TEST=<7fd9bd6's sq> tests/run.sh --pin est_columns est_full est_height_cols est_start
+# screens, the H grid.  They are frozen goldens (see the head of this file),
+# written, from a build of 7fd9bd6, by
+#   SQ_UNDER_TEST=<7fd9bd6's sq> tests/run.sh --pin-frozen est_columns est_full est_height_cols est_start
+# and compared whole: frozen_is would mask the start estimates they pin
 est_now=1793000000 est_now_iso=2026-10-26T07:33:20
 est_goldens=$here/goldens/est   # FIXTURE-WHAT.txt, apart from the fixtures (their sweeps and twins read every file there)
 # est_pin: the case's copy of sq (EST_SQ) whose every systime() and the
@@ -10566,12 +10569,12 @@ est_mono() {
 			PW[h] = w; PS[h] = now
 		}' "$1"
 }
-# est_golden FILE GOLDEN: --pin writes FILE's lines into GOLDEN (291a4a8's,
+# est_golden FILE GOLDEN: --pin-frozen writes FILE's lines into GOLDEN (291a4a8's,
 # from a build of 7fd9bd6: see above); otherwise prints " W:H:what" for each
 # screen of FILE whose column set is not GOLDEN's, that shows ST where GOLDEN
 # shows STATE, or that lacks a ×N or a task GOLDEN shows (AC 15)
 est_golden() {
-	if [ $pin = 1 ]; then gawk '{ print $1, $2, $4, $5, $9 }' "$1" > "$2"; return 0; fi
+	if [ $pin_frozen = 1 ]; then gawk '{ print $1, $2, $4, $5, $9 }' "$1" > "$2"; return 0; fi
 	[ -s "$2" ] || { echo " no golden ${2#"$here"/}"; return 0; }
 	gawk 'NR == FNR { G[$1, $2] = $3 " " $4 " " $5; next }
 		{	if (!(($1, $2) in G)) { printf " %s:%s:nogolden", $1, $2; next }
@@ -10582,10 +10585,10 @@ est_golden() {
 			for (i = 1; i <= n; i++) if (index(have, "," P[i] ",") == 0) printf " %s:%s:lost-%s", $1, $2, P[i]
 		}' "$2" "$1"
 }
-# est_screen_golden GOLDEN: --pin writes the last screen into GOLDEN, else the
+# est_screen_golden GOLDEN: --pin-frozen writes the last screen into GOLDEN, else the
 # screen is GOLDEN byte for byte
 est_screen_golden() {
-	if [ $pin = 1 ]; then cp "$OUT" "$1"; return 0; fi
+	if [ $pin_frozen = 1 ]; then cp "$OUT" "$1"; return 0; fi
 	cmp -s "$1" "$OUT"
 }
 
@@ -10791,7 +10794,7 @@ c_est_height_cols() {   # EST: the H grid against 291a4a8 (decision 8, the state
 	est_wait "${files[@]}"
 	for fx in hplus hplus-busy hplus2 hplus3 far40 mixed mix30; do
 		f=$T_DIR/grid-$fx
-		if [ $pin = 1 ]; then gawk '{ print $1, $2, $4, $6 }' "$f" > "$est_goldens/$fx-grid.txt"; continue; fi
+		if [ $pin_frozen = 1 ]; then gawk '{ print $1, $2, $4, $6 }' "$f" > "$est_goldens/$fx-grid.txt"; continue; fi
 		bad=$(gawk 'NR == FNR { G[$1, $2] = $3; next } (($1, $2) in G) && $4 != G[$1, $2] { printf " %s:%s", $1, $2 } !(($1, $2) in G) { printf " %s:%s:nogolden", $1, $2 }' "$est_goldens/$fx-grid.txt" "$f")
 		# a row whose estimate went at H -> H+1 (W apart): 291a4a8 shows none for it at H+1
 		lost=$(gawk 'function rows(s,   n, E, P, i, o) { sub(/^est=/, "", s); n = split(s, E, ","); for (i = 1; i <= n; i++) { split(E[i], P, "="); o = o "," P[1] }; return o "," }
@@ -10802,7 +10805,7 @@ c_est_height_cols() {   # EST: the H grid against 291a4a8 (decision 8, the state
 		need "$fx: 291a4a8's columns at every W:H (not at:${bad:- none})" test -z "$bad"
 		need "$fx: no estimate lost at H+1 that 291a4a8 shows there (at W:H>H+1(row):${lost:- none})" test -z "$lost"
 	done
-	[ $pin = 1 ] && return
+	[ $pin_frozen = 1 ] && return
 	need "hplus3 W=55: H=18 1410 → 10:33, H=19 none beside the arriving 1411/1412 (the stated exception, 291a4a8 alike)" eval '
 		grep -q "^55 18 0 .* est=1410=10:33 " "$T_DIR/grid-hplus3" && grep -q "^55 19 0 .* est= " "$T_DIR/grid-hplus3" &&
 		grep -q "^55 18 .* est=1410=10:33$" "$est_goldens/hplus3-grid.txt" && grep -q "^55 19 .* est=$" "$est_goldens/hplus3-grid.txt"'
