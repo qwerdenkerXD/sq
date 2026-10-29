@@ -10508,9 +10508,8 @@ est_is()  { [ "$(est_get est)" = "$1" ]; }    # est_is "1201=2027-11-30,1205=10:
 qhdr_is() { [ "$(labelled QHDR | sed -E 's/ +/ /g')" = "$1" ]; }   # qhdr_is TEXT: the queue header, blanks squeezed
 # est_series FILE FIXTURE "WxH..." VIEW [VAR=value]... -- [sq args]: each
 # screen's VIEW (a function: est_view, est_hview) into FILE as "W H RC VIEW";
-# its runs apart (T_DIR, run_n), so several series run at once (as
-# background jobs of the case, after its est_pin); its FAILs into FILE.fail,
-# its stub calls into FILE.calls
+# its runs apart (T_DIR, run_n), so several series run at once (est_bg, after
+# the case's est_pin); its FAILs into FILE.fail, its stub calls into FILE.calls
 est_series() {
 	local file=$1 fx=$2 confs=$3 view=$4 c; shift 4
 	local -a envs=(); while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done; [ $# -gt 0 ] && shift
@@ -10521,14 +10520,24 @@ est_series() {
 	done > "$file"
 	printf '%s\n' "${T_FAIL[@]}" > "$file.fail"; echo "$T_CALLS" > "$file.calls"
 }
+# est_bg FILE FIXTURE "WxH..." VIEW [VAR=value]... -- [sq args]: est_series as
+# a background job of the case, its pid in EST_PIDS; at most est_par (4) of a
+# case's series run at once, whatever -j says and however many it has: a
+# fifth waits for the oldest to end (under load, a dozen at once made sq time
+# out on the stubs)
+est_par=4
+est_bg() {
+	while [ ${#EST_PIDS[@]} -ge $est_par ]; do wait "${EST_PIDS[0]}"; EST_PIDS=("${EST_PIDS[@]:1}"); done
+	est_series "$@" & EST_PIDS+=($!)
+}
 # est_confs "W..." "H...": every WxH, H by H, the widths in their order
 est_confs() { local h w; for h in $2; do for w in $1; do printf '%sx%s ' "$w" "$h"; done; done; }
-# est_wait FILE...: the series of these files done (each a background job
-# of the case's, in EST_PIDS), their FAILs and stub calls taken over; a
-# series that left no screens is a FAIL
+# est_wait FILE...: the series of these files done (est_bg's, the rest of
+# EST_PIDS), their FAILs and stub calls taken over; a series that left no
+# screens is a FAIL
 est_wait() {
 	local f l
-	wait "${EST_PIDS[@]}"; EST_PIDS=()
+	[ ${#EST_PIDS[@]} -eq 0 ] || wait "${EST_PIDS[@]}"; EST_PIDS=()
 	for f; do
 		[ -s "$f" ] || T_FAIL+=("${f##*/}: the series left no screens")
 		[ ! -f "$f.fail" ] || while IFS= read -r l; do [ -z "$l" ] || T_FAIL+=("${f##*/}: $l"); done < "$f.fail"
@@ -10586,12 +10595,12 @@ c_est_monotone() {   # EST AC 4: an estimate shown at W is shown at W+1
 	no_utf8_locale "$nobin"
 	for fx in est estreal mixed estlong nboot wide-text estdig estarr; do
 		f=$T_DIR/mono-$fx; files+=("$f" "$f-full")
-		est_series "$f" "$fx" "$(est_confs "$(seq 21 130)" "40 6 13 14")" est_view -- --compact --no-color & EST_PIDS+=($!)
-		est_series "$f-full" "$fx" "$(est_confs "$(seq 40 130)" 50)" est_view -- --full --no-color & EST_PIDS+=($!)
+		est_bg "$f" "$fx" "$(est_confs "$(seq 21 130)" "40 6 13 14")" est_view -- --compact --no-color
+		est_bg "$f-full" "$fx" "$(est_confs "$(seq 40 130)" 50)" est_view -- --full --no-color
 	done
 	est_wait "${files[@]}"
-	est_series "$T_DIR/mono-est-colour" est "$(est_confs "$(seq 21 130)" 40)" est_view -- --compact --color & EST_PIDS+=($!)
-	est_series "$T_DIR/mono-est-c" est "$(est_confs "$(seq 21 130)" 40)" est_view LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --compact --no-color & EST_PIDS+=($!)
+	est_bg "$T_DIR/mono-est-colour" est "$(est_confs "$(seq 21 130)" 40)" est_view -- --compact --color
+	est_bg "$T_DIR/mono-est-c" est "$(est_confs "$(seq 21 130)" 40)" est_view LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --compact --no-color
 	est_wait "$T_DIR/mono-est-colour" "$T_DIR/mono-est-c"
 	for f in "${files[@]}" "$T_DIR/mono-est-colour" "$T_DIR/mono-est-c"; do
 		lost=$(est_mono "$f")
@@ -10656,7 +10665,7 @@ c_est_columns() {   # EST AC 15: the estimates never cost a column, the long sta
 	est_pin || return
 	for fx in est estreal mixed mix30 wide-text estarr; do
 		f=$T_DIR/cols-$fx; files+=("$f")
-		est_series "$f" "$fx" "$(est_confs "$(seq 21 100)" 40)" est_view -- --compact --no-color & EST_PIDS+=($!)
+		est_bg "$f" "$fx" "$(est_confs "$(seq 21 100)" 40)" est_view -- --compact --no-color
 	done
 	est_wait "${files[@]}"
 	for fx in est estreal mixed mix30 wide-text estarr; do
@@ -10712,7 +10721,7 @@ c_est_height() {   # EST, decision 8: H11's hmono on the estimate fixtures
 	for run in est estreal mixed mix30 estlong nboot guard3 wide-text estdig estarr "est --reserve_3" "estarr --reserve_3"; do
 		read -r fx args <<< "$run"; f=$T_DIR/h-$fx${args//[ _]/}; files+=("$f")
 		# shellcheck disable=SC2086
-		est_series "$f" "$fx" "$(est_confs "40 80 120" "$(seq 2 60)" | tr ' ' '\n' | sort -t x -k1,1n -k2,2n | tr '\n' ' ')" est_hview -- --compact --no-color ${args//_/ } & EST_PIDS+=($!)
+		est_bg "$f" "$fx" "$(est_confs "40 80 120" "$(seq 2 60)" | tr ' ' '\n' | sort -t x -k1,1n -k2,2n | tr '\n' ' ')" est_hview -- --compact --no-color ${args//_/ }
 	done
 	est_wait "${files[@]}"
 	for f in "${files[@]}"; do
@@ -10763,7 +10772,7 @@ c_est_height_cols() {   # EST: the H grid against 291a4a8 (decision 8, the state
 	est_pin || return
 	for fx in hplus hplus-busy hplus2 hplus3 far40 mixed mix30; do
 		f=$T_DIR/grid-$fx; files+=("$f")
-		est_series "$f" "$fx" "$(est_confs "$(seq 44 2 70) 55" "$(seq 8 30)" | tr ' ' '\n' | sort -t x -k1,1n -k2,2n | tr '\n' ' ')" est_view -- --compact --no-color & EST_PIDS+=($!)
+		est_bg "$f" "$fx" "$(est_confs "$(seq 44 2 70) 55" "$(seq 8 30)" | tr ' ' '\n' | sort -t x -k1,1n -k2,2n | tr '\n' ' ')" est_view -- --compact --no-color
 	done
 	est_wait "${files[@]}"
 	for fx in hplus hplus-busy hplus2 hplus3 far40 mixed mix30; do
@@ -10808,9 +10817,9 @@ c_est_start() {   # EST S: a START column holds the estimates' dates
 		57|%i %j %T %P %S %Q %R|JOBID,NAME,STATE,PART,START,NODE/REASON|1205=10:33|1201,1204,1205,1206
 		58|%i %j %T %P %S %Q %R|JOBID,NAME,STATE,PART,START,PRIO,NODE/REASON||1201,1204,1205,1206
 	PINS
-	est_series "$T_DIR/start-arrtask" arrtask "$(est_confs "$(seq 21 60)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R' & EST_PIDS+=($!)
-	est_series "$T_DIR/start-u" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %u %T %S %R' & EST_PIDS+=($!)
-	est_series "$T_DIR/start-nou" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R' & EST_PIDS+=($!)
+	est_bg "$T_DIR/start-arrtask" arrtask "$(est_confs "$(seq 21 60)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R'
+	est_bg "$T_DIR/start-u" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %u %T %S %R'
+	est_bg "$T_DIR/start-nou" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R'
 	est_wait "$T_DIR/start-arrtask" "$T_DIR/start-u" "$T_DIR/start-nou"
 	bad=$(est_golden "$T_DIR/start-arrtask" "$est_goldens/arrtask-start-columns.txt")
 	need "arrtask -o '%i %j %T %S %R' W 21..60: 291a4a8's columns, ×N and tasks (not at W:H:${bad:- none})" test -z "$bad"
