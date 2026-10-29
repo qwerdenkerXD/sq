@@ -2357,11 +2357,10 @@ function never_started(q, r) {
 function ended_state(state, c, q, r) { return (c == "NF") ? state " on " failed_node(q, r) : state " · " exit_text(c) }
 function failed_node(q, r) { return (r && A[r, "FailedNode"] != "") ? A[r, "FailedNode"] : q ? R[q, "NodeList"] : A[r, "NodeList"] }
 # what Slurm printed in place of an exit code sq can read, for the words of
-# an unknown pair: "sacct printed -1:0" (scrubbed, cut to 24 columns), or
-# "sacct printed none" where no row had a value
-function exraw(id,   v) {
-  if (!(id in JRAW)) return JSRC[id] " printed none"
-  v = JRAW[id]; gsub(CNTRL, "?", v); return JSRC[id] " printed " clip(v, 24)
+# an unknown pair: "sacct printed -1:0" (scrubbed as read_stream reads every
+# field, cut to 24 columns), or "sacct printed none" where no row had a value
+function exraw(id) {
+  return JSRC[id] " printed " ((id in JRAW) ? clip(JRAW[id], 24) : "none")
 }
 function exit_text(c,   t, sg, rc) {
   rc = jrc(jid); sg = jsg(jid); t = "exit " exlabel(rc, sg)

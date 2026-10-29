@@ -1103,6 +1103,8 @@ c_job_exit_unread() {   # R3-1 AC 11-18, 21-23
 		! plain | grep -qE "signal -1|which ended the job"'
 	job_run neg1-dep-11963 COLUMNS=120 -- --no-color job 11963
 	need "neg1-dep: the parent line reads exit ?" eval 'rc_is 0 && plain | grep -qxE "    11950  FAILED · exit \? · ended [0-9]+m ago"'
+	job_run neg1-depsq-11963 COLUMNS=120 -- --no-color job 11963
+	need "neg1-depsq: the parent still in squeue reads exit ? too" eval 'rc_is 0 && plain | grep -qxE "    11950  FAILED · exit \? · ended [0-9]+m ago"'
 	job_run neg1-array-11367 COLUMNS=120 -- --no-color job 11367
 	need "neg1-array: the unknown pair grouped as its own why" why_has "  2 failed with an exit code that cannot be read: 11367_37, 11367_150"
 	for f in raw-u32 raw-300 raw-256; do
