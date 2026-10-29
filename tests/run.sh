@@ -1082,7 +1082,7 @@ c_exit_edges() {   # R3-1 AC 7-10
 state_is() { kv_is state "$1"; }   # state_is TEXT: sq job's state line reads TEXT
 c_job_exit_unread() {   # R3-1 AC 11-18, 21-23
 	T_TITLE="sq job on an exit sq cannot read: exit ? with what sacct or squeue printed (scrubbed, 24 columns), the why words, the canceller first and naming only a signal, squeue's raw code only from a wait status, the dependency parent, the array"
-	local f loc
+	local f loc skew
 	job_run neg1-11837 COLUMNS=120 -- --no-color job 11837
 	need "neg1: exit ? (sacct printed -1:0), and why says it cannot be read" eval '
 		rc_is 0 && err_empty && plain | grep -qxF "  state     FAILED · exit ? (sacct printed -1:0)" &&
@@ -1119,10 +1119,14 @@ c_job_exit_unread() {   # R3-1 AC 11-18, 21-23
 	need "rules cxl (0:0, cancelled 0:x): exit ?, the canceller with no signal" eval '
 		rc_is 0 && state_is "FAILED · exit ? (sacct printed 0:x)" && why_has "  the batch script was cancelled by its owner" &&
 		! plain | grep -qE "signal -1|which ended the job"'
-	job_run neg1-dep-11963 COLUMNS=120 -- --no-color job 11963
-	need "neg1-dep: the parent line reads exit ?" eval 'rc_is 0 && plain | grep -qxE "    11950  FAILED · exit \? · ended [0-9]+m ago"'
+	# the parent ended \{epoch-750s}, mid-bucket, so 12m whichever way the clock
+	# steps between the stub and sq (SQSTUB_SKEW, as why_clock_step)
+	for skew in 0 -2 2; do
+		job_run neg1-dep-11963 COLUMNS=120 SQSTUB_SKEW=$skew -- --no-color job 11963
+		need "neg1-dep, the clock stepped ${skew}s: the parent line reads exit ?" eval 'rc_is 0 && plain | grep -qxF "    11950  FAILED · exit ? · ended 12m ago"'
+	done
 	job_run neg1-depsq-11963 COLUMNS=120 -- --no-color job 11963
-	need "neg1-depsq: the parent still in squeue reads exit ? too" eval 'rc_is 0 && plain | grep -qxE "    11950  FAILED · exit \? · ended [0-9]+m ago"'
+	need "neg1-depsq: the parent still in squeue reads exit ? too" eval 'rc_is 0 && plain | grep -qxF "    11950  FAILED · exit ? · ended 12m ago"'
 	job_run neg1-array-11367 COLUMNS=120 -- --no-color job 11367
 	need "neg1-array: the unknown pair grouped as its own why" why_has "  2 failed with an exit code that cannot be read: 11367_37, 11367_150"
 	for f in raw-u32 raw-300 raw-256; do
@@ -5245,8 +5249,13 @@ c_membar_memory_unknown() {   # R3-2 AC 1-4, 6, 7
 	for fx in mem0 memory-empty; do
 		sq_run "$fx" SQ_HEIGHT=4 -- --compact
 		need "$fx COMPACT H=4: the digest as before" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 1 mixed, 1 allocated · 82/152 cpu · 335/?G mem" ]'
-		sq_run "$fx" SQ_HEIGHT=30 -- --compact
-		need "$fx COMPACT H=30: no MEMNOTE line, no taller than its height" eval 'rc_is 0 && [ -z "$(membar_note)" ] && [ "$(plain | wc -l)" -le 30 ]'
+	done
+	# AC 7: COMPACT 120x30 counts one line fewer where the false line went
+	# (7fd9bd6: 16 lines each, measured), the same where the line only names
+	# another node
+	for fx in mem0:15 memory-empty:15 memunk-nolist:15 memunk-two:16; do
+		sq_run "${fx%:*}" SQ_WIDTH=120 SQ_HEIGHT=30 -- --compact
+		need "${fx%:*} COMPACT 120x30: ${fx#*:} lines (7fd9bd6: 16)" eval 'rc_is 0 && [ "$(plain | wc -l)" = "${fx#*:}" ]'
 	done
 }
 c_membar_memory_unknown_docs() {   # R3-2 AC 8
