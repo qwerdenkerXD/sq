@@ -10598,8 +10598,8 @@ c_est_monotone() {   # EST AC 4: an estimate shown at W is shown at W+1
 		need "${f##*/mono-}: no estimate lost from W to W+1 (at H:W>W+1(rows):${lost:- none})" test -z "$lost"
 	done
 }
-c_est_pins() {   # EST AC 8: est, estreal, mixed, estarr, COMPACT H=40; wide-text (the text floors first), arrtask (a task row's estimate)
-	T_TITLE="EST's pins (AC 8), COMPACT H=40: est W 41/42 and 52 none beside 291a4a8's columns, W 53-57 only 1205 → 10:33, W=58 the two dates and 1205, W=59 all four; estreal W=54 none, W 55-60 only 8003 → 12:33, W=61 all three; mixed W=50 none, W=63 → 2027-11-30, W=23 ST and none (the estimates go before the code); estarr W 59-61 291a4a8's ids and none, W=62 7201 → 12:33, W=70 7200_[…] ×18 → Oct28 07:33 and 7202 → 2027-11-30; wide-text W=62 5003 → 10:33 and 5008 → 12:33 (the estimates go after the text floors, H4.3); arrtask W=70 the task row 7301_17 → 2027-11-30 and 7302 → 10:33 (a task row holds its estimate like any row)"
+c_est_pins() {   # EST AC 8: est, estreal, mixed, estarr, COMPACT H=40; wide-text (the text floors first), arrtask (a task row's estimate), est W=55 (the FLEX limit)
+	T_TITLE="EST's pins (AC 8), COMPACT H=40: est W 41/42 and 52 none beside 291a4a8's columns, W 53-57 only 1205 → 10:33, W=55 LEFT 1h00m and NODE/REASON at 9 beside it (its FLEX limit is the floor only where wider than 8), W=58 the two dates and 1205, W=59 all four; estreal W=54 none, W 55-60 only 8003 → 12:33, W=61 all three; mixed W=50 none, W=63 → 2027-11-30, W=23 ST and none (the estimates go before the code); estarr W 59-61 291a4a8's ids and none, W=62 7201 → 12:33, W=70 7200_[…] ×18 → Oct28 07:33 and 7202 → 2027-11-30; wide-text W=62 5003 → 10:33 and 5008 → 12:33 (the estimates go after the text floors, H4.3); arrtask W=70 the task row 7301_17 → 2027-11-30 and 7302 → 10:33 (a task row holds its estimate like any row)"
 	local wd
 	est_run est SQ_WIDTH=41 SQ_HEIGHT=40 -- --compact --no-color
 	need "est W=41: JOBID NAME STATE LEFT MEM NODE/REA, no estimate" eval 'rc_is 0 && qhdr_is "JOBID NAME STATE LEFT MEM NODE/REA" && est_is ""'
@@ -10611,6 +10611,9 @@ c_est_pins() {   # EST AC 8: est, estreal, mixed, estarr, COMPACT H=40; wide-tex
 		est_run est SQ_WIDTH=$wd SQ_HEIGHT=40 -- --compact --no-color
 		need "est W=$wd: only 1205 → 10:33" est_is "1205=10:33"
 	done
+	est_run est SQ_WIDTH=55 SQ_HEIGHT=40 -- --compact --no-color
+	need "est W=55: LEFT 1h00m, NODE/REASON 9 wide beside 1205 → 10:33 (FLEX limit 8, the floor 7 is not wider)" eval '
+		qhdr_is "JOBID NAME USER STATE TIME LEFT CPU MEM NODE/REAS" && words_has " 1201 prep alice PENDING 0s 1h00m 1 4G (ReqNode…"'
 	est_run est SQ_WIDTH=58 SQ_HEIGHT=40 -- --compact --no-color
 	need "est W=58: 1201 → 2027-11-30, 1204 → 2999-12-31, 1205 → 10:33, 1206 (Priority)" eval '
 		est_is "1201=2027-11-30,1204=2999-12-31,1205=10:33" && words_has "1206 prep alice PENDING 0s 1h00m 1 4G (Priority)"'
