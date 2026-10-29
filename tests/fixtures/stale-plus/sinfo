@@ -1,0 +1,8 @@
+# R3-3 rule 1 (fix round 1, LOW 1): the state is read up to its FIRST "+".
+# fb2-bioinf busy with no AllocMem: the in-use view
+CPUsState=58/70/0/128; NodeList=fb2-bioinf; FreeMem=526168; Memory=1031000; StateLong=mixed; Reason=none; TimeStamp=Unknown; CPUsLoad=51.20; AllocMem=0
+# idle+drain*+cloud: up to the first + it is "idle", not stale (its figures, the
+# drain fault's red fill); up to the last + it would be "idle+drain*", stale
+CPUsState=0/0/24/24; NodeList=p01; FreeMem=2176; Memory=80000; StateLong=idle+drain*+cloud; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+# idle*+cloud+drain: up to the first + "idle*", stale; a fault (drain): red ·
+CPUsState=0/0/24/24; NodeList=p02; FreeMem=2176; Memory=80000; StateLong=idle*+cloud+drain; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0

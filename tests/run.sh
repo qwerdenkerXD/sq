@@ -1032,6 +1032,8 @@ c_exit_unread() {   # R3-1 AC 2-4, 9, 10
 	need "COMPACT's one line: 987654 FAILED ?" fin_line_is "recently finished: 987654 neg1 FAILED ?"
 	sq_run exit-unread SQ_WIDTH=40 -- --compact
 	need "COMPACT W=40, one item: a known non-zero exit over ?, 7401 reads 1,…" exit_is "7401_…" "1,…"
+	sq_run exit-digits -- --full
+	need "each field 1-3 digits: 0007:0 ?, 007:0 7, 0:0009 ?" eval 'rc_is 0 && exit_is 131 "?" && exit_is 132 7 && exit_is 133 "?"'
 	sq_run exit-unread-fallback -- --full
 	need "the fallback: 6051 ?, 6052 ?, 6053 255, 6054 1, 6055 ?" eval '
 		rc_is 0 && calls_are 1 1 1 1 && exit_is 6051 "?" && exit_is 6052 "?" && exit_is 6053 255 && exit_is 6054 1 && exit_is 6055 "?" && one_unknown'
@@ -1133,6 +1135,12 @@ c_job_exit_unread() {   # R3-1 AC 11-18, 21-23
 	job_run two-bad-11837 COLUMNS=120 -- --no-color job 11837
 	need "two-bad (empty, then 0:x): the first unreadable row quoted" eval '
 		rc_is 0 && state_is "FAILED · exit ? (sacct printed 0:x)" && why_has "  Slurm marked it FAILED, but its exit code cannot be read: sacct printed 0:x"'
+	job_run negsig-11837 COLUMNS=120 -- --no-color job 11837
+	need "negsig (-1:9, then 0:-1): two unreadable rows, the first one quoted" eval '
+		rc_is 0 && state_is "FAILED · exit ? (sacct printed -1:9)" && why_has "  Slurm marked it FAILED, but its exit code cannot be read: sacct printed -1:9"'
+	job_run cxlsig31-11837 COLUMNS=120 -- --no-color job 11837
+	need "cxlsig31: 31 is still a signal, the canceller names it" eval '
+		rc_is 0 && state_is "FAILED · exit 0/sig31: signal 31" && why_has "  the batch script was cancelled by its owner, which ended the job with signal 31"'
 	job_run comp-neg-11837 COLUMNS=120 -- --no-color job 11837
 	need "comp-neg: COMPLETED · exit ? (sacct printed -1:0)" eval 'rc_is 0 && state_is "COMPLETED · exit ? (sacct printed -1:0)"'
 	job_run to-neg-11837 COLUMNS=120 -- --no-color job 11837
@@ -5147,6 +5155,12 @@ c_stale_inuse() {   # R3-3 AC 1-3, 5, 8
 		plain | gawk "/ cpu / { sub(/ cpu .*/, \" cpu\"); print }" > "$T_DIR/cpu-now" &&
 		without_clock "$r3gold/stale-edges.full.w120.color" | sed -E "s/\x1b\[[0-9;]*m//g" | gawk "/ cpu / { sub(/ cpu .*/, \" cpu\"); print }" > "$T_DIR/cpu-then" &&
 		cmp -s "$T_DIR/cpu-now" "$T_DIR/cpu-then" && cpu_part n24 | grep -qF "▒▒▒▒▒▒▒▒········"'
+	need "an answering fault node with a known figure keeps its colours: n22 down and n16 down\$ red █, dim ░" eval '
+		bar_kinds_are n22 2 "2:░ 31:█" && bar_kinds_are n16 2 "2:░ 31:█"'
+	sq_run stale-plus -- --full --color
+	need "two +: up to the first, p01 idle+drain*+cloud is not stale (its red fill), p02 idle*+cloud+drain is (red ·)" eval '
+		rc_is 0 && mem_part_is p01 "████████████████ 97% 76/78G mem idle+drain*+cloud" && bar_kinds_are p01 2 "31:█" &&
+		mem_part_is p02 "················ -% -/78G mem idle*+cloud+drain" && bar_kinds_are p02 2 "31:·"'
 	sq_run ck-stale SQ_WIDTH=120 -- --full --color
 	need "ck-stale: rc 0" rc_is 0
 	need "k01 down (FreeMem N/A) and k02 drained (Memory empty): faults, their unknown cells red" eval 'bar_kinds_are k01 2 "31:·" && bar_kinds_are k02 2 "31:·"'

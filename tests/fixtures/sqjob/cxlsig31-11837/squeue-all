@@ -1,0 +1,7 @@
+@include ../../_common/job-defaults
+# its output file, dated after the job started (the render script's content)
+@file create media/BioNAS2/schroder/kraken/logs/kraken-11837.out Masking low-complexity regions of downloaded library... done.\nStep 1/3: Creating taxonomy tree\n
+@file touch media/BioNAS2/schroder/kraken/logs/kraken-11837.out \{now-180s}
+@file create media/BioNAS2/schroder/kraken/logs/kraken-11837.err Traceback (most recent call last):\n  File "/media/BioNAS2/schroder/kraken/scripts/build_db.py", line 88, in <module>\n    main(sys.argv[1:])\n  File "/media/BioNAS2/schroder/kraken/scripts/build_db.py", line 61, in main\n    taxa = load_taxonomy(os.path.join(args.db, "taxonomy", "nodes.dmp"), names=os.path.join(args.db, "taxonomy", "names.dmp"))\nFileNotFoundError: [Errno 2] No such file or directory: '/media/BioNAS2/schroder/kraken/db/taxonomy/nodes.dmp'\n\n
+@file touch media/BioNAS2/schroder/kraken/logs/kraken-11837.err \{now-180s}
+JobID=11837; ArrayJobID=11837; StateCompact=F; exit_code=0:31; UserName=schroder; UserID=1029; Name=kraken-build; Partition=small; NodeList=fb2-bioinf-0; BatchHost=fb2-bioinf-0.bioinf.local; NumCPUs=8; tres_alloc=cpu=8,mem=25600M,node=1,billing=8; TimeUsed=41:10; TimeLeft=7:18:50; TimeLimit=8:00:00; SubmitTime=\{epoch-2700s}; StartTime=\{epoch-2650s}; EndTime=\{epoch-210s}; WorkDir=\{run}/media/BioNAS2/schroder/kraken; STDOUT=\{run}/media/BioNAS2/schroder/kraken/logs/kraken-%j.out; STDERR=\{run}/media/BioNAS2/schroder/kraken/logs/kraken-%j.err; Reason=NonZeroExitCode
