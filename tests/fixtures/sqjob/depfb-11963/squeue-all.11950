@@ -1,0 +1,3 @@
+# r3-check2: the parent still in squeue, FAILED with Slurm's own failure (squeue prints 0:1 for job_mgr's 1)
+@include ../../_common/job-defaults
+JobID=11950; ArrayJobID=11950; StateCompact=F; exit_code=0:1; UserName=fsill; UserID=1041; Name=parent; Partition=small; NodeList=fb2-bioinf-0; NumCPUs=16; TimeUsed=2:01:30; TimeLeft=0:00; TimeLimit=8:00:00; SubmitTime=\{epoch-8100s}; StartTime=\{epoch-8010s}; EndTime=\{epoch-750s}; Reason=NonZeroExitCode

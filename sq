@@ -2185,20 +2185,35 @@ function task_in(x, t,   p, np, i, m, a, b, s) {
   return 0
 }
 
+# accounting's rows of table T (rows 1..n) as sq job finds a job in them, for
+# the job itself (pick) and a dependency parent (why_load): its job rows by
+# JobID (JR) and by JobIDRaw (UR), the first of each, and the steps of each
+# (an id with a "."), by the JobID before the dot: NS[id] of them, SR[id, k]
+function acct_index(T, n, JR, UR, NS, SR,   r, id, p, k) {
+  for (r = 1; r <= n; r++) {
+    id = T[r, "JobID"]
+    if ((p = index(id, ".")) > 0) { k = substr(id, 1, p - 1); SR[k, ++NS[k]] = r; continue }
+    if (!(id in JR)) JR[id] = r
+    if (!(T[r, "JobIDRaw"] in UR)) UR[T[r, "JobIDRaw"]] = r
+  }
+}
+# the job row of ID in acct_index's JR and UR: by its JobID, else by its
+# unique id (an array task named by its own job id, 11953 for 11950_3; a het
+# job's leader, 12000 for 12000+0); 0 for none
+function acct_row(id, JR, UR) { return (id in JR) ? JR[id] : (id in UR) ? UR[id] : 0 }
+
 # ---- which records: the job's, a task's, or an array's -----------------------
-# sacct: job_row[id] its job rows, row_by_unique_id[unique id] the same, step_row[id, k] / nsteps[id] the
-# steps of each, task_row[k] / ntask_rows the rows of array JOB's tasks; squeue: array_record[k] / narray_records
+# sacct (acct_index): job_row[id] its job rows, row_by_unique_id[unique id] the same, step_row[id, k] / nsteps[id] the
+# steps of each; task_row[k] / ntask_rows the rows of array JOB's tasks; squeue: array_record[k] / narray_records
 # the records of array JOB.  The answer: het, array, none, or one (with qrow
 # and arow, the job's squeue record and sacct row, either may be 0; inmeta
 # when its record is a pending array's, which still holds the task)
-function pick(   r, id, p, k) {
+function pick(   r, id) {
+  acct_index(A, na, job_row, row_by_unique_id, nsteps, step_row)
   for (r = 1; r <= na; r++) {
     id = A[r, "JobID"]
     if (index(id, "+")) het = 1
-    if ((p = index(id, ".")) > 0) { k = substr(id, 1, p - 1); step_row[k, ++nsteps[k]] = r; continue }
-    if (!(id in job_row)) job_row[id] = r
-    if (!(A[r, "JobIDRaw"] in row_by_unique_id)) row_by_unique_id[A[r, "JobIDRaw"]] = r
-    if (task == "" && index(id, job "_") == 1) task_row[++ntask_rows] = r
+    if (task == "" && !index(id, ".") && index(id, job "_") == 1) task_row[++ntask_rows] = r
   }
   for (r = 1; r <= nq; r++) {
     if (R[r, "HetJobID"] != "N/A") het = 1
@@ -2208,13 +2223,13 @@ function pick(   r, id, p, k) {
   if (task == "") {
     if (ntask_rows || narray_records) return "array"
     for (r = 1; r <= nq && !qrow; r++) if (R[r, "JobID"] == job) qrow = r
-    arow = (job in job_row) ? job_row[job] : (job in row_by_unique_id) ? row_by_unique_id[job] : 0
+    arow = acct_row(job, job_row, row_by_unique_id)
   } else {
     for (r = 1; r <= nq && !qrow; r++)
       if (R[r, "ArrayJobID"] == job && R[r, "ArrayTaskID"] == task) qrow = r
     for (r = 1; r <= nq && !qrow; r++)
       if (R[r, "ArrayJobID"] == job && task_in(R[r, "ArrayTaskID"], task)) { qrow = r; inmeta = 1 }
-    arow = ((job "_" task) in job_row) ? job_row[job "_" task] : 0
+    arow = acct_row(job "_" task, job_row, row_by_unique_id)
   }
   if (!qrow && !arow) return "none"
   # the job as the title names it, its unique id (none for a task still in a
@@ -2362,6 +2377,16 @@ function failed_node(q, r) { return (r && A[r, "FailedNode"] != "") ? A[r, "Fail
 function exraw(id) {
   return JSRC[id] " printed " ((id in JRAW) ? clip(JRAW[id], 24) : "none")
 }
+# job KEY's exit as sq job reads it, the one reader of the job's state line,
+# its array's tasks and a dependency parent: accounting's row ROW of table T
+# and that row's steps (NS, SR of acct_index, by the row's JobID) where ROW is
+# given, the job listed there as ended; else squeue's exit_code QX, its 0:1
+# read as 1:0 (the fallback, fb).  Read back with jrc(KEY) and jsg(KEY)
+function exit_of(key, T, row, NS, SR, qx,   id, s) {
+  if (!row) { xcm(key, qx, 1); return }
+  id = T[row, "JobID"]; xcm(key, T[row, "ExitCode"])
+  for (s = 1; s <= NS[id]; s++) xcm(key, T[SR[id, s], "ExitCode"])
+}
 function exit_text(c,   t, sg, rc) {
   rc = jrc(jid); sg = jsg(jid); t = "exit " exlabel(rc, sg)
   if (rc < 0)    return t " (" exraw(jid) ")"
@@ -2371,7 +2396,7 @@ function exit_text(c,   t, sg, rc) {
   return t ": Slurm error" ((sg in SLERR) ? ", " SLERR[sg] : "")
 }
 function build_job(   q, r, c, final, never, name, user, unique, state, reason, dependency, start, submit,
-                      left, ended, step, req_cpus, req_mb, req_text, alloc_cpus, limit, out, err) {
+                      left, ended, req_cpus, req_mb, req_text, alloc_cpus, limit, out, err) {
   q = qrow; r = arow; c = STATE
   final = (c in DONE); never = final && never_started(q, r)
   name = q ? R[q, "Name"] : A[r, "JobName"]; user = q ? R[q, "UserName"] : A[r, "User"]
@@ -2402,12 +2427,12 @@ function build_job(   q, r, c, final, never, name, user, unique, state, reason, 
     # the exit over the job row and its steps, as the finished block reads
     # it, while accounting has the end; else squeue's
     if (r && (stcode(A[r, "State"]) in DONE)) {
-      xcm(jid, A[r, "ExitCode"]); for (step = 1; step <= nsteps[jid]; step++) xcm(jid, A[step_row[jid, step], "ExitCode"])
+      exit_of(jid, A, r, nsteps, step_row)
       kv("state", "state", ended_state(state, c, q, r))
       if (!never) kv("state", "ran", elap(A[r, "ElapsedRaw"] + 0) " on " A[r, "NodeList"] " (" A[r, "Partition"] ")")
       ended = A[r, "End"]
     } else {
-      xcm(jid, R[q, "exit_code"], 1)
+      exit_of(jid, A, 0, nsteps, step_row, R[q, "exit_code"])
       kv("state", "state", ended_state(state, c, q, r))
       if (!never) kv("state", "ran", elap(dur(R[q, "TimeUsed"])) " on " R[q, "NodeList"] " (" R[q, "Partition"] ")")
       ended = R[q, "EndTime"]
@@ -2625,6 +2650,7 @@ function why_load(   nu, um, i, mf, ln) {
   for (i = 1; i <= nu; i++) if (split(um[i], mf, "=") == 2) UMAP[mf[1]] = mf[2]
   npq = read_stream(ENVIRON["SQJ_WPARENTS"], NONCE, qfields, RP, "^[0-9]+$"); if (npq < 0) npq = 0
   npa = read_stream(ENVIRON["SQJ_WPACCT"], NONCE2, afields, AP, ID "([.][A-Za-z0-9_+.-]+)?$"); if (npa < 0) npa = 0
+  acct_index(AP, npa, prow, praw, pnsteps, pstep_row)      # the parents' rows, found as the job's own
   nrq = read_stream(ENVIRON["SQJ_WQUEUE"], NONCE, ENVIRON["SQJ_WQFIELDS"], RQ, "^[0-9]+$"); if (nrq < 0) nrq = 0
   NODESTAT = ENVIRON["SQJ_WNODESTAT"]; NODEWHY = ENVIRON["SQJ_WNODEWHY"]; NODEFMT = ENVIRON["SQJ_WNODEFMT"]
   if (NODESTAT == "ok" && NODEFMT == "text") nodes_of_sinfo(ENVIRON["SQJ_WNODEFIG"], ENVIRON["SQJ_WNODES"], ENVIRON["SQJ_WNODEGATE"])
@@ -2774,7 +2800,7 @@ function depcond(i, form,   t, x, h) {      # FORM has, have (the lead line) or 
   if (DD[i] != "") x = x (form == "must" ? ", then " plural(DD[i] + 0, "minute") " more" : " and " plural(DD[i] + 0, "minute") " have passed")
   return x
 }
-function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids, lead, idw, st) {
+function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids, lead, idw, st, asked) {
   dep = R[q, "Dependency"]
   if (dep == "" || dep == "(null)") {
     if (reason == "DependencyNeverSatisfied") { wl(vword("will", "a job it depends on ended the wrong way")); cancel_hint() }
@@ -2788,6 +2814,7 @@ function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids,
     if (depclause(cl[i], m)) {
       DT[i] = m[1]; DP[i] = m[2] ((m[4] != "" && m[4] != "*") ? "_" m[4] : ""); DD[i] = m[6]; DS[i] = m[7]
       DSTAR[i] = (m[4] == "*" || (m[4] == "" && is_array_parent(m[2])))
+      if (m[7] == "failed") asked[DP[i]]            # passed to the parents' sacct, as why_plan's pdone
     } else if (match(cl[i], /^singleton\(([a-z]+)\)$/, m)) { DT[i] = "singleton"; DS[i] = m[1] }
     else { DT[i] = "raw"; DP[i] = cl[i] }
     if (DS[i] == "failed") nf++; else nu++
@@ -2807,34 +2834,49 @@ function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids,
   for (i = 1; i <= n; i++) {
     if (DT[i] == "singleton") { wl2(sprintf("%-*s  %s", idw, "", "no other job of " (OWN ? "yours" : OWNER "'s") " named " R[q, "Name"] " runs or waits ahead of it")); continue }
     if (DT[i] == "raw") { wl2(DP[i]); continue }
-    st = DSTAR[i] ? array_state(DP[i]) : parent_state(DP[i])
+    st = DSTAR[i] ? array_state(DP[i]) : parent_state(DP[i], DP[i] in asked)
     if (!same) st = depcond(i, "must") (DS[i] == "failed" ? ", which can no longer happen" : "") " · now " st
     wl2(sprintf("%-*s  %s", idw, DP[i], st))
   }
   if (never) cancel_hint()
 }
 # a parent's state now: squeue's record while it has one, else accounting's
-function parent_state(pid,   p, a, c, x, left) {
+# row, found as sq job PID finds its own (acct_row); an ended one's exit as
+# sq job PID reads it (parent_exit).  ASKED: accounting was asked about it
+# (its id among the parents of failed clauses passed to sacct), so where
+# neither tool holds it and sacct did not answer, its silence is no "no
+# longer knows"
+function parent_state(pid, asked,   p, a, c, left) {
   for (p = 1; p <= npq; p++)
     if (RP[p, "JobID"] == pid || (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/ && RP[p, "ArrayJobID"] "_" RP[p, "ArrayTaskID"] == pid)) break
   if (p <= npq) {
     c = RP[p, "StateCompact"]
     if (c == "PD") return paint(stcolour(c), "PENDING") " (" RP[p, "Reason"] ")" (isepoch(RP[p, "StartTime"]) && RP[p, "StartTime"] > NOW ? " · Slurm's estimate: " when(RP[p, "StartTime"]) : " · no start estimate")
-    if (c in DONE) {
-      exread(RP[p, "exit_code"], x)
-      return paint(stcolour(c), stname(c)) " · exit " exlabel(x[1], x[2]) (isepoch(RP[p, "EndTime"]) ? " · ended " ago(NOW - RP[p, "EndTime"]) " ago" : "")
-    }
+    if (c in DONE)
+      return paint(stcolour(c), stname(c)) parent_exit(pid, c, RP[p, "exit_code"]) (isepoch(RP[p, "EndTime"]) ? " · ended " ago(NOW - RP[p, "EndTime"]) " ago" : "")
     left = RP[p, "TimeLeft"]
     left = (left == "UNLIMITED") ? "no time limit" : (left == "INVALID") ? "past its time limit" : elap(dur(left)) " left of " elap(dur(RP[p, "TimeLimit"]))
     return paint(stcolour(c), stname(c)) " on " RP[p, "NodeList"] " · " left
   }
-  for (a = 1; a <= npa; a++) if (AP[a, "JobID"] == pid) break
-  if (a <= npa) {
-    exread(AP[a, "ExitCode"], x); c = stcode(AP[a, "State"])
-    return paint(stcolour(c), stname(c)) ((c in DONE) ? " · exit " exlabel(x[1], x[2]) (isepoch(AP[a, "End"]) ? " · ended " ago(NOW - AP[a, "End"]) " ago" : "") : "")
+  if ((a = acct_row(pid, prow, praw))) {
+    c = stcode(AP[a, "State"])
+    return paint(stcolour(c), stname(c)) ((c in DONE) ? parent_exit(pid, c, "") (isepoch(AP[a, "End"]) ? " · ended " ago(NOW - AP[a, "End"]) " ago" : "") : "")
   }
   if (ENVIRON["SQJ_WPQ"] == "fail") return "unknown: squeue did not answer"
+  if (asked && ENVIRON["SQJ_WPA"] == "fail") return "unknown: accounting did not answer"
   return "Slurm no longer knows it"
+}
+# " · exit LABEL" of a parent that ended in state C, its pair read as sq job
+# PID reads its own (exit_of): accounting's rows while they list it ended,
+# else squeue's QX.  None for a COMPLETED one: its own exit was 0 (Slurm
+# completes a job only on a 0 status), and Slurm judges a dependency by the
+# state alone, so a step's exit beside it would argue with the verdict
+function parent_exit(pid, c, qx,   a, k) {
+  if (c == "CD") return ""
+  a = acct_row(pid, prow, praw); k = "parent " pid
+  if (a && !(stcode(AP[a, "State"]) in DONE)) a = 0
+  exit_of(k, AP, a, pnsteps, pstep_row, qx)
+  return " · exit " exlabel(jrc(k), jsg(k))
 }
 # an array parent: does squeue answer task records for it?  Its tasks' states, counted
 function is_array_parent(id,   p) {
@@ -3134,7 +3176,7 @@ function why_tail(   info, which, me, host, k) {
 }
 
 # ---- an array: its tasks that did not complete, grouped by why
-function why_array(   i, r, id, c, by, never, key, k, s, n, GN, GI, GK, a, b, t, first, x, y, m) {
+function why_array(   i, r, id, c, by, never, key, k, n, GN, GI, GK, a, b, t, first, x, y, m) {
   for (i = 1; i <= ntask_rows; i++) {
     r = task_row[i]; id = A[r, "JobID"]; c = stcode(A[r, "State"])
     if (c == "CD" || !(c in DONE)) continue
@@ -3142,8 +3184,7 @@ function why_array(   i, r, id, c, by, never, key, k, s, n, GN, GI, GK, a, b, t,
       by = canceller(A[r, "State"]); never = (A[r, "AllocCPUS"] + 0 == 0 || A[r, "Start"] == "None" || A[r, "Start"] == "Unknown")
       key = "cancelled" (by != "" ? " by " who(by, A[r, "User"], A[r, "UID"]) : "") (never ? " while pending" : " while running")
     } else if (c == "F") {
-      xcm(id, A[r, "ExitCode"])
-      for (s = 1; s <= nsteps[id]; s++) xcm(id, A[step_row[id, s], "ExitCode"])
+      exit_of(id, A, r, nsteps, step_row)
       x = jsg(id); y = jrc(id)
       key = (y < 0) ? "failed with an exit code that cannot be read" : (x >= 1 && x <= 31) ? "failed by " signame(x) \
           : (x > 31 && x != 125) ? "failed by Slurm error " x : "failed with exit " y
@@ -3442,7 +3483,7 @@ job_why_export() {
 	local me=
 	[ "$w_tailinfo" != ok ] || job_width
 	[ -z "$w_tailinfo" ] || me=$(hostname -s 2>/dev/null | scrub 64)
-	export SQJ_UIDMAP=$w_uidmap SQJ_WPQ=$w_parents_stat SQJ_WNODESTAT=$w_nodes_stat SQJ_WQUEUESTAT=$w_queue_stat \
+	export SQJ_UIDMAP=$w_uidmap SQJ_WPQ=$w_parents_stat SQJ_WPA=$w_pacct_stat SQJ_WNODESTAT=$w_nodes_stat SQJ_WQUEUESTAT=$w_queue_stat \
 		SQJ_WNODEFMT=$w_nodes_fmt SQJ_WNODEWHY=$w_nodes_why SQJ_WNODEFIG=$tmp/wnodefig SQJ_WNODEGATE=$tmp/wnodes.gate \
 		SQJ_WTAILINFO=$w_tailinfo SQJ_WWHICH=$w_which SQJ_WHOST=$w_host SQJ_WME=$me SQJ_COLS=$job_cols \
 		SQJ_WPARENTS=$tmp/wparents SQJ_WPACCT=$tmp/wpacct SQJ_WNODES=$tmp/wnodes SQJ_WQUEUE=$tmp/wqueue \

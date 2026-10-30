@@ -1,0 +1,17 @@
+▌ 11950  parent · fsill
+state and times
+  state     FAILED · exit ? (sacct printed -1:0)
+  ran       2h01m on fb2-bioinf (LocalQ)
+  ended     2026-10-30 04:06 (12m ago)
+why
+  Slurm marked it FAILED, but its exit code cannot be read: sacct printed -1:0
+  ↳ its output is not there; the job wrote it on fb2-bioinf
+resources
+  CPUs      16 allocated
+  memory    64G allocated
+files
+  work dir  /w
+  stdout    /w/out-11950.log
+  stderr    into stdout
+efficiency
+  CPU ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   0.0%  0s of 1d08h

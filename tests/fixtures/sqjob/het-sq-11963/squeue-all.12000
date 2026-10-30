@@ -1,0 +1,3 @@
+@include ../../_common/job-defaults
+JobID=12000; ArrayJobID=12000; HetJobID=12000; HetJobOffset=0; StateCompact=F; exit_code=0:1; UserName=fsill; UserID=1041; Name=bwa-align; Partition=small; NodeList=fb2-bioinf-0; NumCPUs=16; TimeUsed=2:01:30; TimeLeft=0:00; TimeLimit=8:00:00; SubmitTime=\{epoch-8100s}; StartTime=\{epoch-8010s}; EndTime=\{epoch-750s}
+JobID=12001; ArrayJobID=12001; HetJobID=12000; HetJobOffset=1; StateCompact=F; exit_code=0:1; UserName=fsill; UserID=1041; Name=bwa-align; Partition=small; NodeList=fb2-bioinf-0; NumCPUs=16; TimeUsed=2:01:30; TimeLeft=0:00; TimeLimit=8:00:00; SubmitTime=\{epoch-8100s}; StartTime=\{epoch-8010s}; EndTime=\{epoch-750s}

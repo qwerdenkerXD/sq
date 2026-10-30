@@ -24,6 +24,8 @@
 # est_columns est_full est_height_cols est_start) are frozen the same way,
 # from a build of 7fd9bd6; they hold the start estimates, so they are
 # compared whole (est_golden, est_screen_golden), not by frozen_is.
+# tests/goldens/s1 holds what 4dae676 printed where S-v3's rule P leaves it
+# as it was (why_parent_own), written from 4dae676's sq.
 #
 # A failed case's run directories stay without -k too, as a flake may not
 # come back for a rerun: under ${TMPDIR:-/tmp}/sq-failed/<UTC start>.<pid>/,
@@ -434,18 +436,22 @@ err_empty()  { [ ! -s "$ERR" ]; }
 # for a need's text: " (the first 200 bytes of stderr)" where there is any
 err_quoted() { [ ! -s "$ERR" ] || printf ' (%s)' "$(head -c 200 "$ERR" | tr '\n' ' ')"; }
 out_empty()  { [ ! -s "$OUT" ]; }
-# frozen_is FILE: stdout is FILE, a frozen golden an older build wrote (see the
-# head of this file), the title's clock and the start estimates aside; only
-# --pin-frozen rewrites it, never --pin, and only where it differs so (a
-# golden that differs in its clock alone stays as it is)
+# frozen_is FILE [MASK]: stdout is FILE, a frozen golden an older build wrote
+# (see the head of this file), as MASK prints each of them: by default the
+# dashboard's frozen_mask, the title's clock and the start estimates aside;
+# job_mask for a report of sq job, its dates aside.  Only --pin-frozen
+# rewrites it, never --pin, and only where it differs so (a golden that
+# differs in its clock alone stays as it is)
 frozen_is() {
+	local mask=${2:-frozen_mask}
 	if [ $pin_frozen = 1 ]; then
-		[ -f "$1" ] && frozen_same "$1" && return 0
+		[ -f "$1" ] && frozen_same "$1" "$mask" && return 0
 		mkdir -p "${1%/*}"; cp "$OUT" "$1"; return 0
 	fi
-	frozen_same "$1"
+	frozen_same "$1" "$mask"
 }
-frozen_same() { cmp -s <(without_clock "$1" | mask_estimates) <(without_clock "$OUT" | mask_estimates); }
+frozen_same() { cmp -s <("$2" "$1") <("$2" "$OUT"); }   # frozen_same FILE MASK
+frozen_mask() { without_clock "$1" | mask_estimates; }
 # frozen_put GOLDEN: --pin-frozen's writer of a golden compared whole (EST's):
 # stdin into GOLDEN, only where GOLDEN does not hold exactly that already
 frozen_put() {
@@ -8188,6 +8194,147 @@ c_why_dep() {   # J6, J7
 	need "Dependency and no clause left: met, the next pass" eval 'rc_is 0 && why_has "  waits its turn: its dependency is met now; the scheduler starts it on a next pass"'
 }
 
+# ---- a dependency parent's line (S-v3 rule P) ---------------------------------
+# A parent's accounting row is found as sq job PARENT finds its own (by JobID,
+# else JobIDRaw: an array task's unique id, a het job's leader), its exit is
+# the pair sq job PARENT's state line shows (accounting's job row and steps
+# while accounting lists it ended, else squeue's, its 0:1 read as 1:0), shown
+# as a label alone; a COMPLETED parent shows none; a parent sq asked
+# accounting about (its id among the failed clauses') that neither tool holds
+# reads "unknown: accounting did not answer" where sacct failed, squeue's
+# silence named first.  Each parent ended \{epoch-750s}, mid-bucket: 12m ago
+parent_rows() { why_lines | grep -E '^    [0-9]'; }   # the why section's rows of parents
+# parent_rows_are FIXTURE ROW...: sq job 11963 on FIXTURE-11963 (COLUMNS 120,
+# colour off) has exactly these parent rows, in this order
+parent_rows_are() {
+	local want; want=$(printf '%s\n' "${@:2}")
+	job_run "$1-11963" COLUMNS=120 "${PARENT_ENV[@]}" -- --no-color job 11963
+	need "$1: the parent rows $(printf '[%s] ' "${@:2}" | tr -s ' ')" eval 'rc_is 0 && [ "$(parent_rows)" = "$want" ]'
+}
+c_why_parent() {   # S-v3 rule P: ACs 1-6, 7 (sacct failing), 7b-7d, 8, 9's parent lines
+	T_TITLE="a dependency parent's line reads its exit as sq job PARENT does (steps folded, OOM wins, squeue's 0:1 as 1, an unreadable pair ?), finds it by JobID or unique id (an array task's, a het leader's), shows no exit for a COMPLETED one, and names accounting's silence for a parent sq asked accounting about, squeue's first"
+	local f pid cols line own PARENT_ENV=()
+	local failed='    11950  FAILED · exit 1/oom · ended 12m ago' raw='    11953  FAILED · exit 1/oom · ended 12m ago'
+	local silent='must complete successfully, which can no longer happen · now unknown: accounting did not answer'
+	# AC 1-3: steps folded (OOM wins), squeue's 0:1 as 1:0, -1:0 as ?
+	parent_rows_are dep-oomstep "$failed"
+	parent_rows_are dep-sqoomacct "$failed"
+	for f in dep-sq01 dep-sq01acct; do
+		parent_rows_are $f '    11950  FAILED · exit 1 · ended 12m ago'
+		need "$f: no sig1 anywhere" eval '! plain | grep -q sig1'
+	done
+	parent_rows_are depfb '    11950  FAILED · exit ? · ended 12m ago'
+	# AC 4: accounting still RUNNING (slurmdbd's lag): squeue's, 0:1 as 1
+	parent_rows_are dep-acctlag '    11950  FAILED · exit 1 · ended 12m ago'
+	parent_rows_are lag-running '    11950  FAILED · exit 1 · ended 12m ago'
+	# AC 5, 5b: a task's unique id, a task id, a het job's leader, squeue
+	# listing it or not
+	for f in dep-rawtask-sq dep-rawtask-acct raw-sq raw-forgot; do parent_rows_are $f "$raw"; done
+	for f in task-sq task-forgot; do parent_rows_are $f '    11950_3  FAILED · exit 1/oom · ended 12m ago'; done
+	for f in het-forgot2 het-sq; do
+		parent_rows_are $f '    12000  FAILED · exit 1/oom · ended 12m ago'
+		job_run $f-11963 COLUMNS=120 -- --no-color job 12000
+		need "$f: sq job 12000 still refuses a het job" eval 'rc_is 1 && out_empty && err_is "sq job: het jobs are not supported yet"'
+	done
+	# AC 6: a COMPLETED parent shows no exit, its own report keeps it
+	for f in notok-cdoom notok-cdstep notok-cdstep-sq; do parent_rows_are $f '    11950  COMPLETED · ended 12m ago'; done
+	parent_rows_are notok-mixed '    11950  must fail, which can no longer happen · now COMPLETED · ended 12m ago'
+	job_run notok-cdoom-11963 COLUMNS=120 -- --no-color job 11950
+	need "notok-cdoom: sq job 11950 keeps COMPLETED · exit 0/oom" eval 'rc_is 0 && state_is "COMPLETED · exit 0/oom: out of memory"'
+	for f in notok-cdstep notok-cdstep-sq; do
+		job_run $f-11963 COLUMNS=120 -- --no-color job 11950
+		need "$f: sq job 11950 keeps COMPLETED · exit 1" eval 'rc_is 0 && state_is "COMPLETED · exit 1"'
+	done
+	# AC 7, 7b-7d: the parents' sacct failing; asked = the id among the failed
+	# clauses', whatever clause names it on a row; squeue's silence first
+	parent_rows_are acctfail-dep-oomstep '    11950  unknown: accounting did not answer'
+	parent_rows_are acctfail-dep-sqoomacct '    11950  FAILED · exit 1 · ended 12m ago'
+	parent_rows_are mixed-silent "    11950  $silent" '    11951  must end · now Slurm no longer knows it'
+	parent_rows_are twoclause-silent '    11950  must start, then 60 minutes more · now unknown: accounting did not answer' "    11950  $silent"
+	parent_rows_are bothfail '    11950  unknown: squeue did not answer'
+	# AC 8: one reader, the parent line's label is sq job PARENT's, up to the
+	# first space or ":", at COLUMNS 120 and 40; two's answers are filed under
+	# both ids, so sq job 11950 cannot run on it: its strings
+	for f in dep-oomstep dep-sqoomacct dep-sq01 dep-sq01acct depfb dep-acctlag dep-rawtask-sq dep-rawtask-acct \
+	         raw-sq raw-forgot task-sq task-forgot range lag-running; do
+		pid=11950; case $f in *raw*) pid=11953 ;; task-*) pid=11950_3 ;; esac
+		for cols in 120 40; do
+			job_run $f-11963 COLUMNS=$cols -- --no-color job 11963
+			line=$(parent_rows | sed -n 's/.* · exit \([^ :]*\).*/\1/p')
+			job_run $f-11963 COLUMNS=$cols -- --no-color job $pid
+			own=$(plain | sed -n 's/^  state .* · exit \([^ :]*\).*/\1/p')
+			need "$f COLUMNS=$cols: the parent line's exit ($line) is sq job $pid's ($own)" eval '[ -n "$line" ] && [ "$line" = "$own" ]'
+		done
+	done
+	parent_rows_are range "$failed"
+	parent_rows_are two "$failed" '    11951  FAILED · exit 1 · ended 12m ago'
+	# AC 9: the parent lines rule P leaves as they were
+	parent_rows_are dep-failed '    11950  FAILED · exit 1 · ended 12m ago'
+	parent_rows_are neg1-depsq '    11950  FAILED · exit ? · ended 12m ago'
+	parent_rows_are twoclause-ok '    11950  must start, then 60 minutes more · now FAILED · exit 1/oom · ended 12m ago' \
+		'    11950  must complete successfully, which can no longer happen · now FAILED · exit 1/oom · ended 12m ago'
+	job_run dep-mixed-11969 COLUMNS=120 -- --no-color job 11969
+	need "dep-mixed: its parent rows as they were" eval 'rc_is 0 && [ "$(parent_rows | sed -E "s/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}/<date>/")" = "$(printf "%s\n" \
+		"    11950  must complete successfully · now RUNNING on fb2-bioinf · 21h46m left of 1d00h" \
+		"    11958  must end · now PENDING (Resources) · Slurm'"'"'s estimate: <date> (in 21h)")" ]'
+	job_run pending-dep COLUMNS=120 -- --no-color job 11961
+	need "pending-dep: its parent row as it was" eval 'rc_is 0 && [ "$(parent_rows)" = "    11950  RUNNING on fb2-bioinf · 21h46m left of 1d00h" ]'
+}
+# AC 7 where the parents' sacct hangs past SQ_TIMEOUT (2 s): squeue forgot the
+# parent, so accounting's silence; squeue still lists it, so squeue's
+c_why_parent_hang() {   # S-v3 rule P: AC 7, sacct hanging
+	T_TITLE="a parent whose accounting answer did not come within SQ_TIMEOUT: 'unknown: accounting did not answer' where squeue forgot it, squeue's exit where it lists it"
+	local PARENT_ENV=(SQ_TIMEOUT=2)
+	parent_rows_are accthang-dep-oomstep '    11950  unknown: accounting did not answer'
+	parent_rows_are accthang-dep-sqoomacct '    11950  FAILED · exit 1 · ended 12m ago'
+}
+# AC 9: sq job PARENT's own report on each fixture of rule P that holds its
+# answers is what it was before rule P (the finder is pick()'s own): frozen
+# goldens of 4dae676's sq job (EST left sq job as e59a6de had it), dates aside,
+# written by
+#   SQ_UNDER_TEST=<4dae676's sq> tests/run.sh --pin-frozen why_parent_own
+# Its accthang fixtures wait SQ_TIMEOUT (2 s) for sacct, so it is timed
+s1gold=$here/goldens/s1
+c_why_parent_own() {   # S-v3 rule P: AC 9, the parents' own reports
+	T_TITLE="sq job PARENT on each fixture of rule P (the parent 11950, 11953, 11950_3 or 12000): stdout as before rule P, dates aside, and its rc and stderr"
+	local f pid rc err
+	while read -r f pid rc err; do
+		[ -n "$f" ] || continue
+		job_run $f-11963 COLUMNS=120 SQ_TIMEOUT=2 -- --no-color job $pid
+		need "$f: sq job $pid as before rule P (rc $rc${err:+, $err})" eval 'rc_is $rc && err_is "$err" && frozen_is "$s1gold/$f.job$pid" job_mask'
+	done <<-'OWN'
+		acctfail-dep-oomstep 11950 1 sq job: slurm unreachable · sacct: error: Problem talking to the database: Connection refused
+		acctfail-dep-sqoomacct 11950 0
+		accthang-dep-oomstep 11950 1 sq job: slurm unreachable · no response after 2s
+		accthang-dep-sqoomacct 11950 0
+		bothfail 11950 1 sq job: slurm unreachable · squeue: error: Unable to contact slurm controller (connect failure)
+		dep-acctlag 11950 0
+		dep-oomstep 11950 0
+		dep-rawtask-acct 11953 0
+		dep-rawtask-sq 11953 0
+		dep-sq01 11950 0
+		dep-sq01acct 11950 0
+		dep-sqoomacct 11950 0
+		depfb 11950 0
+		het-forgot 12000 1 sq job: het jobs are not supported yet
+		het-forgot2 12000 1 sq job: het jobs are not supported yet
+		het-sq 12000 1 sq job: het jobs are not supported yet
+		lag-running 11950 0
+		mixed-silent 11950 1 sq job: slurm unreachable · sacct: error: Problem talking to the database: Connection refused
+		notok-cdoom 11950 0
+		notok-cdstep 11950 0
+		notok-cdstep-sq 11950 0
+		notok-mixed 11950 0
+		range 11950 0
+		raw-forgot 11953 0
+		raw-sq 11953 0
+		task-forgot 11950_3 0
+		task-sq 11950_3 0
+		twoclause-ok 11950 0
+		twoclause-silent 11950 1 sq job: slurm unreachable · sacct: error: Problem talking to the database: Connection refused
+	OWN
+}
+
 # ---- Resources and Priority (J9-J11, V9, V11) ---------------------------------
 # res_fx NAME FIXTURE [SED...]: FIXTURE (resources-11964 or pending-est) with
 # these sed expressions run on its scontrol-node and squeue-queue; prints its directory
@@ -10975,6 +11122,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
+	why_parent why_parent_hang why_parent_own
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
@@ -10993,7 +11141,7 @@ cases=(
 timed_cases=" squeue_hangs squeue_ignores_term bell_probe_killed scrub_bounded tables_pass_cost cancel_names
 	membar_json membar_fallback jobmem_outcomes jobmem_throttle job_own
 	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract
-	why_nodes_json why_tail_hung why_budget why_parallel why_signals job_screens
+	why_nodes_json why_tail_hung why_budget why_parallel why_signals job_screens why_parent_hang why_parent_own
 	nodes_o_fail nodes_o_bounds stub_fast nodes_o_cost compact_prompt_row jobmem_lists "
 timed_cases=" $(printf '%s ' $timed_cases)"       # one space around each name
 for c in $timed_cases; do

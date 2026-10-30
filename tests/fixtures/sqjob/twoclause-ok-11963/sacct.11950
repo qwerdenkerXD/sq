@@ -1,0 +1,4 @@
+@include ../../_common/job-sacct-defaults
+JobID=11950; JobIDRaw=11950; UID=1041; User=fsill; State=FAILED; ExitCode=1:0; ElapsedRaw=7290; AllocCPUS=16; ReqCPUS=16; ReqTRES=; AllocTRES=cpu=16,mem=64G,node=1; Submit=\{epoch-8100s}; Start=\{epoch-8010s}; End=\{epoch-750s}; WorkDir=/media/BioNAS2/fsill/wgs; JobName=bwa-align; TimelimitRaw=1440
+JobID=11950.batch; JobIDRaw=11950.batch; UID=; User=; State=FAILED; ExitCode=1:0; ElapsedRaw=7290; AllocCPUS=16; ReqCPUS=16; ReqTRES=; AllocTRES=cpu=16,mem=64G,node=1; Submit=\{epoch-8100s}; Start=\{epoch-8010s}; End=\{epoch-750s}; WorkDir=/media/BioNAS2/fsill/wgs; JobName=bwa-align; TimelimitRaw=1440
+JobID=11950.0; JobIDRaw=11950.0; UID=; User=; State=OUT_OF_MEMORY; ExitCode=0:125; ElapsedRaw=7290; AllocCPUS=16; ReqCPUS=16; ReqTRES=; AllocTRES=cpu=16,mem=64G,node=1; Submit=\{epoch-8100s}; Start=\{epoch-8010s}; End=\{epoch-750s}; WorkDir=/media/BioNAS2/fsill/wgs; JobName=bwa-align; TimelimitRaw=1440

@@ -1,0 +1,2 @@
+@stderr sacct: error: Problem talking to the database: Connection refused
+@exit 1

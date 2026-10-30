@@ -1,0 +1,17 @@
+▌ 11950  bwa-align · fsill
+state and times
+  state     FAILED · exit 1
+  ran       2h01m on fb2-bioinf (LocalQ)
+  ended     2026-10-30 04:06 (12m ago)
+why
+  exit 1: the program reported an error itself; its output should say which
+  ↳ its output is not there; the job wrote it on fb2-bioinf-0
+resources
+  CPUs      16 allocated
+  memory    64G allocated
+files
+  work dir  /media/BioNAS2/fsill/wgs
+  stdout    /media/BioNAS2/fsill/wgs/logs/bwa-align-11950.out
+  stderr    into stdout
+efficiency
+  CPU ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   0.0%  0s of 1d08h

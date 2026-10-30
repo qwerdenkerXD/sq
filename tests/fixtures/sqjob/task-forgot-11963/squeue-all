@@ -1,0 +1,3 @@
+# 11963, whose parent 11950 failed and squeue forgot
+@include ../../_common/job-defaults
+JobID=11963; ArrayJobID=11963; StateCompact=PD; Reason=DependencyNeverSatisfied; Dependency=afterok:11950_3(failed); UserName=fsill; UserID=1041; Name=merge-counts; NodeList=; BatchHost=; NumCPUs=4; tres_alloc=cpu=4,mem=31200M,node=1,billing=4; TimeUsed=0:00; TimeLeft=12:00:00; TimeLimit=12:00:00; SubmitTime=\{epoch-9030s}; StartTime=N/A; WorkDir=/media/BioNAS2/fsill/rnaseq; STDOUT=logs/%x-%j.out; STDERR=logs/%x-%j.out; EndTime=N/A

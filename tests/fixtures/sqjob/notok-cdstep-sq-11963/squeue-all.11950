@@ -1,0 +1,3 @@
+# S item 4: the parent still in squeue (exit_code 1:0), accounting's step 0 OUT_OF_MEMORY
+@include ../../_common/job-defaults
+JobID=11950; ArrayJobID=11950; StateCompact=CD; exit_code=0:0; UserName=fsill; UserID=1041; Name=bwa-align; Partition=small; NodeList=fb2-bioinf-0; NumCPUs=16; TimeUsed=2:01:30; TimeLeft=0:00; TimeLimit=8:00:00; SubmitTime=\{epoch-8100s}; StartTime=\{epoch-8010s}; EndTime=\{epoch-750s}; Reason=None; WorkDir=/media/BioNAS2/fsill/wgs; STDOUT=logs/%x-%j.out; STDERR=logs/%x-%j.out; BatchHost=fb2-bioinf-0

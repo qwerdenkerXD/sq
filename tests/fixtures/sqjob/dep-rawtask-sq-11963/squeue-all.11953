@@ -1,0 +1,3 @@
+# squeue still lists task 11950_3 (raw 11953) F 1:0
+@include ../../_common/job-defaults
+JobID=11953; ArrayJobID=11950; ArrayTaskID=3; StateCompact=F; exit_code=1:0; UserName=fsill; UserID=1041; Name=bwa-align; Partition=small; NodeList=fb2-bioinf-0; NumCPUs=16; TimeUsed=2:01:30; TimeLeft=0:00; TimeLimit=8:00:00; SubmitTime=\{epoch-8100s}; StartTime=\{epoch-8010s}; EndTime=\{epoch-750s}; Reason=NonZeroExitCode; WorkDir=/media/BioNAS2/fsill/wgs; STDOUT=logs/%x-%j.out; STDERR=logs/%x-%j.out; BatchHost=fb2-bioinf-0

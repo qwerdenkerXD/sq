@@ -1,0 +1,15 @@
+▌ 11950_3 (unique id 11953)  bwa-align · fsill
+state and times
+  state     FAILED · exit 1/oom: out of memory
+  ran       2h01m on fb2-bioinf (LocalQ)
+  ended     2026-10-30 04:06 (12m ago)
+why
+  exit 1: the program reported an error itself; its output should say which
+resources
+  CPUs      16 allocated
+  memory    64G allocated
+files
+  work dir  /media/BioNAS2/fsill/wgs
+  output    unknown: Slurm forgets a job's paths about 5 minutes after it ends
+efficiency
+  CPU ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   0.0%  0s of 1d08h
