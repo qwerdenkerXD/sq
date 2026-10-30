@@ -189,7 +189,7 @@ sq job 12345              # one job, and its efficiency once it ended (below)
 | `SQ_RECENT_MAX` | Finished rows shown (default: every finished job in FULL, the space left on screen up to 25 in COMPACT; a value you set is used as given in FULL, and is an upper limit in COMPACT, which never pushes the footer off screen). |
 | `SQ_COMPACT` | `1` always COMPACT, `0` always FULL; anything else, or unset, decides by where the output goes. The flags beat it. |
 | `SQ_BELL_HORIZON` | A failure only rings while it is this fresh (default 600 s; `0` mutes). |
-| `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size. They never choose the mode. |
+| `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size; the dashboard's only (`sq job` cuts its output's last lines to `COLUMNS` when it is 21 or more, else to the terminal's width, else to 120 columns). They never choose the mode. |
 | `SQ_PSS_SINCE` | `sq job` only: when this cluster's accounting moved from RSS to PSS (`JobAcctGatherParams=UsePss`). It only dates that switch, it turns nothing on; Slurm keeps no record of which jobs were measured which way. Written as `2026-10-19 15:59 CEST`, `2026-10-19T13:59Z` or `@EPOCH`. A peak memory measured in a step that started before it gets a note. Unset by default: no such note. |
 
 ## sq log
@@ -281,7 +281,9 @@ efficiency
   4096 bytes while Slurm still knows its path, for every job whose file you can read, other
   users' too; the file is read by one process that gets 2 s, so a hung network mount does not
   hang `sq job` (that process, stuck in the kernel, is the one sq may leave behind). A running
-  or completed job has no why section.
+  or completed job has no why section. The report's lines are not cut to the terminal: a long
+  one wraps, so no path or reason loses a word; only the output's last lines are cut, to
+  `COLUMNS` or the terminal's width.
 - **An array**, `sq job 12345`, gets one summary: its tasks counted by state, and over the
   completed ones the median, the weakest task and the best, so `sq job 12345_7` can look at the
   weakest, and why its other tasks did not complete. A task is `12345_7`, or its own job id.

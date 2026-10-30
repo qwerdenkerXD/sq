@@ -8388,6 +8388,17 @@ c_why_parent_own() {   # S-v3 rule P: AC 9, the parents' own reports
 	OWN
 }
 
+# sq job reads COLUMNS, not SQ_WIDTH (SUBCMD D4, WHY V12), and cuts only the
+# output's last lines (WHY J21): the README says both (S-v3 items 2, 3)
+c_job_width_docs() {   # S-v3 items 2, 3
+	T_TITLE="README: SQ_WIDTH and SQ_HEIGHT are the dashboard's only, sq job cuts its output's last lines to COLUMNS (21 or more), else the terminal's width, else 120; its other lines wrap"
+	local readme=${here%/*}/README.md
+	job_run finished-11912 COLUMNS=120 -- --no-color job 11912
+	need "sq job: rc 0" rc_is 0
+	need "README: the SQ_WIDTH row names its scope and sq job's width" grep -qF '| `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size; the dashboard'"'"'s only (`sq job` cuts its output'"'"'s last lines to `COLUMNS` when it is 21 or more, else to the terminal'"'"'s width, else to 120 columns). They never choose the mode. |' "$readme"
+	need "README: sq job's lines wrap, only the output's last lines are cut" eval 'tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "A running or completed job has no why section. The report'"'"'s lines are not cut to the terminal: a long one wraps, so no path or reason loses a word; only the output'"'"'s last lines are cut, to \`COLUMNS\` or the terminal'"'"'s width."'
+}
+
 # ---- Resources and Priority (J9-J11, V9, V11) ---------------------------------
 # res_fx NAME FIXTURE [SED...]: FIXTURE (resources-11964 or pending-est) with
 # these sed expressions run on its scontrol-node and squeue-queue; prints its directory
@@ -11175,7 +11186,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	why_parent why_parent_hang why_parent_own
+	why_parent why_parent_hang why_parent_own job_width_docs
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
