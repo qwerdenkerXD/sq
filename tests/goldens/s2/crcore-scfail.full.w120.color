@@ -1,0 +1,14 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m04:28:14 UTC[0m
+
+  [1mfb2-bioinf  [0m [32m█[32m█[32m█[32m█[32m█[32m█[2;32m▒[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m  45%  [1m58[0m/128 cpu   [32m█[32m█[32m█[32m█[32m█[32m█[32m█[32m█[2m░[2m░[2m░[2m░[2m░[2m░[2m░[2m░[0m  48%  [1m493[0m/1007G mem  [2mmixed[0m
+  [1mfb2-bioinf-0[0m [33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[33m█[0m 100%  [1m24[0m/24  cpu   [1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[1;31m█[0m  97%  [1;31m 76[0m/78G   mem  [2mallocated[0m
+
+  [4mJOBID           NAME       USER       STATE     TIME         LEFT        CPU  MEM   NODE/REASON [0m
+  [32m5101         [0m   megahit    schroder   [1;32mRUNNING[0m      3:12:40   4-20:47:20   16  100G  fb2-bioinf
+  [32m5102_[0-1] ×2[0m   assemble   alice      [1;32mRUNNING[0m      3:12:40   4-20:47:20   16   64G  fb2-bioinf
+  [32m5105         [0m   blast      bob        [1;32mRUNNING[0m      1:02:11     22:57:49   10   37G  fb2-bioinf
+  [32m5106         [0m   hmmscan    erin       [1;32mRUNNING[0m   1-02:11:05   1-21:48:55   24   70G  fb2-bioinf-0
+
+  [2mrecently finished · last 2h · nothing in this window[0m
+
+  [1m5[0m jobs   [32m5 running[0m   [33m0 pending[0m   [31m0 other[0m

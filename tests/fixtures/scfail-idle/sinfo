@@ -1,0 +1,4 @@
+# S item 5: every Memory unknown (memunk-all) and scontrol failing (scfail)
+CPUsState=0/32/0/32; NodeList=a01; FreeMem=60000; Memory=; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/32/0/32; NodeList=a02; FreeMem=60000; Memory=N/A; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0
+CPUsState=0/32/0/32; NodeList=a03; FreeMem=60000; Memory=0; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0

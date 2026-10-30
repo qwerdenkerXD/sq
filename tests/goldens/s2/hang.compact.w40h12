@@ -1,0 +1,11 @@
+  ▌ SLURM FranzGB  04:28:05 UTC
+
+  a01  25% cpu    -% mem           mixed
+  a02  25% cpu    -% mem           mixed
+  a03  25% cpu    -% mem           mixed
+  ↳ sinfo gave no usable figure for Mem…
+  ↳ memory counts RealMemory: scontrol …
+
+  recently finished · last 2h · nothing…
+
+  2 jobs  2 running  0 pending  0 other

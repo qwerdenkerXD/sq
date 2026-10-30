@@ -24,8 +24,9 @@
 # est_columns est_full est_height_cols est_start) are frozen the same way,
 # from a build of 7fd9bd6; they hold the start estimates, so they are
 # compared whole (est_golden, est_screen_golden), not by frozen_is.
-# tests/goldens/s1 holds what 4dae676 printed where S-v3's rule P leaves it
-# as it was (why_parent_own), written from 4dae676's sq.
+# tests/goldens/s1 and s2 hold what 4dae676 printed where S-v3's rules P and
+# N leave it as it was (why_parent_own, membar_fail_unknown), written from
+# 4dae676's sq.
 #
 # A failed case's run directories stay without -k too, as a flake may not
 # come back for a rerun: under ${TMPDIR:-/tmp}/sq-failed/<UTC start>.<pid>/,
@@ -5295,11 +5296,11 @@ c_membar_memory_unknown() {   # R3-2 AC 1-4, 6, 7
 		need "${fx%:*} COMPACT 120x30: ${fx#*:} lines (7fd9bd6: 16)" eval 'rc_is 0 && [ "$(plain | wc -l)" = "${fx#*:}" ]'
 	done
 }
-c_membar_memory_unknown_docs() {   # R3-2 AC 8
-	T_TITLE="README: a node whose memory size sinfo cannot give counts no RealMemory"
+c_membar_memory_unknown_docs() {   # R3-2 AC 8, S-v3 item 5
+	T_TITLE="README: a node whose memory size sinfo cannot give counts no RealMemory; where no node's size is known, the scontrol line names the failure alone"
 	sq_run memunk-two -- --full
 	need "the dashboard: rc 0" rc_is 0
-	need "the memory-bar paragraph says so" eval 'tr "\n" " " < "${here%/*}/README.md" | sed -E "s/ +/ /g" | grep -qF "or the first of several). A node whose memory size sinfo cannot give is counted only by the line about sinfo'"'"'s figures: its total is unknown, so it counts no RealMemory. Where Slurm does not"'
+	need "the memory-bar paragraph says so" eval 'tr "\n" " " < "${here%/*}/README.md" | sed -E "s/ +/ /g" | grep -qF "or the first of several). A node whose memory size sinfo cannot give is counted only by the line about sinfo'"'"'s figures: its total is unknown, so it counts no RealMemory. Where no node'"'"'s size is known, the line about a failed scontrol names the failure alone. Where Slurm does not"'
 }
 c_membar_fail() {
 	T_TITLE="scontrol failing or silent: RealMemory counts and one dim line under the nodes says why, cut to the width; none under CR_CORE; COMPACT makes room for it, and its summary line counts RealMemory without it"
@@ -5334,6 +5335,58 @@ c_membar_fail() {
 	sq_run "$d" SQSTUB_HOST=FranzGB -- --full --no-color
 	need "CR_CORE: no line, the screen as accepted" eval '
 		rc_is 0 && [ -z "$(membar_note)" ] && cmp -s <(without_clock "$fixtures/membar-crcore/full-w120.txt") <(without_clock "$OUT")'
+}
+# Where no node's Memory is known (every one unknown, DISPLAY E3), the line
+# about a failed scontrol names the failure alone (S-v3 rule N-b): nothing
+# counts RealMemory there.  Where some node's Memory is known it is as it
+# was, and every screen keeps its lines and their order: frozen goldens of
+# 4dae676's screens (the scontrol line masked where rule N changes it), written by
+#   SQ_UNDER_TEST=<4dae676's sq> tests/run.sh --pin-frozen membar_fail_unknown
+s2gold=$here/goldens/s2
+scontrol_note() { plain | grep -E '^ *↳ (memory counts RealMemory|scontrol failed)' | sed -E 's/^ +//'; }
+scontrol_note_mask() { frozen_mask "$1" | sed -E 's/↳ (memory counts RealMemory: )?scontrol .*$/↳ <the scontrol line>/'; }
+c_membar_fail_unknown() {   # S-v3 rule N (N-b), ACs 1-4
+	T_TITLE="scontrol failing where no node's Memory is known: the dim line names the failure alone (no 'memory counts RealMemory'), at every width, the screen otherwise as before; where some Memory is known, as before"
+	local name conf tag
+	local -A fx=([scfail-memall]=scfail-memall [scfail-idle]=scfail-idle [scfail-mem1]=scfail-mem1
+		[hang]=$(mem_fixture scfail-memall scontrol-node '@hang 30') [sig]=$(mem_fixture scfail-memall scontrol-node '@signal 11')
+		[refuse]=$(mem_fixture scfail-memall scontrol-node '@stderr slurm_load_node error: Access/permission denied\n@exit 1')
+		[okjunk]=$(mem_fixture scfail-memall scontrol-node 'garbage line'))
+	# AC 4: every other line, and the lines' order, as 4dae676 drew them
+	for name in scfail-memall hang sig refuse scfail-idle scfail-mem1; do
+		for conf in "full.w120.color:SQ_WIDTH=120:--full --color" "full.w40:SQ_WIDTH=40:--full --no-color" \
+		            "compact.w80h30:SQ_WIDTH=80 SQ_HEIGHT=30:--compact --no-color" "compact.w40h12:SQ_WIDTH=40 SQ_HEIGHT=12:--compact --no-color" \
+		            "compact.w80h4:SQ_WIDTH=80 SQ_HEIGHT=4:--compact --no-color"; do
+			[ $name != hang ] || [[ $conf == full.w120.color:* || $conf == compact.w40h12:* ]] || continue   # each waits SQ_TIMEOUT
+			IFS=: read -r tag envs args <<< "$conf"
+			sq_run "${fx[$name]}" $envs -- $args
+			need "$name $tag: as 4dae676, the scontrol line aside" eval 'rc_is 0 && frozen_is "$s2gold/$name.$tag" scontrol_note_mask'
+		done
+	done
+	# AC 3: where a Memory is known, or nothing failed, byte for byte as before
+	for name in scfail-memempty scfail-mixed scfail scfail-plus scfail-downlast crcore-scfail scfail-inuse okjunk scfail-mem2one scfail-allskip; do
+		sq_run "${fx[$name]:-$name}" -- --full --color
+		need "$name FULL W=120 --color: as 4dae676" eval 'rc_is 0 && frozen_is "$s2gold/$name.full.w120.color"'
+	done
+	[ $pin_frozen = 1 ] && return   # the goldens written; what follows is rule N's, no older build's
+	# AC 1, 2: the failure alone
+	sq_run scfail-memall -- --full --no-color
+	need "scfail-memall FULL W=120: the caption, then the failure alone, cut to the width" eval '
+		rc_is 0 && [ "$(plain | grep -E "^  ↳ ")" = "$(printf "%s\n" "  ↳ sinfo gave no usable figure for Memory (3 nodes): shown as unknown" \
+			"  ↳ scontrol failed (slurm_load_node error: Unable to contact slurm controlle…")" ] && ! plain | grep -q "memory counts RealMemory"'
+	sq_run scfail-memall -- --full --color
+	need "... dim with colour" eval 'rc_is 0 && grep -qF "$ESC[2m↳ scontrol failed (slurm_load_node error: Unable to contact slurm controlle…$ESC[0m" "$OUT"'
+	sq_run scfail-memall SQ_WIDTH=80 SQ_HEIGHT=4 -- --compact --no-color
+	need "... the summary line as before: 47/?G, no !" eval 'rc_is 0 && [ "$(digest_line)" = "nodes: 3 mixed · 24/96 cpu · 47/?G mem" ]'
+	for name in hang:"no response after 3s" sig:"signal 11" scfail-idle:"exit 1" scfail-mem1:"exit 1"; do
+		sq_run "${fx[${name%%:*}]}" -- --full --no-color
+		need "${name%%:*} FULL W=120: ↳ scontrol failed (${name#*:})" eval 'rc_is 0 && [ "$(scontrol_note)" = "↳ scontrol failed (${name#*:})" ]'
+	done
+	# AC 3: where a Memory is known, the line as before; none in the in-use view
+	sq_run scfail-memempty -- --full --no-color
+	need "scfail-memempty: ↳ memory counts RealMemory: scontrol failed (exit 1)" eval 'rc_is 0 && [ "$(scontrol_note)" = "↳ memory counts RealMemory: scontrol failed (exit 1)" ]'
+	sq_run scfail-inuse -- --full --no-color
+	need "scfail-inuse (the in-use view): no scontrol line" eval 'rc_is 0 && [ -z "$(scontrol_note)" ]'
 }
 # A failing scontrol may have printed some nodes before it failed (a dump cut
 # off, a controller lost mid-answer): what it printed is no answer, so the
@@ -11114,7 +11167,7 @@ cases=(
 	bars_idle bars_busy bars_waste bars_over bars_overfull bars_down bars_round bars_edges
 	bars_width_sweep
 	digest_fit node_figures digest_n10 id_cells id_pins id_cells_wide_c
-	membar_screens membar_detect membar_call membar_fail membar_partial membar_over membar_down membar_forged membar_json membar_fallback membar_memory_unknown membar_memory_unknown_docs stale_inuse stale_untouched stale_docs nodes_not_utf8 nodes_ctl_o
+	membar_screens membar_detect membar_call membar_fail membar_fail_unknown membar_partial membar_over membar_down membar_forged membar_json membar_fallback membar_memory_unknown membar_memory_unknown_docs stale_inuse stale_untouched stale_docs nodes_not_utf8 nodes_ctl_o
 	exit_labels exit_compact exit_garbage exit_fallback exit_unread exit_edges job_exit_unread log_exit_unread exit_docs
 	nodes_dup_apart nodes_dup_adjacent nodes_dup_digest nodes_dup_drained node_one_dup nodes_dup_compact nodes_dup_cntrl nodes_dup_unreadable nodes_dup_differ
 	jobmem_screens jobmem_gates jobmem_throttle jobmem_outcomes jobmem_forms jobmem_compact_arrays

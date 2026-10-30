@@ -1,0 +1,11 @@
+  ▌ SLURM FranzGB  04:28:10 UTC
+
+  a01   0% cpu    -% mem            idle
+  a02   0% cpu    -% mem            idle
+  a03   0% cpu    -% mem            idle
+  ↳ sinfo gave no usable figure for Mem…
+  ↳ memory counts RealMemory: scontrol …
+
+  recently finished · last 2h · nothing…
+
+  2 jobs  2 running  0 pending  0 other

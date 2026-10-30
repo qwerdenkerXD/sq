@@ -5014,7 +5014,8 @@ function dfit(wd,   ks, kf, x, keep) {
 # its name not one it can be asked by), lists twice, gives no usable figure
 # for (garbled, none, or one not below RealMemory), and none for any node when no
 # answer was used.  The MEMNOTE line under the nodes says so: why no answer
-# was used, else which nodes count RealMemory and why (one line, the first
+# was used (with no Memory known anywhere nothing counts RealMemory, so it
+# names the failure alone), else which nodes count RealMemory and why (one line, the first
 # such node named).  A node whose Memory sinfo gave no usable figure for counts
 # nothing, RealMemory included: its total is unknown, only the caption above
 # (which counts it) speaks for it, and this line never names it.
@@ -5025,11 +5026,11 @@ function dfit(wd,   ks, kf, x, keep) {
 # Into MEMALLOC, MEMNOTE (1 with its line in MEMTEXT), and per node memden
 # (what jobs can be given, -1 unknown), memu, mempc and memt as the allocated
 # figures, wf and wm their widths
-function membar(   r, anyalloc, zerobusy, i, spec, kind, nk, first, KINDS, nkinds, last) {
+function membar(   r, anyalloc, zerobusy, i, spec, kind, nk, first, KINDS, nkinds, last, known) {
   for (r=1; r<=nn; r++) { if (memalloc[r] > 0) anyalloc = 1; if (used[r] > 0 && memalloc[r] == 0) zerobusy = 1 }
   if (!(MEMALLOC = anyalloc || !zerobusy)) return
   nodes_read(nodespecf, nodespecfmt, nodespecg)
-  MEMNOTE = (serr != ""); MEMTEXT = "↳ memory counts RealMemory: " serr
+  MEMNOTE = (serr != "")
   wf = wm = 0
   for (r=1; r<=nn; r++) {
     i = (node[r] in NODE_AT) ? NODE_AT[node[r]] : 0
@@ -5046,8 +5047,10 @@ function membar(   r, anyalloc, zerobusy, i, spec, kind, nk, first, KINDS, nkind
     memt[r]  = (memden[r] < 0) ? "-" : sprintf("%.0fG", memden[r]/1024)
     if (length(memu[r]) > wf) wf = length(memu[r])
     if (length(memt[r]) > wm) wm = length(memt[r])
+    if (memreal[r] >= 0) known = 1
   }
-  if (MEMNOTE || !nk) return
+  if (MEMNOTE) { MEMTEXT = "↳ " (known ? "memory counts RealMemory: " : "") serr; return }
+  if (!nk) return
   MEMNOTE = 1
   MEMNODE = first                               # the node the caption names, never cut (W8)
   MEMTEXT = "↳ memory counts RealMemory on " first (nk > 1 ? " and " (nk - 1) " more node" (nk > 2 ? "s" : "") : "") ": " \

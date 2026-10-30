@@ -1,0 +1,11 @@
+  [1;36m▌ SLURM[0m [2mFranzGB[0m  [1m04:28:15 UTC[0m
+
+  [2m↳ 3 unreadable node rows skipped[0m
+
+  [4mJOBID  NAME  USER   STATE    TIME   LEFT   CPU MEM NODE/REASON[0m
+  [32m900  [0m  run   alice  [1;32mRUNNING[0m  10:00  50:00    1  4G node01
+  [32m901  [0m  run2  alice  [1;32mRUNNING[0m  10:00  50:00    1  4G node01
+
+  [2mrecently finished · last 2h · nothing in this window[0m
+
+  [1m2[0m jobs   [32m2 running[0m   [33m0 pending[0m   [31m0 other[0m

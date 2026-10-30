@@ -1,0 +1,2 @@
+@stderr slurm_load_node error: Unable to contact slurm controller (connect failure)
+@exit 1
