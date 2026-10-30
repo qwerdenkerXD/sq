@@ -16,7 +16,9 @@
 # Frozen goldens (frozen_is, under tests/goldens/) were written by an older
 # build, e.g. 7fd9bd6's screens a change must leave as they were: --pin never
 # touches them.  --pin-frozen rewrites them, and only them, from the build
-# SQ_UNDER_TEST names (it refuses to run without one), e.g.
+# SQ_UNDER_TEST names (it refuses to run without one), each only where that
+# build's differs from it as the cases compare them (so a clock alone
+# rewrites none), e.g.
 #   SQ_UNDER_TEST=/path/to/7fd9bd6/sq tests/run.sh --pin-frozen stale_untouched
 # The EST cases' goldens (tests/goldens/est: 291a4a8's screens and lists, of
 # est_columns est_full est_height_cols est_start) are frozen the same way,
@@ -434,10 +436,23 @@ err_quoted() { [ ! -s "$ERR" ] || printf ' (%s)' "$(head -c 200 "$ERR" | tr '\n'
 out_empty()  { [ ! -s "$OUT" ]; }
 # frozen_is FILE: stdout is FILE, a frozen golden an older build wrote (see the
 # head of this file), the title's clock and the start estimates aside; only
-# --pin-frozen rewrites it, never --pin
+# --pin-frozen rewrites it, never --pin, and only where it differs so (a
+# golden that differs in its clock alone stays as it is)
 frozen_is() {
-	if [ $pin_frozen = 1 ]; then mkdir -p "${1%/*}"; cp "$OUT" "$1"; return 0; fi
-	cmp -s <(without_clock "$1" | mask_estimates) <(without_clock "$OUT" | mask_estimates)
+	if [ $pin_frozen = 1 ]; then
+		[ -f "$1" ] && frozen_same "$1" && return 0
+		mkdir -p "${1%/*}"; cp "$OUT" "$1"; return 0
+	fi
+	frozen_same "$1"
+}
+frozen_same() { cmp -s <(without_clock "$1" | mask_estimates) <(without_clock "$OUT" | mask_estimates); }
+# frozen_put GOLDEN: --pin-frozen's writer of a golden compared whole (EST's):
+# stdin into GOLDEN, only where GOLDEN does not hold exactly that already
+frozen_put() {
+	local new=$T_DIR/frozen_put.$BASHPID
+	cat > "$new"
+	cmp -s "$new" "$1" || { mkdir -p "${1%/*}"; cp "$new" "$1"; }
+	rm -f "$new"
 }
 
 # ---- the stub log: one CALL line per invocation, see tests/lib/stub.sh ------
@@ -2465,6 +2480,18 @@ c_bell_notty() {
 		eval 'rc_is 0 && [ "$(bels)" -eq 0 ] && cmp -s "$T_DIR/alerted.before" "$home/.cache/sq/alerted" && [ "$(ls -A "$home/.cache/sq")" = alerted ]'
 	BELL=1 NOTTY=1 sq_run "$fx" SQ_BELL_USER=alice --
 	need "no terminal, no memory yet: none written, nothing left" eval 'rc_is 0 && [ -z "$(ls -A "$RUN/home/.cache/sq" 2>/dev/null)" ]'
+}
+# The probe of the bell's state directory is gone the moment it is made: a sq
+# killed outright (no EXIT trap) while squeue hangs leaves no alerted.PID
+# behind (suite3's mutant 4a, a probe left in place: harmless since R1's B,
+# which never renames one over the memory, but one more file per kill)
+c_bell_probe_killed() {
+	T_TITLE="the bell's probe file goes at once: a sq killed by SIGKILL while squeue hangs leaves nothing beside the bell's memory"
+	BELL=1 sq_start squeue-hangs SQ_TIMEOUT=20 --
+	waits_for 10 eval '[ "$(calls squeue)" -ge 1 ]' || T_FAIL+=("sq never called squeue")
+	kill -KILL "$SQ_PID" 2>/dev/null; session_kill "$SQ_PID"
+	sq_finish "$RUN" 10
+	need "killed while squeue hung: nothing in the state directory" eval '[ -z "$(ls -A "$RUN/home/.cache/sq" 2>/dev/null)" ]'
 }
 # The bell's memory is a regular file or none: one that was a directory read
 # as nothing (the bell rang on every run, and a temp file piled up in it each
@@ -10569,12 +10596,13 @@ est_mono() {
 			PW[h] = w; PS[h] = now
 		}' "$1"
 }
-# est_golden FILE GOLDEN: --pin-frozen writes FILE's lines into GOLDEN (291a4a8's,
-# from a build of 7fd9bd6: see above); otherwise prints " W:H:what" for each
-# screen of FILE whose column set is not GOLDEN's, that shows ST where GOLDEN
-# shows STATE, or that lacks a ×N or a task GOLDEN shows (AC 15)
+# est_golden FILE GOLDEN: --pin-frozen writes FILE's lines into GOLDEN where
+# they differ (291a4a8's, from a build of 7fd9bd6: see above); otherwise
+# prints " W:H:what" for each screen of FILE whose column set is not
+# GOLDEN's, that shows ST where GOLDEN shows STATE, or that lacks a ×N or a
+# task GOLDEN shows (AC 15)
 est_golden() {
-	if [ $pin_frozen = 1 ]; then gawk '{ print $1, $2, $4, $5, $9 }' "$1" > "$2"; return 0; fi
+	if [ $pin_frozen = 1 ]; then gawk '{ print $1, $2, $4, $5, $9 }' "$1" | frozen_put "$2"; return 0; fi
 	[ -s "$2" ] || { echo " no golden ${2#"$here"/}"; return 0; }
 	gawk 'NR == FNR { G[$1, $2] = $3 " " $4 " " $5; next }
 		{	if (!(($1, $2) in G)) { printf " %s:%s:nogolden", $1, $2; next }
@@ -10585,10 +10613,10 @@ est_golden() {
 			for (i = 1; i <= n; i++) if (index(have, "," P[i] ",") == 0) printf " %s:%s:lost-%s", $1, $2, P[i]
 		}' "$2" "$1"
 }
-# est_screen_golden GOLDEN: --pin-frozen writes the last screen into GOLDEN, else the
-# screen is GOLDEN byte for byte
+# est_screen_golden GOLDEN: --pin-frozen writes the last screen into GOLDEN
+# where it differs, else the screen is GOLDEN byte for byte
 est_screen_golden() {
-	if [ $pin_frozen = 1 ]; then cp "$OUT" "$1"; return 0; fi
+	if [ $pin_frozen = 1 ]; then frozen_put "$1" < "$OUT"; return 0; fi
 	cmp -s "$1" "$OUT"
 }
 
@@ -10794,7 +10822,7 @@ c_est_height_cols() {   # EST: the H grid against 291a4a8 (decision 8, the state
 	est_wait "${files[@]}"
 	for fx in hplus hplus-busy hplus2 hplus3 far40 mixed mix30; do
 		f=$T_DIR/grid-$fx
-		if [ $pin_frozen = 1 ]; then gawk '{ print $1, $2, $4, $6 }' "$f" > "$est_goldens/$fx-grid.txt"; continue; fi
+		if [ $pin_frozen = 1 ]; then gawk '{ print $1, $2, $4, $6 }' "$f" | frozen_put "$est_goldens/$fx-grid.txt"; continue; fi
 		bad=$(gawk 'NR == FNR { G[$1, $2] = $3; next } (($1, $2) in G) && $4 != G[$1, $2] { printf " %s:%s", $1, $2 } !(($1, $2) in G) { printf " %s:%s:nogolden", $1, $2 }' "$est_goldens/$fx-grid.txt" "$f")
 		# a row whose estimate went at H -> H+1 (W apart): 291a4a8 shows none for it at H+1
 		lost=$(gawk 'function rows(s,   n, E, P, i, o) { sub(/^est=/, "", s); n = split(s, E, ","); for (i = 1; i <= n; i++) { split(E[i], P, "="); o = o "," P[1] }; return o "," }
@@ -10912,7 +10940,7 @@ LOGFX
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
-	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_compact_fin_c fin_caption_fills wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty bell_state_odd centre sacct_fallback sacct_flags
+	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_compact_fin_c fin_caption_fills wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty bell_probe_killed bell_state_odd centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
 	pending_range pending_commas pending_throttle pending_no_id_column
@@ -10962,7 +10990,7 @@ cases=(
 # signals sent while calls are in flight, a snapshot's age by the clock, or
 # SQ_TIMEOUT=1 on calls that must answer.  -j runs them one after the other
 # once the others are done, so no other case loads the host meanwhile.
-timed_cases=" squeue_hangs squeue_ignores_term scrub_bounded tables_pass_cost cancel_names
+timed_cases=" squeue_hangs squeue_ignores_term bell_probe_killed scrub_bounded tables_pass_cost cancel_names
 	membar_json membar_fallback jobmem_outcomes jobmem_throttle job_own
 	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract
 	why_nodes_json why_tail_hung why_budget why_parallel why_signals job_screens
