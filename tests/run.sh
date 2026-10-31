@@ -11773,9 +11773,10 @@ c_help_goldens() {
 }
 # the phrases the docs cases pinned before the help moved them onto its
 # screens, one fact for each fix of the help's review rounds (HELP-v4.1's
-# pins.sh, 99 phrases): each on its screen at 80 columns, wrapped or not
+# pins.sh, 99 phrases; and SQ_TIMEOUT's own rule, as the code reads it): each
+# on its screen at 80 columns, wrapped or not
 c_help_pins() {   # A10
-	T_TITLE="99 phrases, each on the screen of the help it belongs to"
+	T_TITLE="101 phrases, each on the screen of the help it belongs to"
 	local screen phrase n=0 f
 	while IFS=$'\t' read -r screen phrase; do
 		f=$T_DIR/screen-${screen// /_}
@@ -11882,8 +11883,10 @@ help env	a COLUMNS or LINES that is no number is no usable size for the dashboar
 help exit	SQ_FMT for the dashboard, SQ_PSS_SINCE for sq job
 help finished	0, a number of 9 or more digits, or anything else counts as unset
 help nodes	▒ dim in its bar's colour
+help slurm	0, and anything else (' 3', +3), means 5
+help env	SQ_TIMEOUT only digits with one dot at most, so ' 3' and '+3' mean 5
 PINS
-	need "99 phrases checked ($n)" [ "$n" = 99 ]
+	need "101 phrases checked ($n)" [ "$n" = 101 ]
 	stubs_answer
 }
 

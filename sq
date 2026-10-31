@@ -4571,7 +4571,7 @@ help_screen_slurm() { cat <<'HELP_SCREEN_EOF'
 ^ sq help slurm: what sq asks Slurm, and how long it waits
 
 = Environment:
-- SQ_TIMEOUT	Seconds to wait for each Slurm call before calling it unreachable (default 5; 0 or anything that is no number means 5); sq job waits 30 s for accounting unless this is set to a valid number
+- SQ_TIMEOUT	Seconds to wait for each Slurm call before calling it unreachable (default 5), as digits with one dot at most (2.5); 0, and anything else (' 3', +3), means 5; sq job waits 30 s for accounting unless this is set to a valid number
 
 = Discussion:
 > The dashboard asks sinfo for the nodes, squeue for the queue, sacct for the
@@ -4622,7 +4622,7 @@ help_screen_env() { cat <<'HELP_SCREEN_EOF'
 - SQ_BELL_ALL	0 (default) only your failures ring, 1 everyone's (sq help bell)
 - SQ_BELL_USER	The login whose failures ring (sq help bell)
 - SQ_BELL_HORIZON	How fresh a failure must be to ring, in whole seconds (default 600) (sq help bell)
-- SQ_TIMEOUT	Seconds to wait for Slurm, a number (default 5) (sq help slurm)
+- SQ_TIMEOUT	Seconds to wait for Slurm, as digits with one dot at most (default 5) (sq help slurm)
 - SQ_PSS_SINCE	sq job: when accounting moved from RSS to PSS (sq help efficiency)
 
 > A number sq reads from the environment may have blanks around it, one
@@ -4631,7 +4631,8 @@ help_screen_env() { cat <<'HELP_SCREEN_EOF'
 > variable (every one above but SQ_FMT, SQ_SINCE, SQ_BELL_USER and
 > SQ_PSS_SINCE) whose value is no number, or not one of those its topic
 > names, counts as unset: its default, or auto, silently (SQ_COMPACT takes 0
-> or 1 exactly, SQ_TIMEOUT a number with a dot too).  SQ_FMT and SQ_PSS_SINCE
+> or 1 exactly, SQ_TIMEOUT only digits with one dot at most, so ' 3' and '+3'
+> mean 5).  SQ_FMT and SQ_PSS_SINCE
 > are inputs: an invalid one stops the command that reads it, SQ_FMT the
 > dashboard and SQ_PSS_SINCE sq job, with exit 2, and says why.  SQ_SINCE
 > goes to sacct as it is (sq help finished).
