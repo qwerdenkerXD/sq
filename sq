@@ -72,6 +72,8 @@ out_rc() {
 		line=${rest%%$'\n'*}
 		case $rest in *$'\n'*) rest=${rest#*$'\n'} ;; *) rest= ;; esac
 		case $line in
+			# gawk 5.2 dies of SIGPIPE (141) even where it is ignored; other
+			# gawks, or builds, report EPIPE as this error instead
 			*"Broken pipe"*) gone=1 ;;
 			*"standard output"*|*"Bad file descriptor"*)
 				[ $bad = 0 ] || continue          # gawk may say it twice: once

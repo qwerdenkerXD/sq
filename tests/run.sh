@@ -11542,7 +11542,7 @@ c_h0_dash_write() {   # H0-5a-c, K1m-x's sq job
 	done
 }
 c_h0_out_rc_lines() {   # K2, K3, R3-L5
-	T_TITLE="out_rc takes the reason from the line of the write failure and passes the others on in order; sq job's other failures keep its prefix and first line"
+	T_TITLE="out_rc takes the reason from the line of the write failure and passes the others on in order; sq job's other failures keep its prefix and first line; a gawk's Broken pipe is the reader gone"
 	h0_gawk_env two; sq_run mixed "${H0ENV[@]}" --
 	need "K2 a message, then the write failure: rc 1, the message, then sq's line" eval 'rc_is 1 && err_is "sq: internal field separator missing
 sq: cannot write the dashboard: No space left on device"'
@@ -11551,6 +11551,14 @@ sq: cannot write the dashboard: No space left on device"'
 	h0_gawk_env jobtwo; job_run finished-11912 "${H0ENV[@]}" -- job 11912
 	need "R3-L5 sq job: a message, then the write failure: rc 1, both lines, in order" eval 'rc_is 1 && err_is "sq job: gawk: cmd. line:9: warning: a message
 sq job: cannot write the report: No space left on device"'
+	# a gawk that reports EPIPE as an error, "Broken pipe", where gawk 5.2 dies
+	# of SIGPIPE: the reader gone all the same, rc 0, silent
+	h0_gawk_env pipe; sq_run mixed "${H0ENV[@]}" --
+	need "the render says Broken pipe: rc 0, silent" eval 'rc_is 0 && err_empty'
+	job_run finished-11912 "${H0ENV[@]}" -- job 11912
+	need "sq job's report says Broken pipe: rc 0, silent" eval 'rc_is 0 && err_empty'
+	sq_run empty "${H0ENV[@]}" -- help modes
+	need "sq help modes says Broken pipe: rc 0, silent" eval 'rc_is 0 && err_empty'
 }
 
 # H0-6: -S given twice is refused, as squeue keeps only the last one; the

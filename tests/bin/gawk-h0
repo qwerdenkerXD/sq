@@ -8,6 +8,8 @@
 #   jobrc    sq job's report call (-v phase=show) fails with gawk's fatal text, rc 2 (K3)
 #   jobtwo   that call prints a warning, then gawk's write failure, rc 2 (R3-L5)
 #   jobsig   that call is killed by SIGTERM
+#   pipe     the render's, the report's or a help's call (-v screen=) says a
+#            gawk's EPIPE error, rc 2: a gawk that does not die of SIGPIPE
 for a; do
 	case ${H0GAWK:-}:$a in
 		render:reserve=*) echo "gawk: fatal: (stand-in) render failed" >&2; exit 2 ;;
@@ -15,6 +17,8 @@ for a; do
 		two:reserve=*) printf '%s\n' "sq: internal field separator missing" \
 			'gawk: cmd. line:823: fatal: print to "standard output" failed: No space left on device' >&2; exit 2 ;;
 		jobrc:phase=show) echo "gawk: cmd. line:9: fatal: report broke" >&2; exit 2 ;;
+		pipe:reserve=*|pipe:phase=show|pipe:screen=*)
+			echo 'gawk: cmd. line:1: (FILENAME=- FNR=1) fatal: print to "standard output" failed (Broken pipe)' >&2; exit 2 ;;
 		jobtwo:phase=show) printf '%s\n' "gawk: cmd. line:9: warning: a message" \
 			'gawk: cmd. line:9: fatal: print to "standard output" failed: No space left on device' >&2; exit 2 ;;
 	esac
