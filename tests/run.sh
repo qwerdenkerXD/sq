@@ -248,6 +248,34 @@ sq_start() {
 	SQ_PID=$(cat "$RUN/pid"); T_SIDS="$T_SIDS $SQ_PID" all_sids="$all_sids $SQ_PID"
 	echo "$SQ_PID" >> "$work/sids"
 }
+# sq_redir HOW FIXTURE [VAR=value | -VAR]... -- [sq args...]: sq_run's run with
+# stdout where HOW says: full (/dev/full), closed (>&-), gone (a pipe whose
+# reader closed it before sq wrote: { exec 0<&-; sleep 2; }), gone-ign (the
+# same, SIGPIPE ignored), or file (RUN/screen).  sq's rc in RC, its stderr in
+# ERR; with PTY=1 on a pty (PTY_ROWS x PTY_COLS), whose bytes, a bell's
+# among them, go to OUT
+sq_redir() {
+	local how=$1 redir= pipe= cmd q; shift
+	sq_env "$@"
+	case $how in
+		full) redir='> /dev/full' ;; closed) redir='>&-' ;; file) redir="> $(printf '%q' "$RUN/screen")" ;;
+		gone|gone-ign) pipe=' | { exec 0<&-; sleep 2; }' ;;
+	esac
+	q=$(printf '%q ' "$sq" "${SQ_ARGV[@]}")
+	[ -n "${PTY:-}" ] || q="$(printf '%q ' "$bound" -k 2 "${BOUND:-30}")$q"
+	cmd="$q 2> $(printf '%q' "$ERR") $redir$pipe; echo \${PIPESTATUS[0]} > $(printf '%q' "$RUN/rc")"
+	[ "$how" != gone-ign ] || cmd="trap '' PIPE; $cmd"
+	rm -f "$RUN/rc"
+	if [ -n "${PTY:-}" ]; then
+		env -i "${ENVLIST[@]}" SHELL=/bin/sh "$bound" --foreground -k 2 30 \
+			script -qec "stty rows $PTY_ROWS cols $PTY_COLS; bash -c $(printf '%q' "$cmd")" /dev/null > "$OUT" 2> /dev/null < /dev/null
+	else
+		env -i "${ENVLIST[@]}" ${NOTTY:+setsid -w} bash -c "$cmd" > "$OUT" 2> "$RUN/shell.err" < /dev/null
+	fi
+	RC=$(cat "$RUN/rc" 2>/dev/null); RC=${RC:-124}
+	[ "$RC" != 124 ] || T_FAIL+=("sq did not finish")
+	note_run
+}
 at_exit() { leftovers "$(cat "$RUN/pid")" > "$RUN/left-at-exit"; echo "$1" > "$RUN/rc"; }
 nothing_at_exit() { [ ! -s "$RUN/left-at-exit" ]; }   # sq waited for all it started
 use_run() {   # use_run RUN: make that run the current one (OUT, ERR, LOG, SQ_PID)
@@ -11381,6 +11409,32 @@ c_h0_rc_internal() {   # H0-2a-d
 		! grep -E "mint_nonce\).*\|\| *die|\|\| *die \"two field separators collided\"" "$sq" > /dev/null'
 }
 
+# H0-3: a help that cannot be written is rc 1 and one line, a full disk and a
+# closed stdout alike; a reader gone is rc 0, silent.  No help asks Slurm, so
+# each such case ends with a dashboard run, the suite's proof that the stubs
+# answer (verdict)
+stubs_answer() { sq_run empty --; need "the dashboard on the stubs: rc 0" rc_is 0; }
+h0_help_cmds=("-h:sq" "job -h:sq job" "log -h:sq log")
+c_h0_help_write() {   # H0-3a-e, K1m-x's helps
+	T_TITLE="a help that cannot be written: rc 1 and '<command>: cannot write the help: <reason>' for /dev/full and >&-, also on a terminal; a reader gone: rc 0, silent"
+	local c how pty reason
+	for c in "${h0_help_cmds[@]}"; do
+		for pty in '' 1; do
+			for how in full closed; do
+				reason="No space left on device"; [ $how = full ] || reason="Bad file descriptor"
+				PTY=$pty PTY_ROWS=40 PTY_COLS=100 sq_redir $how empty TERM=xterm-256color -- ${c%%:*}
+				need "sq ${c%%:*} ${pty:+on a terminal, }stdout $how: rc 1, '${c#*:}: cannot write the help: $reason'" eval '
+					rc_is 1 && err_is "${c#*:}: cannot write the help: $reason"'
+			done
+		done
+		for how in gone gone-ign; do
+			sq_redir $how empty -- ${c%%:*}
+			need "sq ${c%%:*} into a reader that closed$([ $how = gone ] || echo ", SIGPIPE ignored"): rc 0, silent" eval 'rc_is 0 && err_empty'
+		done
+	done
+	stubs_answer
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -11430,7 +11484,7 @@ cases=(
 	whole_forms whole_orders whole_guard whole_v31
 	est_monotone est_pins est_columns est_widest_first est_trade est_full est_f3 est_height est_negative est_height_cols est_start
 	gawk_arg_limit plural_one invalid_colour suite_interrupt
-	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal
+	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,

@@ -159,6 +159,53 @@ pref() {
 	if num_read "${!2-}" && { [ $# -le 3 ] || in_list "$nval" "${*:4}"; }; then printf -v "$1" '%s' "$nval"
 	else printf -v "$1" '%s' "$3"; fi
 }
+# out_rc RC ERR PREFIX WHAT: the end of a run in which gawk wrote WHAT (the
+# help, the dashboard, the report) to stdout and ended with RC, ERR being its
+# stderr.  The exit status goes into orc:
+# - the reader gone (SIGPIPE's 141, or "Broken pipe" where SIGPIPE is
+#   ignored): 0, and that line is dropped;
+# - stdout unwritable (a full disk, a closed stdout): 1, and the line that
+#   says so (that one, not ERR's first) becomes "PREFIX: cannot write WHAT:
+#   REASON";
+# - a signal: 128+N; any other failure: 1; else 0.
+# ERR's other lines go to stderr as they are, in their order
+out_rc() {
+	local rc=$1 rest=$2 prefix=$3 what=$4 line why gone=0 bad=0
+	local -a lines=()
+	while [ -n "$rest" ]; do
+		line=${rest%%$'\n'*}
+		case $rest in *$'\n'*) rest=${rest#*$'\n'} ;; *) rest= ;; esac
+		case $line in
+			*"Broken pipe"*) gone=1 ;;
+			*"standard output"*|*"Bad file descriptor"*)
+				[ $bad = 0 ] || continue          # gawk may say it twice: once
+				bad=1 why=$line
+				if [[ $why =~ \(([^()]*)\)$ ]]; then why=${BASH_REMATCH[1]}; else why=${why##*: }; fi
+				lines+=("$prefix: cannot write $what: $(printf '%s' "$why" | scrub)") ;;
+			*)  lines+=("$line") ;;
+		esac
+	done
+	[ "$rc" != 141 ] || gone=1
+	if   [ $bad = 1 ];  then orc=1
+	elif [ $gone = 1 ]; then orc=0
+	elif [ "$rc" = 0 ]; then orc=0
+	elif [ "$rc" -gt 128 ]; then orc=$rc
+	else orc=1
+	fi
+	[ ${#lines[@]} = 0 ] || printf '%s\n' "${lines[@]}" >&2
+}
+# help_out PREFIX CMD...: CMD's text, a help, on stdout through gawk, which
+# checks the write: a help that cannot be written is "PREFIX: cannot write the
+# help: REASON", rc 1, a full disk and a closed stdout alike; a reader gone is
+# rc 0, silent (out_rc).  A closed stdout fails the redirection to gawk before
+# gawk runs, so it is asked first
+help_out() {
+	local prefix=$1 err rc; shift
+	(exec 9>&1) 2>/dev/null || { out_rc 2 "standard output: Bad file descriptor" "$prefix" "the help"; exit "$orc"; }
+	{ err=$("$@" | env LC_ALL=C gawk '{ print }' 2>&1 >&3); rc=$?; } 3>&1
+	out_rc "$rc" "$err" "$prefix" "the help"
+	exit "$orc"
+}
 
 # ---- the scrub (tests/run.sh and tests/faithfulness.sh run the text from here
 # to "scrub end" on their own input)
@@ -1889,7 +1936,7 @@ sub_log() {
 			case $a in
 				-e|--err)    log_want=err; continue ;;
 				--no-follow) log_follow=0; continue ;;
-				-h|--help)   log_help; exit 0 ;;
+				-h|--help)   help_out 'sq log' log_help ;;
 				--)          positional=1; continue ;;
 				-n|-n*)
 					if [ "$a" = -n ]; then
@@ -3540,7 +3587,7 @@ sub_job() {
 		a=$1; shift
 		if [ $positional = 0 ]; then
 			case $a in
-				-h|--help) job_help; exit 0 ;;
+				-h|--help) help_out 'sq job' job_help ;;
 				--)        positional=1; continue ;;
 				# as before the subcommand: sq job --no-color 123 is sq --no-color job 123
 				--color|--colour)       color=1; continue ;;
@@ -3940,7 +3987,7 @@ place_word() {   # place_word WORD REST...: run the subcommand WORD names, else 
 	stray "$1"
 }
 
-show_help() { awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; exit 0; }
+show_help() { help_out sq awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; }
 
 # refused_long WORD: the refusal of a long option sq refuses by name, if WORD
 # is one.  A squeue format flag beats SQUEUE_FORMAT, so it would silently
