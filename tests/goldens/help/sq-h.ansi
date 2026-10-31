@@ -1,0 +1,51 @@
+An auto-fitting Slurm dashboard: nodes, queue and finished jobs.
+
+[1;36mUsage:[0m [1msq[0m [36m[OPTIONS][0m [36m[FILTERS][0m
+       [1msq[0m [36m<COMMAND>[0m [36m[ARGS][0m
+
+[1;36mCommands:[0m
+  [1mjob[0m [36m<JOBID>[0m   One job: why it waits or did not complete, its efficiency
+  [1mlog[0m [36m<JOBID>[0m   A job's output file, followed while the job runs
+  [1mhelp[0m [36m[TOPIC][0m  How sq behaves, one topic at a time; alone, the topics
+  A command comes first: only options that take no value may stand before it.
+
+[1;36mOptions:[0m
+  [1m--compact[0m, [1m--full[0m    Fit the screen, or show every job (sq help modes)
+  [1m--reserve[0m [36m<N>[0m        COMPACT leaves N lines of the screen unused
+  [1m-o[0m, [1m--format[0m [36m<LIST>[0m  Columns, squeue's letters (default i,j,u,T,M,L,C,m,R)
+  [1m-x[0m, [1m--expand[0m         One row per array task instead of folding them
+  [1m-c[0m, [1m--center[0m         Centre horizontally (also --centre)
+  [1m-C[0m, [1m--center-all[0m     Centre in both axes (also --centre-all)
+  [1m--no-recent[0m          Hide the recently-finished block
+  [1m--no-bell[0m            Never ring the bell on a new failure
+  [1m--color[0m, [1m--no-color[0m  Force colour on or off (also --colour, --no-colour)
+  [1m-h[0m, [1m--help[0m           Print this help
+
+[1;36mFilters:[0m squeue's, passed on; the value attached (-pgpu) or the next word
+  [1m-u[0m, [1m--user[0m [36m<LIST>[0m         Jobs of these users (also --users)
+  [1m--me[0m                      Your own jobs
+  [1m-p[0m, [1m--partition[0m [36m<LIST>[0m    Jobs in these partitions (also --partitions)
+  [1m-A[0m, [1m--account[0m [36m<LIST>[0m      Jobs of these accounts (also -U, --accounts)
+  [1m-q[0m, [1m--qos[0m [36m<LIST>[0m          Jobs of these QoS
+  [1m-j[0m, [1m--job[0m [36m<LIST>[0m          These jobs, 12345 or 12345_4 (also --jobs)
+  [1m-n[0m, [1m--name[0m [36m<LIST>[0m         Jobs of these names
+  [1m-t[0m, [1m--state[0m [36m<LIST>[0m        Jobs in these states, e.g. R,PD (also --states)
+  [1m-w[0m, [1m--nodelist[0m [36m<LIST>[0m     Jobs on these nodes (also --node, --nodes)
+  [1m-L[0m, [1m--license[0m [36m<LIST>[0m      Jobs using these licenses (also --licenses)
+  [1m-R[0m, [1m--reservation[0m [36m<NAME>[0m  Jobs in this reservation
+  [1m-M[0m, [1m--cluster[0m [36m<LIST>[0m      Jobs of these clusters (also --clusters)
+  [1m-S[0m, [1m--sort[0m [36m<KEYS>[0m         The rows' order, squeue's sort keys (default t,i)
+
+[1;36msqueue flags:[0m
+  [1m-a[0m, [1m--all[0m       Also hidden partitions and partitions closed to you
+  [1m-r[0m, [1m--array[0m     One row per task of a pending array
+  [1m-P[0m, [1m--priority[0m  A pending job once per partition it may run in
+  [1m--hide[0m, [1m--noconvert[0m, [1m--federation[0m, [1m--local[0m, [1m--sibling[0m, [1m--sib[0m, [1m--noheader[0m
+                  As squeue reads them; --noheader changes nothing
+
+  Long names in full only, short options are written apart (-a -r, not -ar),
+  each filter once (a list: -u alice,bob). More: sq help filters.
+
+[1;36mTopics:[0m [1mmodes[0m [1mcolumns[0m [1mmemory[0m [1marrays[0m [1mnodes[0m [1mfinished[0m [1mexit[0m [1mbell[0m [1mfilters[0m [1mdisplay[0m
+        [1mslurm[0m [1menv[0m [1mwhy[0m [1mefficiency[0m
+  One topic: sq help TOPIC. A line on each: sq help.

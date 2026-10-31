@@ -1,0 +1,47 @@
+Prints a batch job's output file from its start, then follows it while the job
+runs, and ends shortly (within about 10 s) after the job ends: pipe it to less
+or grep, or watch it as it comes.
+
+Usage: sq log [OPTIONS] <JOBID>
+
+Arguments:
+  <JOBID>  12345, an array task 12345_4, or a het job's component 12345+1 (its
+           leader writes the output); a bare array id is refused with its task
+           ids, unless only its last task is left, which is then followed
+
+Options:
+  -e, --err    The job's stderr file instead of its stdout file
+  -n <N>       Only the last N lines, then follow
+  --no-follow  Print what is there now and stop
+  -h, --help   Print this help
+
+Environment:
+  SQ_TIMEOUT  Seconds to wait for each Slurm call (5)
+
+Discussion:
+  A pending job is waited for until it runs and its file is there (with
+  --no-follow it is an error). The path is computed from the job's -o/-e the way
+  Slurm's job does (%j, %A_%a, %N, %x, widths, %%, and a backslash, which turns
+  expansion off), so a file name that is reused (no %j in it) may first show an
+  earlier run's text.
+
+  The file's bytes are passed on as they are; notes ("sq log: …") go to stderr,
+  also into a pipe: the job is pending, the file has not appeared yet, Slurm
+  does not answer, and how the job ended (sq log: job 12345 ended: FAILED (exit
+  code 1:0)). A requeued job ends the stream with a note; run sq log again for
+  its new run.
+
+  sq log follows for as long as Slurm cannot tell it the job ended, and asks
+  Slurm every 5 s: once it follows, it keeps following while Slurm does not
+  answer. "Live" can lag: a job on another node writes through NFS, and a
+  program buffers its output into a file (python -u, or stdbuf -oL, helps).
+  Under watch, use --no-follow -n N: watch -n 5 sq log --no-follow -n 20 12345.
+
+  The file cannot be shown (exit 1), for example: Slurm is unreachable at the
+  start; Slurm forgot the job (MinJobAge, often 5 minutes after it ends) and its
+  path with it; an interactive job; output to /dev/null; a file not readable, or
+  one the job never wrote; a path that is no regular file, such as a FIFO or a
+  device; and with --no-follow, a job not started or a file not written yet. It
+  is read on this machine, so -M, --federation, --sibling and SLURM_CLUSTERS are
+  refused. Following needs GNU tail 8.28 or newer; --no-follow does without.
+  Exit status: sq help exit.

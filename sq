@@ -1,120 +1,7 @@
 #!/usr/bin/env bash
-# sq - auto-fitting Slurm dashboard
-#
-#   sq                      default columns
-#   sq -o i,j,T,M,P,N       custom columns (squeue field letters, %/widths
-#                           ignored); also -oLIST, --format LIST, --format=LIST
-#   sq -u "$USER" -p gpu    squeue's filters, read by their full long name and
-#                           passed on in squeue's short spelling:
-#                           -u --user --users, --me, -p --partition --partitions,
-#                           -A -U --account --accounts, -q --qos, -j --job --jobs
-#                           (job ids: 12345 or 12345_4), -M --cluster --clusters,
-#                           -n --name, -t --state --states, -w --node --nodes
-#                           --nodelist, -L --license --licenses, -R --reservation,
-#                           -S --sort; the value attached (-pgpu, --partition=gpu)
-#                           or the next word, whatever it looks like (-n -x is
-#                           the job name -x); none empty, none twice
-#   sq -a -r                squeue's flags: -a --all, -r --array, -P --priority,
-#                           --hide, --noconvert, --federation, --local, --sibling
-#                           --sib.  squeue's -h is --noheader, which sq always
-#                           passes, so --noheader is accepted and changes
-#                           nothing, and -h is sq's help
-#                           short options are written apart (-a -r, not -ar),
-#                           and a long name keeps both dashes: -partition is
-#                           refused, so a job named "ame" is -n ame, not -name
-#                           refused: -O --Format -s --steps -i --iterate -l -v
-#                           -V --json --yaml, each of which would replace or
-#                           defeat the output sq parses
-#   sq -c / -C              centre horizontally / in both axes (--center
-#                           --centre / --center-all --centre-all); vertically
-#                           only on a screen (a terminal, or watch), and only
-#                           while the dashboard is at least two lines shorter
-#   sq -x                   expand array tasks instead of folding them (--expand);
-#                           a pending bracket squeue prints (9008_[4-9] x6) stays
-#                           one row, which only --array splits
-#   sq --no-recent          hide the recently-finished block
-#   sq --no-bell            never ring the terminal bell on a new failure
-#   sq --color / --no-color force colour on or off (--colour, --no-colour)
-#   sq --compact / --full   fit the screen / show everything (see below)
-#   sq --reserve N          COMPACT leaves N lines of the screen unused
-#                           (on a terminal one more, for the prompt)
-#   sq -h / --help          this help
-#   watch -tc -n 5 sq       live dashboard; keep -t, or watch's own header
-#                           pushes the footer off screen (or --reserve 2)
-#   sq log JOBID            a job's output file, followed while the job runs
-#                           (sq log -h)
-#   sq job JOBID            one job: state, why it is where it is, resources,
-#                           files, and its CPU and memory efficiency once it
-#                           ended; an array's summary (sq job -h).  A subcommand
-#                           comes first: only options that take no value may
-#                           stand before it
-#
-# Two modes.  FULL shows every job.  COMPACT fits the screen's height: rows
-# that do not fit collapse into lines like "… 42 jobs running".  Stuck jobs
-# (pending for a reason other than plain waiting), jobs blocked by a node or
-# partition fault and jobs held by an admin keep their rows longest, within
-# half the table while running jobs are hidden; running jobs come next, your
-# own near their memory limit first (from 90 %, then from 70 %), then the
-# longest-running, and ordinary pending jobs last.  The finished block
-# shrinks to one line, the newest failure, else the newest job, and on the
-# smallest screens the nodes to one summary line.  COMPACT fits every width
-# it can measure, below 21 columns too: its lines take shorter forms of whole
-# parts (sinfo's short node states, durations as 5h59m once the text columns
-# are at 8, start estimates, fewer columns, Slurm's state codes last), and a
-# line is cut only below its shortest form.  FULL takes none of these forms:
-# its long lines wrap.
-# COMPACT is chosen when stdout is a terminal or COLUMNS and LINES are both
-# exported (watch does that), FULL in a pipe or a file; --compact, --full and
-# SQ_COMPACT decide instead, the flags first.
-#
-# env: SQ_FMT    default column list (same syntax as -o)
-#      SQ_CENTER 1 = horizontal, 2 = both axes
-#      SQ_FOLD   0 = never fold array tasks
-#      SQ_RECENT 0 = never show finished jobs
-#      SQ_BELL   0 = never ring; the bell covers only your own jobs unless
-#                SQ_BELL_ALL=1.  SQ_ETA 0 = no pending start estimates
-#      SQ_BELL_HORIZON  a failure only rings while it is this fresh (600s; 0 mutes)
-#      SQ_COLOR  0 = never colour, 1 = always
-#      SQ_TIMEOUT seconds to wait for slurm before declaring it unreachable (5;
-#                 sq job waits 30 s for accounting unless it is set)
-#      SQ_SINCE  how far back the finished block looks (sacct -S; now-2hours)
-#      SQ_RECENT_MAX  finished rows (default: every one in FULL, the space
-#                     left up to 25 in COMPACT; a value you set is used as
-#                     given in FULL, and is an upper limit in COMPACT, never
-#                     pushing the footer off)
-#      SQ_COMPACT 1 = always COMPACT, 0 = always FULL, else auto-detect
-#      SQ_WIDTH / SQ_HEIGHT  force terminal size instead of auto-detect; they
-#                     never choose the mode
-# squeue's own variables count as the flags they stand for, a flag winning:
-#      SQUEUE_USERS -u, SQUEUE_PARTITION -p, SQUEUE_ACCOUNT -A, SQUEUE_QOS -q,
-#      SQUEUE_STATES -t, SQUEUE_NAMES -n, SQUEUE_LICENSES -L, SLURM_CLUSTERS -M,
-#      and, set at all, SQUEUE_ALL -a, SQUEUE_ARRAY -r, SQUEUE_PRIORITY -P,
-#      SQUEUE_LOCAL, SQUEUE_FEDERATION, SQUEUE_SIB/SQUEUE_SIBLING; one set but
-#      empty is refused, as squeue would show no job
-#
-# Array tasks agreeing on every displayed column collapse to 9008_[0-3] x4,
-# and a bracket Slurm prints reads 9008_[4-9] x6 with or without -x: the
-# footer and "+N more" count every task in it, not the row.
-# EXIT: rc/sigN signal N, rc/oom out of memory, rc/errN low 7 bits of a Slurm
-# error, ? an exit sq cannot read
-# Finished jobs come from the accounting DB, so the window is SQ_SINCE and not
-# MinJobAge: a job that ended while nobody watched is still seen.  Step rows
-# are read along with it, because the allocation row of a signalled job
-# reports plain success and only its step carries the signal.  With no
-# accounting, or with a filter sq does not translate for sacct (-n -w -L -R
-# --sibling, so SQUEUE_NAMES, SQUEUE_LICENSES, SQUEUE_SIB and SQUEUE_SIBLING
-# too), the block falls back to squeue -t all and its caption says so.  A
-# state filter (-t) filters the queue only: the block shows every finished
-# job either way.
-# A new failure rings the bell once, and only while it is
-# younger than SQ_BELL_HORIZON, so a first run, a cleared cache and a week of
-# downtime all stay quiet.  The state kept is "<jobid><tab><end epoch>" lines
-# in ~/.cache/sq/alerted: add-only and aged out after 24h, never pruned just
-# because one run queried less, and replaced by an atomic rename so two
-# instances cannot tear it.  A row with an unknown user never rings and is
-# never remembered, and with no controlling terminal the bell is skipped.
-# TIME LEFT turns yellow under 10% of the limit and red under 2%.  Pending
-# jobs show the backfill start estimate; down nodes show their reason.
+# sq - an auto-fitting Slurm dashboard: nodes, queue and finished jobs.
+# Its help is written below ("---- help"), and printed by sq -h, sq help
+# [TOPIC], sq job -h and sq log -h.
 
 set -u
 # POSIXLY_CORRECT in the caller's environment puts bash in POSIX mode (no
@@ -203,18 +90,6 @@ out_rc() {
 	fi
 	[ -z "$own" ] || [ $bad = 1 ] || [ ${#lines[@]} -le 1 ] || lines=("${lines[0]}")
 	[ ${#lines[@]} = 0 ] || printf '%s\n' "${lines[@]}" >&2
-}
-# help_out PREFIX CMD...: CMD's text, a help, on stdout through gawk, which
-# checks the write: a help that cannot be written is "PREFIX: cannot write the
-# help: REASON", rc 1, a full disk and a closed stdout alike; a reader gone is
-# rc 0, silent (out_rc).  A closed stdout fails the redirection to gawk before
-# gawk runs, so it is asked first
-help_out() {
-	local prefix=$1 err rc; shift
-	(exec 9>&1) 2>/dev/null || { out_rc 2 "standard output: Bad file descriptor" "$prefix" "the help"; exit "$orc"; }
-	{ err=$("$@" | env LC_ALL=C gawk '{ print }' 2>&1 >&3); rc=$?; } 3>&1
-	out_rc "$rc" "$err" "$prefix" "the help"
-	exit "$orc"
 }
 
 # ---- the scrub (tests/run.sh and tests/faithfulness.sh run the text from here
@@ -1610,38 +1485,7 @@ jobmem_collect() {   # jobmem_collect [-w]
 # every 5 s in every phase: waiting for the job to start, for the file to
 # appear, and while tail streams it.  The stream ends only at a final state
 # (never during CG, when a job may still write), after a 3 s grace.
-log_help() {
-	cat <<'EOF'
-usage: sq log [-e|--err] [-n N] [--no-follow] JOBID
-
-Prints a batch job's output file from its start, then follows it while the
-job runs, and ends shortly (within about 10 s) after the job ends: pipe it
-to less or grep, or watch it as it comes.  JOBID is 12345, an array task
-12345_4, or a het job 12345+1 (its leader writes the output).  A pending job
-is waited for until it runs and its file is there.
-
-  -e, --err      the job's stderr file instead of its stdout file
-  -n N           only the last N lines, then follow
-  --no-follow    print what is there now and stop
-  -h, --help     this help
-
-Notes ("sq log: ...") go to stderr, also into a pipe; the file's own bytes
-are passed on as they are.  Exit 0 when done, whatever the job's own outcome
-(a note names it), 1 when the file cannot be shown, 2 for a usage error,
-128+N when stopped by signal N.
-
-Good to know:
-- The path is computed from -o/-e the way Slurm's job does.  A file name that
-  is reused (no %j in it) may first show an earlier run's text.
-- sq log follows for as long as Slurm cannot tell it the job ended: while
-  Slurm does not answer, it keeps following.
-- "Live" can lag: a job on another node writes through NFS, and a program
-  buffers its output into a file (python -u, or stdbuf -oL, helps).
-- A requeued job ends the stream with a note; run sq log again for its new run.
-- Under watch, use --no-follow -n N:  watch -n 5 sq log --no-follow -n 20 12345
-- Slurm forgets a job about 5 minutes after it ends; its path is then unknown.
-EOF
-}
+log_help() { help_render log 'sq log'; }
 
 # every message names sq log and is scrubbed whole: it carries paths, names
 # and reasons, all of them outside text
@@ -1946,7 +1790,7 @@ sub_log() {
 			case $a in
 				-e|--err)    log_want=err; continue ;;
 				--no-follow) log_follow=0; continue ;;
-				-h|--help)   help_out 'sq log' log_help ;;
+				-h|--help)   log_help ;;
 				--)          positional=1; continue ;;
 				-n|-n*)
 					if [ "$a" = -n ]; then
@@ -2123,62 +1967,7 @@ sub_log() {
 # while sacct is still asked, and for the caller's own running job JOBMEM's
 # reading.  One source down: the other's view, with a dim line saying which;
 # both: rc 1.
-job_help() {
-	cat <<'EOF'
-usage: sq job [--color|--no-color] JOBID
-
-One job in one report: its state and times, the CPUs and memory it asked for
-and was given, its work directory and output files, and once it ended how
-well it used them: its CPU time against CPUs x elapsed, and its peak memory
-against its allocation.  While your own job runs, the memory it uses now, as
-the dashboard's MEM reads it (? no reading yet, ! the reading failed).  JOBID
-is 12345, an array task 12345_4, or an array 12345, which gets one summary
-over its completed tasks: the median, the weakest task and the best.
-
-Why: for a pending job, what holds it and who can act (it waits its turn,
-needs action, waits for an admin, can never start, will never start, or is
-stuck: a reason sq has no words for); for an ended one that did not
-complete, its exit in plain words, who cancelled it, its time or memory
-limit, the node it lost; for an array, its tasks that did not complete.  A
-failed job's output ends the section with its last lines, for any job
-whose file you can read, other users' too.
-
-Exit 0 when shown, 1 when Slurm does not know the job or cannot be asked,
-2 for a usage error, 128+N when stopped by signal N.
-
-env: SQ_TIMEOUT    seconds to wait for Slurm (5); sq job waits 30 s for
-                   accounting, which a big array keeps busy, unless
-                   SQ_TIMEOUT is set to a valid number of seconds, which
-                   then bounds that wait too.  Every call is done by that
-                   wait and 5 s more
-     SQ_PSS_SINCE  when this cluster's accounting moved from RSS to PSS
-                   (JobAcctGatherParams=UsePss), as YYYY-MM-DD[ HH:MM[:SS]]
-                   [ ZONE], YYYY-MM-DDTHH:MM[:SS]Z or @EPOCH, e.g.
-                   SQ_PSS_SINCE="2026-10-19 15:59 CEST": a peak measured in a
-                   step that started before it gets a note, as RSS counts
-                   memory shared between processes once per process.  Unset,
-                   or empty: no such note.
-
-Good to know:
-- CPU time per step is the larger of what its processes reported and what
-  Slurm's sampling saw, so processes Slurm killed or never waited for count;
-  sampled, it is still a lower bound.
-- Peak memory is the largest step's: with several tasks, the sum of each
-  task's own peak, an upper bound.  Sampling misses a short spike, so a job
-  killed for its memory can read well below its limit.
-- Efficiency comes from accounting, so it shows once accounting has recorded
-  the job's end, a moment after squeue says it ended.
-- Slurm forgets a job's output paths about 5 minutes after it ends, and its
-  last lines with them.  They come from the last 4096 bytes of the file
-  (its stderr when that has a file of its own), only from a regular file
-  written while the job ran, and are cut to the terminal's width.
-- That file is read by a process of its own, given 2 s: on a network mount
-  that hangs, the process cannot be stopped, and it is the one process sq
-  may leave behind.
-- While accounting does not answer, an array's count is a floor (>=N): its
-  done, failed and cancelled tasks are only known there.
-EOF
-}
+job_help() { help_render job 'sq job'; }
 # every message names sq job and is scrubbed whole: it carries ids, names and
 # reasons, all of them outside text
 job_say()   { printf 'sq job: %s\n' "$(printf '%s' "$1" | scrub)" >&2; }
@@ -3597,7 +3386,7 @@ sub_job() {
 		a=$1; shift
 		if [ $positional = 0 ]; then
 			case $a in
-				-h|--help) help_out 'sq job' job_help ;;
+				-h|--help) colour_words "$@"; job_help ;;
 				--)        positional=1; continue ;;
 				# as before the subcommand: sq job --no-color 123 is sq --no-color job 123
 				--color|--colour)       color=1; continue ;;
@@ -3956,9 +3745,9 @@ value_opt() {
 # subpos stays 1 while a subcommand may still stand at the next word (valued
 # says whether an option that takes a value is what ended that), after_j
 # holds the word before it when that was a -j value, and clustercause the
-# first -M, --cluster(s), --federation, --sib or --sibling, which both
-# subcommands refuse.
-subcommands="log job"
+# first -M, --cluster(s), --federation, --sib or --sibling, which sq log and
+# sq job refuse.
+subcommands="log job help"
 is_subcommand() { in_list "$1" "$subcommands"; }
 subpos=1 valued=0 after_j= j_seen= clustercause=
 # every long name sq knows, by what it does with one written with a single
@@ -3980,7 +3769,6 @@ stray() {   # stray WORD: a word sq cannot place, refused with the hint that fit
 	low=${w,,}
 	if is_subcommand "$low"; then hint="sq $low"
 	elif is_subcommand "${low%s}"; then hint="sq ${low%s}"
-	elif [ "$low" = help ]; then hint="sq -h"
 	elif in_list "$low" "$long_names"; then hint="sq --$low"
 	elif [ -n "$after_j" ]; then   # only where the list would be a valid -j value
 		! jobid_ok "$after_j,$w" || hint="sq -j $after_j,$w"
@@ -3990,9 +3778,9 @@ stray() {   # stray WORD: a word sq cannot place, refused with the hint that fit
 }
 place_word() {   # place_word WORD REST...: run the subcommand WORD names, else refuse it
 	if is_subcommand "$1"; then
-		# both subcommands refuse a cluster selection, also where they would
-		# otherwise only be told to come first
-		[ -z "$clustercause" ] || "$1_refuse_cluster" "$clustercause"
+		# sq log and sq job refuse a cluster selection, also where they would
+		# otherwise only be told to come first; sq help reads none
+		[ -z "$clustercause" ] || [ "$1" = help ] || "$1_refuse_cluster" "$clustercause"
 		[ "$subpos" = 1 ] || [ "$valued" = 1 ] || die "subcommands come first: sq $1 …"
 		[ "$subpos" = 1 ] || die "subcommands come first, before any option that takes a value: sq $1 …"
 		local sub=$1; shift
@@ -4001,7 +3789,1147 @@ place_word() {   # place_word WORD REST...: run the subcommand WORD names, else 
 	stray "$1"
 }
 
-show_help() { help_out sq awk 'NR>1 && /^#/ {sub(/^#/, ""); sub(/^ /, ""); print; next} NR>1 {exit}' "$0"; }
+# ---- help: sq -h, sq help [TOPIC], sq job -h, sq log -h ---------------------
+# The help is written here, in sq: one gawk program (help_awk) renders one
+# screen of it (help_screen_NAME, sq-h's function help_screen_sq_h) at the
+# width and in the colour asked for, and one table (help_table, one line per
+# topic, "GROUP<TAB>NAME<TAB>ONE-LINER") feeds the topic names sq help accepts
+# and hints at, sq -h's Topics line, sq help's list and the README's table
+# (tests/run.sh's help_readme_refs compares the README with it).  sq reads no
+# file beside itself.
+# The screens' markup, one kind per line, by its first characters:
+#   @screen NAME   the screen starts
+#   ^ TEXT         prose, column 0; consecutive lines are one paragraph
+#   > TEXT         prose, indent 2;   >> TEXT  indent 4
+#   = HEAD<TAB>TEXT  a heading; TEXT after the tab follows on its line,
+#                  wrapped under itself (Usage: sq ...); "=+<TAB>TEXT"
+#                  continues it; TEXT as names, or plain when it starts "~ "
+#   - NAME<TAB>DESC  an item; consecutive items share one name column
+#   : A ; B ; C    a grid of names, as many columns as fit, row by row;
+#                  consecutive : lines are one grid
+#   $ CMD          an example command, indent 4, never wrapped
+#   | TEXT         verbatim, never wrapped
+#   (empty)        an empty line
+#   @@items G,H    the table's items of groups G and H (name, one-liner)
+#   @@names G,H    (in a heading's TEXT) the names of those groups
+# Inline: {X} a placeholder; [[SGR|text]] text in that SGR colour (legends).
+# Outside braces a NAME, a heading's TEXT, a grid cell and a CMD are names
+# (bold).  Prose wraps at min(width, 80), items and grids at the width.
+help_awk() { cat <<'HELP_AWK_EOF'
+function sgr(code, s) { return (color && code != "" && s != "") ? "\033[" code "m" s "\033[0m" : s }
+# visible text: markup removed
+# (a "]]" closes a span only when one is open: "[:SS]][ ZONE]" is text)
+function vis(s, isopen,   out, m) {
+  out = ""
+  while (match(s, /\[\[[0-9;]*\||\]\]/)) {
+    m = substr(s, RSTART, RLENGTH); out = out substr(s, 1, RSTART - 1); s = substr(s, RSTART + RLENGTH)
+    if (m != "]]") isopen = 1; else if (isopen) isopen = 0; else out = out m
+  }
+  out = out s; gsub(/[{}]/, "", out); return out
+}
+function vlen(s, isopen) { return length(vis(s, isopen)) }
+# a run of markup text styled: [[c|x]] in c, {x} as placeholder, the rest
+# as names (base) or plain (base == "")
+function paint(s, base,   out, m, pre, x) {
+  out = ""
+  while (match(s, /\[\[[0-9;]*\|[^]]*\]\]|\{[^}]*\}/)) {
+    pre = substr(s, 1, RSTART - 1); m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+    out = out names(pre, base)
+    if (m ~ /^\{/) out = out sgr(PH, substr(m, 2, length(m) - 2))
+    else { x = m; sub(/^\[\[/, "", x); sub(/\]\]$/, "", x)
+           out = out sgr(substr(x, 1, index(x, "|") - 1), substr(x, index(x, "|") + 1)) }
+  }
+  return out names(s, base)
+}
+# names: every run of characters but blanks and commas in base
+function names(s, base,   out) {
+  if (base == "" || !color) return s
+  out = ""
+  while (match(s, /[^ ,]+/)) { out = out substr(s, 1, RSTART - 1) sgr(base, substr(s, RSTART, RLENGTH)); s = substr(s, RSTART + RLENGTH) }
+  return out s
+}
+# wrap TEXT (markup) into lines of at most w visible characters, into L[]
+# A [[c|...]] span a line break falls into is closed at the line's end and
+# opened again on the next line.
+function wrap(text, w, L,   n, nw, W, i, line, ll, wl, open, t, m) {
+  gsub(/↳ /, "↳\001", text)                  # ↳ stays with the word it points at,
+  gsub(/sq help /, "sq\001help\001", text)    # and a pointer to a topic stays whole
+  n = 0; nw = split(text, W, / +/); line = ""; ll = 0; open = ""
+  for (i = 1; i <= nw; i++) {
+    if (W[i] == "") continue
+    wl = vlen(W[i], open != "")
+    if (ll && ll + 1 + wl > w) { L[++n] = line (open != "" ? "]]" : ""); line = (open != "" ? "[[" open "|" : ""); ll = 0 }
+    line = ll ? line " " W[i] : line W[i]; ll += (ll ? 1 : 0) + wl
+    t = W[i]                                  # the span open after this word
+    while (match(t, /\[\[[0-9;]*\||\]\]/)) {
+      m = substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH)
+      if (m != "]]") open = substr(m, 3, length(m) - 3); else open = ""
+    }
+  }
+  if (ll || !n) L[++n] = line
+  for (i = 1; i <= n; i++) gsub(/\001/, " ", L[i])
+  return n
+}
+function sp(n) { return sprintf("%*s", n, "") }
+function flush_para(   L, n, i, w) {
+  if (para == "") return
+  w = PW - pind; if (w < 20) w = 20
+  n = wrap(para, w, L)
+  for (i = 1; i <= n; i++) print sp(pind) paint(L[i], "")
+  para = ""
+}
+function flush_items(   i, nw, dcol, stacked, L, n, j, w, k, NL) {
+  if (!ni) return
+  nw = 0
+  for (i = 1; i <= ni; i++) if (vlen(IN[i]) <= NAMECAP && vlen(IN[i]) > nw) nw = vlen(IN[i])
+  dcol = 2 + nw + 2
+  stacked = (W - dcol < 30)
+  for (i = 1; i <= ni; i++) {
+    if (vlen(IN[i]) > W - 2) {                # a name wider than the screen wraps too
+      k = wrap(IN[i], W - 2, NL); for (j = 1; j < k; j++) print "  " paint(NL[j], NAME)
+      IN[i] = NL[k]; if (!stacked && vlen(IN[i]) <= nw) { n = (ID[i] == "") ? 0 : wrap(ID[i], W - dcol, L)
+        print "  " paint(IN[i], NAME) (n ? sp(nw - vlen(IN[i]) + 2) paint(L[1], "") : ""); for (j = 2; j <= n; j++) print sp(dcol) paint(L[j], ""); continue } }
+    if (stacked) { print "  " paint(IN[i], NAME); w = W - 6; n = wrap(ID[i], w, L); for (j = 1; j <= n; j++) print sp(6) paint(L[j], ""); continue }
+    n = (ID[i] == "") ? 0 : wrap(ID[i], W - dcol, L)
+    if (vlen(IN[i]) > nw) { print "  " paint(IN[i], NAME); j = 1 }
+    else { print "  " paint(IN[i], NAME) (n ? sp(nw - vlen(IN[i]) + 2) paint(L[1], "") : ""); j = 2 }
+    for (; j <= n; j++) print sp(dcol) paint(L[j], "")
+  }
+  ni = 0
+}
+function flush_grid(   i, cw, ncol, c, k, line) {
+  if (!ng) return
+  cw = 0; for (i = 1; i <= ng; i++) if (vlen(G[i]) > cw) cw = vlen(G[i])
+  cw += 2; ncol = int((W - 2) / cw); if (ncol < 1) ncol = 1; if (ncol > ng) ncol = ng
+  for (k = 1; k <= ng; k += ncol) {          # row-major: a row reads as written
+    line = "  "
+    for (c = 0; c < ncol && k + c <= ng; c++)
+      line = line paint(G[k + c], NAME) ((c < ncol - 1 && k + c < ng) ? sp(cw - vlen(G[k + c])) : "")
+    print line
+  }
+  ng = 0
+}
+function flush_all() { flush_para(); flush_items(); flush_grid() }
+function heading(h, text,   L, n, i, hw, base) {
+  hw = vlen(h); lasthw = hw
+  if (text == "") { print sgr(HEAD, h); return }
+  base = NAME; if (text ~ /^~ /) { base = ""; text = substr(text, 3) }   # "~ " plain text
+  n = wrap(text, W - hw - 1, L)
+  print sgr(HEAD, h) " " paint(L[1], base)
+  for (i = 2; i <= n; i++) print sp(hw + 1) paint(L[i], base)
+}
+function table_items(groups,   i) {
+  for (i = 1; i <= nt; i++) if (index("," groups ",", "," TG[i] ",")) { IN[++ni] = TN[i]; ID[ni] = TD[i] }
+}
+function table_names(groups,   i, out) {
+  out = ""; for (i = 1; i <= nt; i++) if (index("," groups ",", "," TG[i] ",")) out = out (out == "" ? "" : " ") TN[i]
+  return out
+}
+BEGIN {
+  W = width + 0; PW = (W < 80 ? W : 80)
+  HEAD = "1;36"; NAME = "1"; PH = "36"; NAMECAP = 26
+  on = 0; para = ""; ni = 0; ng = 0
+}
+/^@topics$/ { intab = 1; next }
+/^@end$/ { intab = 0; next }
+intab { if (split($0, F, "\t") == 3) { nt++; TG[nt] = F[1]; TN[nt] = F[2]; TD[nt] = F[3] }; next }
+/^@screen / { if (on) { flush_all(); exit } on = ($2 == screen); if (on) found = 1; next }
+!on { next }
+/^$/ { flush_all(); print ""; next }
+/^@@items / { flush_para(); flush_grid(); table_items($2); next }
+/@@names / { match($0, /@@names [^ \t]+/); g = substr($0, RSTART + 8, RLENGTH - 8); $0 = substr($0, 1, RSTART - 1) table_names(g) substr($0, RSTART + RLENGTH) }
+/^\^ / { flush_items(); flush_grid(); if (para != "" && pind != 0) flush_para(); pind = 0; para = para (para == "" ? "" : " ") substr($0, 3); next }
+/^>> / { flush_items(); flush_grid(); if (para != "" && pind != 4) flush_para(); pind = 4; para = para (para == "" ? "" : " ") substr($0, 4); next }
+/^> / { flush_items(); flush_grid(); if (para != "" && pind != 2) flush_para(); pind = 2; para = para (para == "" ? "" : " ") substr($0, 3); next }
+/^=\+\t/ { flush_all(); t = substr($0, 4); n = wrap(t, W - lasthw - 1, L); for (i = 1; i <= n; i++) print sp(lasthw + 1) paint(L[i], NAME); next }
+/^= / { flush_all(); s = substr($0, 3); t = ""; if (index(s, "\t")) { t = substr(s, index(s, "\t") + 1); s = substr(s, 1, index(s, "\t") - 1) }; heading(s, t); next }
+/^- / { flush_para(); flush_grid(); s = substr($0, 3); d = ""; if (index(s, "\t")) { d = substr(s, index(s, "\t") + 1); s = substr(s, 1, index(s, "\t") - 1) }; IN[++ni] = s; ID[ni] = d; next }
+/^: / { flush_para(); flush_items(); nc = split(substr($0, 3), C, / ; /); for (i = 1; i <= nc; i++) G[++ng] = C[i]; next }
+/^\$ / { flush_all(); print "    " sgr(NAME, "$") " " paint(substr($0, 3), NAME); next }
+/^\| ?/ { flush_all(); s = $0; sub(/^\| ?/, "", s); print paint(s, ""); next }
+{ flush_all(); print "the help has unknown markup: " $0 > "/dev/stderr"; exit 3 }
+END {
+  if (on) flush_all()
+  if (!found) { print "the help has no screen " screen > "/dev/stderr"; exit 4 }
+}
+HELP_AWK_EOF
+}
+help_table() { cat <<'HELP_TABLE_EOF'
+@topics
+dash	modes	FULL and COMPACT: how sq chooses, what fits a small screen
+dash	columns	-o's letters and their headers, what gives first when narrow
+dash	memory	MEM: each job's total memory, your own jobs' use, ? and !
+dash	arrays	How array tasks fold, and what -x and -r change
+dash	nodes	The CPU and memory bars: [[32|█]] [[2;32|▒]] [[35|▓]] [[2|░]] [[2|·]], their colours and lines
+dash	finished	The recently-finished block: sacct, SQ_SINCE, the fallback
+dash	exit	Reading EXIT (rc/sigN, rc/oom, rc/errN, ?), and sq's own exit status
+dash	bell	Which failures ring, and the state the bell keeps
+dash	filters	squeue's options sq passes on, those it refuses, and why
+dash	display	Colour, centring, clock times, and the text sq rewrites
+dash	slurm	What sq asks Slurm, how long it waits, an outage
+dash	env	Every variable sq reads, a line each
+job	why	sq job's why section: what holds a job, or why it ended
+job	efficiency	sq job's CPU and memory against the allocation, an array's summary
+cmd	job	sq job's help, as sq job -h prints it
+cmd	log	sq log's help, as sq log -h prints it
+@end
+HELP_TABLE_EOF
+}
+help_screen_sq_h() { cat <<'HELP_SCREEN_EOF'
+@screen sq-h
+^ An auto-fitting Slurm dashboard: nodes, queue and finished jobs.
+
+= Usage:	sq {[OPTIONS]} {[FILTERS]}
+=+	sq {<COMMAND>} {[ARGS]}
+
+= Commands:
+- job {<JOBID>}	One job: why it waits or did not complete, its efficiency
+- log {<JOBID>}	A job's output file, followed while the job runs
+- help {[TOPIC]}	How sq behaves, one topic at a time; alone, the topics
+> A command comes first: only options that take no value may stand before it.
+
+= Options:
+- --compact, --full	Fit the screen, or show every job (sq help modes)
+- --reserve {<N>}	COMPACT leaves N lines of the screen unused
+- -o, --format {<LIST>}	Columns, squeue's letters (default i,j,u,T,M,L,C,m,R)
+- -x, --expand	One row per array task instead of folding them
+- -c, --center	Centre horizontally (also --centre)
+- -C, --center-all	Centre in both axes (also --centre-all)
+- --no-recent	Hide the recently-finished block
+- --no-bell	Never ring the bell on a new failure
+- --color, --no-color	Force colour on or off (also --colour, --no-colour)
+- -h, --help	Print this help
+
+= Filters:	~ squeue's, passed on; the value attached (-pgpu) or the next word
+- -u, --user {<LIST>}	Jobs of these users (also --users)
+- --me	Your own jobs
+- -p, --partition {<LIST>}	Jobs in these partitions (also --partitions)
+- -A, --account {<LIST>}	Jobs of these accounts (also -U, --accounts)
+- -q, --qos {<LIST>}	Jobs of these QoS
+- -j, --job {<LIST>}	These jobs, 12345 or 12345_4 (also --jobs)
+- -n, --name {<LIST>}	Jobs of these names
+- -t, --state {<LIST>}	Jobs in these states, e.g. R,PD (also --states)
+- -w, --nodelist {<LIST>}	Jobs on these nodes (also --node, --nodes)
+- -L, --license {<LIST>}	Jobs using these licenses (also --licenses)
+- -R, --reservation {<NAME>}	Jobs in this reservation
+- -M, --cluster {<LIST>}	Jobs of these clusters (also --clusters)
+- -S, --sort {<KEYS>}	The rows' order, squeue's sort keys (default t,i)
+
+= squeue flags:
+- -a, --all	Also hidden partitions and partitions closed to you
+- -r, --array	One row per task of a pending array
+- -P, --priority	A pending job once per partition it may run in
+- --hide, --noconvert, --federation, --local, --sibling, --sib, --noheader	As squeue reads them; --noheader changes nothing
+
+> Long names in full only, short options are written apart (-a -r, not -ar),
+> each filter once (a list: -u alice,bob).  More: sq help filters.
+
+= Topics:	@@names dash,job
+> One topic: sq help TOPIC.  A line on each: sq help.
+HELP_SCREEN_EOF
+}
+help_screen_help() { cat <<'HELP_SCREEN_EOF'
+@screen help
+= Usage:	sq help {[TOPIC]}
+
+= The dashboard:
+@@items dash
+
+= One job:
+@@items job,cmd
+
+= Options:
+- -h, --help	Print this list
+- --color, --no-color	Force colour on or off (also --colour, --no-colour)
+HELP_SCREEN_EOF
+}
+help_screen_modes() { cat <<'HELP_SCREEN_EOF'
+@screen modes
+^ sq help modes: FULL and COMPACT
+
+= Options:
+- --compact	Fit the screen, wherever the output goes
+- --full	Show every job, wherever the output goes; giving both is an error
+- --reserve {<N>}	COMPACT leaves N lines of the screen unused, e.g. for watch's own header (on a terminal one more, for the prompt); if only the footer fits, only the footer is drawn
+
+= Environment:
+- SQ_COMPACT	1 always COMPACT, 0 always FULL; anything else, or unset, decides by where the output goes; the flags beat it
+- SQ_WIDTH, SQ_HEIGHT	Pretend the screen has this size (the dashboard's only), a number; one under 21 columns or 5 lines (1 in COMPACT) is no usable size, and that axis falls back to 100 columns or 24 lines; anything that is no number counts as unset; they never choose the mode
+- COLUMNS, LINES	The size watch passes; both exported, they are a screen: COMPACT, at that size; COLUMNS alone also colours a pipe (sq help display)
+
+= Discussion:
+> FULL shows every job.  COMPACT fits the screen's height: rows that do not
+> fit collapse into lines like "… 42 jobs running".
+
+> How the mode is chosen: --compact or --full, else SQ_COMPACT, else COMPACT
+> when stdout is a terminal, or when COLUMNS and LINES are both in the
+> environment, which is how watch runs sq (an interactive shell does not
+> export them).  Anything else, a pipe, a file, ssh host sq without -t, a
+> cron job, gets FULL.  sq --compact with no size to measure uses the usual
+> fallback size, 24 lines.
+
+> Which rows stay: stuck jobs (pending for a reason other than plain
+> waiting), jobs blocked by a node or partition fault and jobs held by an
+> admin keep their rows longest, within half the table while running jobs
+> are hidden; running jobs come next, your own near their memory limit first
+> (from 90 %, then from 70 %), then the longest-running; ordinary pending
+> jobs last.  The rows keep squeue's order (-S); COMPACT only decides which
+> are hidden.  When the screen runs short, the finished block shrinks, down
+> to one line naming the newest failure, else the newest job, and on the
+> smallest screens the nodes become one summary line (sq help nodes).
+
+> Narrow screens: COMPACT fits every width it can measure, below 21 columns
+> too.  Its lines take shorter forms of whole parts, one step at a time: the
+> nodes as name and state, then with sinfo's short state names (alloc,
+> drain*), then the one summary line; durations as 5h59m once the text
+> columns are down to 8; start estimates, whole or not at all; fewer columns
+> (sq help columns); Slurm's state codes (PD, R) last.  A line is cut only
+> below its shortest form.  FULL takes none of these forms: its long lines
+> wrap.
+
+= Examples:
+> Live, every 5 s; keep -t, or watch's own header pushes the footer off
+> screen (or leave it room with --reserve 2); -c for colour
+$ watch -tc -n 5 sq
+> Over ssh: -t for a terminal (COMPACT); without -q, ssh's "Connection to …
+> closed." line takes the row sq leaves for the prompt (or --reserve 1)
+$ ssh -qt host sq
+> One screenful into a file
+$ sq --compact > now.txt
+
+> See also: sq help finished (SQ_RECENT_MAX, its rows), sq help display
+> (centring).
+HELP_SCREEN_EOF
+}
+help_screen_columns() { cat <<'HELP_SCREEN_EOF'
+@screen columns
+^ sq help columns: what the job table shows
+
+= Options:
+- -o, --format {<LIST>}	Columns as squeue field letters, e.g. i,j,u,T,M,L,C,m,R (the default); also -o{LIST}, --format={LIST}; % and widths are ignored, since widths are automatic
+
+= Environment:
+- SQ_FMT	The default column list, same syntax as -o; its letters are checked like -o's (exit 2)
+- SQ_ETA	0 hides pending jobs' start estimates; 1, or anything else, shows them
+
+= Letters:
+: a ACCOUNT ; b GRES ; C CPU ; c MIN_CPU ; D NODES ; e END
+: f FEAT ; g GROUP ; i JOBID ; j NAME ; K ARRAY ; L LEFT
+: l LIMIT ; M TIME ; m MEM ; N NODELIST ; o COMMAND ; P PART
+: p PRIO ; Q PRIO ; q QOS ; R NODE/REASON ; r REASON ; S START
+: T STATE ; t ST ; u USER ; V SUBMIT ; v RESV ; Z WORKDIR
+
+> Any other squeue letter (man squeue, -o) is shown under that letter in
+> capitals.  M
+> is the time used, not memory; m is sq's MEM, each job's total (sq help
+> memory), not squeue's %m; R is NODE/REASON, a running job's nodes or a
+> pending job's reason.
+
+= Discussion:
+> Widths: every column is sized to its content.  When the table is too wide,
+> the text columns (name, reason, command, node list, work dir) shrink first,
+> longest first, cut with …; numbers are never cut while anything else can
+> give.  Node stats, the job table and the finished block are measured
+> together and drawn to one right edge.
+
+> On a narrow screen COMPACT drops whole columns: first any column -o adds
+> beyond the default list, from the right, then CPU, TIME, USER, MEM, LEFT
+> and NAME, in that order; JOBID, STATE and NODE/REASON (or REASON) stay (sq
+> help modes).
+
+> LEFT, the time left, turns yellow under 10 % of the job's limit and bold
+> red under 2 %; INVALID, a job past its limit, is bold red too.
+
+> Start estimates: a pending job shows the backfill scheduler's start
+> estimate in NODE/REASON (→ 14:32), none once it is past.  An estimate shows
+> whole or not at all: on a narrow screen the estimates go before any column
+> and before an id's ×N, the longest first (→ Nov15 07:33, then →
+> 2027-11-30, then → 10:33).  While a START column (-o S) shows the dates,
+> the estimates are the first thing to go.  An estimate names its month in
+> English whatever your locale; its clock is the server's (sq help display).
+
+> A folded array row is one row for many tasks (sq help arrays).
+
+> See also: sq help modes, sq help memory, sq help arrays.
+HELP_SCREEN_EOF
+}
+help_screen_memory() { cat <<'HELP_SCREEN_EOF'
+@screen memory
+^ sq help memory: the MEM column
+
+= Discussion:
+> MEM is each job's total memory: what a running job holds and what a
+> pending one asks for, as Slurm's tres-alloc reports it, not per node or per
+> CPU as squeue's own %m prints it: a --mem-per-cpu=7800M -c 2 job reads
+> 15.2G, not 7800M.  Binary units, M below 1000 MiB, T from 1 TiB, else G,
+> with one decimal, cut, where it is not whole; on a screen too narrow for
+> the decimals, whole numbers from 10 up (15G; 7.6G and 0.9G keep their
+> decimal).
+
+> A folded row's MEM is the sum over the jobs it stands for: a folded array
+> row adds up its tasks, and a pending bracket ×16 is sixteen times the
+> request of one task, also with no JOBID column to show the ×16 (without
+> one, tasks do not fold).  A pending job's request is what it asked for, not
+> always what it will get: an --exclusive job is given the whole node, and a
+> --mem=0 job the memory of the node it lands on.
+
+> A red ! before the value means sq could not get the totals, and the value
+> is squeue's %m; a job Slurm reports no total for shows %m too.  The totals
+> cost one more squeue call per refresh, made only while MEM is shown and no
+> cluster is selected: under -M, --federation, --sibling, SLURM_CLUSTERS or
+> SQUEUE_FEDERATION, SQUEUE_SIB, SQUEUE_SIBLING (set at all, even empty), MEM
+> is %m, and your own jobs' use is not read either.
+> FederationParameters=fed_display in slurm.conf selects the federation too,
+> but sq does not detect it.  %m means what squeue means by it, per node, or
+> per CPU for a --mem-per-cpu job, but is printed in the same units (7800M
+> reads 7.6G); a 0 (--mem=0) stays 0.
+
+> Your own running jobs show the memory they use, as in use/allocated
+> (41/64G, 7.7/15.2G): [[32|green]] below 70 %, [[33|yellow]] from 70 %, [[31|red]] from 90 %, [[1;31|bold
+> red]] from 100 %.  On a screen too narrow for that, whole numbers, 7/15G,
+> but an allocation below 10 keeps its decimal, 1/1.2G; still too narrow,
+> with colour, the allocation alone, 15G, in the same colours.  ? means no
+> reading: none yet, or a job sq does not measure (one on several nodes, or
+> without a memory allocation); ! that the reading failed.
+
+> The reading comes from sstat, which sq asks only about your own jobs, at
+> most every 30 s: it is kept in ~/.cache/sq/memuse (the directory: sq help
+> bell), which every sq of yours shares, sq job too.  With
+> JobAcctGatherType=jobacct_gather/linux the figure leaves out page cache,
+> tmpfs and /dev/shm, which the job's out-of-memory limit counts, so a job
+> can be killed while it reads well below its allocation; with
+> jobacct_gather/cgroup on cgroup v2 it is the cgroup's memory.current, page
+> cache included.
+
+> See also: sq help efficiency (a job's peak memory once it ended), sq help
+> nodes (the nodes' memory bars).
+HELP_SCREEN_EOF
+}
+help_screen_arrays() { cat <<'HELP_SCREEN_EOF'
+@screen arrays
+^ sq help arrays: folded array tasks
+
+= Options:
+- -x, --expand	One row per array task instead of folding them, in the queue and in the finished block
+- -r, --array	squeue's: one row per task of a pending array, which -x alone does not split
+
+= Environment:
+- SQ_FOLD	0 never folds array tasks, as -x; 1, or anything else, folds
+
+= Discussion:
+> Tasks that agree on every displayed column, as squeue prints it, collapse
+> to one row, 4108_[0-3] ×4, and its MEM adds up theirs.  A pending array
+> Slurm prints as one bracket reads 4109_[1,4,7-20%2] ×16, with or without
+> -x (only --array splits it), and the footer and "+N more" count every task
+> in it, not the row.  When the id column is too narrow it shrinks inside the
+> brackets, 4109_[1,4,…] ×16, so the count is never the part that gets cut.
+
+> Finished tasks fold by array and by outcome, so failures never hide inside
+> a count of successes; values that differ are shown as ranges (ELAPSED
+> 1s-3s).
+
+> See also: sq help efficiency (sq job 12345, an array's summary).
+HELP_SCREEN_EOF
+}
+help_screen_nodes() { cat <<'HELP_SCREEN_EOF'
+@screen nodes
+^ sq help nodes: the node bars
+
+^ Each node is a line: its CPU bar and allocated cores, its memory bar and
+^ figure, and its state; a node with a reason (down, drained, …) gets it on a
+^ line of its own.
+
+|   node01 [[32|██]][[2;32|▒]][[2|░░░░░░░]]  25%  32/128 cpu  [[32|██]][[2|░░░░░░░░]]  19%  192/1007G mem  mixed
+|   node02 [[2|░░░░░░░░░░]]   0%   0/24  cpu  [[2|░░░░░░░░░░]]   0%    0/79G   mem  down*
+|          [[2|↳ Not responding · since 2026-10-19]]
+
+= Legend:
+- [[32|█]]	CPU: in use; memory: allocated (or in use, see below)
+- [[2;32|▒]]	allocated, and idle (CPU) or with its use unknown (then the rest is ·)
+- [[35|▓]]	CPU in use beyond the allocation (magenta)
+- [[2|░]]	free
+- [[2|·]]	use not known (sinfo says N/A)
+- -	a figure sinfo gave no usable value for; in the in-use memory view, a node Slurm no longer refreshes
+- !	in the summary line: a total that counts RealMemory for some node
+- ?	in the summary line: a sum sq does not know
+
+= Colours:
+> Bars are green, yellow past 85 %; ▓ is magenta, ▒ dim in its bar's colour,
+> ░ and · dim; memory in
+> use is bold red past 95 %.  A node in a fault state (down, drained or
+> draining, failing, inval, unknown) has its filled cells red, in the in-use
+> memory bar its unknown ones too.
+
+= Discussion:
+> CPU: the figure counts allocated cores.  In use is the node's 5-minute
+> load average (CPULoad), refreshed only with slurmctld's node pings, so it
+> trails the node by minutes, and it counts processes outside Slurm too.
+
+> Memory, where Slurm schedules it: the bar and the figure count allocated
+> memory the same way, █ allocated and ░ free, against what jobs can be
+> given: RealMemory less the node's MemSpecLimit, 265/977G, which one more
+> call, scontrol --json show node (scontrol -o show node on a Slurm without
+> JSON, asked about the nodes sinfo lists), reads.  While sinfo gives no
+> FreeMem for a node (after a slurmctld restart, until the node reports), its
+> allocated memory reads ▒ and the rest ·.  Should the scontrol call fail,
+> RealMemory counts and a dim line under the nodes says why; where scontrol
+> gives no usable MemSpecLimit for a node (it does not list it, lists it
+> twice, or its figures are unreadable), RealMemory counts for that node and
+> the same line names it, the first of several (↳ memory counts RealMemory on
+> fb2-bioinf: scontrol listed it twice).  A node whose memory size sinfo
+> cannot give is counted only by the line about sinfo's figures: its total
+> is unknown, so it counts no RealMemory.  Where no node's size is known, the
+> line about a failed scontrol names the failure alone.
+
+> Memory, where Slurm does not schedule it (CR_CORE: no node has any memory
+> allocated, but some node has CPUs allocated): the bar shows memory in use
+> instead, █ in use and ░ free, from the node's own free-memory reading,
+> which is exactly when you most need to watch it.  It is RealMemory -
+> FreeMem, and FreeMem follows the kernel's MemFree, so page cache and the OS
+> count as used: use beyond the allocation is not necessarily jobs.  A node
+> Slurm no longer refreshes reads -: one that does not respond, is powered
+> down, powering up or down, rebooting, inval or future (*, ~, #, %, ^);
+> Slurm keeps its last FreeMem.  A node in a fault state keeps its bar red.
+> With nothing allocated anywhere, the bar is the allocated one, 0/977G.
+
+> Figures sinfo gives no usable value for (none, a word, a Memory of 0 or 1)
+> read - or ·, with a dim line naming them (↳ sinfo gave no usable figure
+> for Memory (2 nodes): shown as unknown), except FreeMem and CPUsLoad N/A,
+> which read unknown without the line: Slurm prints FreeMem N/A for a node
+> that has not reported since slurmctld started.
+
+> The summary line, on the smallest screens: the nodes' states, the
+> allocated cores and the allocated memory added up, 335/1052G mem, with !
+> before a total that counts RealMemory for any node (335/!1085G mem) and ?
+> for an unknown sum.  When it must drop parts to fit, it drops whole ones,
+> and the fault states (down*, drained, …) are kept longest.  In COMPACT the
+> reason lines are dropped when the screen runs short.
+
+> See also: sq help memory (MEM, and your own jobs' use, 41/64G), sq help
+> slurm (the calls and their timeouts).
+HELP_SCREEN_EOF
+}
+help_screen_finished() { cat <<'HELP_SCREEN_EOF'
+@screen finished
+^ sq help finished: the recently-finished block
+
+= Options:
+- --no-recent	Hide the block
+
+= Environment:
+- SQ_RECENT	0 hides the block, as --no-recent; 1, or anything else, shows it
+- SQ_SINCE	How far back it looks (default now-2hours), passed to sacct -S as it is: one sacct refuses costs the block, which falls back as below and names sacct's error
+- SQ_RECENT_MAX	Its rows: by default every finished job in FULL, the space left on screen up to 25 in COMPACT; a number from 1 you set is used as given in FULL, and is an upper limit in COMPACT, which never pushes the footer off screen; 0, a number of 9 or more digits, or anything else counts as unset
+
+= Discussion:
+> Each finished job shows its state, its exit (sq help exit), its elapsed
+> time and how long ago it ended.  Finished jobs come from the accounting
+> database (sacct), so a job that ended while nobody was watching is still
+> shown, for as long as SQ_SINCE reaches back.  Step rows are read too,
+> because a signalled job's own row reports success and only its step
+> carries the signal.
+
+> Without accounting, or with a filter sq does not translate for sacct (-n,
+> -w, -L, -R, --sibling, so SQUEUE_NAMES, SQUEUE_LICENSES, SQUEUE_SIB and
+> SQUEUE_SIBLING too), the block falls back to squeue -t all, which only
+> remembers jobs for MinJobAge (often 300 s), and the caption says so (sq
+> does not translate -n for sacct).  sacct also refuses an unknown user or
+> QoS that squeue only warns about: -u alice,typo shows alice's queue beside
+> a fallback block that names sacct's error.
+
+> Which filters reach sacct: a state filter (-t) filters the queue only, the
+> block shows every finished job either way.  --array (-r) becomes sacct's
+> --array, one row per task of a pending array's remainder, and --local and
+> --federation are sacct's own; --noconvert, --priority (-P) and -S only
+> change how squeue shows its jobs, and --all (-a) and --hide only whether
+> it shows the jobs of hidden partitions and of partitions closed to your
+> groups, which sacct always shows, so none of them is passed to sacct.  So
+> in squeue's default view (no --all, no -p, no -j, and not for an operator
+> or admin, who sees every partition's jobs) the queue leaves out those
+> partitions' jobs while the finished block lists them.  sacct runs without
+> your SACCT_* settings.
+
+> When the screen runs short in COMPACT, the block shrinks, down to one line:
+> the newest failure, else the newest job.  Finished array tasks fold by
+> array and by outcome (sq help arrays).
+
+> See also: sq help exit, sq help bell (a new failure rings).
+HELP_SCREEN_EOF
+}
+help_screen_exit() { cat <<'HELP_SCREEN_EOF'
+@screen exit
+^ sq help exit: the EXIT column, and sq's own exit status
+
+= Reading EXIT:
+- 0, 1, …	The job's exit code
+- rc/sigN	Killed by signal N, as Slurm records it
+- rc/oom	Out of memory
+- rc/errN	The low 7 bits of a Slurm error code (not errno), from slurmd starting the job or step
+- ?	An exit sq cannot read
+
+> EXIT is the exit code, then what ExitCode's second field says, taken from
+> the job and its steps (the first non-zero one, except that an
+> out-of-memory always wins; a row whose ExitCode is no wait status, two
+> numbers up to 255 and 127, is not read).  So EXIT can show a step's OOM on
+> a job that finished COMPLETED.  The bell and the colours follow STATE, not
+> EXIT: a COMPLETED job whose step ran out of memory shows 0/oom but stays
+> green and quiet.
+
+> The errN codes: 53 task I/O setup failed (the stdin, stdout or stderr file,
+> or the link back to srun); 52 slurmstepd could not start the tasks: a fork,
+> chdir, pam_setup or privilege drop failed, or a task or proctrack plugin
+> call did (a missing or non-executable program is not 52: it exits with its
+> errno, e.g. exit 2 for a missing file; a spank plugin failing after
+> start-up reads as an exit code, not an errN); 46 the process-tracking
+> container for the step could not be created; 48 switching to the user's
+> ids failed (setuid/setgid); 54 the prolog failed or never started; 115 the
+> spank plugin stack failed to initialize.
+
+> A folded row lists its distinct exits, highest exit code first, then
+> highest N.  An exit sq cannot read (nothing readable says non-zero, and a
+> row could not be read or none had a value) shows ?, once, after every
+> non-zero exit code and before exit 0, 0/oom included.
+
+> Known limits: a launch or communication failure can read as sig11, sig12
+> or sig13 (Slurm's own log calls it RaisedSignal); steps Slurm closes for a
+> dead node read sig9; an OOM caught by OverMemoryKill or missed by the
+> cgroup detection reads sig9; a real-time signal (34-64) reads errN; a
+> signal passed through a shell as exit 128+N reads as exit N (that is
+> sacct's text; the squeue -t all fallback shows 128+N).
+
+= sq's exit status:
+- 0	Done: the dashboard drawn (also when Slurm does not answer, or answers what sq cannot read: the screen says so), the job shown, the file followed to its end whatever the job's own outcome, the help printed; a reader that went away (| head) counts as done, for every command
+- 1	It could not be done: Slurm does not know the job, cannot be asked, or it is a het job (sq job); the file cannot be shown (sq log, e.g. Slurm unreachable at the start, a job Slurm forgot, a file not readable, and with --no-follow a job not started or a file not written yet); the output cannot be written (sq: cannot write the dashboard: …); or sq itself failed (no temporary directory, an internal error); one line on stderr says which
+- 2	A usage error: the command line, or a variable the command reads as input (SQ_FMT for the dashboard, SQ_PSS_SINCE for sq job, SQUEUE_* and SLURM_CLUSTERS), is wrong; one line on stderr says how
+- 128+N	Stopped by signal N
+HELP_SCREEN_EOF
+}
+help_screen_bell() { cat <<'HELP_SCREEN_EOF'
+@screen bell
+^ sq help bell: a bell for your own failures
+
+= Options:
+- --no-bell	Never ring
+
+= Environment:
+- SQ_BELL	0 never rings, as --no-bell; 1, or anything else, rings
+- SQ_BELL_ALL	1 rings for everyone's failures, not only yours; 0, or anything else, only yours
+- SQ_BELL_USER	The login whose failures ring (default yours, id -un); MEM's own jobs stay yours
+- SQ_BELL_HORIZON	A failure only rings while it is this fresh, in whole seconds (default 600; 0 mutes); anything else counts as unset
+
+= Discussion:
+> A job of yours that newly ends badly, FAILED, TIMEOUT, OUT_OF_MEMORY,
+> NODE_FAIL, DEADLINE or BOOT_FAIL, rings the terminal bell once.  Other
+> people's jobs don't.  The bell follows STATE, not EXIT: a COMPLETED job
+> whose step ran out of memory shows 0/oom but stays quiet.  A screen that
+> did not reach its reader (a closed pipe, a full disk) neither rings nor is
+> remembered, so the next run that does rings.  It rings only
+> while the failure is younger than SQ_BELL_HORIZON, so a first run, a
+> cleared cache and a week of downtime all stay quiet.  A row with an
+> unknown user never rings and is never remembered, and with no controlling
+> terminal the bell is skipped.
+
+> The bell keeps a little state: <jobid><tab><end time> lines in
+> ~/.cache/sq/alerted, added to and aged out after 24 h, never pruned just
+> because one run looked at fewer jobs, and replaced atomically so two
+> running copies cannot tear it.  The directory is $XDG_CACHE_HOME/sq when
+> that is an absolute path, else ~/.cache/sq (memuse lives there too: sq
+> help memory); with no absolute HOME either, or a directory sq cannot write
+> in, sq keeps no state and the bell stays off.
+HELP_SCREEN_EOF
+}
+help_screen_filters() { cat <<'HELP_SCREEN_EOF'
+@screen filters
+^ sq help filters: squeue's options, as sq passes them on
+
+> sq reads squeue's filters and flags (sq -h lists them) by their full long
+> names from a fixed list and passes them on in squeue's short spelling,
+> never an abbreviation, because squeue's own getopt would read "--iter=5" as
+> -i and "--forma=%i" as -o.
+
+= Values:
+> The value follows the letter (-pgpu, --partition=gpu) or is the next word,
+> whatever it looks like (-n -x is the job name -x).  Refused: an empty
+> value, one of only blanks and commas, and -p=gpu; a user, partition,
+> account, QoS, job or cluster beginning with - (-u -bob); and a filter given
+> twice, -S included, as squeue would keep only the last: write one list (-u
+> alice,bob).  -j takes job ids, 12345 or 12345_4.  -S takes squeue's sort
+> keys (default t,i), and may be empty; COMPACT keeps the order it gives.
+
+= The flags:
+- -a, --all	Also the jobs of hidden partitions and of partitions closed to your groups (-p and -j show them anyway, and an operator or admin always sees them)
+- --hide	The opposite, squeue's default: without them
+- -r, --array	One row per task of a pending array (sq help arrays)
+- -P, --priority	A pending job once per partition it may run in
+- --noconvert	squeue's units as they are (2048M, not 2G) where squeue prints them; MEM is sq's own
+- --federation	The jobs of every cluster in the federation
+- --local	This cluster's jobs only, even in a federation
+- --sibling, --sib	Every sibling of a federated job
+- --noheader	Accepted, and changes nothing: squeue's -h is --noheader, which sq always passes, so -h is sq's help
+
+= squeue's environment:
+> squeue's own variables count as the flags they stand for, the flag on the
+> command line winning: SQUEUE_USERS, SQUEUE_PARTITION, SQUEUE_ACCOUNT,
+> SQUEUE_QOS, SQUEUE_STATES, SQUEUE_NAMES, SQUEUE_LICENSES and SLURM_CLUSTERS
+> are read as -u, -p, -A, -q, -t, -n, -L and -M, and SQUEUE_ALL,
+> SQUEUE_ARRAY, SQUEUE_PRIORITY, SQUEUE_LOCAL, SQUEUE_FEDERATION, SQUEUE_SIB
+> and SQUEUE_SIBLING (set at all, even empty) as -a, -r, -P, --local,
+> --federation and --sibling, all in squeue's own order, so the queue, the
+> finished block and its caption see the same filters.
+
+> squeue's environment may stop sq with a usage error naming the variable,
+> because squeue would silently show no job (or fail): one set but empty or
+> of only blanks and commas, a user, partition, account, QoS or cluster
+> beginning with - (SLURM_CLUSTERS even under -M, as squeue reads it first),
+> and SQUEUE_LICENSES together with -L or -p, which Slurm versions read
+> differently.  SQUEUE_SORT is ignored, other SQUEUE_* names are left to
+> squeue, which ignores them too.  A SQUEUE_SIB or SQUEUE_SIBLING set in a
+> profile costs the accounting block, as --sibling does: sacct has no
+> sibling view (sq help finished).  What sq's own variables do with a value
+> they do not take: sq help env.
+
+= Refused:
+> -O/--Format, -s/--steps, -i/--iterate, -l, -v, -V, --json and --yaml, in
+> any spelling (-Oi, --steps=5, -aO): each would replace or defeat the output
+> sq parses; sq exits with code 2 and says why.  (-o/--format are sq's own
+> column list.)  squeue's --long, --start, --usage, --verbose, --version and
+> --autocomplete are not forwarded either.  Options run together are refused
+> (-ar, -atR: write -a -r, -a -t R), and so is any short option sq does not
+> forward (-z).  A long name written with one dash is refused with a hint,
+> -partition is no -p artition; the cost: a job named "ame" is written -n
+> ame, not -name, a user "sers" -u sers, a partition "artition" -p artition.
+> Slurm's development branch adds -J/--job-name (= -n), which sq refuses
+> until it is listed.
+
+> -- ends sq's options: what follows is a subcommand or nothing, so sq -- log
+> 12345 is sq log 12345, and a bare -- changes nothing.  A subcommand comes
+> first: only options that take no value (--me, -c, …) may stand before it,
+> so alias sq='sq --me' still works with it.  A subcommand's name is matched
+> exactly as written.
+
+= Examples:
+> Your own jobs in the gpu partition, centred
+$ sq --me -p gpu -C
+> Two users' running jobs
+$ sq -u alice,bob -t R
+HELP_SCREEN_EOF
+}
+help_screen_display() { cat <<'HELP_SCREEN_EOF'
+@screen display
+^ sq help display: colour, centring, clocks and text
+
+= Options:
+- --color, --no-color	Force colour on or off, wherever the output goes (also --colour, --no-colour)
+- -c, --center	Centre horizontally (also --centre)
+- -C, --center-all	Centre in both axes (also --centre-all)
+
+= Environment:
+- SQ_COLOR	0 never colours, 1 always; anything else, or unset, decides as below; the flags beat it
+- NO_COLOR	Set and not empty: no colour (unless SQ_COLOR or a flag says otherwise)
+- SQ_CENTER	1 centres horizontally, 2 in both axes; 0, or anything else, does not
+- TZ	The time zone of the title and the start estimates, e.g. TZ=Europe/Berlin sq
+
+= Discussion:
+> Colour where it belongs: on in a terminal and under watch, off when piped
+> or redirected, off with NO_COLOR.  Under watch the output is a pipe with
+> COLUMNS set, so the dashboard and sq job read COLUMNS in a pipe as watch
+> and colour it (watch needs -c); set COLUMNS by hand and a pipe gets the
+> escapes too, unless --no-color.  The help (sq -h, sq help, sq job -h, sq
+> log -h) is coloured on a terminal only: in a pipe it is plain unless
+> forced.
+
+> Centring: vertical centring happens only on a screen (a terminal, or
+> watch; into a file or a pipe -C centres horizontally only) and shows only
+> while the dashboard is at least two lines shorter than the screen.  With
+> -C, keep watch -t, or watch's header pushes the bottom off screen.
+
+> Clock times are the server's, in its time zone, which the title names (UTC
+> on many clusters).  Set TZ to read the title and the start estimates in
+> your own.  A start estimate names its month in English whatever your
+> locale (Oct23 14:05).
+
+> Text sq rewrites: a ␚ stands for bytes that are not valid UTF-8, one per
+> broken piece, wherever sq draws text: in what Slurm's tables print (job,
+> user and node names, reasons, sq job's fields), in error messages, in
+> filters and SQ_SINCE on captions, in usage errors and in the host name in
+> the title.  Bidi controls (U+202A-202E, U+2066-2069, U+200E/F, U+061C),
+> which would turn around what follows them on a line, are dropped; every
+> other character stays, emoji joiners too.  Control characters (a tab, an
+> escape) are dropped from what sq echoes in an error, so 'mo<tab>des' is
+> echoed as 'modes'.  Two names that differ only in such bytes or controls
+> read the same and are one: the node block shows the first of two such
+> nodes, scontrol then lists that name twice, so its memory bar counts all
+> of RealMemory and sq job calls it unknown, and array tasks named so fold
+> together.  sq log passes a job's output file on as it is.
+
+> sq needs a UTF-8 terminal; it counts characters under your locale when that
+> is UTF-8, else under C.UTF-8 or another UTF-8 locale it finds.
+HELP_SCREEN_EOF
+}
+help_screen_slurm() { cat <<'HELP_SCREEN_EOF'
+@screen slurm
+^ sq help slurm: what sq asks Slurm, and how long it waits
+
+= Environment:
+- SQ_TIMEOUT	Seconds to wait for each Slurm call before calling it unreachable (default 5; 0 or anything that is no number means 5); sq job waits 30 s for accounting unless this is set to a valid number
+
+= Discussion:
+> The dashboard asks sinfo for the nodes, squeue for the queue, sacct for the
+> finished jobs (sq help finished), one more squeue call for MEM's totals
+> while MEM is shown (sq help memory), sstat for your own running jobs'
+> memory at most every 30 s, and scontrol --json show node for the memory
+> each node reserves for its OS (scontrol -o show node on a Slurm without
+> JSON, asked about the nodes sinfo lists).  sq job asks squeue, sacct,
+> sinfo, sstat and scontrol about the one job, its nodes and, for a pending
+> job, the queue ahead of it and its dependencies; sq log asks Slurm every 5
+> s.
+
+> An unreachable controller makes sinfo and squeue hang rather than fail, so
+> every call is bounded by SQ_TIMEOUT (sstat by at most 2 s).  The calls that
+> need the job list (the memory ones, the squeue -t all fallback) are skipped
+> when it does not come, so an outage of the controller delays a refresh by
+> about twice that, three times when accounting (sacct) does not answer
+> either.  The screen then shows a clear banner instead of an empty table
+> that looks like an empty queue, and sq still exits 0 (sq help exit).
+
+> Without accounting (no slurmdbd), the finished block falls back to squeue
+> -t all and says so, and sq job shows no efficiency.  On a Slurm without
+> JSON, sq job asks sinfo for the node figures and scontrol -o show node,
+> for those nodes alone, for MemSpecLimit and the effective CPU count
+> (CPUEfctv).
+
+> -M, --federation, --sibling and SLURM_CLUSTERS select other clusters for
+> the dashboard (MEM is then %m: sq help memory); sq job and sq log refuse
+> them, as they read this cluster and this machine.
+HELP_SCREEN_EOF
+}
+help_screen_env() { cat <<'HELP_SCREEN_EOF'
+@screen env
+^ sq help env: every variable sq reads
+
+= sq's own:
+- SQ_FMT	The default column list, as -o (sq help columns)
+- SQ_COMPACT	1 always COMPACT, 0 always FULL; unset, by the output (sq help modes)
+- SQ_WIDTH, SQ_HEIGHT	Pretend the screen has this size, a number; the dashboard's only (sq help modes)
+- SQ_CENTER	0 (default) does not centre, 1 centres horizontally, 2 in both axes (sq help display)
+- SQ_COLOR	0 never colours, 1 always; unset, auto (sq help display)
+- SQ_FOLD	0 never folds array tasks, 1 (default) folds (sq help arrays)
+- SQ_ETA	0 hides start estimates, 1 (default) shows them (sq help columns)
+- SQ_RECENT	0 hides the finished block, 1 (default) shows it (sq help finished)
+- SQ_SINCE	How far back the finished block looks, as sacct -S reads it (sq help finished)
+- SQ_RECENT_MAX	The finished block's rows, a number (sq help finished)
+- SQ_BELL	0 never rings, 1 (default) rings (sq help bell)
+- SQ_BELL_ALL	0 (default) only your failures ring, 1 everyone's (sq help bell)
+- SQ_BELL_USER	The login whose failures ring (sq help bell)
+- SQ_BELL_HORIZON	How fresh a failure must be to ring, in whole seconds (default 600) (sq help bell)
+- SQ_TIMEOUT	Seconds to wait for Slurm, a number (default 5) (sq help slurm)
+- SQ_PSS_SINCE	sq job: when accounting moved from RSS to PSS (sq help efficiency)
+
+> A number sq reads from the environment may have blanks around it, one
+> leading + and leading zeros: ' 0', '+0' and '00' are 0.  Anything else, a
+> blank inside ('5 0'), a -, a dot, a letter, is no number.  A display
+> variable (every one above but SQ_FMT, SQ_SINCE, SQ_BELL_USER and
+> SQ_PSS_SINCE) whose value is no number, or not one of those its topic
+> names, counts as unset: its default, or auto, silently (SQ_COMPACT takes 0
+> or 1 exactly, SQ_TIMEOUT a number with a dot too).  SQ_FMT and SQ_PSS_SINCE
+> are inputs: an invalid one stops the command that reads it, SQ_FMT the
+> dashboard and SQ_PSS_SINCE sq job, with exit 2, and says why.  SQ_SINCE
+> goes to sacct as it is (sq help finished).
+
+= Others sq reads:
+- SQUEUE_*, SLURM_CLUSTERS	squeue's filters and flags, for the dashboard: an invalid one stops it with exit 2 (sq help filters); sq job and sq log leave SQUEUE_* aside and refuse SLURM_CLUSTERS, set at all, with exit 2
+- NO_COLOR	No colour (sq help display)
+- COLUMNS, LINES	The screen size watch passes: they size the dashboard unless SQ_WIDTH and SQ_HEIGHT do, and both exported mean a screen (sq help modes); COLUMNS alone colours the dashboard and sq job in a pipe (sq help display); COLUMNS also sizes the help and sq job's last lines; a COLUMNS or LINES that is no number is no usable size for the dashboard (that axis falls back to 100 columns or 24 lines), and the help and sq job measure the terminal instead
+- TZ	The time zone of clock times (sq help display)
+- XDG_CACHE_HOME, HOME	Where the bell's state and the memory readings live (sq help bell)
+- TMPDIR	Where sq makes its temporary directory; sq exits 1 when it cannot
+- LC_ALL, LC_CTYPE, LANG	The locale gawk counts characters in, else C.UTF-8 (sq help display)
+
+> SQUEUE_SORT is ignored, and sacct runs without your SACCT_* settings.
+HELP_SCREEN_EOF
+}
+help_screen_why() { cat <<'HELP_SCREEN_EOF'
+@screen why
+^ sq help why: sq job's why section
+
+> A section right after the state, for a job that waits or did not complete;
+> a running or completed job has none.
+
+= A pending job:
+> What holds it and who can act, as one coloured verdict, the same kinds the
+> dashboard sorts pending jobs by: in green, [[32|waits its turn]]; in yellow, [[33|needs
+> action]], [[33|waits for an admin]] and [[33|stuck]] (a reason sq has no words for); in
+> red, [[31|can never start]] and [[31|will never start]].  With the detail: the parents
+> of a dependency and their state now, a job waiting for resources against
+> what each node it may use has free and the running jobs that must end
+> first, the jobs ahead of it in the queue, the command that releases a hold.
+
+= An ended job that did not complete:
+> Its exit in plain words (and what sacct cannot tell apart, such as exit 4
+> and a SIGILL), who cancelled it, the time or memory limit it hit, the node
+> it lost; for an array, its tasks that did not complete.
+
+= Its output's last lines:
+> A batch job that ended FAILED (not a timeout, an out-of-memory or a
+> cancelled job) ends the section with the last 5 lines of its output that
+> are not blank, for every job whose file you can read, other users' too.
+> The file is read on the machine sq job runs on, so one on a node's local
+> disk reads as missing (the report names the node that wrote it).  The
+> lines come from the last 4096 bytes of the file (its stderr when that has
+> a file of its own), only from a regular file written while the job ran,
+> and only while Slurm still knows its path: Slurm forgets a job's output
+> paths once it forgets the job (MinJobAge, often 5 minutes after it ends),
+> and its last lines with them.
+
+> They are cut to COLUMNS when it is 21 or more, else to the terminal's
+> width, else to 120 columns; the report's other lines are not cut: a long
+> one wraps, so no path or reason loses a word.  COLUMNS set in a pipe also
+> colours the report, as for the dashboard (sq help display); --no-color.
+
+> The file is read by a process of its own, given 2 s, so a hung network
+> mount does not hang sq job: that process, stuck in the kernel, cannot be
+> stopped, and it is the one process sq may leave behind.
+
+> See also: sq help efficiency, sq help exit.
+HELP_SCREEN_EOF
+}
+help_screen_efficiency() { cat <<'HELP_SCREEN_EOF'
+@screen efficiency
+^ sq help efficiency: how well a job used what it was given
+
+= Environment:
+- SQ_PSS_SINCE	When this cluster's accounting moved from RSS to PSS (JobAcctGatherParams=UsePss), as YYYY-MM-DD[ HH:MM[:SS]][ ZONE], YYYY-MM-DDTHH:MM[:SS]Z or @EPOCH, e.g. "2026-10-19 15:59 CEST" or 2026-10-19T13:59Z; unset or empty: no note; anything else stops sq job with exit 2
+- SQ_TIMEOUT	sq job waits 30 s for accounting, which a big array keeps busy, unless SQ_TIMEOUT is set to a valid number of seconds, which then bounds that wait too; every call is done by that wait and 5 s more
+
+= Discussion:
+> Once a job ended, sq job shows its CPU time against CPUs x elapsed and its
+> peak memory against its allocation.  Per step the CPU time is the larger
+> of what the step's processes reported and what Slurm's sampling saw, so
+> processes Slurm killed or never waited for still count (a note says when
+> the sampling decided it); sampled, it stays a lower bound.  When Slurm gave
+> more CPUs than were asked for, a note says how far a program running one
+> thread per requested CPU can get at most, the cap.  CPU is [[32|green]] from 70 % of
+> what it can reach (100 %, or that cap), [[33|yellow]] from 30 % of it, [[31|red]] below.
+
+> MEM is the largest step's peak against the allocation, coloured as the
+> dashboard's MEM.  A step of several tasks adds up each task's own peak, an
+> upper bound, and a note says so.  The peak is sampled and sampling misses
+> a short spike, so a job killed for its memory can read far below its limit;
+> an OUT_OF_MEMORY job gets a note saying that.  On a cluster whose
+> accounting moved from RSS to PSS, set SQ_PSS_SINCE to when: a peak measured
+> in a step that started before it gets a note, as RSS counts memory shared
+> between processes once per process.  It only dates that switch, it turns
+> nothing on; Slurm keeps no record of which jobs were measured which way.
+
+> Where it differs from seff: its CPU time includes what Slurm's sampling
+> saw of processes it killed or never waited for, which seff leaves out (a
+> job killed at its time limit can read near 0 % there), and its peak memory
+> is the largest step's total, each task's own peak added up, where seff
+> multiplies the largest single task's peak by that step's task count.
+
+> The efficiency comes from accounting (sacct), so it shows once accounting
+> has recorded the job's end, a moment after squeue says it ended; sq job
+> asks the rest meanwhile.  A job squeue has forgotten (MinJobAge, often 5
+> minutes after it ends) is still shown from accounting, without its output
+> paths.  When one of squeue and sacct does not answer, the report shows what
+> the other knows and a dim line says which.
+
+> While your own job runs: the memory it uses now, as the dashboard's MEM
+> reads it, from the same reading (? none yet, ! it failed); the CPU
+> efficiency comes when it ends.  Another user's running job and a pending
+> job have no efficiency section: sq reads sstat only for your own jobs.
+
+= An array:
+> sq job 12345 gets one summary: its tasks counted by state, and over the
+> completed ones the median, the weakest task and the best (sq job 12345_7
+> then looks at one), and why the other tasks did not complete.  A task is
+> 12345_7, or its own job id.  While accounting does not answer, the count is
+> a floor (array of ≥5 (accounting did not answer)): its done, failed and
+> cancelled tasks are only known there.
+HELP_SCREEN_EOF
+}
+help_screen_job() { cat <<'HELP_SCREEN_EOF'
+@screen job
+^ One job in one report: its state and times, the CPUs and memory it asked for
+^ and was given, its work directory and output files, why it waits or did not
+^ complete, and once it ended how well it used them.
+
+= Usage:	sq job {[OPTIONS]} {<JOBID>}
+
+= Arguments:
+- {<JOBID>}	12345, an array task 12345_4 (or its own job id), or an array 12345, which gets one summary; het jobs are not supported yet
+
+= Options:
+- --color, --no-color	Force colour on or off (also --colour, --no-colour)
+- -h, --help	Print this help
+
+= Environment:
+- SQ_TIMEOUT	Seconds to wait for Slurm (5); accounting gets 30 s unless it is set to a valid number
+- SQ_PSS_SINCE	When accounting moved from RSS to PSS (sq help efficiency)
+- SQ_COLOR, NO_COLOR	Colour, as the dashboard's (sq help display)
+- COLUMNS	The width the output's last lines are cut to (sq help why); set in a pipe, it also colours the report, as for the dashboard
+
+> -M, --federation, --sibling and SLURM_CLUSTERS are refused: sq job reads
+> this cluster only.  More: sq help why, sq help efficiency, sq help exit.
+HELP_SCREEN_EOF
+}
+help_screen_log() { cat <<'HELP_SCREEN_EOF'
+@screen log
+^ Prints a batch job's output file from its start, then follows it while the
+^ job runs, and ends shortly (within about 10 s) after the job ends: pipe it
+^ to less or grep, or watch it as it comes.
+
+= Usage:	sq log {[OPTIONS]} {<JOBID>}
+
+= Arguments:
+- {<JOBID>}	12345, an array task 12345_4, or a het job's component 12345+1 (its leader writes the output); a bare array id is refused with its task ids, unless only its last task is left, which is then followed
+
+= Options:
+- -e, --err	The job's stderr file instead of its stdout file
+- -n {<N>}	Only the last N lines, then follow
+- --no-follow	Print what is there now and stop
+- -h, --help	Print this help
+
+= Environment:
+- SQ_TIMEOUT	Seconds to wait for each Slurm call (5)
+
+= Discussion:
+> A pending job is waited for until it runs and its file is there (with
+> --no-follow it is an error).  The path is computed from the job's -o/-e the
+> way Slurm's job does (%j, %A_%a, %N, %x, widths, %%, and a backslash, which
+> turns expansion off), so a file name that is reused (no %j in it) may first
+> show an earlier run's text.
+
+> The file's bytes are passed on as they are; notes ("sq log: …") go to
+> stderr, also into a pipe: the job is pending, the file has not appeared
+> yet, Slurm does not answer, and how the job ended (sq log: job 12345 ended:
+> FAILED (exit code 1:0)).  A requeued job ends the stream with a note; run
+> sq log again for its new run.
+
+> sq log follows for as long as Slurm cannot tell it the job ended, and asks
+> Slurm every 5 s: once it follows, it keeps following while Slurm does not
+> answer.  "Live" can lag: a job on another node writes through NFS, and a
+> program buffers its output into a file (python -u, or stdbuf -oL, helps).
+> Under watch, use --no-follow -n N: watch -n 5 sq log --no-follow -n 20
+> 12345.
+
+> The file cannot be shown (exit 1), for example: Slurm is unreachable at
+> the start; Slurm forgot the job (MinJobAge, often 5 minutes after it ends)
+> and its path with it; an interactive job; output to /dev/null; a file not
+> readable, or one the job never wrote; a path that is no regular file, such
+> as a FIFO or a device; and with --no-follow, a job not started or a file
+> not written yet.  It is read on this machine, so -M, --federation,
+> --sibling and SLURM_CLUSTERS are refused.  Following needs GNU tail 8.28
+> or newer; --no-follow does without.  Exit status: sq help exit.
+HELP_SCREEN_EOF
+}
+help_names() { help_topics=$(help_table | env LC_ALL=C gawk -F'\t' 'NF == 3 { printf "%s ", $2 }'); }
+# the help's colour: --color/--no-color, else SQ_COLOR, else NO_COLOR, else a
+# terminal on stdout.  Unlike the dashboard and sq job (color_resolve), a
+# pipe is plain even with COLUMNS set
+help_color() {
+	[ "$color" = auto ] || return 0
+	if [ -n "${NO_COLOR:-}" ]; then color=0; elif [ -t 1 ]; then color=1; else color=0; fi
+}
+# the help's width: COLUMNS if it is a number (num_read) other than 0, else
+# the terminal's, else 80; clamped to 40..100
+help_width() {
+	pref help_cols COLUMNS ''
+	[ "${help_cols:-0}" != 0 ] || { tty_size; help_cols=$tty_cols; }
+	[ "$help_cols" -ge 1 ] 2>/dev/null || help_cols=80
+	[ "$help_cols" -ge 40 ] || help_cols=40
+	[ "$help_cols" -le 100 ] || help_cols=100
+}
+# colour_words WORD...: the colour words among them, the last one winning; they
+# count after -h too (sq, sq help, sq job)
+colour_words() {
+	local a
+	for a; do case $a in --color|--colour) color=1 ;; --no-color|--no-colour) color=0 ;; esac; done
+}
+# help_render SCREEN PREFIX: the help's screen SCREEN on stdout, then exit 0;
+# a help that cannot be written is out_rc's "PREFIX: cannot write the help:
+# REASON", rc 1, a reader gone rc 0.  A closed stdout fails the redirection to
+# gawk before gawk runs, so it is asked first.  No Slurm call, no tmp dir
+help_render() {
+	local screen=$1 prefix=$2 fn=help_screen_${1//-/_} err rc
+	help_color; help_width; gawk_locale
+	(exec 9>&1) 2>/dev/null || { out_rc 2 "standard output: Bad file descriptor" "$prefix" "the help"; exit "$orc"; }
+	declare -F "$fn" > /dev/null || { printf '%s: the help has no screen %s\n' "$prefix" "$screen" >&2; exit 1; }
+	{ err=$({ help_table; "$fn"; } | env LC_ALL="$gloc" gawk -v screen="$screen" -v width="$help_cols" -v color="$color" \
+		--source "$(help_awk)" 2>&1 >&3); rc=$?; } 3>&1
+	out_rc "$rc" "$err" "$prefix" "the help" own
+	exit "$orc"
+}
+# sq -h prints the overview whatever follows it; only the colour words count
+show_help() { colour_words "$@"; help_render sq-h sq; }
+help_say()   { printf 'sq help: %s\n' "$(printf '%s' "$1" | scrub)" >&2; }
+help_usage() { help_say "$*"; exit 2; }
+# help_hint WORD: the topic a word that is none may have meant, into hint (empty
+# for none): a fixed table, never an edit distance - another case, a plural,
+# a word the topic is about, a prefix of 2 or more letters only one topic has
+help_hint() {
+	local low=${1,,} t
+	low=${low#--}
+	hint=; [ -n "${help_topics-}" ] || help_names
+	if   in_list "$low" "$help_topics"; then hint=$low
+	elif in_list "${low%s}" "$help_topics"; then hint=${low%s}
+	elif in_list "${low}s" "$help_topics"; then hint=${low}s
+	else case $low in
+		compact|full|reserve|sq_compact|sq_width|sq_height|watch) hint=modes ;;
+		format|-o|o|sq_fmt|column|width|letters) hint=columns ;;
+		mem|sstat|memuse) hint=memory ;;
+		expand|-x|x|fold|sq_fold|array) hint=arrays ;;
+		bar|bars|node|sinfo|scontrol|memspeclimit|legend) hint=nodes ;;
+		recent|no-recent|sacct|sq_since|sq_recent|sq_recent_max|history) hint=finished ;;
+		exits|rc|oom|signal|sig|status|exitcode|exit-code|exit-status) hint=exit ;;
+		no-bell|sq_bell|sq_bell_all|sq_bell_horizon|sq_bell_user|alert|alerted) hint=bell ;;
+		filter|options|option|squeue|me|user|partition|sort|squeue_*) hint=filters ;;
+		color|colour|no-color|no-colour|sq_color|no_color|center|centre|sq_center|tz|time|utf-8|utf8) hint=display ;;
+		timeout|timeouts|sq_timeout|slurm|outage) hint=slurm ;;
+		verdict|pending|reason|held|tail) hint=why ;;
+		seff|cpu|peak|sq_pss_since|pss) hint=efficiency ;;
+		environment|variables|variable|vars|var) hint=env ;;
+		*)  for t in $help_topics; do      # a prefix only one topic has
+				[ ${#low} -ge 2 ] && [ "${t#"$low"}" != "$t" ] || continue
+				[ -z "$hint" ] || { hint=; return; }
+				hint=$t
+			done ;;
+	esac; fi
+}
+# sq help [TOPIC]: alone (or help, -h, --help anywhere before a --) the list,
+# else one topic, matched exactly; one topic at a time.  The colour words
+# count wherever they stand
+sub_help() {
+	local a topic= tset=0 positional=0 shown hint
+	help_names
+	for a; do
+		case $a in --) break ;; -h|--help) colour_words "$@"; help_render help 'sq help' ;; esac
+	done
+	while [ $# -gt 0 ]; do
+		a=$1; shift
+		if [ $positional = 0 ]; then
+			case $a in
+				--color|--colour|--no-color|--no-colour) colour_words "$a"; continue ;;
+				--) positional=1; continue ;;
+				--help=*) help_usage "--help takes no value; write it on its own, e.g. sq help --help" ;;
+				--color=*|--colour=*|--no-color=*|--no-colour=*)
+					help_usage "${a%%=*} takes no value; write it on its own, e.g. sq help ${a%%=*} modes" ;;
+				-?*) help_hint "$a"
+					help_usage "'$(word40 "$a")' is not an option of sq help; sq help -h lists them${hint:+ (did you mean sq help $hint?)}" ;;
+			esac
+		fi
+		[ $tset = 0 ] || help_usage "one topic at a time, not '$(word40 "$topic")' and '$(word40 "$a")'; e.g. sq help $topic"
+		topic=$a tset=1
+	done
+	[ $tset = 1 ] || help_render help 'sq help'
+	case $topic in *[![:space:]]*) ;; *) help_usage "an empty topic (an unset variable?); sq help lists them" ;; esac
+	[ "$topic" != help ] || help_render help 'sq help'
+	if ! in_list "$topic" "$help_topics"; then
+		shown=$(word40 "$topic"); help_hint "$topic"
+		help_usage "'$shown' is not a topic; sq help lists them${hint:+ (did you mean sq help $hint?)}"
+	fi
+	help_render "$topic" 'sq help'
+}
 
 # refused_long WORD: the refusal of a long option sq refuses by name, if WORD
 # is one.  A squeue format flag beats SQUEUE_FORMAT, so it would silently
@@ -4101,7 +5029,7 @@ short_word() {
 			c) center=1; return ;;
 			C) center=2; return ;;
 			x) fold=0; return ;;
-			h) show_help ;;
+			h) show_help "${@:2}" ;;
 			# squeue's own long format replaces the framed one
 			l) die "-l replaces the output format sq parses; sq -o i,j,u picks columns" ;;
 			# the parameter dump contains SQUEUE_FORMAT itself, nonce and all, so
@@ -4170,7 +5098,7 @@ long_word() {
 					| scrub 40)'; e.g. sq --reserve 2" ;;
 			esac
 			return ;;
-		--help) show_help ;;
+		--help) show_help "${@:2}" ;;
 		--help=*) die "--help takes no value; write it on its own, e.g. sq --help" ;;
 		# sq's own long flags take no value: "--color=never" is what every other
 		# CLI accepts, and squeue answered it with a fake "slurm unreachable"

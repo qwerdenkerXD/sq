@@ -1,0 +1,25 @@
+One job in one report: its state and times, the CPUs and memory it asked for and
+was given, its work directory and output files, why it waits or did not
+complete, and once it ended how well it used them.
+
+[1;36mUsage:[0m [1msq[0m [1mjob[0m [36m[OPTIONS][0m [36m<JOBID>[0m
+
+[1;36mArguments:[0m
+  [36m<JOBID>[0m  12345, an array task 12345_4 (or its own job id), or an array 12345,
+           which gets one summary; het jobs are not supported yet
+
+[1;36mOptions:[0m
+  [1m--color[0m, [1m--no-color[0m  Force colour on or off (also --colour, --no-colour)
+  [1m-h[0m, [1m--help[0m           Print this help
+
+[1;36mEnvironment:[0m
+  [1mSQ_TIMEOUT[0m          Seconds to wait for Slurm (5); accounting gets 30 s unless
+                      it is set to a valid number
+  [1mSQ_PSS_SINCE[0m        When accounting moved from RSS to PSS (sq help efficiency)
+  [1mSQ_COLOR[0m, [1mNO_COLOR[0m  Colour, as the dashboard's (sq help display)
+  [1mCOLUMNS[0m             The width the output's last lines are cut to
+                      (sq help why); set in a pipe, it also colours the report,
+                      as for the dashboard
+
+  -M, --federation, --sibling and SLURM_CLUSTERS are refused: sq job reads this
+  cluster only. More: sq help why, sq help efficiency, sq help exit.

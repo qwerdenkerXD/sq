@@ -1,0 +1,51 @@
+An auto-fitting Slurm dashboard: nodes, queue and finished jobs.
+
+Usage: sq [OPTIONS] [FILTERS]
+       sq <COMMAND> [ARGS]
+
+Commands:
+  job <JOBID>   One job: why it waits or did not complete, its efficiency
+  log <JOBID>   A job's output file, followed while the job runs
+  help [TOPIC]  How sq behaves, one topic at a time; alone, the topics
+  A command comes first: only options that take no value may stand before it.
+
+Options:
+  --compact, --full    Fit the screen, or show every job (sq help modes)
+  --reserve <N>        COMPACT leaves N lines of the screen unused
+  -o, --format <LIST>  Columns, squeue's letters (default i,j,u,T,M,L,C,m,R)
+  -x, --expand         One row per array task instead of folding them
+  -c, --center         Centre horizontally (also --centre)
+  -C, --center-all     Centre in both axes (also --centre-all)
+  --no-recent          Hide the recently-finished block
+  --no-bell            Never ring the bell on a new failure
+  --color, --no-color  Force colour on or off (also --colour, --no-colour)
+  -h, --help           Print this help
+
+Filters: squeue's, passed on; the value attached (-pgpu) or the next word
+  -u, --user <LIST>         Jobs of these users (also --users)
+  --me                      Your own jobs
+  -p, --partition <LIST>    Jobs in these partitions (also --partitions)
+  -A, --account <LIST>      Jobs of these accounts (also -U, --accounts)
+  -q, --qos <LIST>          Jobs of these QoS
+  -j, --job <LIST>          These jobs, 12345 or 12345_4 (also --jobs)
+  -n, --name <LIST>         Jobs of these names
+  -t, --state <LIST>        Jobs in these states, e.g. R,PD (also --states)
+  -w, --nodelist <LIST>     Jobs on these nodes (also --node, --nodes)
+  -L, --license <LIST>      Jobs using these licenses (also --licenses)
+  -R, --reservation <NAME>  Jobs in this reservation
+  -M, --cluster <LIST>      Jobs of these clusters (also --clusters)
+  -S, --sort <KEYS>         The rows' order, squeue's sort keys (default t,i)
+
+squeue flags:
+  -a, --all       Also hidden partitions and partitions closed to you
+  -r, --array     One row per task of a pending array
+  -P, --priority  A pending job once per partition it may run in
+  --hide, --noconvert, --federation, --local, --sibling, --sib, --noheader
+                  As squeue reads them; --noheader changes nothing
+
+  Long names in full only, short options are written apart (-a -r, not -ar),
+  each filter once (a list: -u alice,bob). More: sq help filters.
+
+Topics: modes columns memory arrays nodes finished exit bell filters display
+        slurm env why efficiency
+  One topic: sq help TOPIC. A line on each: sq help.

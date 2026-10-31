@@ -10,8 +10,9 @@
 # measure time or load (timed_cases) run one after the other after the rest.
 #
 # --pin writes what sq prints into the pinned screens of sq job and its why
-# section (tests/fixtures/sqjob/screens) instead of comparing with them, for
-# a change that is meant to change them; git diff then shows what changed.
+# section (tests/fixtures/sqjob/screens) and of the help (tests/goldens/help)
+# instead of comparing with them, for a change that is meant to change them;
+# git diff then shows what changed.
 #
 # Frozen goldens (frozen_is, under tests/goldens/) were written by an older
 # build, e.g. 7fd9bd6's screens a change must leave as they were: --pin never
@@ -394,6 +395,8 @@ oracle_width() {
 }
 has()   { plain | grep -qF -- "$1"; }
 lacks() { ! has "$1"; }
+joined() { plain | tr '\n' ' ' | sed -E 's/ +/ /g'; }   # the text as one line, a help's wrapped sentence whole
+says()  { joined | grep -qF -- "$1"; }                  # says PHRASE: the text holds it, wrapped or not
 lines_matching() { plain | grep -E -- "$1"; }          # ERE over whole lines
 matches()        { plain | grep -qE -- "$1"; }
 escapes()  { LC_ALL=C tr -cd "$ESC" < "$OUT" | wc -c; }
@@ -1232,17 +1235,19 @@ EOF2
 " && err_is "sq log: job 500 ended: FAILED (exit code -1:0)"'
 }
 c_exit_docs() {   # R3-1 AC 20, 24
-	T_TITLE="README's Reading EXIT and sq -h name the ? of an exit sq cannot read"
+	T_TITLE="README's Reading EXIT and sq help exit name the ? of an exit sq cannot read"
 	local readme=${here%/*}/README.md
 	sq_run exit-unread --
 	need "the dashboard: rc 0" rc_is 0
 	need "README: a row that is no wait status is not read" grep -qF "always wins; a row whose" "$readme"
 	need "README: ... ExitCode is no wait status, two numbers up to 255 and 127, is not read)" grep -qF "ExitCode is no wait status, two numbers up to 255 and 127, is not read)" "$readme"
 	need "README: the fold's ?" eval 'tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "An exit sq cannot read (nothing readable says non-zero, and a row could not be read or none had a value) shows \`?\`, once, after every non-zero exit code and before exit 0, \`0/oom\` included."'
-	sq_run empty -- -h
-	need "sq -h: the EXIT labels, ? among them, no line wider than 81" eval '
-		rc_is 0 && plain | grep -qxF "EXIT: rc/sigN signal N, rc/oom out of memory, rc/errN low 7 bits of a Slurm" &&
-		plain | grep -qxF "error, ? an exit sq cannot read" && [ "$(plain | LC_ALL=$utf8 gawk "{ if (length(\$0) > m) m = length(\$0) } END { print m }")" -le 81 ]'
+	sq_run empty -- help exit
+	need "sq help exit: the EXIT labels, ? among them, and the fold's ?" eval '
+		rc_is 0 && plain | grep -qE "^  rc/sigN +Killed by signal N" && plain | grep -qE "^  rc/oom +Out of memory" &&
+		plain | grep -qE "^  rc/errN +The low 7 bits of a Slurm error code" && plain | grep -qE "^  \? +An exit sq cannot read$" &&
+		says "ExitCode is no wait status, two numbers up to 255 and 127, is not read)" &&
+		says "An exit sq cannot read (nothing readable says non-zero, and a row could not be read or none had a value) shows ?, once, after every non-zero exit code and before exit 0, 0/oom included."'
 }
 c_user_filter() {
 	T_TITLE="-u alice reaches squeue and sacct as -u alice, and sacct gets no -a"
@@ -4257,10 +4262,14 @@ c_compact_prompt_row() {
 	need "--full on a 20-row pty: what a pipe prints with --full (tries: $PAIR_RUNS)" test "$PAIR_SAME" = 1
 }
 c_display_docs() {
-	T_TITLE="DISPLAY-v4's docs: sq -h and the README's --reserve row name the prompt's row, the README's Usage the ssh -qt note (G1 AC5); the README's bars paragraph: CR_CORE's memory in use as █, the dim line naming an unusable figure but FreeMem and CPUsLoad N/A, the summary's ! and ?, its fault states kept longest (E AC7)"
+	T_TITLE="DISPLAY-v4's docs: sq help modes and the README's --reserve row name the prompt's row, the README's Usage the ssh -qt note (G1 AC5); the README's bars paragraph: CR_CORE's memory in use as █, the dim line naming an unusable figure but FreeMem and CPUsLoad N/A, the summary's ! and ?, its fault states kept longest (E AC7)"
 	local readme=${here%/*}/README.md
 	sq_run empty -- -h
-	need "sq -h: the --reserve line and its prompt row" eval 'rc_is 0 && plain | grep -A1 -E "^ *sq --reserve N +COMPACT leaves N lines of the screen unused$" | tail -n 1 | grep -qE "^ +\(on a terminal one more, for the prompt\)$"'
+	need "sq -h: the --reserve row" eval 'rc_is 0 && plain | grep -qE "^  --reserve <N> +COMPACT leaves N lines of the screen unused$"'
+	sq_run empty -- help modes
+	need "sq help modes: --reserve's prompt row, and ssh -qt" eval 'rc_is 0 &&
+		says "COMPACT leaves N lines of the screen unused, e.g. for watch'"'"'s own header (on a terminal one more, for the prompt)" &&
+		says "ssh -qt host sq"'
 	need "README: the --reserve row says it" grep -qF '| `--reserve N` | COMPACT leaves N lines of the screen unused, e.g. for `watch`'"'"'s own header (on a terminal one more, for the prompt).' "$readme"
 	need "README: Usage, ssh -qt and the closing line, or --reserve 1" eval 'grep -qE "^ssh -qt host sq +# " "$readme" && grep -qF "ssh'"'"'s \"Connection to … closed.\" line takes the row" "$readme" && grep -qF "(or give it --reserve 1)" "$readme"'
 	need "README: CR_CORE's memory in use draws as █ in the bar's colours, no ▓ for memory" eval '
@@ -6438,9 +6447,10 @@ EOF
 	sq_run "$fx" SQ_FMT=bogus%% SQ_CENTER=x SQ_RECENT_MAX=-1 SQ_COMPACT=7 -- log --no-follow 500
 	need "D4: a dashboard setting is neither applied nor validated" eval 'rc_is 0 && [ "$(cat "$OUT")" = done ] && err_is "sq log: job 500 ended: COMPLETED (exit code 0:0)"'
 	sq_run "$fx" -- log -h
-	need "sq log -h: rc 0, its help on stdout, no Slurm call" eval 'rc_is 0 && has "usage: sq log" && no_slurm_call'
+	need "sq log -h: rc 0, its help on stdout, no Slurm call" eval 'rc_is 0 && has "Usage: sq log [OPTIONS] <JOBID>" && no_slurm_call'
 	sq_run empty -- -h
-	need "sq -h names the subcommand" has "sq log JOBID"
+	need "sq -h names the subcommands" eval 'plain | grep -qE "^  log <JOBID> " && plain | grep -qE "^  job <JOBID> " && plain | grep -qE "^  help \[TOPIC\] "'
+	need "sq -h: an auto-fitting Slurm dashboard" has "auto-fitting Slurm dashboard"
 	sub_refused "sq: 'Log' is not a subcommand; sq -h lists them (did you mean sq log?)" Log 500
 	# -h and a usage error need no tmp dir: an unusable TMPDIR changes nothing
 	sq_run empty TMPDIR=/nonexistent/x -- -h
@@ -6448,7 +6458,7 @@ EOF
 	sq_run empty TMPDIR=/nonexistent/x -- --bogus
 	need "TMPDIR unusable: sq --bogus, rc 2, its own words" eval 'rc_is 2 && out_empty && err_is "sq: --bogus is not one of the long options sq forwards; sq -h lists them"'
 	sq_run empty TMPDIR=/nonexistent/x -- log -h
-	need "TMPDIR unusable: sq log -h, rc 0" eval 'rc_is 0 && has "usage: sq log" && err_empty'
+	need "TMPDIR unusable: sq log -h, rc 0" eval 'rc_is 0 && has "Usage: sq log" && err_empty'
 	sq_run empty TMPDIR=/nonexistent/x -- log
 	need "TMPDIR unusable: sq log, rc 2, its own words" eval 'rc_is 2 && out_empty && err_is "sq log: which job? e.g. sq log 12345"'
 }
@@ -6473,7 +6483,11 @@ EOF
 	sub_refused "sq: 'foo' is not a subcommand; sq -h lists them" foo
 	sub_refused "sq: 'LOG' is not a subcommand; sq -h lists them (did you mean sq log?)" LOG 500
 	sub_refused "sq: 'logs' is not a subcommand; sq -h lists them (did you mean sq log?)" logs 500
-	sub_refused "sq: 'help' is not a subcommand; sq -h lists them (did you mean sq -h?)" help
+	# sq help is a subcommand now: the topics' list (help_list)
+	sq_run empty -- help
+	need "sq help: rc 0, the list of topics, no Slurm call" eval 'rc_is 0 && err_empty && has "Usage: sq help [TOPIC]" && no_slurm_call'
+	sub_refused "sq: 'helps' is not a subcommand; sq -h lists them (did you mean sq help?)" helps
+	sub_refused "sq: 'HELP' is not a subcommand; sq -h lists them (did you mean sq help?)" HELP
 	sub_refused "sq: 'me' is not a subcommand; sq -h lists them (did you mean sq --me?)" me
 	sub_refused "sq: 'no-recent' is not a subcommand; sq -h lists them (did you mean sq --no-recent?)" --full no-recent
 	# SQJOB-v3's D6 changes: a job id alone, and "jobs", now point at sq job
@@ -7215,9 +7229,10 @@ c_job_contract() {   # Q0
 		sub_refused "sq job: '$f' is not a job id; e.g. sq job 12345, an array task 12345_4 or an array 12345" job -- "$f"
 	done
 	sq_run empty -- job -h
-	need "sq job -h: rc 0, its help on stdout, no Slurm call" eval 'rc_is 0 && has "usage: sq job [--color|--no-color] JOBID" && has "SQ_PSS_SINCE" && err_empty && no_slurm_call'
+	need "sq job -h: rc 0, its help on stdout, no Slurm call" eval 'rc_is 0 && has "Usage: sq job [OPTIONS] <JOBID>" && has "SQ_PSS_SINCE" &&
+		has "--colour" && has "NO_COLOR" && has "COLUMNS" && err_empty && no_slurm_call'
 	sq_run empty -- -h
-	need "sq -h names it" has "sq job JOBID"
+	need "sq -h names it" eval 'plain | grep -qE "^  job <JOBID> "'
 	sq_run empty -- job 10646+1
 	need "a het component typed: rc 1, refused, no call" eval 'rc_is 1 && out_empty && no_slurm_call && err_is "sq job: het jobs are not supported yet"'
 	# the report's reader gone before it is written: quietly 0; a full disk: 1
@@ -9193,7 +9208,7 @@ c_opts_mem() {   # AC23
 	need "memalloc, -M c1: no allocation, mirror or sstat call" eval 'rc_is 0 && [ "$(calls alloc)$(calls mirror)$(calls sstat)" = 000 ]'
 }
 c_opts_docs() {   # AC27
-	T_TITLE="sq -h names every short letter and long name sq accepts as a word, the README each of OPTS's notes, and the help's examples run"
+	T_TITLE="sq -h names every short letter and long name sq accepts as a word, sq help filters and finished and the README each of OPTS's notes, and the help's examples run"
 	local w missing= readme=${here%/*}/README.md
 	sq_run empty -- -h
 	for w in -u -p -A -U -q -j -M -n -t -w -L -R -S -a -r -P -o -c -C -x -h \
@@ -9205,10 +9220,17 @@ c_opts_docs() {   # AC27
 		plain | grep -qE -- "(^|[^-[:alnum:]])$w([^-[:alnum:]]|$)" || missing="$missing $w"
 	done
 	need "sq -h names each as a word${missing:+ (missing:$missing)}" eval 'rc_is 0 && [ -z "$missing" ]'
-	need "sq -h: options are written apart, -h is --noheader, the environment counts, an empty one is refused, the one-dash cost" eval '
-		has "short options are written apart (-a -r, not -ar)" && has "squeue'"'"'s -h is --noheader, which sq always" &&
-		has "squeue'"'"'s own variables count as the flags they stand for, a flag winning" && has "empty is refused" &&
-		has "a job named \"ame\" is -n ame, not -name" && has "SQUEUE_SIB and SQUEUE_SIBLING"'
+	need "sq -h: options are written apart" says "short options are written apart (-a -r, not -ar)"
+	sq_run empty -- help filters
+	need "sq help filters: -h is --noheader, the environment counts, an empty one is refused, the one-dash cost, any spelling, sacct's cost" eval '
+		rc_is 0 && says "squeue'"'"'s -h is --noheader, which sq always passes" &&
+		says "squeue'"'"'s own variables count as the flags they stand for, the flag on the command line winning" &&
+		says "empty or of only blanks and commas" && says "a job named \"ame\" is written -n ame" &&
+		says "SQUEUE_SIB and SQUEUE_SIBLING" && says "in any spelling" && says "costs the accounting block"'
+	sq_run empty -- help finished
+	need "sq help finished: squeue's default view, sacct's unknown user or QoS" eval '
+		rc_is 0 && says "squeue'"'"'s default view (no --all, no -p, no -j, and not for an operator or admin, who sees every partition'"'"'s jobs)" &&
+		says "refuses an unknown user or QoS that squeue only warns about"'
 	need "README: Usage, the flag table, Good to know (default view, sacct's unknown user, squeue's environment), Refused" eval '
 		grep -qF "read by their full long" "$readme" && grep -qF "in squeue'"'"'s short spelling" "$readme" &&
 		grep -qF "| \`-u\`, \`-p\`, \`-A\` (\`-U\`)" "$readme" && grep -qF "squeue'"'"'s default view (no \`--all\`, no \`-p\`)" "$readme" &&
@@ -10491,12 +10513,19 @@ c_whole_captions() {   # WHOLE AC 13 (R-L7): NODES' MEMNOTE under H8 and W8
 	need "nodes-cntrl W=44: ↳ memory counts RealMemory on node? and …" words_line "↳ memory counts RealMemory on node? and …"
 }
 c_whole_docs() {   # WHOLE AC 12 (H12), EST's AC 12
-	T_TITLE="sq -h and the README: COMPACT fits every measured width, below 21 columns too, by shorter forms of whole parts (start estimates among them), a line cut only below its shortest form; FULL wraps; the README keeps 'Numbers are never cut while anything else can give' and says how start estimates give (EST)"
+	T_TITLE="sq help modes and the README: COMPACT fits every measured width, below 21 columns too, by shorter forms of whole parts (start estimates among them), a line cut only below its shortest form; FULL wraps; the README keeps 'Numbers are never cut while anything else can give' and says how start estimates give (EST)"
 	local readme=${here%/*}/README.md
-	sq_run empty -- -h
-	need "sq -h: COMPACT fits every width, FULL wraps" eval 'rc_is 0 && plain | tr "\n" " " | sed -E "s/ +/ /g" |
-		grep -qF "COMPACT fits every width it can measure, below 21 columns too: its lines take shorter forms of whole parts (sinfo'"'"'s short node states, durations as 5h59m once the text columns are at 8, start estimates, fewer columns, Slurm'"'"'s state codes last), and a line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap."'
-	need "sq -h: no 'Below about 60 columns'" lacks "Below about 60 columns"
+	sq_run empty -- help modes
+	need "sq help modes: COMPACT fits every width, FULL wraps" eval 'rc_is 0 &&
+		says "COMPACT fits every width it can measure, below 21 columns too." &&
+		says "A line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap."'
+	local t; for t in -h help "help modes" "help columns" "help display"; do
+		sq_run empty -- $t
+		need "sq $t: no 'Below about 60 columns'" lacks "Below about 60 columns"
+	done
+	sq_run empty -- help columns
+	need "sq help columns: an estimate whole or not at all; numbers never cut while anything else can give" eval '
+		rc_is 0 && says "An estimate shows whole or not at all" && says "numbers are never cut while anything else can give"'
 	need "README: COMPACT fits every width, a line cut only below its shortest form, FULL wraps; no floor of 60 columns" eval '
 		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "COMPACT fits every width it can measure, below 21 columns too" &&
 		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "A line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap." &&
@@ -11551,6 +11580,319 @@ c_h0_subcommand_exact() {   # H0-8
 }
 
 # ============================================================================
+# the help (HELP-v4.1 §3): sq -h, sq help [TOPIC], sq job -h, sq log -h
+# ============================================================================
+# Every help run is in a pipe without a terminal (NOTTY) and at COLUMNS=80
+# unless a case says otherwise, so the caller's terminal sets no width.  No
+# help asks Slurm, so each case ends with stubs_answer
+help_run() { NOTTY=1 sq_run empty COLUMNS=80 "$@"; }   # help_run [VAR=value | -VAR]... -- ARGS...
+esc_lines() { LC_ALL=C grep -c "$ESC\[" "$OUT"; }        # how many lines hold an escape
+help_list_lines=25
+help_names_of() { sed -n "/^help_table() { cat <<'HELP_TABLE_EOF'\$/,/^HELP_TABLE_EOF\$/p" "$sq" | gawk -F'\t' 'NF == 3 { print $2 }'; }
+c_help_list() {   # A1
+	T_TITLE="sq help, -h or --help anywhere among its words before a --, and help help print the list of topics; so do valueless options and -- before help"
+	local a list=$T_DIR/list
+	help_run -- help; cp "$OUT" "$list"
+	need "sq help: rc 0, the list ($help_list_lines lines), stderr empty, no Slurm call" eval '
+		rc_is 0 && err_empty && no_slurm_call && [ "$(grep -c "" "$OUT")" = $help_list_lines ] && has "Usage: sq help [TOPIC]"'
+	for a in "help -h" "help --help" "help help" "help modes -h" "help modes nodes -h" "help -h modes nodes" \
+	         "--me help" "--federation help" "-- help" "-x -- help"; do
+		help_run -- $a
+		need "sq $a: rc 0, the list" eval 'rc_is 0 && err_empty && cmp -s "$list" "$OUT"'
+	done
+	stubs_answer
+}
+c_help_topics() {   # A2, both directions
+	T_TITLE="every name of the topic table is a topic (sq help T: rc 0, a screen, nothing on stderr) and is on sq -h's Topics line or sq help's list; a word made of two names is none"
+	local t names topics_line
+	names=$(help_names_of)
+	need "the table has 16 names" [ "$(printf '%s\n' "$names" | grep -c .)" = 16 ]
+	help_run -- -h; topics_line=$(joined | sed -n 's/.*Topics: \(.*\) One topic: sq help TOPIC.*/\1/p')
+	help_run -- help; cp "$OUT" "$T_DIR/list"
+	for t in $names; do
+		help_run -- help "$t"
+		need "sq help $t: rc 0, a screen, stderr empty, no Slurm call" eval 'rc_is 0 && err_empty && [ -s "$OUT" ] && no_slurm_call'
+		need "$t: on sq help's list" grep -qE "^  $t " "$T_DIR/list"
+		case $t in job|log) ;; *) need "$t: on sq -h's Topics line" in_words "$t" "$topics_line" ;; esac
+	done
+	need "sq -h's Topics line names the 14 topics and nothing else" eval '[ "$(printf "%s\n" $topics_line | grep -c .)" = 14 ]'
+	for t in 'nodes finished' 'modes nodes' 'job log'; do
+		help_run -- help "$t"
+		need "sq help '$t': rc 2, no topic" eval 'rc_is 2 && out_empty && err_is "sq help: '"'"'$t'"'"' is not a topic; sq help lists them"'
+	done
+	stubs_answer
+}
+in_words() { case " $2 " in *" $1 "*) return 0 ;; esac; return 1; }   # in_words WORD LIST
+help_refused() {   # help_refused TEXT ARGS...: rc 2, nothing on stdout, stderr exactly TEXT
+	local text=$1; shift
+	help_run -- "$@"
+	need "sq $*: rc 2, says '$text'" eval 'rc_is 2 && out_empty && err_is "$text"'
+}
+c_help_words() {   # A3-A6
+	T_TITLE="a word that is no topic: rc 2, one line, with a hint from the fixed table (case, ±s, aliases, a unique prefix); options of sq help, two topics, an empty one; -h prints the overview whatever follows; help comes first"
+	local t
+	for t in MODES:modes mode:modes mod:modes SQ_BELL_USER:bell bars:nodes seff:efficiency status:exit Nodes:nodes; do
+		help_refused "sq help: '${t%%:*}' is not a topic; sq help lists them (did you mean sq help ${t#*:}?)" help "${t%%:*}"
+	done
+	for t in 'nodes finished' 'Nodes Finished' 'a b' m; do
+		help_refused "sq help: '$t' is not a topic; sq help lists them" help "$t"
+	done
+	help_refused "sq help: 'modes' is not a topic; sq help lists them" help $'mo\tdes'    # the tab scrubbed from the echo
+	help_refused "sq help: one topic at a time, not 'modes' and 'nodes'; e.g. sq help modes" help modes nodes
+	help_refused "sq help: an empty topic (an unset variable?); sq help lists them" help ''
+	help_refused "sq help: an empty topic (an unset variable?); sq help lists them" help ' '
+	help_refused "sq help: --color takes no value; write it on its own, e.g. sq help --color modes" help --color=x
+	help_refused "sq help: --help takes no value; write it on its own, e.g. sq help --help" help --help=x
+	help_refused "sq help: '-x' is not an option of sq help; sq help -h lists them (did you mean sq help arrays?)" help -x
+	help_refused "sq help: '--compact' is not an option of sq help; sq help -h lists them (did you mean sq help modes?)" help --compact
+	help_refused "sq help: '-h' is not a topic; sq help lists them" help -- -h
+	help_run -- help -- modes
+	need "sq help -- modes: the topic" eval 'rc_is 0 && plain | head -n 1 | grep -q "^sq help modes: "'
+	help_run -- -h; cp "$OUT" "$T_DIR/overview"
+	need "sq -h: rc 0, the overview, 51 lines at 80 columns" eval 'rc_is 0 && err_empty && [ "$(grep -c "" "$OUT")" = 51 ] && has "auto-fitting Slurm dashboard"'
+	for t in "-h modes" "--help" "-h --bogus" "-h -u ''"; do
+		eval "help_run -- $t"
+		need "sq $t: the overview" eval 'rc_is 0 && err_empty && cmp -s "$T_DIR/overview" "$OUT"'
+	done
+	for t in "-p gpu" "-M c" "--cluster c"; do
+		help_refused "sq: subcommands come first, before any option that takes a value: sq help …" $t help
+	done
+	help_refused "sq: 'helps' is not a subcommand; sq -h lists them (did you mean sq help?)" helps
+	help_refused "sq: 'HELP' is not a subcommand; sq -h lists them (did you mean sq help?)" HELP
+	stubs_answer
+}
+c_help_widths() {   # A7
+	T_TITLE="every screen of the help at COLUMNS 40, 80, 100 and 200, under C.UTF-8 and C: no line wider than the width clamped to 40..100, but example commands and the nodes sample"
+	local loc c t w widest limit
+	for loc in "$utf8" C; do
+		for c in 40 80 100 200; do
+			limit=$c; [ $c -ge 40 ] || limit=40; [ $c -le 100 ] || limit=100
+			widest=0
+			for t in -h help "help modes" "help columns" "help memory" "help arrays" "help nodes" "help finished" "help exit" \
+			         "help bell" "help filters" "help display" "help slurm" "help env" "help why" "help efficiency" "job -h" "log -h"; do
+				help_run COLUMNS=$c LC_ALL=$loc -- $t
+				need "LC_ALL=$loc COLUMNS=$c sq $t: rc 0" eval 'rc_is 0 && err_empty'
+				w=$(plain | LC_ALL=$utf8 gawk '!/^ *\$ / && !/^  +node0|^ +↳ Not/ { if (length($0) > m) m = length($0) } END { print m + 0 }')
+				[ "$w" -le "$widest" ] || widest=$w
+			done
+			need "LC_ALL=$loc COLUMNS=$c: widest line $widest, at most $limit" [ "$widest" -le "$limit" ]
+		done
+	done
+	stubs_answer
+}
+c_help_same_bytes() {   # A8, R1
+	T_TITLE="sq help job is sq job -h and sq help log is sq log -h, byte for byte; the colour words count before and after -h"
+	local a b
+	help_run -- help job --color; cp "$OUT" "$T_DIR/a"
+	for b in "job -h --color" "job --color -h"; do
+		help_run -- $b
+		need "sq help job --color = sq $b" eval 'rc_is 0 && cmp -s "$T_DIR/a" "$OUT"'
+	done
+	help_run -- help log; cp "$OUT" "$T_DIR/a"
+	help_run -- log -h
+	need "sq help log = sq log -h" eval 'rc_is 0 && cmp -s "$T_DIR/a" "$OUT"'
+	help_run -- -h --color; cp "$OUT" "$T_DIR/a"
+	help_run -- --color --help
+	need "sq -h --color = sq --color --help" eval 'rc_is 0 && cmp -s "$T_DIR/a" "$OUT"'
+	stubs_answer
+}
+c_help_colour() {   # A9, R6
+	T_TITLE="the help's colour: a flag, else SQ_COLOR, else NO_COLOR, else a terminal; plain in a pipe even with COLUMNS set; the colour words after -h count, sq log takes none"
+	local t
+	for t in "38:-h --color" "22:help -h --color" "13:help --color modes" "13:help modes --color" "11:job -h --color" "11:job --color -h" "0:log -h --color"; do
+		help_run -- ${t#*:}
+		need "sq ${t#*:} | cat: rc 0, ${t%%:*} lines in colour" eval 'rc_is 0 && [ "$(esc_lines)" = "${t%%:*}" ] && escapes_all_sgr'
+	done
+	help_refused "sq log: '--color' is not an option of sq log (sq log -h lists them); e.g. sq log -n 20 --err 12345" log --color -h
+	for t in -h "help modes" "job -h"; do
+		help_run -- $t
+		need "sq $t | cat: plain (COLUMNS=80 set)" eval 'rc_is 0 && [ "$(escapes)" = 0 ]'
+	done
+	help_run SQ_COLOR=1 -- -h
+	need "SQ_COLOR=1 sq -h | cat: colour" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ]'
+	help_run NO_COLOR=1 -- -h --color
+	need "NO_COLOR=1 sq -h --color: colour, the flag first" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ]'
+	PTY=1 PTY_ROWS=40 PTY_COLS=80 sq_run empty TERM=xterm-256color -- -h
+	need "sq -h on a terminal: colour" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ]'
+	PTY=1 PTY_ROWS=40 PTY_COLS=80 sq_run empty TERM=xterm-256color SQ_COLOR=0 -- -h
+	need "SQ_COLOR=0 sq -h on a terminal: plain" eval 'rc_is 0 && [ "$(escapes)" = 0 ]'
+	PTY=1 PTY_ROWS=40 PTY_COLS=80 sq_run empty TERM=xterm-256color NO_COLOR=1 -- help modes
+	need "NO_COLOR=1 sq help modes on a terminal: plain" eval 'rc_is 0 && [ "$(escapes)" = 0 ]'
+	stubs_answer
+}
+c_help_tmpdir() {   # A11
+	T_TITLE="TMPDIR unusable: sq -h, sq help, sq help modes, sq job -h and sq log -h print their help, rc 0"
+	local t
+	for t in -h help "help modes" "job -h" "log -h"; do
+		help_run TMPDIR=/nonexistent/x -- $t
+		need "TMPDIR unusable: sq $t, rc 0, the help" eval 'rc_is 0 && err_empty && [ -s "$OUT" ]'
+	done
+	stubs_answer
+}
+c_help_columns_env() {   # A12, R7
+	T_TITLE="the help's width: COLUMNS as num_read reads it, if not 0, else the terminal's, else 80; clamped to 40..100"
+	local t widest
+	for t in 99999999999999999999:80 ' 50:50' +50:50 050:50 00050:50 '5 0:80' abc:80 0:80 39:40 200:100; do
+		help_run COLUMNS="${t%%:*}" -- help filters
+		widest=$(plain | LC_ALL=$utf8 gawk '!/^ *\$ / { if (length($0) > m) m = length($0) } END { print m + 0 }')
+		need "COLUMNS='${t%%:*}', no terminal: sq help filters at ${t##*:} ($widest)" eval 'rc_is 0 && [ "$widest" = "${t##*:}" ]'
+	done
+	help_run -COLUMNS -- help filters
+	need "COLUMNS unset, no terminal: 80" eval '[ "$(plain | LC_ALL=$utf8 gawk "!/^ *\\\$ / { if (length(\$0) > m) m = length(\$0) } END { print m + 0 }")" = 80 ]'
+	PTY=1 PTY_ROWS=40 PTY_COLS=60 sq_run empty TERM=xterm-256color -COLUMNS -- help filters
+	need "COLUMNS unset, a terminal of 60 columns: 60" eval 'rc_is 0 && [ "$(plain | LC_ALL=$utf8 gawk "!/^ *\\\$ / { if (length(\$0) > m) m = length(\$0) } END { print m + 0 }")" = 60 ]'
+	stubs_answer
+}
+c_help_env_complete() {
+	T_TITLE="every SQ_* variable sq reads (but its internal ones) is on sq help env, and every long option sq knows on sq -h"
+	local v missing=
+	help_run -- help env
+	for v in $(grep -oE '\bSQ_[A-Z0-9_]+' "$sq" | sort -u); do
+		case $v in SQ_NONCE|SQ_NONCE2|SQ_NONCE3|SQ_NODEFILE|SQ_NODEGATE|SQ_LISTNONCE) continue ;; esac
+		plain | grep -qE "(^|[^A-Z_])$v([^A-Z0-9_]|$)" || missing="$missing $v"
+	done
+	need "sq help env names every SQ_* sq reads${missing:+ (missing:$missing)}" eval 'rc_is 0 && [ -z "$missing" ]'
+	help_run -- -h; missing=
+	for v in $(sed -n '/^long_valued="/,/"$/p; /^long_flags="/,/"$/p' "$sq" | tr -d '"' | sed 's/^long_[a-z]*=//'); do
+		plain | grep -qE -- "(^|[^-[:alnum:]])--$v([^-[:alnum:]]|$)" || missing="$missing --$v"
+	done
+	need "sq -h names every long option sq knows${missing:+ (missing:$missing)}" [ -z "$missing" ]
+	stubs_answer
+}
+# the help's layout, pinned: sq -h, sq help, sq job -h and sq log -h at 80
+# columns, plain and in colour (tests/goldens/help, written by --pin); the
+# topics are not pinned whole, their key sentences are (help_pins)
+c_help_goldens() {
+	T_TITLE="sq -h, sq help, sq job -h and sq log -h at 80 columns, plain and coloured, byte for byte as pinned"
+	local t name flag ext
+	for t in "-h:sq-h" "help:help" "job -h:job-h" "log -h:log-h"; do
+		name=${t#*:}
+		for flag in --no-color --color; do
+			ext=txt; [ $flag = --no-color ] || ext=ansi
+			help_run -- ${t%%:*} $flag
+			if [ $pin = 1 ]; then mkdir -p "$here/goldens/help"; cp "$OUT" "$here/goldens/help/$name.$ext"; continue; fi
+			need "sq ${t%%:*} $flag: rc 0, as pinned in goldens/help/$name.$ext" eval 'rc_is 0 && err_empty && cmp -s "$here/goldens/help/$name.$ext" "$OUT"'
+		done
+	done
+	stubs_answer
+}
+# the phrases the docs cases pinned before the help moved them onto its
+# screens, one fact for each fix of the help's review rounds (HELP-v4.1's
+# pins.sh, 99 phrases): each on its screen at 80 columns, wrapped or not
+c_help_pins() {   # A10
+	T_TITLE="99 phrases, each on the screen of the help it belongs to"
+	local screen phrase n=0 f
+	while IFS=$'\t' read -r screen phrase; do
+		f=$T_DIR/screen-${screen// /_}
+		[ -f "$f" ] || { help_run -- $screen --no-color; joined > "$f"; }
+		grep -qF -- "$phrase" "$f" || T_FAIL+=("sq $screen: lacks '$phrase'")
+		n=$((n + 1))
+	done <<'PINS'
+log -h	ends shortly
+log -h	reused
+log -h	cannot tell it the job ended
+log -h	python -u
+log -h	stdbuf -oL
+log -h	--no-follow -n N
+-h	short options are written apart (-a -r, not -ar)
+-h	auto-fitting Slurm dashboard
+-h	log <JOBID>
+-h	job <JOBID>
+help filters	squeue's -h is --noheader, which sq always passes
+help filters	squeue's own variables count as the flags they stand for, the flag on the command line winning
+help filters	empty or of only blanks and commas
+help filters	a job named "ame" is written -n ame
+help filters	SQUEUE_SIB and SQUEUE_SIBLING
+help filters	in any spelling
+help filters	costs the accounting block
+help modes	COMPACT leaves N lines of the screen unused, e.g. for watch's own header (on a terminal one more, for the prompt)
+help modes	ssh -qt host sq
+help modes	COMPACT fits every width it can measure, below 21 columns too.
+help modes	A line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap.
+help exit	An exit sq cannot read (nothing readable says non-zero, and a row could not be read or none had a value) shows ?, once, after every non-zero exit code and before exit 0, 0/oom included.
+help exit	ExitCode is no wait status, two numbers up to 255 and 127, is not read)
+help nodes	A node whose memory size sinfo cannot give is counted only by the line about sinfo's figures: its total is unknown, so it counts no RealMemory. Where no node's size is known, the line about a failed scontrol names the failure alone.
+help finished	refuses an unknown user or QoS that squeue only warns about
+help finished	squeue's default view (no --all, no -p, no -j, and not for an operator or admin, who sees every partition's jobs)
+help columns	numbers are never cut while anything else can give
+help columns	Start estimates: a pending job shows
+help columns	An estimate shows whole or not at all
+help why	a long one wraps, so no path or reason loses a word
+help why	COLUMNS when it is 21 or more
+job -h	SQ_PSS_SINCE
+job -h	--colour
+job -h	NO_COLOR
+job -h	COLUMNS
+help env	SQ_BELL_USER
+help bell	SQ_BELL_USER
+help efficiency	green from 70 % of what it can reach (100 %, or that cap), yellow from 30 % of it, red below
+help efficiency	sq reads sstat only for your own jobs
+help efficiency	(sq job 12345_7 then looks at one), and why the other tasks did not complete
+help why	A batch job that ended FAILED (not a timeout, an out-of-memory or a cancelled job)
+help why	that are not blank
+help why	read on the machine sq job runs on
+help why	in green, waits its turn; in yellow, needs action
+help why	MinJobAge, often 5 minutes
+help nodes	allocated, and idle (CPU) or with its use unknown (then the rest is ·)
+help nodes	(magenta)
+help nodes	▓ is magenta
+help nodes	down, drained or draining, failing, inval, unknown
+help nodes	some node has CPUs allocated
+help nodes	a node with a reason (down, drained, …) gets it on a line of its own
+help nodes	While sinfo gives no FreeMem for a node
+help columns	M TIME
+help columns	m MEM
+help columns	M is the time used, not memory
+help columns	first any column -o adds beyond the default list, from the right
+help columns	JOBID, STATE and NODE/REASON (or REASON) stay
+help columns	bold red under 2 %; INVALID
+help columns	in NODE/REASON (→ 14:32), none once it is past
+help finished	When the screen runs short in COMPACT, the block shrinks, down to one line
+help finished	passed to sacct -S as it is
+help exit	for every command
+help exit	or it is a het job (sq job)
+help exit	sq: cannot write the dashboard
+help bell	FAILED, TIMEOUT, OUT_OF_MEMORY, NODE_FAIL, DEADLINE or BOOT_FAIL
+help bell	1, or anything else, rings
+help filters	a filter given twice, -S included
+help filters	beginning with - (-u -bob)
+help filters	--long, --start, --usage, --verbose, --version and --autocomplete
+help filters	-p and -j show them anyway
+help filters	matched exactly as written
+help slurm	unless this is set to a valid number
+help slurm	the queue ahead of it and its dependencies
+help slurm	that looks like an empty queue, and sq still exits 0
+help memory	JobAcctGatherType=jobacct_gather/linux
+help memory	which sq asks only about your own jobs
+help display	the dashboard and sq job read COLUMNS in a pipe as watch
+help display	in a pipe it is plain unless forced
+help display	is echoed as 'modes'
+help display	SQ_CENTER 1 centres horizontally, 2 in both axes; 0, or anything else, does not
+help env	counts as unset: its default, or auto, silently
+help env	COLUMNS alone colours the dashboard and sq job in a pipe
+job -h	unless it is set to a valid number
+job -h	set in a pipe, it also colours the report
+log -h	with --no-follow it is an error
+log -h	Slurm is unreachable at the start
+log -h	a bare array id is refused with its task ids
+log -h	MinJobAge, often 5 minutes
+help modes	anything that is no number counts as unset
+help modes	that axis falls back to 100 columns or 24 lines
+help modes	COMPACT, at that size; COLUMNS alone also colours a pipe
+help bell	A screen that did not reach its reader (a closed pipe, a full disk) neither rings nor is remembered
+help env	' 0', '+0' and '00' are 0
+help env	a blank inside ('5 0')
+help env	SQ_FMT the dashboard and SQ_PSS_SINCE sq job
+help env	a COLUMNS or LINES that is no number is no usable size for the dashboard
+help exit	SQ_FMT for the dashboard, SQ_PSS_SINCE for sq job
+help finished	0, a number of 9 or more digits, or anything else counts as unset
+help nodes	▒ dim in its bar's colour
+PINS
+	need "99 phrases checked ($n)" [ "$n" = 99 ]
+	stubs_answer
+}
+
+# ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
@@ -11600,6 +11942,8 @@ cases=(
 	est_monotone est_pins est_columns est_widest_first est_trade est_full est_f3 est_height est_negative est_height_cols est_start
 	gawk_arg_limit plural_one invalid_colour suite_interrupt
 	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write h0_dash_undelivered h0_dash_write h0_out_rc_lines h0_sort_twice h0_sort_twice_example h0_subcommand_exact
+	help_list help_topics help_words help_widths help_same_bytes help_colour help_tmpdir help_columns_env help_env_complete
+	help_goldens help_pins
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,

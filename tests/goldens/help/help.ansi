@@ -1,0 +1,25 @@
+[1;36mUsage:[0m [1msq[0m [1mhelp[0m [36m[TOPIC][0m
+
+[1;36mThe dashboard:[0m
+  [1mmodes[0m     FULL and COMPACT: how sq chooses, what fits a small screen
+  [1mcolumns[0m   -o's letters and their headers, what gives first when narrow
+  [1mmemory[0m    MEM: each job's total memory, your own jobs' use, ? and !
+  [1marrays[0m    How array tasks fold, and what -x and -r change
+  [1mnodes[0m     The CPU and memory bars: [32m█[0m [2;32m▒[0m [35m▓[0m [2m░[0m [2m·[0m, their colours and lines
+  [1mfinished[0m  The recently-finished block: sacct, SQ_SINCE, the fallback
+  [1mexit[0m      Reading EXIT (rc/sigN, rc/oom, rc/errN, ?), and sq's own exit status
+  [1mbell[0m      Which failures ring, and the state the bell keeps
+  [1mfilters[0m   squeue's options sq passes on, those it refuses, and why
+  [1mdisplay[0m   Colour, centring, clock times, and the text sq rewrites
+  [1mslurm[0m     What sq asks Slurm, how long it waits, an outage
+  [1menv[0m       Every variable sq reads, a line each
+
+[1;36mOne job:[0m
+  [1mwhy[0m         sq job's why section: what holds a job, or why it ended
+  [1mefficiency[0m  sq job's CPU and memory against the allocation, an array's summary
+  [1mjob[0m         sq job's help, as sq job -h prints it
+  [1mlog[0m         sq log's help, as sq log -h prints it
+
+[1;36mOptions:[0m
+  [1m-h[0m, [1m--help[0m           Print this list
+  [1m--color[0m, [1m--no-color[0m  Force colour on or off (also --colour, --no-colour)

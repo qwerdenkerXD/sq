@@ -1,0 +1,25 @@
+Usage: sq help [TOPIC]
+
+The dashboard:
+  modes     FULL and COMPACT: how sq chooses, what fits a small screen
+  columns   -o's letters and their headers, what gives first when narrow
+  memory    MEM: each job's total memory, your own jobs' use, ? and !
+  arrays    How array tasks fold, and what -x and -r change
+  nodes     The CPU and memory bars: █ ▒ ▓ ░ ·, their colours and lines
+  finished  The recently-finished block: sacct, SQ_SINCE, the fallback
+  exit      Reading EXIT (rc/sigN, rc/oom, rc/errN, ?), and sq's own exit status
+  bell      Which failures ring, and the state the bell keeps
+  filters   squeue's options sq passes on, those it refuses, and why
+  display   Colour, centring, clock times, and the text sq rewrites
+  slurm     What sq asks Slurm, how long it waits, an outage
+  env       Every variable sq reads, a line each
+
+One job:
+  why         sq job's why section: what holds a job, or why it ended
+  efficiency  sq job's CPU and memory against the allocation, an array's summary
+  job         sq job's help, as sq job -h prints it
+  log         sq log's help, as sq log -h prints it
+
+Options:
+  -h, --help           Print this list
+  --color, --no-color  Force colour on or off (also --colour, --no-colour)

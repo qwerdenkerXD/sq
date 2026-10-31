@@ -1,0 +1,25 @@
+One job in one report: its state and times, the CPUs and memory it asked for and
+was given, its work directory and output files, why it waits or did not
+complete, and once it ended how well it used them.
+
+Usage: sq job [OPTIONS] <JOBID>
+
+Arguments:
+  <JOBID>  12345, an array task 12345_4 (or its own job id), or an array 12345,
+           which gets one summary; het jobs are not supported yet
+
+Options:
+  --color, --no-color  Force colour on or off (also --colour, --no-colour)
+  -h, --help           Print this help
+
+Environment:
+  SQ_TIMEOUT          Seconds to wait for Slurm (5); accounting gets 30 s unless
+                      it is set to a valid number
+  SQ_PSS_SINCE        When accounting moved from RSS to PSS (sq help efficiency)
+  SQ_COLOR, NO_COLOR  Colour, as the dashboard's (sq help display)
+  COLUMNS             The width the output's last lines are cut to
+                      (sq help why); set in a pipe, it also colours the report,
+                      as for the dashboard
+
+  -M, --federation, --sibling and SLURM_CLUSTERS are refused: sq job reads this
+  cluster only. More: sq help why, sq help efficiency, sq help exit.
