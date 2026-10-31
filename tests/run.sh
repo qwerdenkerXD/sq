@@ -11287,8 +11287,9 @@ c_h0_display_prefs() {   # H0-7a-e, K4
 # Each spelling gives what 848d3d4 gave for it, except the changes of §2's list
 # (h0_nr_changes), each of which gives what 848d3d4 gave for the spelling it
 # now means, and not what 848d3d4 gave for itself.  A result is the rc and a
-# digest of stdout and stderr, the clock, the start estimates and sq job's
-# dates aside; on a terminal (the bell's variables), how often it rang
+# digest of stdout and stderr, the digits of the first line (the title's
+# clock, cut to "06…" at 5 columns), the start estimates and sq job's dates
+# aside; on a terminal (the bell's variables), how often it rang
 h0_numbers=$here/goldens/h0/numbers
 h0_flags=('<unset>' '' 0 1 2 ' 1' '1 ' +1 -1 00 01 ' 0' +0 abc 1x '5 0' 1.0 0x1 $'\t1' $'1\n' $'\n0' $'1\r' ++1 -0 '+ 1'
           0000000001 1000000001 $'\xd9\xa1' $'\xe2\x80\x831' '1 1')          # ١ (Arabic 1), U+2003 1
@@ -11342,7 +11343,7 @@ h0_nr_group() {
 				h0_got[$label]="bells=$(bels)"
 			else
 				NOTTY=1 sq_run "$fx" "${base[@]}" "${set[@]}" -- "${args[@]}"
-				h0_got[$label]="rc=$RC $({ unrooted | without_clock /dev/stdin | mask_estimates | job_mask /dev/stdin; cat "$ERR"; } | md5sum | cut -c1-32)"
+				h0_got[$label]="rc=$RC $({ unrooted | sed '1s/[0-9]/0/g' | mask_estimates | job_mask /dev/stdin; cat "$ERR"; } | md5sum | cut -c1-32)"
 			fi
 			[ ${#h0_old[@]} -gt 0 ] && [ "${h0_got[$label]}" != "$(h0_nr_want "$label")" ] || break
 		done
