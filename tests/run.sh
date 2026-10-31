@@ -9096,7 +9096,7 @@ c_opts_jobid() {   # AC17
 	o_refused "'0' is not a subcommand; sq -h lists them" -- -j 5 0
 }
 c_opts_repeat() {   # AC18
-	T_TITLE="a filter set twice in any spelling is refused naming the second, its example a real list (-R: one reservation, named so); -u/--me and -A/-U are one key; the environment never repeats, -S may"
+	T_TITLE="a filter set twice in any spelling is refused naming the second, its example a real list (-R: one reservation, named so); -u/--me and -A/-U are one key; the environment never repeats; -S neither (H0-6)"
 	local login; login=$(login_of_stub) tail="squeue would keep only the last one, so write one list instead, e.g. sq"
 	o_refused "-u sets the same filter twice; $tail -u $login,alice" -- -u a -ub
 	o_refused "--partition sets the same filter twice; $tail -p batch,gpu" -- -p a --partition=b
@@ -9112,8 +9112,8 @@ c_opts_repeat() {   # AC18
 	o_refused "-U sets the same filter twice; $tail -A acct1,acct2" -- -A a -U b
 	orun empty SQUEUE_USERS=a -- -u b
 	need "SQUEUE_USERS=a -u b: no repeat, Q -u b" eval 'rc_is 0 && q_is -u b'
-	orun empty -- -S a -S b
-	need "-S a -S b: no repeat, Q -S t,i -S a -S b" eval 'rc_is 0 && q_is -S a -S b'
+	# H0-6: squeue keeps only the last -S too
+	o_refused "-S sets the sort order twice; squeue would keep only the last one, so write one key list instead, e.g. sq -S a,b" -- -S a -S b
 }
 c_opts_check_order() {   # AC19
 	T_TITLE="each word is checked as it is read, so the first bad one wins; the environment after the column letters"
@@ -11411,9 +11411,7 @@ c_h0_rc_internal() {   # H0-2a-d
 
 # H0-3: a help that cannot be written is rc 1 and one line, a full disk and a
 # closed stdout alike; a reader gone is rc 0, silent.  No help asks Slurm, so
-# each such case ends with a dashboard run, the suite's proof that the stubs
-# answer (verdict)
-stubs_answer() { sq_run empty --; need "the dashboard on the stubs: rc 0" rc_is 0; }
+# each such case ends with stubs_answer
 h0_help_cmds=("-h:sq" "job -h:sq job" "log -h:sq log")
 c_h0_help_write() {   # H0-3a-e, K1m-x's helps
 	T_TITLE="a help that cannot be written: rc 1 and '<command>: cannot write the help: <reason>' for /dev/full and >&-, also on a terminal; a reader gone: rc 0, silent"
@@ -11515,6 +11513,32 @@ sq: cannot write the dashboard: No space left on device"'
 sq job: cannot write the report: No space left on device"'
 }
 
+# H0-6: -S given twice is refused, as squeue keeps only the last one; the
+# example is the user's own keys, each once (K8)
+c_h0_sort_twice() {   # H0-6
+	T_TITLE="-S given twice, in any spelling, is refused at the second; -S once, and -S '' once, are accepted"
+	local tail="squeue would keep only the last one, so write one key list instead, e.g. sq -S"
+	o_refused "-S sets the sort order twice; $tail i,u" -- -S i -S u
+	o_refused "--sort sets the sort order twice; $tail i,u" -- -S i --sort u
+	o_refused "--sort sets the sort order twice; $tail i,u" -- -Si --sort=u
+	o_refused "-S sets the sort order twice; $tail -t" -- --sort=-t -S '' -S u
+	o_refused "-S sets the sort order twice; $tail t,-i" -- -S '' -S ''
+	o_refused "-S sets the sort order twice; $tail i,u" -- -j 5 -S i -S u
+	orun empty -- -S i
+	need "-S i once: rc 0, Q -S i" eval 'rc_is 0 && q_is -S i'
+	orun empty -- -S ''
+	need "-S '' once: rc 0" rc_is 0
+}
+c_h0_sort_twice_example() {   # K8
+	T_TITLE="the example of -S twice is built from the user's keys, the earlier ones and this one, each once, empty ones left out; t,-i only when none is left"
+	local tail="squeue would keep only the last one, so write one key list instead, e.g. sq -S"
+	o_refused "-S sets the sort order twice; $tail i" -- -S i -S i
+	o_refused "--sort sets the sort order twice; $tail i,u,-t" -- -S i,u --sort u,-t
+	o_refused "-S sets the sort order twice; $tail -t,u" -- -S -t,,u -S ,u,
+	o_refused "-S sets the sort order twice; $tail p" -- -S '' -S p
+	o_twin
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -11564,7 +11588,7 @@ cases=(
 	whole_forms whole_orders whole_guard whole_v31
 	est_monotone est_pins est_columns est_widest_first est_trade est_full est_f3 est_height est_negative est_height_cols est_start
 	gawk_arg_limit plural_one invalid_colour suite_interrupt
-	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write h0_dash_undelivered h0_dash_write h0_out_rc_lines
+	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write h0_dash_undelivered h0_dash_write h0_out_rc_lines h0_sort_twice h0_sort_twice_example
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,

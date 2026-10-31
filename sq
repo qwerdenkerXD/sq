@@ -131,8 +131,12 @@ shopt -u checkwinsize
 die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
 fail() { printf 'sq: %s\n' "$*" >&2; exit 1; }  # sq itself failed, not the command line
 # in_list WORD LIST: WORD is one of LIST's blank-separated words, exactly, never
-# a part of one
-in_list() { local w; for w in $2; do [ "$1" = "$w" ] && return 0; done; return 1; }
+# a part of one (no glob, no blank in WORD: "log job" is no subcommand)
+in_list() {
+	case $1 in ''|*[$' \t\n']*) return 1 ;; esac
+	case " ${2//[$'\t\n']/ } " in *" $1 "*) return 0 ;; esac
+	return 1
+}
 # num_read TEXT: the one reader of every number sq takes from the environment.
 # TEXT is a number when it is decimal digits with one leading + at most and
 # blanks around them, a blank being a space or a tab in every locale (a
@@ -3802,9 +3806,22 @@ canon_opt() {
 # so "sq -u fsill -u root" showed an empty queue beside a finished block full of
 # root's jobs: the two halves of the screen disagreeing about what they show.
 # Both tools accept the list form, so the error has somewhere to point.
-mark_filter() {                  # $1 the filter's key, $2 as written
+# -S too: squeue keeps only the last sort order, and the example is the user's
+# own keys, each once (the earlier ones and this one), squeue's default when
+# none is left (all empty).
+mark_filter() {                  # $1 the filter's key, $2 as written, $3 its value
 	case " $seen " in
 		*" $1 "*) opt_hint "$1"
+			if [ "$1" = -S ]; then
+				local i k keys=
+				for i in "${!nfk[@]}"; do [ "${nfk[i]}" != -S ] || keys="$keys${nfv[i]},"; done
+				keys="$keys$3,"
+				while [ -n "$keys" ]; do
+					k=${keys%%,*} keys=${keys#*,}
+					[ -z "$k" ] || in_list "$k" "${vlist//,/ }" || vlist=${vlist:+$vlist,}$k
+				done
+				die "$2 sets the sort order twice; squeue would keep only the last one, so write one key list instead, e.g. sq -S $(word40 "${vlist:-t,-i}")"
+			fi
 			# -R takes one reservation, the others a list
 			if [ "$1" = -R ]; then die "$2 sets the same filter twice; squeue would keep only the last one, so name one reservation, e.g. sq $1 $vlist"; fi
 			die "$2 sets the same filter twice; squeue would keep only the last one, so write one list instead, e.g. sq $1 $vlist" ;;
@@ -3919,8 +3936,7 @@ value_opt() {
 	value_checks "$key" "$opt" "$val" "$attached"
 	case $key in
 		-o) fields=$val fsrc=-o; return ;;
-		-S) ;;                    # a second sort key refines the order, it contradicts nothing
-		*)  mark_filter "$key" "$opt" ;;   # REPEAT
+		*)  mark_filter "$key" "$opt" "$val" ;;   # REPEAT
 	esac
 	case $key in
 		-M) clustercause=${clustercause:-$opt} ;;
