@@ -159,18 +159,23 @@ pref() {
 	if num_read "${!2-}" && { [ $# -le 3 ] || in_list "$nval" "${*:4}"; }; then printf -v "$1" '%s' "$nval"
 	else printf -v "$1" '%s' "$3"; fi
 }
-# out_rc RC ERR PREFIX WHAT: the end of a run in which gawk wrote WHAT (the
-# help, the dashboard, the report) to stdout and ended with RC, ERR being its
-# stderr.  The exit status goes into orc:
+# out_rc RC ERR PREFIX WHAT [own FALLBACK]: the end of a run in which gawk
+# wrote WHAT (the help, the dashboard, the report) to stdout and ended with
+# RC, ERR being its stderr.  The exit status goes into orc:
 # - the reader gone (SIGPIPE's 141, or "Broken pipe" where SIGPIPE is
 #   ignored): 0, and that line is dropped;
 # - stdout unwritable (a full disk, a closed stdout): 1, and the line that
 #   says so (that one, not ERR's first) becomes "PREFIX: cannot write WHAT:
 #   REASON";
 # - a signal: 128+N; any other failure: 1; else 0.
-# ERR's other lines go to stderr as they are, in their order
+# ERR's other lines go to stderr in their order: as they are, or with own as
+# the caller's own messages, "PREFIX: LINE" scrubbed (sq job's, every one of
+# which names it; there, as before, a failure other than the write keeps
+# only the first, and gawk's stderr is dropped when it succeeded).  A failure
+# that left no line says "PREFIX: FALLBACK", by default "WHAT failed (gawk
+# exit RC)"
 out_rc() {
-	local rc=$1 rest=$2 prefix=$3 what=$4 line why gone=0 bad=0
+	local rc=$1 rest=$2 prefix=$3 what=$4 own=${5:-} fallback=${6:-} line why gone=0 bad=0
 	local -a lines=()
 	while [ -n "$rest" ]; do
 		line=${rest%%$'\n'*}
@@ -182,16 +187,17 @@ out_rc() {
 				bad=1 why=$line
 				if [[ $why =~ \(([^()]*)\)$ ]]; then why=${BASH_REMATCH[1]}; else why=${why##*: }; fi
 				lines+=("$prefix: cannot write $what: $(printf '%s' "$why" | scrub)") ;;
-			*)  lines+=("$line") ;;
+			*)  if [ -n "$own" ]; then lines+=("$prefix: $(printf '%s' "$line" | scrub)"); else lines+=("$line"); fi ;;
 		esac
 	done
 	[ "$rc" != 141 ] || gone=1
 	if   [ $bad = 1 ];  then orc=1
 	elif [ $gone = 1 ]; then orc=0
-	elif [ "$rc" = 0 ]; then orc=0
+	elif [ "$rc" = 0 ]; then orc=0; [ -z "$own" ] || lines=()
 	elif [ "$rc" -gt 128 ]; then orc=$rc
-	else orc=1
+	else orc=1; [ ${#lines[@]} -gt 0 ] || lines=("$prefix: ${fallback:-$what failed (gawk exit $rc)}")
 	fi
+	[ -z "$own" ] || [ $bad = 1 ] || [ ${#lines[@]} -le 1 ] || lines=("${lines[0]}")
 	[ ${#lines[@]} = 0 ] || printf '%s\n' "${lines[@]}" >&2
 }
 # help_out PREFIX CMD...: CMD's text, a help, on stdout through gawk, which
@@ -3712,21 +3718,13 @@ sub_job() {
 		jobmem_snapshot || SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 jobmem_collect -w
 	fi
 	# the report on stdout: a reader that is gone (| head) ends sq quietly,
-	# rc 0; a write that fails is rc 1, with gawk's reason ("print to
-	# "standard output" failed (No space left on device)", or "error writing
-	# standard output: ...")
+	# rc 0; a write that fails is rc 1, "sq job: cannot write the report:
+	# REASON"; gawk's other failures are rc 1 with its first line as sq job's
+	# (out_rc)
 	job_run show 2> "$tmp/show.err"
 	rc=$?
-	[ $rc != 0 ] && [ $rc != 141 ] || exit 0
-	[ $rc -le 128 ] || exit $rc                     # stopped by a signal: 128+N
-	local why; why=$(scrub -f "$tmp/show.err")
-	case $why in
-		*"Broken pipe"*) exit 0 ;;
-		*"standard output"*)
-			if [[ $why =~ \(([^()]*)\)$ ]]; then why=${BASH_REMATCH[1]}; else why=${why##*: }; fi
-			job_fail "cannot write the report: $why" ;;
-	esac
-	job_fail "${why:-its report failed (gawk exit $rc)}"
+	out_rc $rc "$(cat "$tmp/show.err" 2>/dev/null)" "sq job" "the report" own "its report failed (gawk exit $rc)"
+	exit "$orc"
 }
 
 fields=${SQ_FMT:-i,j,u,T,M,L,C,m,R}
@@ -6562,6 +6560,11 @@ END{
     for (i=0; i<top; i++) print ""
   }
   for (i=1; i<=o; i++) print (compact ? lastcut(out[i], cols) : out[i])   # the last resort
+  # the screen reaches its reader before the bell rings or the state is
+  # written: a checked flush, at which a reader gone is SIGPIPE (or "Broken
+  # pipe") and a full or closed stdout a fatal error of gawk, either ending it
+  # here.  close() below flushes stdout too, unchecked, and would swallow it
+  fflush("/dev/stdout")
 
   if (bell && hastty) {                         # everything remembered, not just
     printf "" > statetmp                        # what this run happened to query;
@@ -6570,11 +6573,14 @@ END{
     if (ding) { print "\a" > "/dev/tty"; close("/dev/tty") }
   }
 }
-' "$tmp/nodes" "$tmp/jobs" "$tmp/recent"
-rc=$?
-# exit 2 is a usage error only: gawk's own failure is sq's, 1 (its line said
-# why), and a signal stays 128+N
-[ "$rc" = 0 ] || [ "$rc" -gt 128 ] || rc=1
+' "$tmp/nodes" "$tmp/jobs" "$tmp/recent" 2> "$tmp/render.err"
+# gawk's own failure is sq's, 1, never a usage error, and a signal 128+N; the
+# reader gone is done, 0; stdout unwritable is one line, "sq: cannot write the
+# dashboard: REASON" (out_rc).  A screen that did not reach its reader ended
+# gawk at its checked flush, before the bell and the state: it neither rang
+# nor left a state for the promotion below to find ([ -f ]), so the next run
+# that delivers it rings
+out_rc $? "$(cat "$tmp/render.err" 2>/dev/null)" sq "the dashboard"; rc=$orc
 
 # rename(2), so a second instance can never read or leave a torn state file.
 # Only on success: a gawk that died mid-write leaves a partial temp, and

@@ -11435,6 +11435,86 @@ c_h0_help_write() {   # H0-3a-e, K1m-x's helps
 	stubs_answer
 }
 
+# H0-4/H0-5, K1: a screen that did not reach its reader neither rings nor is
+# remembered (the render flushes it, checked, before the bell and the
+# state), so the next run that delivers it rings; the reader gone is rc 0,
+# silent; a stdout that cannot be written is "sq: cannot write the dashboard:
+# REASON", rc 1.  Small: the bell fixture (under gawk's 4 KB buffer, which a
+# close() flushed unchecked); big: huge's queue and the same failure
+h0_big_fixture() {   # h0_big_fixture: huge's queue beside the bell fixture's fresh failure
+	local d=$T_DIR/fx-big; mkdir -p "$d"
+	cp "$(bell_fixture)"/{sinfo,sacct} "$d/"
+	printf '@include %s\n' "$fixtures/huge/squeue" > "$d/squeue"
+	printf '%s' "$d"
+}
+h0_seed_state() {   # h0_seed_state HOME: an old entry in its bell memory, and the memory's digest in T_DIR/state.md5
+	mkdir -p "$1/.cache/sq"; printf '6001\t%d\n' $(( $(epoch_now) - 3600 )) > "$1/.cache/sq/alerted"
+	md5sum < "$1/.cache/sq/alerted" > "$T_DIR/state.md5"
+}
+h0_state_kept() { cmp -s "$T_DIR/state.md5" <(md5sum < "$1/.cache/sq/alerted"); }   # h0_state_kept HOME
+c_h0_dash_undelivered() {   # H0-4, K1a-k
+	T_TITLE="a screen that did not reach its reader neither rings nor is remembered, on a terminal with the bell on: /dev/full and >&- rc 1 and one line, a closed reader rc 0 and silent; the next delivered run rings once"
+	local fx size how home want said
+	for size in small big; do
+		if [ $size = small ]; then fx=$(bell_fixture); else fx=$(h0_big_fixture); fi
+		home=$T_DIR/home-$size-file; h0_seed_state "$home"
+		BELL=1 PTY=1 PTY_ROWS=40 PTY_COLS=100 sq_redir file "$fx" TERM=xterm-256color SQ_BELL_USER=alice HOME="$home" -- --full
+		need "K1 $size, delivered into a file: rc 0, one bell, remembered" eval '
+			rc_is 0 && err_empty && [ "$(bels)" = 1 ] && grep -q "^7001[[:space:]]" "$home/.cache/sq/alerted"'
+		for how in full closed gone gone-ign; do
+			home=$T_DIR/home-$size-$how; h0_seed_state "$home"
+			BELL=1 PTY=1 PTY_ROWS=40 PTY_COLS=100 sq_redir $how "$fx" TERM=xterm-256color SQ_BELL_USER=alice HOME="$home" -- --full
+			case $how in
+				full)   want='rc_is 1 && err_is "sq: cannot write the dashboard: No space left on device"' said="rc 1, sq's one line" ;;
+				closed) want='rc_is 1 && err_is "sq: cannot write the dashboard: Bad file descriptor"' said="rc 1, sq's one line" ;;
+				*)      want='rc_is 0 && err_empty' said="rc 0, silent" ;;
+			esac
+			need "K1 $size, stdout $how: $said, no bell, the bell's memory unchanged" eval "$want"' && [ "$(bels)" = 0 ] && h0_state_kept "$home"'
+			BELL=1 PTY=1 PTY_ROWS=40 PTY_COLS=100 sq_redir file "$fx" TERM=xterm-256color SQ_BELL_USER=alice HOME="$home" -- --full
+			need "K1 $size, the run after the one into $how: delivered, one bell" eval 'rc_is 0 && [ "$(bels)" = 1 ]'
+		done
+	done
+	# H0-4a, b: without a terminal, empty and huge, into a reader that closed
+	for fx in empty huge; do
+		for how in gone gone-ign; do
+			sq_redir $how $fx -- --full
+			need "H0-4 $fx, no terminal, into a reader that closed$([ $how = gone ] || echo ", SIGPIPE ignored"): rc 0, silent" eval 'rc_is 0 && err_empty'
+		done
+	done
+}
+c_h0_dash_write() {   # H0-5a-c, K1m-x's sq job
+	T_TITLE="the dashboard's stdout full or closed: rc 1, 'sq: cannot write the dashboard: <reason>', small screen or big; sq job's report the same with its own words, on a terminal too"
+	local fx how reason pty
+	for fx in empty huge; do
+		for how in full closed; do
+			reason="No space left on device"; [ $how = full ] || reason="Bad file descriptor"
+			sq_redir $how $fx -- --full
+			need "H0-5 $fx, stdout $how: rc 1, 'sq: cannot write the dashboard: $reason'" eval 'rc_is 1 && err_is "sq: cannot write the dashboard: $reason"'
+		done
+	done
+	for pty in '' 1; do
+		for how in full closed; do
+			reason="No space left on device"; [ $how = full ] || reason="Bad file descriptor"
+			for c in "" --color; do
+				PTY=$pty PTY_ROWS=40 PTY_COLS=100 sq_redir $how "$jfx/finished-11912" SQSTUB_UID=1041 TERM=xterm-256color -- job $c 11912
+				need "sq job $c 11912 ${pty:+on a terminal, }stdout $how: rc 1, 'sq job: cannot write the report: $reason'" eval '
+					rc_is 1 && err_is "sq job: cannot write the report: $reason"'
+			done
+		done
+	done
+}
+c_h0_out_rc_lines() {   # K2, K3, R3-L5
+	T_TITLE="out_rc takes the reason from the line of the write failure and passes the others on in order; sq job's other failures keep its prefix and first line"
+	h0_gawk_env two; sq_run mixed "${H0ENV[@]}" --
+	need "K2 a message, then the write failure: rc 1, the message, then sq's line" eval 'rc_is 1 && err_is "sq: internal field separator missing
+sq: cannot write the dashboard: No space left on device"'
+	h0_gawk_env jobrc; job_run finished-11912 "${H0ENV[@]}" -- job 11912
+	need "K3 sq job's report gawk fails: rc 1, its line as sq job's" eval 'rc_is 1 && err_is "sq job: gawk: cmd. line:9: fatal: report broke"'
+	h0_gawk_env jobtwo; job_run finished-11912 "${H0ENV[@]}" -- job 11912
+	need "R3-L5 sq job: a message, then the write failure: rc 1, both lines, in order" eval 'rc_is 1 && err_is "sq job: gawk: cmd. line:9: warning: a message
+sq job: cannot write the report: No space left on device"'
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -11484,7 +11564,7 @@ cases=(
 	whole_forms whole_orders whole_guard whole_v31
 	est_monotone est_pins est_columns est_widest_first est_trade est_full est_f3 est_height est_negative est_height_cols est_start
 	gawk_arg_limit plural_one invalid_colour suite_interrupt
-	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write
+	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write h0_dash_undelivered h0_dash_write h0_out_rc_lines
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,
