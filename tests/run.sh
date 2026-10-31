@@ -11625,7 +11625,7 @@ help_refused() {   # help_refused TEXT ARGS...: rc 2, nothing on stdout, stderr 
 c_help_words() {   # A3-A6
 	T_TITLE="a word that is no topic: rc 2, one line, with a hint from the fixed table (case, ±s, aliases, a unique prefix); options of sq help, two topics, an empty one; -h prints the overview whatever follows; help comes first"
 	local t
-	for t in MODES:modes mode:modes mod:modes SQ_BELL_USER:bell bars:nodes seff:efficiency status:exit Nodes:nodes; do
+	for t in MODES:modes mode:modes mod:modes SQ_BELL_USER:bell bars:nodes seff:efficiency status:exit Nodes:nodes envs:env; do
 		help_refused "sq help: '${t%%:*}' is not a topic; sq help lists them (did you mean sq help ${t#*:}?)" help "${t%%:*}"
 	done
 	for t in 'nodes finished' 'Nodes Finished' 'a b' m; do
