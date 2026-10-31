@@ -154,9 +154,10 @@ tests/run.sh -j 6         # ~8 min: 6 cases at once, the timed ones one by one a
 The suite puts stand-ins for `squeue`, `sinfo`, `sacct`, `sstat`, `scontrol` and `getent` first
 on `PATH` and feeds sq the shapes that are hard to get from a live cluster: large arrays, hostile
 job names, array ids Slurm truncates, a controller that hangs. Most cases assert properties of
-the screen (counts, which rows appear, that nothing is forged), not a snapshot; the node bars
-and the `sq job` reports are compared byte for byte with the screens they were designed from
-(`tests/run.sh --pin` writes the latter anew, for a change meant to change them). Known defects are listed
+the screen (counts, which rows appear, that nothing is forged), not a snapshot; the node bars,
+the `sq job` reports and the help's `sq -h`, `sq help`, `sq job -h` and `sq log -h` are compared
+byte for byte with the screens they were designed from (`tests/run.sh --pin` writes the reports
+and the help's screens anew, for a change meant to change them). Known defects are listed
 as expected failures, so a fix shows up as one. `tests/faithfulness.sh <host>` compares the
 stand-ins' output with the real tools, read-only, and fails wherever a real tool complains on
 stderr.
