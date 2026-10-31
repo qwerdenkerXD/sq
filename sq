@@ -129,6 +129,35 @@ unset POSIXLY_CORRECT
 shopt -u checkwinsize
 
 die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
+# in_list WORD LIST: WORD is one of LIST's blank-separated words, exactly, never
+# a part of one
+in_list() { local w; for w in $2; do [ "$1" = "$w" ] && return 0; done; return 1; }
+# num_read TEXT: the one reader of every number sq takes from the environment.
+# TEXT is a number when it is decimal digits with one leading + at most and
+# blanks around them, a blank being a space or a tab in every locale (a
+# newline or a CR is none); leading zeros are allowed and read as decimal, and
+# at most 9 digits are left once they are gone.  Its value goes into nval.
+# Anything else is no number, rc 1: a blank inside ("5 0"), a -, a dot, a
+# letter, digits of another script
+num_read() {
+	local t=$1
+	t=${t#"${t%%[!$' \t']*}"}; t=${t%"${t##*[!$' \t']}"}   # the blanks around
+	t=${t#+}
+	case $t in ''|*[!0123456789]*) return 1 ;; esac
+	t=${t#"${t%%[!0]*}"}; t=${t:-0}                        # the leading zeros
+	[ ${#t} -le 9 ] || return 1
+	nval=$t
+}
+# pref VAR NAME DEFAULT [VALUE...]: the variable NAME of the environment as a
+# number (num_read) into VAR, where it is one and, with VALUEs given, one of
+# them; anything else counts as unset, silently: DEFAULT.  For the display
+# preferences and the sizes; inputs (SQ_FMT, SQ_PSS_SINCE, SQUEUE_*,
+# SLURM_CLUSTERS) are refused instead, by the command that reads them
+pref() {
+	local nval
+	if num_read "${!2-}" && { [ $# -le 3 ] || in_list "$nval" "${*:4}"; }; then printf -v "$1" '%s' "$nval"
+	else printf -v "$1" '%s' "$3"; fi
+}
 
 # ---- the scrub (tests/run.sh and tests/faithfulness.sh run the text from here
 # to "scrub end" on their own input)
@@ -3470,10 +3499,10 @@ node_hook_job() {   # node_hook_job LEFT SHOWN
 	node_left NODE_HOOK_LEFT "$1" wnodefig
 	NODE_HOOK_NODES=$node_list NODE_HOOK_BYTES=$node_list_bytes
 }
-# the width the output lines are cut to: COLUMNS if exported, else the
-# terminal's, else 120
+# the width the output lines are cut to: COLUMNS if exported and a number
+# (num_read), else the terminal's, else 120
 job_width() {
-	job_cols=${COLUMNS:-}
+	pref job_cols COLUMNS ''
 	[ "$job_cols" -ge 21 ] 2>/dev/null && return
 	tty_size; job_cols=$tty_cols
 	[ "$job_cols" -ge 21 ] 2>/dev/null || job_cols=120
@@ -3653,12 +3682,14 @@ sub_job() {
 
 fields=${SQ_FMT:-i,j,u,T,M,L,C,m,R}
 fsrc=${SQ_FMT:+SQ_FMT}; fsrc=${fsrc:--o}         # which one to blame for a bad letter
-center=${SQ_CENTER:-0}
-fold=${SQ_FOLD:-1}
-recent=${SQ_RECENT:-1}
-bell=${SQ_BELL:-1}
-eta=${SQ_ETA:-1}
-color=${SQ_COLOR:-auto}
+# the display preferences: a value that is no number, or not one of these,
+# counts as unset, silently
+pref center SQ_CENTER 0    0 1 2
+pref fold   SQ_FOLD   1    0 1
+pref recent SQ_RECENT 1    0 1
+pref bell   SQ_BELL   1    0 1
+pref eta    SQ_ETA    1    0 1
+pref color  SQ_COLOR  auto 0 1
 # The normal form (NF): after the argument loop and the environment, ONE
 # ordered list of entries is all the squeue calls, the sacct call, the caption
 # and the cluster check read; nothing later looks at argv or a SQUEUE_*
@@ -4149,7 +4180,7 @@ done
 # SQ_WIDTH/SQ_HEIGHT size the screen but never choose the mode.
 screen=0
 if [ -t 1 ] || { [ -n "${COLUMNS:-}" ] && [ -n "${LINES:-}" ]; }; then screen=1; fi
-compact=${SQ_COMPACT:-}
+compact=${SQ_COMPACT:-}           # its own rule, exactly 0 or 1, not num_read's
 case $modeflag in --compact) compact=1 ;; --full) compact=0 ;; esac
 case $compact in 0|1) ;; *) compact=$screen ;; esac
 # -C centres vertically only on that screen: in a file or a pipe there is no
@@ -4291,11 +4322,21 @@ for ((i = 0; i < ${#nf_key[@]}; i++)); do
 done
 [ "$memon" = 0 ] || { qfield A; qpos_jobid=$qfields; qfield U; qpos_uid=$qfields; }
 
-cols=${SQ_WIDTH:-${COLUMNS:-}}
-lines=${SQ_HEIGHT:-${LINES:-}}
 mincols=21 minlines=5            # anything smaller is no usable size, from any source,
 [ "$compact" = 0 ] || minlines=1 mincols=1   # but COMPACT fits whatever size it is given, down
                                  # to the footer alone; 0 still means "not sized yet"
+# the sizes, each read by num_read.  A SQ_WIDTH or SQ_HEIGHT that is no number
+# counts as unset, so that axis is measured as without it.  A COLUMNS or LINES
+# that is set but no number stays no usable size (0): that axis's fallback,
+# 100 columns or 24 lines, not the terminal (c_compact_prompt_row).  A number
+# under the minimum is no usable size either, from any source: the fallback
+# too (c_compact_low_heights)
+pref sqwidth  SQ_WIDTH  ''
+pref sqheight SQ_HEIGHT ''
+pref envcols  COLUMNS   ''; [ -n "$envcols" ] || [ -z "${COLUMNS:-}" ] || envcols=0
+pref envlines LINES     ''; [ -n "$envlines" ] || [ -z "${LINES:-}" ] || envlines=0
+cols=${sqwidth:-$envcols}
+lines=${sqheight:-$envlines}
 
 # the terminal's own size (tty_size), asked once, and only for an axis the
 # env left open; a value under the minimum is left to tput instead
@@ -4314,13 +4355,12 @@ fi
 login=                                          # what "--me" means to squeue,
 me=${SQ_BELL_USER:-$(id -un)}                   # resolved only if --me asks
 scrub_var me                                    # read as Slurm's user names are (the pass)
-bellall=${SQ_BELL_ALL:-0}
+pref bellall SQ_BELL_ALL 0 0 1
 
 # how many finished rows to show.  0 = work it out from what the screen has
-# left; anything that is not a plain positive integer is not a row count
-rmax=${SQ_RECENT_MAX:-0}
-case $rmax in ''|*[!0-9]*|?????????*) rmax=0 ;; esac
-[ "$rmax" -gt 0 ] 2>/dev/null || rmax=0
+# left; anything that is no number, or one of 9 digits or more, is no row count
+pref rmax SQ_RECENT_MAX 0
+[ "$rmax" -lt 100000000 ] || rmax=0
 # no state directory turns the bell off, as one that cannot be made or written
 # in does (a read-only ~/.cache/sq killed gawk as it wrote the state), and so
 # does a memory that is there but no regular file, as jobmem_snapshot judges
@@ -4343,12 +4383,11 @@ hastty=0
 # on a terminal whose height sq measured itself (LINES, stty, tput, the
 # fallback).  SQ_HEIGHT is the height to fill, exactly; watch reads a pipe
 prompt=0
-[ -t 1 ] && [ -z "${SQ_HEIGHT:-}" ] && prompt=1
+[ -t 1 ] && [ -z "$sqheight" ] && prompt=1
 
 # a failure only rings while it is this fresh, which is what makes a first run,
 # a cleared cache and a week of downtime behave sanely
-horizon=${SQ_BELL_HORIZON:-600}
-case $horizon in ''|*[!0-9]*) horizon=600 ;; esac
+pref horizon SQ_BELL_HORIZON 600
 
 make_tmp
 

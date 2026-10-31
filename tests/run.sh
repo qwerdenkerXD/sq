@@ -11148,6 +11148,213 @@ LOGFX
 }
 
 # ============================================================================
+# H0 (HELP-v4.1 §2): the small fixes before the help
+# ============================================================================
+# H0-1/H0-7: a display preference that is no number (num_read), or not one of
+# its values, counts as unset; one reader for every number sq takes from the
+# environment.  The comparisons run against the variable unset, the clock
+# aside, as the runs are seconds apart
+same_screen() { cmp -s <(without_clock "$1") <(without_clock "$OUT"); }   # same_screen FILE: stdout is FILE, the clock aside
+c_h0_sq_color() {   # H0-1a-g
+	T_TITLE="SQ_COLOR is 0 or 1, as a number: anything else is auto, so a pipe stays plain; a flag still wins; sq job and sq -h the same"
+	local v
+	for v in no yes always 2 never 1x '5 0'; do
+		sq_run mixed SQ_COLOR="$v" --
+		need "dashboard in a pipe, SQ_COLOR='$v': rc 0, no escape" eval 'rc_is 0 && [ "$(escapes)" = 0 ]'
+	done
+	for v in 1 ' 1' +1 01; do
+		sq_run mixed SQ_COLOR="$v" --
+		need "dashboard in a pipe, SQ_COLOR='$v' (the number 1): colour" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ] && escapes_all_sgr'
+	done
+	PTY=1 PTY_ROWS=40 PTY_COLS=100 sq_run mixed TERM=xterm-256color SQ_COLOR=no --
+	need "on a terminal, SQ_COLOR=no: auto, so colour" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ]'
+	PTY=1 PTY_ROWS=40 PTY_COLS=100 sq_run mixed TERM=xterm-256color SQ_COLOR=0 --
+	need "on a terminal, SQ_COLOR=0: no colour" eval 'rc_is 0 && [ "$(escapes)" = 0 ]'
+	sq_run mixed SQ_COLOR=no -- --color
+	need "in a pipe, SQ_COLOR=no --color: the flag wins, colour" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ]'
+	job_run finished-11912 SQ_COLOR=no -- job 11912
+	need "sq job in a pipe, SQ_COLOR=no: rc 0, no escape" eval 'rc_is 0 && [ "$(escapes)" = 0 ] && has 11912'
+	job_run finished-11912 SQ_COLOR=1 -- job 11912
+	need "sq job in a pipe, SQ_COLOR=1: colour" eval 'rc_is 0 && [ "$(escapes)" -gt 0 ]'
+	sq_run empty SQ_COLOR=no -- -h
+	need "sq -h in a pipe, SQ_COLOR=no: rc 0, no escape" eval 'rc_is 0 && [ "$(escapes)" = 0 ] && [ -s "$OUT" ]'
+}
+c_h0_display_prefs() {   # H0-7a-e, K4
+	T_TITLE="every display preference that is no number or not one of its values is as unset; another spelling of a value is that value; SQ_WIDTH/SQ_HEIGHT junk is measured, a number under the minimum keeps its fallback"
+	local v unset fx
+	unset=$T_DIR/unset
+	for v in SQ_CENTER=no SQ_CENTER=yes SQ_CENTER=3 SQ_FOLD=no SQ_FOLD=1x SQ_RECENT=off SQ_RECENT=-0 SQ_ETA=no 'SQ_ETA=0 0' \
+	         SQ_COMPACT=yes 'SQ_COMPACT= 1' SQ_RECENT_MAX=abc SQ_RECENT_MAX=0 SQ_BELL_HORIZON=10m; do
+		sq_run busy24 -"${v%%=*}" --; cp "$OUT" "$unset"
+		sq_run busy24 "$v" --
+		need "H0-7a $v: rc 0, the screen of ${v%%=*} unset" eval 'rc_is 0 && err_empty && same_screen "$unset"'
+	done
+	# K4: one reader, so another spelling of a value is that value; each
+	# value against unset first, so the pair says something
+	local pair spelled canon differs
+	for pair in "array-running SQ_FOLD 00 0 y" "array-running SQ_FOLD ' 0' 0 y" "busy24 SQ_RECENT +0 0 y" "mixed SQ_CENTER +1 1 y" \
+	            "mixed SQ_CENTER 02 2 y" "est SQ_ETA 00 0 y" "busy24 SQ_RECENT '1 ' 1 n"; do
+		eval "set -- $pair"; fx=$1 v=$2 spelled=$3 canon=$4 differs=$5
+		sq_run "$fx" -"$v" -- --full; mask_estimates < "$OUT" > "$unset"
+		sq_run "$fx" "$v=$canon" -- --full; mask_estimates < "$OUT" > "$T_DIR/canon"
+		[ "$differs" = n ] || need "K4 $fx $v=$canon: not the screen of $v unset" eval '! cmp -s <(without_clock "$T_DIR/canon") <(without_clock "$unset")'
+		sq_run "$fx" "$v=$spelled" -- --full
+		need "K4 $fx $v='$spelled': rc 0, the screen of $v=$canon" eval 'rc_is 0 && err_empty && cmp -s <(without_clock "$T_DIR/canon") <(mask_estimates < "$OUT" | without_clock /dev/stdin)'
+	done
+	sq_run mixed -SQ_CENTER --; cp "$OUT" "$unset"
+	for v in 1 2; do
+		sq_run mixed SQ_CENTER=$v --
+		need "H0-7b SQ_CENTER=$v, a value: not the screen of SQ_CENTER unset" eval 'rc_is 0 && ! same_screen "$unset"'
+	done
+	# a SQ_WIDTH/SQ_HEIGHT that is no number is measured: here COLUMNS=60 LINES=30
+	sq_run busy24 -SQ_WIDTH -SQ_HEIGHT COLUMNS=60 LINES=30 --; cp "$OUT" "$unset"
+	need "COLUMNS=60 LINES=30 alone: 60 columns" eval 'rc_is 0 && [ "$(width)" -le 60 ] && [ "$(width)" -ge 50 ]'
+	for v in SQ_WIDTH=abc SQ_WIDTH=12x SQ_HEIGHT=abc SQ_HEIGHT=-5; do
+		sq_run busy24 -SQ_WIDTH -SQ_HEIGHT COLUMNS=60 LINES=30 "$v" --
+		need "H0-7c $v, COLUMNS=60 LINES=30: rc 0, as unset (measured)" eval 'rc_is 0 && same_screen "$unset"'
+	done
+	# a number under the minimum is no usable size: that axis's fixed fallback
+	sq_run empty -SQ_WIDTH -SQ_HEIGHT COLUMNS=60 LINES=30 SQ_CENTER=2 -- --full; cp "$OUT" "$unset"
+	sq_run empty -SQ_WIDTH COLUMNS=60 LINES=30 SQ_CENTER=2 SQ_HEIGHT=3 -- --full
+	need "H0-7d SQ_HEIGHT=3 --full -C, LINES=30: rc 0, not as unset (24 lines)" eval 'rc_is 0 && ! same_screen "$unset"'
+	sq_run busy24 -SQ_WIDTH -SQ_HEIGHT COLUMNS=60 LINES=30 -- --full; cp "$OUT" "$unset"
+	sq_run busy24 -SQ_HEIGHT COLUMNS=60 LINES=30 SQ_WIDTH=5 -- --full
+	need "H0-7d SQ_WIDTH=5 --full, COLUMNS=60: rc 0, not as unset (100 columns)" eval 'rc_is 0 && ! same_screen "$unset" && [ "$(width)" -gt 60 ]'
+	# the bell: alice's fresh failure, run as bob
+	fx=$(bell_fixture)
+	bell_run "$fx" SQ_BELL_USER=bob SQ_BELL_ALL=no
+	need "H0-7e bob, alice's fresh failure, SQ_BELL_ALL=no: rc 0, silent" eval 'rc_is 0 && [ "$(bels)" -eq 0 ]'
+	bell_run "$fx" SQ_BELL_USER=bob SQ_BELL_ALL=' 1'
+	need "H0-7e ... SQ_BELL_ALL=' 1': rc 0, one bell" eval 'rc_is 0 && [ "$(bels)" -eq 1 ]'
+}
+# K4, R3-L1: every number sq takes from the environment, in 502 spellings,
+# each run as 848d3d4 ran it (HELP-v4.1's spellings.sh: unset, empty, blanks,
+# signs, zeros, other digits, junk).  tests/goldens/h0/numbers holds what
+# 848d3d4 gave, written by --pin-frozen from that build:
+#   SQ_UNDER_TEST=<848d3d4's sq> tests/run.sh --pin-frozen h0_number_reader
+# Each spelling gives what 848d3d4 gave for it, except the changes of §2's list
+# (h0_nr_changes), each of which gives what 848d3d4 gave for the spelling it
+# now means, and not what 848d3d4 gave for itself.  A result is the rc and a
+# digest of stdout and stderr, the clock, the start estimates and sq job's
+# dates aside; on a terminal (the bell's variables), how often it rang
+h0_numbers=$here/goldens/h0/numbers
+h0_flags=('<unset>' '' 0 1 2 ' 1' '1 ' +1 -1 00 01 ' 0' +0 abc 1x '5 0' 1.0 0x1 $'\t1' $'1\n' $'\n0' $'1\r' ++1 -0 '+ 1'
+          0000000001 1000000001 $'\xd9\xa1' $'\xe2\x80\x831' '1 1')          # ١ (Arabic 1), U+2003 1
+h0_nums=('<unset>' '' 80 ' 80' '80 ' +80 080 '8 0' abc 5 0 -80 99999999999999999999 80.0 $'\t80' $'80\n' ++80 -0 '+ 80'
+         000000080 0000000000080 123456789 1234567890 $'\xd9\xa8\xd9\xa0' $'\xe2\x80\x8380' $'80\r')   # ٨٠, U+2003 80
+h0_nr_label() {   # h0_nr_label GROUP VAR VALUE: the row's name, its value quoted as bash does in C
+	local LC_ALL=C
+	if [ "$3" = '<unset>' ]; then printf '%s %s unset' "$1" "$2"; else printf '%s %s=%q' "$1" "$2" "$3"; fi
+}
+# §2's change list: GROUP VAR NOW VALUE...: these spellings of VAR now mean NOW
+declare -A h0_nr_changes
+h0_nr_change() {
+	local group=$1 var=$2 now=$3 v; shift 3
+	for v; do h0_nr_changes[$(h0_nr_label "$group" "$var" "$v")]=$(h0_nr_label "$group" "$var" "$now"); done
+}
+h0_nonumber_flag=(-1 abc 1x '5 0' 1.0 0x1 $'1\n' $'1\r' ++1 '+ 1' 1000000001 $'\xd9\xa1' $'\xe2\x80\x831' '1 1')
+h0_nonumber_size=('8 0' abc -80 99999999999999999999 80.0 $'80\n' ++80 -0 '+ 80' 1234567890 $'\xd9\xa8\xd9\xa0' $'\xe2\x80\x8380' $'80\r')
+h0_nr_change flags   SQ_CENTER       '<unset>' "${h0_nonumber_flag[@]}"
+h0_nr_change flags   SQ_COLOR        '<unset>' 2 "${h0_nonumber_flag[@]}"
+h0_nr_change job     SQ_COLOR        '<unset>' 2 "${h0_nonumber_flag[@]}"
+h0_nr_change bell    SQ_BELL_ALL     '<unset>' 2 "${h0_nonumber_flag[@]}"
+h0_nr_change flags   SQ_FOLD         '<unset>' -0 $'\n0'
+h0_nr_change flags   SQ_RECENT       '<unset>' -0 $'\n0'
+h0_nr_change eta     SQ_ETA          '<unset>' -0 $'\n0'
+h0_nr_change bell    SQ_BELL         '<unset>' -0 $'\n0'
+h0_nr_change horizon SQ_BELL_HORIZON 60 ' 60' '60 ' +60 $'\t60'
+h0_nr_change rmax    SQ_RECENT_MAX   3 ' 3' '3 ' +3 $'\t3' 0000000003
+h0_nr_change sizes   SQ_WIDTH        '<unset>' 1234567890
+h0_nr_change sizes   SQ_HEIGHT       '<unset>' 1234567890
+h0_nr_change sizes   COLUMNS         abc 1234567890
+h0_nr_change sizes   LINES           abc 1234567890
+h0_nr_change measure SQ_WIDTH        '<unset>' "${h0_nonumber_size[@]}"
+h0_nr_change measure SQ_HEIGHT       '<unset>' "${h0_nonumber_size[@]}"
+# h0_nr_group GROUP KIND FIXTURE VAR [VAR=value | -VAR]... -- [sq args] -- VALUE...:
+# one run per VALUE of VAR, its result into h0_got[label]; KIND pipe (no
+# terminal) or pty (the bell on, alice's failure 90 s old: its bells).  A
+# result other than the one expected (h0_nr_want) runs once more, as a run
+# that straddles a minute moves an age
+declare -A h0_got h0_old
+h0_nr_group() {
+	local group=$1 kind=$2 fx=$3 var=$4 v label try; shift 4
+	local -a base=() args=()
+	while [ "$1" != -- ]; do base+=("$1"); shift; done; shift
+	while [ "$1" != -- ]; do args+=("$1"); shift; done; shift
+	for v; do
+		local -a set=("$var=$v"); [ "$v" != '<unset>' ] || set=(-"$var")
+		label=$(h0_nr_label "$group" "$var" "$v")
+		for try in 1 2; do
+			if [ "$kind" = pty ]; then
+				BELL=1 PTY=1 PTY_ROWS=40 PTY_COLS=100 sq_run "$fx" TERM=xterm-256color SQ_BELL_USER=alice "${base[@]}" "${set[@]}" -- "${args[@]}"
+				h0_got[$label]="bells=$(bels)"
+			else
+				NOTTY=1 sq_run "$fx" "${base[@]}" "${set[@]}" -- "${args[@]}"
+				h0_got[$label]="rc=$RC $({ unrooted | without_clock /dev/stdin | mask_estimates | job_mask /dev/stdin; cat "$ERR"; } | md5sum | cut -c1-32)"
+			fi
+			[ ${#h0_old[@]} -gt 0 ] && [ "${h0_got[$label]}" != "$(h0_nr_want "$label")" ] || break
+		done
+	done
+}
+h0_nr_want() {   # h0_nr_want LABEL: what 848d3d4 gave for it, or for what a listed change now means
+	if [ -n "${h0_nr_changes[$1]+set}" ]; then printf '%s' "${h0_old[${h0_nr_changes[$1]}]-}"; else printf '%s' "${h0_old[$1]-}"; fi
+}
+h0_nr_all() {   # every spelling, in spellings.sh's order
+	local v bfx=$1
+	for v in SQ_CENTER SQ_FOLD SQ_RECENT SQ_COLOR SQ_COMPACT; do
+		h0_nr_group flags pipe busy24 $v -- --no-bell -- "${h0_flags[@]}"
+	done
+	h0_nr_group eta pipe est SQ_ETA SQ_WIDTH=160 SQ_HEIGHT=60 -- -- "${h0_flags[@]}"
+	h0_nr_group bell pty "$bfx" SQ_BELL -- --full -- "${h0_flags[@]}"
+	h0_nr_group bell pty "$bfx" SQ_BELL_ALL SQ_BELL_USER=bob -- --full -- "${h0_flags[@]}"
+	h0_nr_group horizon pty "$bfx" SQ_BELL_HORIZON -- --full -- '<unset>' '' 60 ' 60' '60 ' +60 060 0 abc 10m -60 1.5 $'\t60' $'60\n' ++60 -0 000000060 1234567890
+	h0_nr_group rmax pipe busy24 SQ_RECENT_MAX -- --full -- '<unset>' '' 3 ' 3' '3 ' +3 03 0 abc -3 12345678 123456789 $'\t3' $'3\n' ++3 -0 99999999 100000000 0000000003
+	h0_nr_group sizes pipe busy24 SQ_WIDTH  -SQ_WIDTH SQ_HEIGHT=40 -- --compact -- "${h0_nums[@]}"
+	h0_nr_group sizes pipe busy24 SQ_HEIGHT SQ_WIDTH=100 -SQ_HEIGHT -- --compact -- "${h0_nums[@]}"
+	h0_nr_group sizes pipe busy24 COLUMNS   -SQ_WIDTH -SQ_HEIGHT LINES=40 -- --compact -- "${h0_nums[@]}"
+	h0_nr_group sizes pipe busy24 LINES     -SQ_WIDTH -SQ_HEIGHT COLUMNS=100 -- --compact -- "${h0_nums[@]}"
+	h0_nr_group measure pipe busy24 SQ_WIDTH  -SQ_WIDTH SQ_HEIGHT=40 COLUMNS=60 LINES=30 -- --compact -- "${h0_nums[@]}"
+	h0_nr_group measure pipe busy24 SQ_HEIGHT SQ_WIDTH=100 -SQ_HEIGHT COLUMNS=60 LINES=30 -- --compact -- "${h0_nums[@]}"
+	h0_nr_group timeout pipe busy24 SQ_TIMEOUT -- -- '<unset>' '' 3 ' 3' +3 03 0 abc 2.5 $'\t3' '3 ' 00 .5
+	h0_nr_group job pipe sqjob/finished-11912 SQ_COLOR -SQ_WIDTH -SQ_HEIGHT -- job 11912 -- "${h0_flags[@]}"
+	h0_nr_group job pipe sqjob/finished-11912 COLUMNS -SQ_WIDTH -SQ_HEIGHT -- job 11912 -- "${h0_nums[@]}"
+}
+c_h0_number_reader() {   # K4, R3-L1, §2's change list
+	T_TITLE="502 spellings of every number sq reads: each as 848d3d4 read it, except §2's 106 changes, each now the value it names"
+	local bfx label line n=0 nchanged=0
+	h0_got=() h0_old=()
+	if [ $pin_frozen = 0 ]; then
+		[ -f "$h0_numbers" ] || { T_FAIL+=("no 848d3d4 column in $h0_numbers (--pin-frozen)"); return; }
+		while IFS=$'\t' read -r label line; do h0_old[$label]=$line; done < "$h0_numbers"
+	fi
+	bfx=$(bell_fixture)
+	h0_nr_all "$bfx"
+	for label in "${!h0_got[@]}"; do n=$((n + 1)); done
+	need "502 spellings run (ran $n)" [ "$n" = 502 ]
+	need "§2's change list: 106 rows (has ${#h0_nr_changes[@]})" [ ${#h0_nr_changes[@]} = 106 ]
+	for label in "${!h0_nr_changes[@]}"; do
+		[ -n "${h0_got[$label]+set}" ] || T_FAIL+=("the change list names $label, which no run is")
+	done
+	if [ $pin_frozen = 1 ]; then   # 848d3d4's column
+		for label in "${!h0_got[@]}"; do printf '%s\t%s\n' "$label" "${h0_got[$label]}"; done | LC_ALL=C sort | frozen_put "$h0_numbers"
+		return
+	fi
+	for label in "${!h0_got[@]}"; do
+		[ -n "${h0_old[$label]+set}" ] || { T_FAIL+=("$label: not in the 848d3d4 column"); continue; }
+		if [ -n "${h0_nr_changes[$label]+set}" ]; then
+			nchanged=$((nchanged + 1))
+			[ "$(h0_nr_want "$label")" != "${h0_old[$label]}" ] ||
+				T_FAIL+=("$label: listed as a change, but 848d3d4 gave it what it gave ${h0_nr_changes[$label]}")
+			[ "${h0_got[$label]}" = "$(h0_nr_want "$label")" ] ||
+				T_FAIL+=("$label: should be what 848d3d4 gave ${h0_nr_changes[$label]} ($(h0_nr_want "$label")), is ${h0_got[$label]}")
+		else
+			[ "${h0_got[$label]}" = "${h0_old[$label]}" ] || T_FAIL+=("$label: 848d3d4 gave ${h0_old[$label]}, now ${h0_got[$label]}")
+		fi
+	done
+	need "every listed change checked ($nchanged)" [ "$nchanged" = 106 ]
+}
+
+# ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
 	squeue_fails squeue_hangs squeue_ignores_term collector_killed tool_missing timeout_leading_zero squeue_garbage queue_cut both_fail
@@ -11196,6 +11403,7 @@ cases=(
 	whole_forms whole_orders whole_guard whole_v31
 	est_monotone est_pins est_columns est_widest_first est_trade est_full est_f3 est_height est_negative est_height_cols est_start
 	gawk_arg_limit plural_one invalid_colour suite_interrupt
+	h0_sq_color h0_display_prefs h0_number_reader
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,
