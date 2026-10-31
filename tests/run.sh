@@ -1235,18 +1235,14 @@ EOF2
 " && err_is "sq log: job 500 ended: FAILED (exit code -1:0)"'
 }
 c_exit_docs() {   # R3-1 AC 20, 24
-	T_TITLE="README's Reading EXIT and sq help exit name the ? of an exit sq cannot read"
-	local readme=${here%/*}/README.md
+	T_TITLE="sq help exit names the ? of an exit sq cannot read"
 	sq_run exit-unread --
 	need "the dashboard: rc 0" rc_is 0
-	need "README: a row that is no wait status is not read" grep -qF "always wins; a row whose" "$readme"
-	need "README: ... ExitCode is no wait status, two numbers up to 255 and 127, is not read)" grep -qF "ExitCode is no wait status, two numbers up to 255 and 127, is not read)" "$readme"
-	need "README: the fold's ?" eval 'tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "An exit sq cannot read (nothing readable says non-zero, and a row could not be read or none had a value) shows \`?\`, once, after every non-zero exit code and before exit 0, \`0/oom\` included."'
 	sq_run empty -- help exit
 	need "sq help exit: the EXIT labels, ? among them, and the fold's ?" eval '
 		rc_is 0 && plain | grep -qE "^  rc/sigN +Killed by signal N" && plain | grep -qE "^  rc/oom +Out of memory" &&
 		plain | grep -qE "^  rc/errN +The low 7 bits of a Slurm error code" && plain | grep -qE "^  \? +An exit sq cannot read$" &&
-		says "ExitCode is no wait status, two numbers up to 255 and 127, is not read)" &&
+		says "always wins; a row whose ExitCode is no wait status, two numbers up to 255 and 127, is not read)" &&
 		says "An exit sq cannot read (nothing readable says non-zero, and a row could not be read or none had a value) shows ?, once, after every non-zero exit code and before exit 0, 0/oom included."'
 }
 c_user_filter() {
@@ -4262,24 +4258,22 @@ c_compact_prompt_row() {
 	need "--full on a 20-row pty: what a pipe prints with --full (tries: $PAIR_RUNS)" test "$PAIR_SAME" = 1
 }
 c_display_docs() {
-	T_TITLE="DISPLAY-v4's docs: sq help modes and the README's --reserve row name the prompt's row, the README's Usage the ssh -qt note (G1 AC5); the README's bars paragraph: CR_CORE's memory in use as █, the dim line naming an unusable figure but FreeMem and CPUsLoad N/A, the summary's ! and ?, its fault states kept longest (E AC7)"
-	local readme=${here%/*}/README.md
+	T_TITLE="DISPLAY-v4's docs, now the help's: sq -h's --reserve row, sq help modes its prompt row and the ssh -qt note (G1 AC5); sq help nodes: CR_CORE's memory in use as █, the dim line naming an unusable figure but FreeMem and CPUsLoad N/A, the summary's ! and ?, its fault states kept longest (E AC7)"
 	sq_run empty -- -h
 	need "sq -h: the --reserve row" eval 'rc_is 0 && plain | grep -qE "^  --reserve <N> +COMPACT leaves N lines of the screen unused$"'
 	sq_run empty -- help modes
-	need "sq help modes: --reserve's prompt row, and ssh -qt" eval 'rc_is 0 &&
+	need "sq help modes: --reserve's prompt row, ssh -qt and its closing line, or --reserve 1" eval 'rc_is 0 &&
 		says "COMPACT leaves N lines of the screen unused, e.g. for watch'"'"'s own header (on a terminal one more, for the prompt)" &&
-		says "ssh -qt host sq"'
-	need "README: the --reserve row says it" grep -qF '| `--reserve N` | COMPACT leaves N lines of the screen unused, e.g. for `watch`'"'"'s own header (on a terminal one more, for the prompt).' "$readme"
-	need "README: Usage, ssh -qt and the closing line, or --reserve 1" eval 'grep -qE "^ssh -qt host sq +# " "$readme" && grep -qF "ssh'"'"'s \"Connection to … closed.\" line takes the row" "$readme" && grep -qF "(or give it --reserve 1)" "$readme"'
-	need "README: CR_CORE's memory in use draws as █ in the bar's colours, no ▓ for memory" eval '
-		grep -qF "memory in use draws as \`█\` in the bar'"'"'s colours" "$readme" && ! grep -qF "all of it draws as \`▓\`" "$readme"'
-	need "README: an unusable figure reads - or · with a dim line naming it, FreeMem and CPUsLoad N/A without it" eval '
-		grep -qF "reads \`-\` or \`·\`," "$readme" && grep -qF "with a dim line naming it" "$readme" &&
-		grep -qF "except FreeMem and CPUsLoad \`N/A\`, which read unknown without the line" "$readme"'
-	need "README: the summary line marks a RealMemory total with !, an unknown sum with ?, keeps the fault states longest" eval '
-		grep -qF "marks with \`!\` a total that counts RealMemory for any node" "$readme" && grep -qF "an unknown" "$readme" &&
-		grep -qF "sum with \`?\`" "$readme" && grep -qF "states (\`down*\`, \`drained\`, …) are kept longest" "$readme"'
+		says "\$ ssh -qt host sq" && says "ssh'"'"'s \"Connection to … closed.\" line takes the row sq leaves for the prompt (or --reserve 1)"'
+	sq_run empty -- help nodes
+	need "sq help nodes: CR_CORE's memory in use draws as █ in use and ░ free, no ▓ for memory" eval 'rc_is 0 &&
+		says "(CR_CORE: no node has any memory allocated, but some node has CPUs allocated): the bar shows memory in use instead, █ in use and ░ free" &&
+		says "▓ CPU in use beyond the allocation"'
+	need "sq help nodes: an unusable figure reads - or · with a dim line naming it, FreeMem and CPUsLoad N/A without it" eval '
+		says "read - or ·, with a dim line naming them" && says "except FreeMem and CPUsLoad N/A, which read unknown without the line"'
+	need "sq help nodes: the summary line marks a RealMemory total with !, an unknown sum with ?, keeps the fault states longest" eval '
+		says "with ! before a total that counts RealMemory for any node (335/!1085G mem) and ? for an unknown sum" &&
+		says "the fault states (down*, drained, …) are kept longest"'
 	stubs_answer
 }
 c_auto_full() {   # detection settled by measurement; true today already
@@ -5288,13 +5282,12 @@ c_stale_untouched() {   # R3-3 AC 4, and the CPU bars of AC 5
 	need "stale-edges' golden (its CPU bars, c_stale_inuse) is 7fd9bd6's" eval 'rc_is 0 && { [ $pin_frozen = 1 ] && frozen_is "$r3gold/stale-edges.full.w120.color" || [ -s "$r3gold/stale-edges.full.w120.color" ]; }'
 }
 c_stale_docs() {   # R3-3 AC 7
-	T_TITLE="README: the in-use view's no-longer-refreshed nodes read -, a down one keeps its bar red, in the in-use memory bar its unknown cells too"
-	local text
+	T_TITLE="sq help nodes: the in-use view's no-longer-refreshed nodes read -, a node in a fault state keeps its bar red, in the in-use memory bar its unknown cells too"
 	sq_run down-stale-crcore -- --full
 	need "the dashboard: rc 0" rc_is 0
-	text=$(tr "\n" " " < "${here%/*}/README.md" | sed -E "s/ +/ /g")
-	need "Two caveats gains the stale set" eval 'grep -qF "necessarily jobs. In the in-use view, a node Slurm no longer refreshes reads \`-\`: one that does not respond, is powered down, powering up or down, rebooting, \`inval\` or \`future\` (\`*\`, \`~\`, \`#\`, \`%\`, \`^\`). Slurm keeps its last FreeMem. A down one keeps its bar red." <<< "$text"'
-	need "the bars sentence: in the in-use memory bar its unknown ones too" eval 'grep -qF "and a down node'"'"'s filled cells are red, in the in-use memory bar its unknown ones too." <<< "$text"'
+	sq_run empty -- help nodes
+	need "the stale set" eval 'rc_is 0 && says "A node Slurm no longer refreshes reads -: one that does not respond, is powered down, powering up or down, rebooting, inval or future (*, ~, #, %, ^); Slurm keeps its last FreeMem."'
+	need "the fault states' red: in the in-use memory bar its unknown ones too" says "A node in a fault state (down, drained or draining, failing, inval, unknown) has its filled cells red, in the in-use memory bar its unknown ones too."
 }
 # ---- R3-2: a node whose Memory sinfo gave no usable figure for -------------
 # Its total is unknown whatever scontrol says, so NODES' per-node line never
@@ -5335,10 +5328,11 @@ c_membar_memory_unknown() {   # R3-2 AC 1-4, 6, 7
 	done
 }
 c_membar_memory_unknown_docs() {   # R3-2 AC 8, S-v3 item 5
-	T_TITLE="README: a node whose memory size sinfo cannot give counts no RealMemory; where no node's size is known, the scontrol line names the failure alone"
+	T_TITLE="sq help nodes: a node whose memory size sinfo cannot give counts no RealMemory; where no node's size is known, the scontrol line names the failure alone"
 	sq_run memunk-two -- --full
 	need "the dashboard: rc 0" rc_is 0
-	need "the memory-bar paragraph says so" eval 'tr "\n" " " < "${here%/*}/README.md" | sed -E "s/ +/ /g" | grep -qF "or the first of several). A node whose memory size sinfo cannot give is counted only by the line about sinfo'"'"'s figures: its total is unknown, so it counts no RealMemory. Where no node'"'"'s size is known, the line about a failed scontrol names the failure alone. Where Slurm does not"'
+	sq_run empty -- help nodes
+	need "the memory paragraph says so" eval 'rc_is 0 && says "A node whose memory size sinfo cannot give is counted only by the line about sinfo'"'"'s figures: its total is unknown, so it counts no RealMemory. Where no node'"'"'s size is known, the line about a failed scontrol names the failure alone."'
 }
 c_membar_fail() {
 	T_TITLE="scontrol failing or silent: RealMemory counts and one dim line under the nodes says why, cut to the width; none under CR_CORE; COMPACT makes room for it, and its summary line counts RealMemory without it"
@@ -8435,12 +8429,16 @@ c_why_parent_own() {   # S-v3 rule P: AC 9, the parents' own reports
 # sq job reads COLUMNS, not SQ_WIDTH (SUBCMD D4, WHY V12), and cuts only the
 # output's last lines (WHY J21): the README says both (S-v3 items 2, 3)
 c_job_width_docs() {   # S-v3 items 2, 3
-	T_TITLE="README: SQ_WIDTH and SQ_HEIGHT are the dashboard's only, sq job cuts its output's last lines to COLUMNS (21 or more), else the terminal's width, else 120; its other lines wrap"
-	local readme=${here%/*}/README.md
+	T_TITLE="the help: SQ_WIDTH and SQ_HEIGHT are the dashboard's only, sq job cuts its output's last lines to COLUMNS (21 or more), else the terminal's width, else 120; its other lines wrap"
 	job_run finished-11912 COLUMNS=120 -- --no-color job 11912
 	need "sq job: rc 0" rc_is 0
-	need "README: the SQ_WIDTH row names its scope and sq job's width" grep -qF '| `SQ_WIDTH`, `SQ_HEIGHT` | Pretend the terminal has this size; the dashboard'"'"'s only (`sq job` cuts its output'"'"'s last lines to `COLUMNS` when it is 21 or more, else to the terminal'"'"'s width, else to 120 columns). They never choose the mode. |' "$readme"
-	need "README: sq job's lines wrap, only the output's last lines are cut" eval 'tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "A running or completed job has no why section. The report'"'"'s lines are not cut to the terminal: a long one wraps, so no path or reason loses a word; only the output'"'"'s last lines are cut, to \`COLUMNS\` or the terminal'"'"'s width."'
+	sq_run empty -- help modes
+	need "sq help modes: SQ_WIDTH and SQ_HEIGHT are the dashboard's only" eval 'rc_is 0 && says "SQ_WIDTH, SQ_HEIGHT Pretend the screen has this size (the dashboard'"'"'s only)"'
+	sq_run empty -- help env
+	need "sq help env: the same" eval 'rc_is 0 && says "SQ_WIDTH, SQ_HEIGHT Pretend the screen has this size, a number; the dashboard'"'"'s only"'
+	sq_run empty -- help why
+	need "sq help why: the output's last lines cut to COLUMNS when it is 21 or more, else the terminal's, else 120; the other lines wrap" eval 'rc_is 0 &&
+		says "They are cut to COLUMNS when it is 21 or more, else to the terminal'"'"'s width, else to 120 columns; the report'"'"'s other lines are not cut: a long one wraps, so no path or reason loses a word."'
 }
 
 # ---- Resources and Priority (J9-J11, V9, V11) ---------------------------------
@@ -9208,8 +9206,8 @@ c_opts_mem() {   # AC23
 	need "memalloc, -M c1: no allocation, mirror or sstat call" eval 'rc_is 0 && [ "$(calls alloc)$(calls mirror)$(calls sstat)" = 000 ]'
 }
 c_opts_docs() {   # AC27
-	T_TITLE="sq -h names every short letter and long name sq accepts as a word, sq help filters and finished and the README each of OPTS's notes, and the help's examples run"
-	local w missing= readme=${here%/*}/README.md
+	T_TITLE="sq -h names every short letter and long name sq accepts as a word, sq help filters and finished each of OPTS's notes, and the help's examples run"
+	local w missing=
 	sq_run empty -- -h
 	for w in -u -p -A -U -q -j -M -n -t -w -L -R -S -a -r -P -o -c -C -x -h \
 	         --user --users --partition --partitions --account --accounts --qos --job --jobs --cluster --clusters \
@@ -9227,17 +9225,15 @@ c_opts_docs() {   # AC27
 		says "squeue'"'"'s own variables count as the flags they stand for, the flag on the command line winning" &&
 		says "empty or of only blanks and commas" && says "a job named \"ame\" is written -n ame" &&
 		says "SQUEUE_SIB and SQUEUE_SIBLING" && says "in any spelling" && says "costs the accounting block"'
+	need "sq help filters: read by their full long names, passed on in squeue's short spelling; squeue's environment may stop sq; Refused; options run together" eval '
+		says "by their full long names from a fixed list and passes them on in squeue'"'"'s short spelling" &&
+		says "squeue'"'"'s environment may stop sq with a usage error naming the variable" &&
+		says "Refused: -O/--Format, -s/--steps, -i/--iterate, -l, -v, -V, --json and --yaml, in any spelling" &&
+		says "Options run together are refused (-ar, -atR: write -a -r, -a -t R)"'
 	sq_run empty -- help finished
 	need "sq help finished: squeue's default view, sacct's unknown user or QoS" eval '
 		rc_is 0 && says "squeue'"'"'s default view (no --all, no -p, no -j, and not for an operator or admin, who sees every partition'"'"'s jobs)" &&
 		says "refuses an unknown user or QoS that squeue only warns about"'
-	need "README: Usage, the flag table, Good to know (default view, sacct's unknown user, squeue's environment), Refused" eval '
-		grep -qF "read by their full long" "$readme" && grep -qF "in squeue'"'"'s short spelling" "$readme" &&
-		grep -qF "| \`-u\`, \`-p\`, \`-A\` (\`-U\`)" "$readme" && grep -qF "squeue'"'"'s default view (no \`--all\`, no \`-p\`)" "$readme" &&
-		grep -qF "refuses an unknown user or QoS that squeue only warns about" "$readme" &&
-		grep -qF "squeue'"'"'s environment may stop sq with a" "$readme" && grep -qF "sq'"'"'s own \`SQ_*\` variables" "$readme" &&
-		grep -qF "costs the" "$readme" && grep -qF "Options run together are refused" "$readme" &&
-		grep -qF "a job named \"ame\" is written \`-n ame\`" "$readme" && grep -qF "in any spelling" "$readme"'
 	# the help's own examples
 	orun empty -- -o i,j,T,M,P,N
 	need "sq -o i,j,T,M,P,N: rc 0" eval 'rc_is 0 && err_empty'
@@ -10513,26 +10509,24 @@ c_whole_captions() {   # WHOLE AC 13 (R-L7): NODES' MEMNOTE under H8 and W8
 	need "nodes-cntrl W=44: ↳ memory counts RealMemory on node? and …" words_line "↳ memory counts RealMemory on node? and …"
 }
 c_whole_docs() {   # WHOLE AC 12 (H12), EST's AC 12
-	T_TITLE="sq help modes and the README: COMPACT fits every measured width, below 21 columns too, by shorter forms of whole parts (start estimates among them), a line cut only below its shortest form; FULL wraps; the README keeps 'Numbers are never cut while anything else can give' and says how start estimates give (EST)"
-	local readme=${here%/*}/README.md
+	T_TITLE="sq help modes and columns, and the README: COMPACT fits every measured width, below 21 columns too, by shorter forms of whole parts (start estimates among them), a line cut only below its shortest form; FULL wraps; numbers are never cut while anything else can give; how start estimates give (EST)"
+	local readme=${here%/*}/README.md t
 	sq_run empty -- help modes
-	need "sq help modes: COMPACT fits every width, FULL wraps" eval 'rc_is 0 &&
+	need "sq help modes: COMPACT fits every width, by shorter forms of whole parts, FULL wraps" eval 'rc_is 0 &&
 		says "COMPACT fits every width it can measure, below 21 columns too." &&
+		says "durations as 5h59m once the text columns are down to 8; start estimates, whole or not at all; fewer columns (sq help columns); Slurm'"'"'s state codes (PD, R) last." &&
 		says "A line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap."'
-	local t; for t in -h help "help modes" "help columns" "help display"; do
+	for t in -h help "help modes" "help columns" "help display"; do
 		sq_run empty -- $t
 		need "sq $t: no 'Below about 60 columns'" lacks "Below about 60 columns"
 	done
 	sq_run empty -- help columns
-	need "sq help columns: an estimate whole or not at all; numbers never cut while anything else can give" eval '
-		rc_is 0 && says "An estimate shows whole or not at all" && says "numbers are never cut while anything else can give"'
-	need "README: COMPACT fits every width, a line cut only below its shortest form, FULL wraps; no floor of 60 columns" eval '
-		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "COMPACT fits every width it can measure, below 21 columns too" &&
-		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "A line is cut only below its shortest form. FULL takes none of these forms: its long lines wrap." &&
+	need "sq help columns (EST, H12): a start estimate whole or not at all, before any column and an id's ×N, the longest first; a START column" eval '
+		rc_is 0 && says "An estimate shows whole or not at all: on a narrow screen the estimates go before any column and before an id'"'"'s ×N, the longest first (→ Nov15 07:33, then → 2027-11-30, then → 10:33)." &&
+		says "While a START column (-o S) shows the dates, the estimates are the first thing to go." && says "numbers are never cut while anything else can give"'
+	need "README: numbers are never cut while anything else can give; COMPACT fits every width, FULL wraps; no floor of 60 columns" eval '
+		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "numbers are never cut while anything else can give; COMPACT fits every width, FULL wraps its long lines." &&
 		! grep -qF "cannot shrink below about 60 columns" "$readme"'
-	need "README: 'Numbers are never cut while anything else can give' stays" grep -qF "Numbers are never cut while anything else can give." "$readme"
-	need "README (EST, H12): a start estimate whole or not at all, before any column and an id's ×N, the longest first; a START column holds the dates" eval '
-		tr "\n" " " < "$readme" | sed -E "s/ +/ /g" | grep -qF "durations as \`5h59m\` once the text columns are down to 8; a start estimate shows whole or not at all: on a narrow screen the estimates go before any column and before an id'"'"'s \`×N\`, the longest first (\`→ Nov15 07:33\`, then \`→ 2027-11-30\`, then \`→ 10:33\`); a START column (\`-o %S\`) holds their dates while it shows; fewer columns"'
 	stubs_answer
 }
 
@@ -11892,6 +11886,30 @@ PINS
 	stubs_answer
 }
 
+# R10: the README refers to the help.  Its topic table is the help's own
+# table, taken from sq's help_table heredoc (markup removed), so the two cannot
+# drift; every sq help TOPIC, sq job -h and sq log -h it names prints a help
+c_help_readme_refs() {   # R10
+	T_TITLE="the README's topic table is sq's help_table, byte for byte; every help the README points at exists"
+	local readme=${here%/*}/README.md t
+	need "the README's topic table is help_table's" eval 'cmp -s <(sed -n "/^| Topic | |\$/,/^\$/p" "$readme" | sed "/^\$/d") <(
+		printf "| Topic | |\n|---|---|\n"
+		sed -n "/^help_table() { cat <<'"'"'HELP_TABLE_EOF'"'"'\$/,/^HELP_TABLE_EOF\$/p" "$sq" |
+			gawk -F"\t" "NF == 3 { d = \$3; gsub(/\\[\\[[0-9;]*\\|/, \"\", d); gsub(/\\]\\]/, \"\", d); printf \"| \`%s\` | %s |\\n\", \$2, d }")'
+	need "the README names at least 10 topics" [ "$(grep -o "sq help [a-z]\+" "$readme" | sort -u | wc -l)" -ge 10 ]
+	for t in $(grep -o "sq help [a-z]\+" "$readme" | gawk '{ print $3 }' | sort -u); do
+		help_run -- help "$t"
+		need "the README's sq help $t: rc 0, a screen" eval 'rc_is 0 && err_empty && [ -s "$OUT" ]'
+	done
+	for t in job log; do
+		grep -qF "sq $t -h" "$readme" || continue
+		help_run -- $t -h
+		need "the README's sq $t -h: rc 0, a screen" eval 'rc_is 0 && err_empty && [ -s "$OUT" ]'
+	done
+	need "README: a bare array id is refused with its task ids (C4)" grep -qF "a bare array id is refused with its" "$readme"
+	stubs_answer
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -11943,7 +11961,7 @@ cases=(
 	gawk_arg_limit plural_one invalid_colour suite_interrupt
 	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write h0_dash_undelivered h0_dash_write h0_out_rc_lines h0_sort_twice h0_sort_twice_example h0_subcommand_exact
 	help_list help_topics help_words help_widths help_same_bytes help_colour help_tmpdir help_columns_env help_env_complete
-	help_goldens help_pins
+	help_goldens help_pins help_readme_refs
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,
