@@ -3959,7 +3959,7 @@ value_opt() {
 # first -M, --cluster(s), --federation, --sib or --sibling, which both
 # subcommands refuse.
 subcommands="log job"
-is_subcommand() { case " $subcommands " in *" $1 "*) return 0 ;; esac; return 1; }
+is_subcommand() { in_list "$1" "$subcommands"; }
 subpos=1 valued=0 after_j= j_seen= clustercause=
 # every long name sq knows, by what it does with one written with a single
 # dash (N2a), and the hint for a bare word that is one: a fixed table, never
@@ -3981,7 +3981,7 @@ stray() {   # stray WORD: a word sq cannot place, refused with the hint that fit
 	if is_subcommand "$low"; then hint="sq $low"
 	elif is_subcommand "${low%s}"; then hint="sq ${low%s}"
 	elif [ "$low" = help ]; then hint="sq -h"
-	elif case $long_names in *" $low "*) true ;; *) false ;; esac; then hint="sq --$low"
+	elif in_list "$low" "$long_names"; then hint="sq --$low"
 	elif [ -n "$after_j" ]; then   # only where the list would be a valid -j value
 		! jobid_ok "$after_j,$w" || hint="sq -j $after_j,$w"
 	elif [[ $w =~ ^[0-9]+$ ]]; then hint="sq job $w"

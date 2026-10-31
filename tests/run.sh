@@ -11539,6 +11539,17 @@ c_h0_sort_twice_example() {   # K8
 	o_twin
 }
 
+# H0-8: a subcommand, and stray's long-name hint, are matched word for word
+c_h0_subcommand_exact() {   # H0-8
+	T_TITLE="a word made of two subcommands, or of two long names, is no subcommand and no hint: rc 2, one line"
+	sub_refused "sq: 'log job' is not a subcommand; sq -h lists them" 'log job'
+	sub_refused "sq: 'job log' is not a subcommand; sq -h lists them" 'job log'
+	sub_refused "sq: 'logjob' is not a subcommand; sq -h lists them" $'log\tjob'   # the tab scrubbed from the echo
+	sub_refused "sq: 'me all' is not a subcommand; sq -h lists them" 'me all'
+	sub_refused "sq: 'me' is not a subcommand; sq -h lists them (did you mean sq --me?)" me
+	stubs_answer
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -11588,7 +11599,7 @@ cases=(
 	whole_forms whole_orders whole_guard whole_v31
 	est_monotone est_pins est_columns est_widest_first est_trade est_full est_f3 est_height est_negative est_height_cols est_start
 	gawk_arg_limit plural_one invalid_colour suite_interrupt
-	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write h0_dash_undelivered h0_dash_write h0_out_rc_lines h0_sort_twice h0_sort_twice_example
+	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write h0_dash_undelivered h0_dash_write h0_out_rc_lines h0_sort_twice h0_sort_twice_example h0_subcommand_exact
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,
