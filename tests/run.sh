@@ -11265,6 +11265,12 @@ c_h0_display_prefs() {   # H0-7a-e, K4
 		sq_run busy24 -SQ_WIDTH -SQ_HEIGHT COLUMNS=60 LINES=30 "$v" --
 		need "H0-7c $v, COLUMNS=60 LINES=30: rc 0, as unset (measured)" eval 'rc_is 0 && same_screen "$unset"'
 	done
+	# a COLUMNS that is set but no number is no usable size, on a terminal too:
+	# the 100-column fallback, not the terminal's width (as LINES=abc, c_compact_prompt_row)
+	PTY=1 PTY_ROWS=40 PTY_COLS=60 sq_run busy24 TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT -- --no-color
+	need "a terminal of 60 columns: rc 0, laid out at 60" eval 'rc_is 0 && [ "$(width)" -le 60 ] && [ "$(width)" -ge 50 ]'
+	PTY=1 PTY_ROWS=40 PTY_COLS=60 sq_run busy24 TERM=xterm-256color -SQ_WIDTH -SQ_HEIGHT COLUMNS=abc -- --no-color
+	need "COLUMNS=abc on a terminal of 60 columns: rc 0, the 100-column fallback" eval 'rc_is 0 && [ "$(width)" -gt 60 ] && [ "$(width)" -le 100 ]'
 	# a number under the minimum is no usable size: that axis's fixed fallback
 	sq_run empty -SQ_WIDTH -SQ_HEIGHT COLUMNS=60 LINES=30 SQ_CENTER=2 -- --full; cp "$OUT" "$unset"
 	sq_run empty -SQ_WIDTH COLUMNS=60 LINES=30 SQ_CENTER=2 SQ_HEIGHT=3 -- --full
@@ -11279,13 +11285,14 @@ c_h0_display_prefs() {   # H0-7a-e, K4
 	bell_run "$fx" SQ_BELL_USER=bob SQ_BELL_ALL=' 1'
 	need "H0-7e ... SQ_BELL_ALL=' 1': rc 0, one bell" eval 'rc_is 0 && [ "$(bels)" -eq 1 ]'
 }
-# K4, R3-L1: every number sq takes from the environment, in 502 spellings,
+# K4, R3-L1: every number sq takes from the environment, in 508 spellings,
 # each run as 848d3d4 ran it (HELP-v4.1's spellings.sh: unset, empty, blanks,
-# signs, zeros, other digits, junk).  tests/goldens/h0/numbers holds what
+# signs, zeros, other digits, junk; and sq job's COLUMNS where it cuts the
+# lines of a failed job's output, the review's L6).  tests/goldens/h0/numbers holds what
 # 848d3d4 gave, written by --pin-frozen from that build:
 #   SQ_UNDER_TEST=<848d3d4's sq> tests/run.sh --pin-frozen h0_number_reader
 # Each spelling gives what 848d3d4 gave for it, except the changes of §2's list
-# (h0_nr_changes), each of which gives what 848d3d4 gave for the spelling it
+# and L6's (h0_nr_changes), each of which gives what 848d3d4 gave for the spelling it
 # now means, and not what 848d3d4 gave for itself.  A result is the rc and a
 # digest of stdout and stderr, the digits of the first line (the title's
 # clock, cut to "06…" at 5 columns), the start estimates and sq job's dates
@@ -11323,6 +11330,9 @@ h0_nr_change sizes   COLUMNS         abc 1234567890
 h0_nr_change sizes   LINES           abc 1234567890
 h0_nr_change measure SQ_WIDTH        '<unset>' "${h0_nonumber_size[@]}"
 h0_nr_change measure SQ_HEIGHT       '<unset>' "${h0_nonumber_size[@]}"
+# L6: 10-19 digits were sq job's width; now they are no number, so the
+# terminal's, else 120, as for abc (§2 names only the dashboard's fallback)
+h0_nr_change jobtail COLUMNS         abc 1234567890
 # h0_nr_group GROUP KIND FIXTURE VAR [VAR=value | -VAR]... -- [sq args] -- VALUE...:
 # one run per VALUE of VAR, its result into h0_got[label]; KIND pipe (no
 # terminal) or pty (the bell on, alice's failure 90 s old: its bells).  A
@@ -11371,9 +11381,15 @@ h0_nr_all() {   # every spelling, in spellings.sh's order
 	h0_nr_group timeout pipe busy24 SQ_TIMEOUT -- -- '<unset>' '' 3 ' 3' +3 03 0 abc 2.5 $'\t3' '3 ' 00 .5
 	h0_nr_group job pipe sqjob/finished-11912 SQ_COLOR -SQ_WIDTH -SQ_HEIGHT -- job 11912 -- "${h0_flags[@]}"
 	h0_nr_group job pipe sqjob/finished-11912 COLUMNS -SQ_WIDTH -SQ_HEIGHT -- job 11912 -- "${h0_nums[@]}"
+	# a failed job whose output's last lines are 200 wide, which COLUMNS cuts
+	local long= i
+	for i in $(seq -w 1 30); do long="$long$(printf 'L%s%0197d' "$i" 0)\\n"; done
+	h0_nr_group jobtail pipe "$(tail_fx h0long -- "$(out_file "$long")" "$(dated 200s)")" COLUMNS \
+		-SQ_WIDTH -SQ_HEIGHT SQSTUB_UID=1041 SQSTUB_HOST=fb2-bioinf.bioinf.local -- --no-color job 11836 -- \
+		'<unset>' 80 ' 80' abc 1234567890 99999999999999999999
 }
 c_h0_number_reader() {   # K4, R3-L1, §2's change list
-	T_TITLE="502 spellings of every number sq reads: each as 848d3d4 read it, except §2's 106 changes, each now the value it names"
+	T_TITLE="508 spellings of every number sq reads: each as 848d3d4 read it, except §2's 106 changes and L6's sq job width, each now the value it names"
 	local bfx label line n=0 nchanged=0
 	h0_got=() h0_old=()
 	if [ $pin_frozen = 0 ]; then
@@ -11383,8 +11399,8 @@ c_h0_number_reader() {   # K4, R3-L1, §2's change list
 	bfx=$(bell_fixture)
 	h0_nr_all "$bfx"
 	for label in "${!h0_got[@]}"; do n=$((n + 1)); done
-	need "502 spellings run (ran $n)" [ "$n" = 502 ]
-	need "§2's change list: 106 rows (has ${#h0_nr_changes[@]})" [ ${#h0_nr_changes[@]} = 106 ]
+	need "508 spellings run (ran $n)" [ "$n" = 508 ]
+	need "§2's change list and L6's: 107 rows (has ${#h0_nr_changes[@]})" [ ${#h0_nr_changes[@]} = 107 ]
 	for label in "${!h0_nr_changes[@]}"; do
 		[ -n "${h0_got[$label]+set}" ] || T_FAIL+=("the change list names $label, which no run is")
 	done
@@ -11404,7 +11420,7 @@ c_h0_number_reader() {   # K4, R3-L1, §2's change list
 			[ "${h0_got[$label]}" = "${h0_old[$label]}" ] || T_FAIL+=("$label: 848d3d4 gave ${h0_old[$label]}, now ${h0_got[$label]}")
 		fi
 	done
-	need "every listed change checked ($nchanged)" [ "$nchanged" = 106 ]
+	need "every listed change checked ($nchanged)" [ "$nchanged" = 107 ]
 }
 
 # H0-2: exit 2 is a usage error only.  tests/bin/gawk-h0 stands in for gawk
@@ -11634,6 +11650,8 @@ c_help_words() {   # A3-A6
 	done
 	help_refused "sq help: 'modes' is not a topic; sq help lists them" help $'mo\tdes'    # the tab scrubbed from the echo
 	help_refused "sq help: one topic at a time, not 'modes' and 'nodes'; e.g. sq help modes" help modes nodes
+	# the whole line is scrubbed, its example too, which word40 does not cut
+	help_refused "sq help: one topic at a time, not 'a[31mb' and 'nodes'; e.g. sq help a[31mb" help $'a\e[31mb' nodes
 	help_refused "sq help: an empty topic (an unset variable?); sq help lists them" help ''
 	help_refused "sq help: an empty topic (an unset variable?); sq help lists them" help ' '
 	help_refused "sq help: --color takes no value; write it on its own, e.g. sq help --color modes" help --color=x
@@ -11727,7 +11745,7 @@ c_help_tmpdir() {   # A11
 c_help_columns_env() {   # A12, R7
 	T_TITLE="the help's width: COLUMNS as num_read reads it, if not 0, else the terminal's, else 80; clamped to 40..100"
 	local t widest
-	for t in 99999999999999999999:80 ' 50:50' +50:50 050:50 00050:50 '5 0:80' abc:80 0:80 39:40 200:100; do
+	for t in 99999999999999999999:80 1234567890:80 ' 50:50' +50:50 050:50 00050:50 '5 0:80' abc:80 0:80 39:40 200:100; do
 		help_run COLUMNS="${t%%:*}" -- help filters
 		widest=$(plain | LC_ALL=$utf8 gawk '!/^ *\$ / { if (length($0) > m) m = length($0) } END { print m + 0 }')
 		need "COLUMNS='${t%%:*}', no terminal: sq help filters at ${t##*:} ($widest)" eval 'rc_is 0 && [ "$widest" = "${t##*:}" ]'
