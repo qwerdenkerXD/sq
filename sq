@@ -4866,15 +4866,15 @@ show_help() { colour_words "$@"; help_render sq-h sq; }
 help_say()   { printf 'sq help: %s\n' "$(printf '%s' "$1" | scrub)" >&2; }
 help_usage() { help_say "$*"; exit 2; }
 # help_hint WORD: the topic a word that is none may have meant, into hint (empty
-# for none): a fixed table, never an edit distance - another case, a plural,
-# a word the topic is about, a prefix of 2 or more letters only one topic has
+# for none): a fixed table, never an edit distance - another case, an s too
+# many, a word the topic is about, a prefix of 2 or more letters only one
+# topic has (which also takes a topic's s away: mode)
 help_hint() {
 	local low=${1,,} t
 	low=${low#--}
 	hint=; [ -n "${help_topics-}" ] || help_names
 	if   in_list "$low" "$help_topics"; then hint=$low
 	elif in_list "${low%s}" "$help_topics"; then hint=${low%s}
-	elif in_list "${low}s" "$help_topics"; then hint=${low}s
 	else case $low in
 		compact|full|reserve|sq_compact|sq_width|sq_height|watch) hint=modes ;;
 		format|-o|o|sq_fmt|column|width|letters) hint=columns ;;
