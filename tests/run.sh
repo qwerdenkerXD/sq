@@ -42,7 +42,8 @@
 # The stubs in tests/bin stand in for squeue/sinfo/sacct/sstat/scontrol
 # (tests/lib/stub.sh says how, tests/FAITHFULNESS.md how they were checked
 # against the real ones) and for getent; tests/bin/stty only logs and runs the
-# real stty, tests/bin/id and hostname answer what a case sets.
+# real stty, tests/bin/id and hostname answer what a case sets, and
+# tests/bin/gawk-h0 fails one gawk call for the h0_* cases that put it first.
 # Every case must see a stub answer, so the suite cannot pass against a real
 # Slurm by accident.
 #
@@ -11354,6 +11355,32 @@ c_h0_number_reader() {   # K4, R3-L1, §2's change list
 	need "every listed change checked ($nchanged)" [ "$nchanged" = 106 ]
 }
 
+# H0-2: exit 2 is a usage error only.  tests/bin/gawk-h0 stands in for gawk
+# (on PATH as gawk, first, for these runs only) and fails one call as H0GAWK
+# says
+h0_gawk_env() {   # h0_gawk_env MODE: the VAR=value words that put gawk-h0 first on PATH as gawk, in MODE
+	local shim=$T_DIR/h0bin
+	mkdir -p "$shim"; ln -sf "$here/bin/gawk-h0" "$shim/gawk"
+	H0ENV=(PATH="$shim:$here/bin:$PATH" H0GAWK_REAL="$(command -v gawk)" H0GAWK="$1")
+}
+c_h0_rc_internal() {   # H0-2a-d
+	T_TITLE="exit 2 means a usage error only: sq's own failures are 1 with one line, the render's and the report's signals 128+N"
+	h0_gawk_env render; sq_run mixed "${H0ENV[@]}" --
+	need "H0-2a the render gawk fails, rc 2: sq exits 1, gawk's one line" eval 'rc_is 1 && err_is "gawk: fatal: (stand-in) render failed"'
+	h0_gawk_env rendersig; sq_run mixed "${H0ENV[@]}" --
+	need "the render gawk killed by SIGTERM: 143" rc_is 143
+	h0_gawk_env jobsig; job_run finished-11912 "${H0ENV[@]}" -- job 11912
+	need "sq job's report gawk killed by SIGTERM: 143 (was 1)" rc_is 143
+	sq_run mixed -- --bogus
+	need "H0-2c sq --bogus: still a usage error, 2" eval 'rc_is 2 && out_empty'
+	# H0-2d: with bash 5.1 or later no run reaches it (SRANDOM cannot fail),
+	# so the source: every failure of mint_nonce, and the collision, is fail,
+	# job_fail or log_fail, none die
+	need "H0-2d the separators' failures: 7 lines, each fail, job_fail or log_fail, none die" eval '
+		[ "$(grep -cE "mint_nonce\).*\|\| *(fail|job_fail|log_fail) \"|separators collided\"$" "$sq")" = 7 ] &&
+		! grep -E "mint_nonce\).*\|\| *die|\|\| *die \"two field separators collided\"" "$sq" > /dev/null'
+}
+
 # ============================================================================
 cases=(
 	empty mixed array_fold fold_split drain_reason hostile_names trailing_junk
@@ -11403,7 +11430,7 @@ cases=(
 	whole_forms whole_orders whole_guard whole_v31
 	est_monotone est_pins est_columns est_widest_first est_trade est_full est_f3 est_height est_negative est_height_cols est_start
 	gawk_arg_limit plural_one invalid_colour suite_interrupt
-	h0_sq_color h0_display_prefs h0_number_reader
+	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal
 )
 # The cases that measure time or load: a bound on how long sq or a call
 # takes, CPU seconds, a poll that must see sq do something within seconds,

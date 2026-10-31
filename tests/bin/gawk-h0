@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# gawk-h0: a gawk that fails one of sq's calls the way H0GAWK names, for the
+# h0_* cases, which put it on PATH as "gawk" (a directory of their own, first)
+# and name the real one in H0GAWK_REAL; every other call runs the real gawk.
+#   render   the dashboard's render call (the one given -v reserve=) fails, rc 2
+#   rendersig  that call is killed by SIGTERM
+#   two      that call prints a message of its own, then gawk's write failure, rc 2 (K2)
+#   jobrc    sq job's report call (-v phase=show) fails with gawk's fatal text, rc 2 (K3)
+#   jobtwo   that call prints a warning, then gawk's write failure, rc 2 (R3-L5)
+#   jobsig   that call is killed by SIGTERM
+for a; do
+	case ${H0GAWK:-}:$a in
+		render:reserve=*) echo "gawk: fatal: (stand-in) render failed" >&2; exit 2 ;;
+		rendersig:reserve=*|jobsig:phase=show) kill -TERM $$ ;;
+		two:reserve=*) printf '%s\n' "sq: internal field separator missing" \
+			'gawk: cmd. line:823: fatal: print to "standard output" failed: No space left on device' >&2; exit 2 ;;
+		jobrc:phase=show) echo "gawk: cmd. line:9: fatal: report broke" >&2; exit 2 ;;
+		jobtwo:phase=show) printf '%s\n' "gawk: cmd. line:9: warning: a message" \
+			'gawk: cmd. line:9: fatal: print to "standard output" failed: No space left on device' >&2; exit 2 ;;
+	esac
+done
+exec "${H0GAWK_REAL:?}" "$@"

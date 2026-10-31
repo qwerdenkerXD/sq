@@ -129,6 +129,7 @@ unset POSIXLY_CORRECT
 shopt -u checkwinsize
 
 die() { printf 'sq: %s\n' "$*" >&2; exit 2; }   # a usage error, never a table
+fail() { printf 'sq: %s\n' "$*" >&2; exit 1; }  # sq itself failed, not the command line
 # in_list WORD LIST: WORD is one of LIST's blank-separated words, exactly, never
 # a part of one
 in_list() { local w; for w in $2; do [ "$1" = "$w" ] && return 0; done; return 1; }
@@ -1932,7 +1933,7 @@ sub_log() {
 	fi
 	trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
 	unset $(exported_names 'SQUEUE_*')
-	nonce=$(mint_nonce) || die "no usable random field separator"
+	nonce=$(mint_nonce) || log_fail "no usable random field separator"
 	export SQ_NONCE=$nonce
 	log_fmt=
 	for v in $log_fields; do log_fmt="$log_fmt${log_fmt:+,}$v:$nonce"; done
@@ -3577,8 +3578,8 @@ sub_job() {
 	# three nonces, as the dashboard has: sacct's --delimiter and sinfo's -O
 	# are on their command lines for anyone to read, the queue's stays in
 	# the environment
-	nonce=$(mint_nonce) && nonce2=$(mint_nonce) && nonce3=$(mint_nonce) || die "no usable random field separator"
-	[ "$nonce" != "$nonce2" ] && [ "$nonce" != "$nonce3" ] && [ "$nonce2" != "$nonce3" ] || die "two field separators collided"
+	nonce=$(mint_nonce) && nonce2=$(mint_nonce) && nonce3=$(mint_nonce) || job_fail "no usable random field separator"
+	[ "$nonce" != "$nonce2" ] && [ "$nonce" != "$nonce3" ] && [ "$nonce2" != "$nonce3" ] || job_fail "two field separators collided"
 	export SQ_NONCE=$nonce SQ_NONCE2=$nonce2 SQ_NONCE3=$nonce3
 	make_tmp
 	# The sentinel, as sq log's: a process of its own that ticks once a
@@ -3670,6 +3671,7 @@ sub_job() {
 	job_run show 2> "$tmp/show.err"
 	rc=$?
 	[ $rc != 0 ] && [ $rc != 141 ] || exit 0
+	[ $rc -le 128 ] || exit $rc                     # stopped by a signal: 128+N
 	local why; why=$(scrub -f "$tmp/show.err")
 	case $why in
 		*"Broken pipe"*) exit 0 ;;
@@ -4189,7 +4191,7 @@ case $compact in 0|1) ;; *) compact=$screen ;; esac
 
 color_resolve
 
-nonce=$(mint_nonce)   || die "no usable random field separator"
+nonce=$(mint_nonce)   || fail "no usable random field separator"
 # Two of the three separators cannot travel in the environment, so they are
 # visible in /proc/<pid>/cmdline (mode 0444) and each gets its OWN nonce:
 # sacct's --delimiter has no environment equivalent at all, nor has sinfo's -O
@@ -4198,10 +4200,10 @@ nonce=$(mint_nonce)   || die "no usable random field separator"
 # reader who catches one can then forge nothing in the other two blocks, and the
 # queue nonce - the only one covering user-supplied text - never leaves the 0400
 # environment.
-nonce2=$(mint_nonce)  || die "no usable random field separator"
-nonce3=$(mint_nonce)  || die "no usable random field separator"
+nonce2=$(mint_nonce)  || fail "no usable random field separator"
+nonce3=$(mint_nonce)  || fail "no usable random field separator"
 [ "$nonce" != "$nonce2" ] && [ "$nonce" != "$nonce3" ] && [ "$nonce2" != "$nonce3" ] \
-	|| die "two field separators collided"
+	|| fail "two field separators collided"
 # gawk reads these as ENVIRON["SQ_NONCE"] / ["SQ_NONCE2"] / ["SQ_NONCE3"]: passed
 # with -v they would land on gawk's own world-readable command line
 export SQ_NONCE=$nonce
@@ -6523,6 +6525,9 @@ END{
 }
 ' "$tmp/nodes" "$tmp/jobs" "$tmp/recent"
 rc=$?
+# exit 2 is a usage error only: gawk's own failure is sq's, 1 (its line said
+# why), and a signal stays 128+N
+[ "$rc" = 0 ] || [ "$rc" -gt 128 ] || rc=1
 
 # rename(2), so a second instance can never read or leave a torn state file.
 # Only on success: a gawk that died mid-write leaves a partial temp, and
