@@ -100,8 +100,8 @@ jobs=$((10#$jobs)); [ "$jobs" -ge 1 ] || { echo "run.sh: -j takes 1 or more" >&2
 if [ -n "$at_given" ]; then
 	export CLOCK_AT_DATE=${CLOCK_AT_DATE:-$(command -v date)} CLOCK_AT_GAWK=${CLOCK_AT_GAWK:-$(command -v gawk)}   # kept: a run under --at has the shims first on PATH
 	export PATH=$here/lib/clock-at:$PATH
-	{ command date +%s && command gawk 'BEGIN { }'; } > /dev/null || exit 2   # the shims refuse a value they cannot run, each in its own line
-	[[ $clock_at == *[![:space:]]* ]] && clock_at=$(date -d "$clock_at" +%s 2>/dev/null) || { echo "run.sh: --at takes a date, as date -d reads it" >&2; exit 2; }
+	at_try=$({ command date +%s && command gawk 'BEGIN { }'; } 2>&1 > /dev/null) || { echo "${at_try:-run.sh: --at: CLOCK_AT_DATE or CLOCK_AT_GAWK does not run}" >&2; exit 2; }   # the shims refuse a value they cannot run, each in its own line
+	[[ $clock_at == *[![:space:]]* ]] && clock_at=$("$CLOCK_AT_DATE" -d "$clock_at" +%s 2>/dev/null) || { echo "run.sh: --at takes a date, as date -d reads it" >&2; exit 2; }
 	export CLOCK_AT_SHIFT=$((clock_at - EPOCHSECONDS)) BASH_ENV=$here/lib/clock-at/env.bash
 	. "$BASH_ENV"
 fi
@@ -8324,7 +8324,21 @@ c_clock_at() {
 		for value in "$here/lib/clock-at/$tool" "$tool" /nonexistent; do
 			need "the $tool shim given $var='$value': exit 2 and its one line, no exec" shim_refuses "$tool" "$var" "$value"
 		done
+		need "--at with $var=/nonexistent: exit 2, the shim's line, not a word on the date" at_says "$here/lib/clock-at/$tool: $var is no executable file other than this shim: '/nonexistent'" "$var=/nonexistent"
+		need "--at with $var=/bin/false: exit 2, says it does not run" at_says "run.sh: --at: CLOCK_AT_DATE or CLOCK_AT_GAWK does not run" "$var=/bin/false"
 	done
+	need "--at '+1 month' is what date -d reads, not a month counted from 1970" at_month_on
+}
+at_says() {   # at_says LINE VAR=VALUE: run.sh --at with that value exits 2, saying LINE and nothing else
+	local said; said=$(env "$2" "$bound" -k 2 20 "$here/run.sh" --at '2030-06-15 12:00:00 UTC' no_such_case 2>&1)
+	[ $? = 2 ] && [ "$said" = "$1" ]
+}
+at_month_on() {   # the summary's moment, a tick of the day between the two reads allowed
+	local real_date=${CLOCK_AT_DATE:-$(command -v date)} before after said
+	before=$("$real_date" -d '+1 month' +%F)
+	said=$("$here/run.sh" --at '+1 month' help_env_complete 2>&1)
+	after=$("$real_date" -d '+1 month' +%F)
+	[[ $said == *"started at $before "* || $said == *"started at $after "* ]]
 }
 shim_refuses() {   # shim_refuses TOOL VAR VALUE: that shim, VAR at VALUE, exits 2 with its one line, bounded as one execing itself would not end
 	local shim=$here/lib/clock-at/$1 said
