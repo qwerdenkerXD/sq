@@ -98,9 +98,11 @@ esac
 jobs=$((10#$jobs)); [ "$jobs" -ge 1 ] || { echo "run.sh: -j takes 1 or more" >&2; exit 2; }
 
 if [ -n "$at_given" ]; then
-	[[ $clock_at == *[![:space:]]* ]] && clock_at=$(date -d "$clock_at" +%s 2>/dev/null) || { echo "run.sh: --at takes a date, as date -d reads it" >&2; exit 2; }
 	export CLOCK_AT_DATE=${CLOCK_AT_DATE:-$(command -v date)} CLOCK_AT_GAWK=${CLOCK_AT_GAWK:-$(command -v gawk)}   # kept: a run under --at has the shims first on PATH
-	export CLOCK_AT_SHIFT=$((clock_at - EPOCHSECONDS)) BASH_ENV=$here/lib/clock-at/env.bash PATH=$here/lib/clock-at:$PATH
+	export PATH=$here/lib/clock-at:$PATH
+	{ command date +%s && command gawk 'BEGIN { }'; } > /dev/null || exit 2   # the shims refuse a value they cannot run, each in its own line
+	[[ $clock_at == *[![:space:]]* ]] && clock_at=$(date -d "$clock_at" +%s 2>/dev/null) || { echo "run.sh: --at takes a date, as date -d reads it" >&2; exit 2; }
+	export CLOCK_AT_SHIFT=$((clock_at - EPOCHSECONDS)) BASH_ENV=$here/lib/clock-at/env.bash
 	. "$BASH_ENV"
 fi
 # sq measures widths with gawk's length(), which counts characters only in a

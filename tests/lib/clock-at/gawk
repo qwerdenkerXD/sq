@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # not a stub: the real gawk, every systime() in a program given as an argument
 # CLOCK_AT_SHIFT seconds on, for run.sh --at (lib/clock-at/env.bash)
-real=${CLOCK_AT_GAWK:?run.sh --at sets it}   # by name: a case may put a gawk of its own on PATH, which calls this one
+real=${CLOCK_AT_GAWK:-}   # run.sh --at sets it, by name: a case may put a gawk of its own on PATH, which calls this one; anything but a real one could only exec itself for good
+[[ $real == */* && -f $real && -x $real && ! $real -ef $0 ]] || { echo "$0: CLOCK_AT_GAWK is no executable file other than this shim: '$real'" >&2; exit 2; }
 args=()
 for a; do
 	case $a in *'systime()'*) a=${a//'systime()'/"(systime() + ${CLOCK_AT_SHIFT:-0})"} ;; esac

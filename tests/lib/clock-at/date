@@ -2,7 +2,8 @@
 # not a stub: the real date, its "now" CLOCK_AT_SHIFT seconds on, for run.sh --at
 # (lib/clock-at/env.bash says what else moves).  A -d of a date in full, or of
 # @EPOCH, is the real date's; a -d "+400 days" counts from the shifted now
-real=${CLOCK_AT_DATE:?run.sh --at sets it}
+real=${CLOCK_AT_DATE:-}   # run.sh --at sets it; anything but a real one could only exec itself for good
+[[ $real == */* && -f $real && -x $real && ! $real -ef $0 ]] || { echo "$0: CLOCK_AT_DATE is no executable file other than this shim: '$real'" >&2; exit 2; }
 now=$((EPOCHSECONDS + ${CLOCK_AT_SHIFT:-0})) args=() given=
 while [ $# -gt 0 ]; do
 	case $1 in
