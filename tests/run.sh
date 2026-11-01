@@ -8186,13 +8186,17 @@ nouptime_left() {   # one attempt: --json failing after 1 s, -o hanging, no /pro
 }
 # T4-g: a read of /proc/uptime that fails after sq chose it (fd exhaustion,
 # say).  failread_env CALLER NTH: the VAR=values whose BASH_ENV makes the NTH
-# read mono_us makes for CALLER fail, noting it in $T_DIR/failread.log
+# read mono_us makes for CALLER fail (N+: that one and every later one), noting
+# each in $T_DIR/failread.log
 failread_env() {
 	cat > "$T_DIR/failread.sh" <<'FR'
 read() {
 	if [ "${FUNCNAME[1]:-}" = mono_us ] && [ "${FUNCNAME[2]:-}" = "${FAILREAD_CALLER:-}" ]; then
 		failread_n=$(( ${failread_n:-0} + 1 ))
-		if [ "$failread_n" = "${FAILREAD_NTH:-1}" ]; then echo "read $failread_n of $FAILREAD_CALLER failed" >> "$FAILREAD_LOG"; return 1; fi
+		case $FAILREAD_NTH in
+			*+) [ "$failread_n" -lt "${FAILREAD_NTH%+}" ] ;;
+			*)  [ "$failread_n" != "$FAILREAD_NTH" ] ;;
+		esac || { echo "read $failread_n of $FAILREAD_CALLER failed" >> "$FAILREAD_LOG"; return 1; }
 	fi
 	builtin read "$@"
 }
@@ -8200,17 +8204,20 @@ FR
 	: > "$T_DIR/failread.log"
 	printf 'BASH_ENV=%s FAILREAD_CALLER=%s FAILREAD_NTH=%s FAILREAD_LOG=%s' "$T_DIR/failread.sh" "$1" "$2" "$T_DIR/failread.log"
 }
-failed_read() { cat "$T_DIR/failread.log" 2>/dev/null | paste -sd'|'; }   # what the stand-in failed, if anything
+failed_read() { head -n 3 "$T_DIR/failread.log" 2>/dev/null | paste -sd'|'; }   # what the stand-in failed, if anything
 c_clock_fail_read() {
 	T_TITLE="a read of /proc/uptime failing later (T4-g), at the start of each budget and inside it: the clock moves an hour on for good, so a budget reads as spent, never as waited on: the tail reader cut, no second sstat list, getent within sq job's deadline"
 	local d start nth caller
-	for nth in 1 2; do
+	# 1+: the reads go on failing, so each must move the clock on from the one
+	# before, or the budget would stand still at the second and wait for good
+	for nth in 1 2 1+; do
 		d=$(tail_fx failtail$nth -- "$(out_file 'never read\n')" "$(dated 200s)")
 		start=$(up_ms)
 		BOUND=12 sq_run "$d" SQSTUB_UID=1041 $(failread_env job_tail_wait $nth) PATH="$here/lib/tail-as:$here/bin:$PATH" SQSTUB_TAIL=hang -- --no-color job 11836
 		need "the tail reader's read $nth failing ($(failed_read)): rc 0, 'did not answer within 2s', under 4 s (took $(( $(up_ms) - start )) ms)" eval '
 			[ -n "$(failed_read)" ] && rc_is 0 && [ "$(why_notes)" = "its output file did not answer within 2s" ] && [ $(( $(up_ms) - start )) -lt 4000 ]'
 	done
+	need "... with the reads going on failing, a second one did fail (got: $(failed_read))" eval '[ "$(grep -c . "$T_DIR/failread.log")" -ge 2 ]'
 	for nth in 1 2; do
 		d=$(jobmem_lists_fx failsstat$nth '@hang 30')
 		sq_run "$d" SQSTUB_UID=1041 SQ_TIMEOUT=3 SQ_WIDTH=110 SQ_HEIGHT=30 $(failread_env jobmem_collect $nth) -- --full --no-color
