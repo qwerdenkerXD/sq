@@ -39,7 +39,8 @@
 # locale sources for one case;
 # util-linux `flock` (the stub's call counter, the failed cases' evidence) and
 # procps `ps` (sq log's leftover processes, found by session id) for the sq
-# log cases.
+# log cases; Linux's /proc/uptime, the clock every elapsed time is measured by
+# (up_ms).
 # The stubs in tests/bin stand in for squeue/sinfo/sacct/sstat/scontrol
 # (tests/lib/stub.sh says how, tests/FAITHFULNESS.md how they were checked
 # against the real ones) and for getent; tests/bin/stty only logs and runs the
@@ -277,7 +278,7 @@ sq_redir() {
 	[ "$RC" != 124 ] || T_FAIL+=("sq did not finish")
 	note_run
 }
-at_exit() { leftovers "$(cat "$RUN/pid")" > "$RUN/left-at-exit"; echo "$1" > "$RUN/rc"; }
+at_exit() { up_ms > "$RUN/end_ms"; leftovers "$(cat "$RUN/pid")" > "$RUN/left-at-exit"; echo "$1" > "$RUN/rc"; }   # the end's time before ps -s, which scans all of /proc
 nothing_at_exit() { [ ! -s "$RUN/left-at-exit" ]; }   # sq waited for all it started
 use_run() {   # use_run RUN: make that run the current one (OUT, ERR, LOG, SQ_PID)
 	RUN=$1; OUT=$RUN/out ERR=$RUN/err LOG=$RUN/log; SQ_PID=$(cat "$RUN/pid")
@@ -292,6 +293,11 @@ sq_finish() {
 	RC=$(cat "$RUN/rc" 2>/dev/null); RC=${RC:-124}
 	note_run
 }
+# up_ms: the time in milliseconds on a clock no step of the wall clock moves
+# (/proc/uptime, 1/100 s, read by a builtin, as sq's collect -r does), for
+# every time a case measures between two moments: WSL steps its wall clock
+# back about 2.5 s every 31 s, and NTP may step any host's either way
+up_ms() { local up _; read -r up _ < /proc/uptime; printf '%s\n' $(( 10#${up/./} * 10 )); }
 # waits_for SECONDS CMD...: until CMD holds, polling every 0.1 s; counted, not
 # timed, as WSL steps its clock back now and then
 waits_for() {   # (SECONDS may have one decimal: 2.5)
@@ -301,6 +307,13 @@ waits_for() {   # (SECONDS may have one decimal: 2.5)
 		[ $n -lt $limit ] || return 1
 		sleep 0.1; n=$((n + 1))
 	done
+}
+# not_within MS CMD...: CMD does not come to hold within MS milliseconds by
+# up_ms (polled every 0.1 s): a "not yet" on a clock, as a counted wait runs
+# long under load and would fail it where sq is right
+not_within() {
+	local end=$(( $(up_ms) + $1 )); shift
+	while [ "$(up_ms)" -lt "$end" ]; do "$@" && return 1; sleep 0.1; done
 }
 leftovers() { ps -s "$1" -o pid=,args= 2>/dev/null; }    # leftovers SID: what still runs in it
 nothing_left() { [ -z "$(leftovers "$SQ_PID")" ]; }       # in the current run's session
@@ -870,12 +883,12 @@ c_squeue_fails() {
 }
 c_squeue_hangs() {
 	T_TITLE="squeue hangs (cut at SQ_TIMEOUT=1): the job list is unavailable, and the footer says '? jobs' instead of a count"
-	local t0=$SECONDS
+	local t0; t0=$(up_ms)
 	sq_run squeue-hangs SQ_TIMEOUT=1 --
 	need "rc 0"                       rc_is 0
 	need "stderr empty"               err_empty
 	need "stubs: queue once, no fallback" calls_are 1 1 0 1
-	need "finished within 10s"        eval '[ $((SECONDS - t0)) -lt 10 ]'
+	need "finished within 10s"        eval '[ $(( $(up_ms) - t0 )) -lt 10000 ]'
 	need "banner 'no response after 1s'" matches "^  ⚠ slurm unreachable · no response after 1s$"
 	need "'job list unavailable'"     has "job list unavailable"
 	need "no '0 jobs' footer while the job list is unavailable" eval '! section footer | grep -qE "^ *0 jobs "'
@@ -899,11 +912,11 @@ c_squeue_ignores_term() {
 	T_TITLE="squeue ignoring SIGTERM, killed after SQ_TIMEOUT=1: 'no response after 1s', with and without timeout --verbose"
 	local t0 how
 	for how in verbose old; do
-		t0=$SECONDS
+		t0=$(up_ms)
 		if [ $how = verbose ]; then sq_run squeue-hangs SQ_TIMEOUT=1 SQSTUB_IGNORE_TERM=squeue --
 		else sq_run squeue-hangs SQ_TIMEOUT=1 SQSTUB_IGNORE_TERM=squeue "$(timeout_as)" SQSTUB_TIMEOUT=old --; fi
 		need "$how: rc 0, stderr empty, stubs: queue once, no fallback" eval 'rc_is 0 && err_empty && calls_are 1 1 0 1'
-		need "$how: finished within 10s" eval '[ $((SECONDS - t0)) -lt 10 ]'
+		need "$how: finished within 10s" eval '[ $(( $(up_ms) - t0 )) -lt 10000 ]'
 		need "$how: banner 'no response after 1s'" matches "^  ⚠ slurm unreachable · no response after 1s$"
 		need "$how: 'job list unavailable', footer ? ? ? ?" eval 'has "job list unavailable" && footer_unknown'
 	done
@@ -1522,10 +1535,10 @@ raw_stderr_fixture() {   # raw_stderr_fixture NAME GAWK-PRINT: "wide" whose sque
 c_scrub_bounded() {
 	T_TITLE="100 KB of nested C1 pairs on squeue's stderr: sq answers within seconds, a ␚ for each half; a cut never halves a character"
 	local t0
-	t0=$SECONDS
+	t0=$(up_ms)
 	sq_run "$(raw_stderr_fixture deep 'for (i=0; i<50000; i++) printf "\302"; for (i=0; i<50000; i++) printf "\233"')" --
 	need "50000 pairs nested: rc 0 within 10s, stderr empty (no gawk warning), ␚s on the banner" \
-		eval 'rc_is 0 && [ $((SECONDS - t0)) -lt 10 ] && err_empty && utf8_valid && matches "^  ⚠ slurm unreachable · squeue: error: ␚␚␚␚"'
+		eval 'rc_is 0 && [ $(( $(up_ms) - t0 )) -lt 10000 ] && err_empty && utf8_valid && matches "^  ⚠ slurm unreachable · squeue: error: ␚␚␚␚"'
 	sq_run "$(raw_stderr_fixture tail 'for (i=0; i<2000; i++) printf "\302"; for (i=0; i<2000; i++) printf "\233"; for (i=0; i<96000; i++) printf "x"')" --
 	need "2000 pairs nested, then text: rc 0, stderr empty, a ␚ for each outer half on the banner, no C1" \
 		eval 'rc_is 0 && err_empty && matches "^  ⚠ slurm unreachable · squeue: error: ␚␚␚␚" && c1_inert'
@@ -5567,10 +5580,10 @@ c_membar_json() {
 	done
 	d=$(json_fx membar-busy '{ print } /^ *"name": "fb2-bioinf",$/ { s = "\\\\"; q = "\\\""; while (length(s) < 131072) { s = s s; q = q q }
 		print "      \"reason\": \"" s "\","; print "      \"comment\": \"" q "\","; print "      \"operating_system\": \"" s "x" q "\\\\\"," }')
-	local start; start=$(date +%s%N)
+	local start; start=$(up_ms)
 	sq_run "$d" SQSTUB_HOST=FranzGB SQ_TIMEOUT=10 -- --full --no-color
 	need "128 KB runs of backslashes and quotes: rc 0 within 10 s, stderr empty, the accepted screen" eval '
-		rc_is 0 && err_empty && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ] && membar_busy_is'
+		rc_is 0 && err_empty && [ $(( $(up_ms) - start )) -lt 10000 ] && membar_busy_is'
 	# invalid UTF-8 in a name and in partitions: read, kept, no warning
 	d=$(json_fx membar-busy '/^ *"small"$/ { sub(/small/, "x\377\303y") } { print }
 		/^    },$/ && !n++ { print "    {"; print "      \"name\": \"n\377\376\303(\","; print "      \"cpus\": 1"; print "    }," }')
@@ -5612,10 +5625,10 @@ c_membar_json() {
 	d=$(json_fx membar-busy 'n < 2 { L[++nl] = $0 } /^    [{}],?$/ && ++n == 2 { pad = "      \"energy\": {"; for (i = 1; i <= 40; i++) pad = pad "\n        \"e" i "\": {\"set\": true,\n          \"number\": " i "\n        },"; pad = pad "\n        \"last\": 0\n      },"
 			for (k = 1; k <= 1000; k++) { print "    {"; print pad; print "      \"name\": \"big" k "\","; for (i = 2; i < nl - 1; i++) if (L[i] !~ /"name":/) print L[i]; print L[nl - 1]; print "    }," } }
 		/^  "nodes": \[$/ { print; next } n >= 0 { print }')
-	start=$(date +%s%N)
+	start=$(up_ms)
 	sq_run "$d" SQSTUB_HOST=FranzGB SQ_TIMEOUT=10 -- --full --no-color
 	need "1000 more nodes ($(( $(wc -c < "$d/scontrol-node.json") / 1024 )) KB): rc 0 within 10 s, stderr empty, the accepted screen" eval '
-		rc_is 0 && err_empty && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ] && membar_busy_is'
+		rc_is 0 && err_empty && [ $(( $(up_ms) - start )) -lt 10000 ] && membar_busy_is'
 }
 # json_unusable PROGRAM WHAT: scontrol --json answering, exit 0, membar-busy's
 # document run through the json_fx PROGRAM, unusable for WHAT: -o read
@@ -5787,11 +5800,11 @@ c_membar_fallback() {
 	# timeout named by the first bound
 	d=$(mem_fixture membar-busy scontrol-node "@hang 10")
 	printf '@hang 1\n@exit 1\n' > "$d/scontrol-node.json"
-	start=$(date +%s%N)
+	start=$(up_ms)
 	sq_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 -- --full
 	need "--json failing after 1 s, -o hanging: -o bounded by about 2 s, done within 4.5 s, 'no response after 3s'" eval '
 		rc_is 0 && err_empty && [ "$(calls scontrol)" = 2 ] && [ "$(timeout_of scontrol)" = 3 ] && v=$(timeout_of scontrol 2) &&
-		[ "${v%%.*}" -ge 1 ] && [ "${v%%.*}" -lt 2 ] && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 4500 ] &&
+		[ "${v%%.*}" -ge 1 ] && [ "${v%%.*}" -lt 2 ] && [ $(( $(up_ms) - start )) -lt 4500 ] &&
 		[ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (no response after 3s)" ]'
 	sq_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=2.5 -- --full
 	need "... SQ_TIMEOUT=2.5: named as given" eval 'rc_is 0 && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (no response after 2.5s)" ]'
@@ -6034,9 +6047,9 @@ c_jobmem_outcomes() {
 		[ "$(mem_of 4001) $(mem_of 4002) $(mem_of 4003) $(mem_of 4004) $(mem_of 4007) $(mem_of 4008)" = "1/4G !/4G ?/4G !/4G ?/8G ?4G" ]'
 	# sstat silent past its budget, min(SQ_TIMEOUT, 2) s
 	d=$(mem_fixture jobmem-outcomes sstat '@hang 8')
-	t0=$(date +%s%N)
+	t0=$(up_ms)
 	mem_run "$d" SQ_TIMEOUT=6 XDG_CACHE_HOME="$cache" -- --color
-	ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+	ms=$(( $(up_ms) - t0 ))
 	need "sstat silent (SQ_TIMEOUT=6): rc 0, stderr empty, cut at 2 s, so done within 5 s (took ${ms}ms)" eval 'rc_is 0 && err_empty && [ "$ms" -lt 5000 ]'
 	for id in 4001 4002 4003 4004 4005_1 4005_0 4011 4012; do
 		need "timeout: $id a red !" row_has $id "$ESC[31m!$ESC[0m/4G"
@@ -6161,11 +6174,11 @@ c_jobmem_lists() {
 	need "the first call failing: two sstat calls, flye, salmon, multiqc '83/100G 7.7/15.2G ?/4G' (got: $(jobmem_lists_mem))" eval '
 		rc_is 0 && err_empty && [ "$(calls sstat)" = 2 ] && [ "$(jobmem_lists_mem)" = "83/100G 7.7/15.2G ?/4G" ]'
 	d=$(jobmem_lists_fx hang '@hang 30')
-	start=$(date +%s%N)
+	start=$(up_ms)
 	sq_run "$d" SQSTUB_UID=1041 SQ_TIMEOUT=3 SQ_WIDTH=110 SQ_HEIGHT=30 -- --full --no-color
 	need "the first call hanging: one sstat call, the second list not asked, its ids failed: '!/100G !/15.2G !/4G' (got: $(jobmem_lists_mem))" eval '
 		rc_is 0 && err_empty && [ "$(calls sstat)" = 1 ] && [ "$(jobmem_lists_mem)" = "!/100G !/15.2G !/4G" ]'
-	need "... sq ends within 6 s of its start (the budget, not 2 s a list)" eval '[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 6000 ]'
+	need "... sq ends within 6 s of its start (the budget, not 2 s a list)" eval '[ $(( $(up_ms) - start )) -lt 6000 ]'
 }
 c_memalloc_screens() {
 	T_TITLE="the accepted MEMALLOC screens byte for byte, clock aside: totals as fsill and as nobody in a pipe, a failed call marked, whole numbers for all and own form a in the unit rule on an 80-column screen"
@@ -6651,10 +6664,10 @@ StateCompact=CD
 EOF
 )" -- log --err 500; err=$RUN
 
-	# the 3 s grace: the end comes well after the poll that saw it (counted
-	# in 0.1 s steps; without the grace it comes within a second or two)
+	# the 3 s grace: the end comes well after the poll that saw it (2 s by
+	# up_ms; without the grace it comes within a second or two)
 	local grace_ok=
-	use_run "$n"; waits_for 30 eval '[ "$(stub_calls)" -ge 3 ]' && ! waits_for 2.0 eval '[ -s "$RUN/rc" ]' && grace_ok=1
+	use_run "$n"; waits_for 30 eval '[ "$(stub_calls)" -ge 3 ]' && not_within 2000 eval '[ -s "$RUN/rc" ]' && grace_ok=1
 	sq_finish "$late"
 	need "late: nothing of sq's alive when it returned" nothing_at_exit
 	need "late: rc 0, the whole file as it grew" eval 'rc_is 0 && out_is "one
@@ -7966,9 +7979,9 @@ c_why_tail_hung() {   # V2
 	sq_finish "$RUN" 10
 	need "rc 0, the note, nothing left in its session, the tmp dir gone" eval '
 		rc_is 0 && [ "$(why_notes)" = "its output file did not answer within 2s" ] && nothing_at_exit && [ -z "$(ls -A "$RUN/tmp")" ]'
-	local start=$(date +%s%N)
+	local start=$(up_ms)
 	sq_run "$d" SQSTUB_UID=1041 PATH="$here/lib/tail-as:$here/bin:$PATH" SQSTUB_TAIL=hang -- --no-color job 11836
-	need "... within 2 s and a little (under 4 s in all)" eval 'rc_is 0 && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 4000 ]'
+	need "... within 2 s and a little (under 4 s in all)" eval 'rc_is 0 && [ $(( $(up_ms) - start )) -lt 4000 ]'
 }
 
 # ---- V14: scontrol's free text cannot forge the figures ------------------------
@@ -8590,14 +8603,14 @@ c_why_array() {   # J25, V16
 }
 
 # ---- the time sq job takes (W2, V13) --------------------------------------------
-finished_in() { printf '%s' $(( $(stat -c %Y "$RUN/rc") - $1 )); }   # finished_in START: seconds from START to sq's end
+finished_in() { printf '%s' $(( ($(cat "$RUN/end_ms") - $1) / 1000 )); }   # finished_in START_MS (up_ms): whole seconds from START_MS to sq's end
 timeout_of() {   # timeout_of TOOL [N]: the bound sq's timeout gave TOOL's first (N-th) call (TIMEOUT lines, SQSTUB_TIMEOUT=log)
 	gawk -F'\t' -v t="$1" -v want="${2:-1}" '$1 == "TIMEOUT" && index(" " $2 " ", " " t " ") && ++seen == want { n = split($2, a, " ")
 		for (i = 1; i <= n; i++) if (a[i] == "-k") { print a[i + 2]; exit } }' "$LOG"
 }
 c_why_budget() {   # Franz #1, W2, V13, V16
 	T_TITLE="sq job waits 30 s for accounting unless SQ_TIMEOUT validly says otherwise (invalid: as unset); the queue keeps SQ_TIMEOUT's 5 s; every call within sacct's budget and 5 s more; the ≥N array"
-	local runs=() r start=$(epoch_now) d dep v
+	local runs=() r start=$(epoch_now) start_ms=$(up_ms) d dep v
 	# accounting silent, SQ_TIMEOUT unset: the pinned ≥N screen after 30 s,
 	# colour on and off at once
 	sq_start "$jfx/array-silent-11367" SQSTUB_UID=1041 SQ_PSS_SINCE=@$(( start - pss_ago )) -SQ_TIMEOUT -- --no-color job 11367; runs+=("$RUN")
@@ -8611,15 +8624,15 @@ c_why_budget() {   # Franz #1, W2, V13, V16
 	sq_start "$dep" SQSTUB_UID=1041 -SQ_TIMEOUT -- --no-color job 11963; runs+=("$RUN")
 	for r in "${runs[@]}"; do sq_finish "$r" 60; done
 	use_run "${runs[0]}"; RC=$(cat "$RUN/rc")
-	# the end is a whole-second mtime and WSL steps the clock back about 1.5 s
-	# every 30 s: 27 s still tells the 30 s budget from SQ_TIMEOUT's 5
-	need "accounting silent, SQ_TIMEOUT unset: the pinned ≥N screen, after 30 s (27 by the clock) and before 35" eval '
-		rc_is 0 && screen_is "$jfx/screens/why__array-silent.txt" && [ "$(finished_in $start)" -ge 27 ] && [ "$(finished_in $start)" -le 36 ] && nothing_at_exit'
+	# by up_ms from before sq started to its end (at_exit): never under the
+	# 30 s timeout waited, whatever the wall clock did
+	need "accounting silent, SQ_TIMEOUT unset: the pinned ≥N screen, after 30 s and before 35 (took $(finished_in $start_ms) s)" eval '
+		rc_is 0 && screen_is "$jfx/screens/why__array-silent.txt" && [ "$(finished_in $start_ms)" -ge 30 ] && [ "$(finished_in $start_ms)" -le 36 ] && nothing_at_exit'
 	use_run "${runs[1]}"; RC=$(cat "$RUN/rc")
 	need "... colour on" eval 'rc_is 0 && screen_is "$jfx/screens/why__array-silent.ansi"'
 	use_run "${runs[2]}"; RC=$(cat "$RUN/rc")
 	need "everything hanging: done within sacct's 30 s and 5 more (2 s kill grace aside), each source's note, nothing left" eval '
-		rc_is 0 && [ "$(finished_in $start)" -le 37 ] && nothing_at_exit &&
+		rc_is 0 && [ "$(finished_in $start_ms)" -le 37 ] && nothing_at_exit &&
 		[ "$(plain | sed -n 2p)" = "  ↳ accounting did not answer within 30s" ] &&
 		why_has "  will never start: it may start only once 11950 has completed successfully, which can no longer happen" &&
 		why_has "    11950  unknown: squeue did not answer"'
@@ -8650,10 +8663,10 @@ c_why_parallel() {   # V13
 	for f in squeue-all sacct scontrol-node squeue-queue; do
 		{ [ $f = squeue-all ] || echo '@hang 3'; sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$jfx/pending-est/$f"; } > "$d/$f"
 	done
-	start=$(date +%s%N)
+	start=$(up_ms)
 	job_run "$d" SQ_TIMEOUT=6 -- --no-color job 11962
 	need "sacct, scontrol and the queue, 3 s each: about 3 s in all (under 5), the pinned report" eval '
-		rc_is 0 && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 5000 ] && job_is "$jfx/screens/job__pending-est.txt"'
+		rc_is 0 && [ $(( $(up_ms) - start )) -lt 5000 ] && job_is "$jfx/screens/job__pending-est.txt"'
 }
 c_why_signals() {   # V2, V13: nothing outlives sq
 	T_TITLE="a signal or SIGKILL while the why section's calls and sacct run together: 128+N, or the sentinel ends them; nothing left, the tmp dir gone"
@@ -9722,11 +9735,11 @@ c_nodes_o_fail() {   # AC 11, 24 (timed)
 	local d start why='sinfo: error: Unable to contact slurm controller (connect failure)' swhy='scontrol: error: Unable to contact slurm controller (connect failure)'
 	d=$(jfx_copy sfail resources-11964 "sinfo=@stderr $why
 @exit 1")
-	start=$(date +%s%N); why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	start=$(up_ms); why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
 	need "sinfo failing with stderr: W1's line, V1b's lead, no -o call, done within 1.5 s" eval '
 		rc_is 0 && err_empty && [ "$(why_notes)" = "the nodes are unknown: sinfo failed ($why)" ] &&
 		why_has "  waits its turn: Slurm finds too little free now on the nodes it may use (LocalQ)" && [ "$(calls scontrol)" = 1 ] &&
-		[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 1500 ]'
+		[ $(( $(up_ms) - start )) -lt 1500 ]'
 	printf '@exit 1\n' > "$d/sinfo"; why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
 	need "sinfo exit 1, nothing said: '(exit 1)'" eval 'rc_is 0 && [ "$(why_notes)" = "the nodes are unknown: sinfo failed (exit 1)" ] && [ "$(calls scontrol)" = 1 ]'
 	printf '@signal 9\n' > "$d/sinfo"; why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
@@ -9735,10 +9748,10 @@ c_nodes_o_fail() {   # AC 11, 24 (timed)
 	need "a record without its nonce: W3b's '(no readable answer)'" eval 'rc_is 0 && [ "$(why_notes)" = "the nodes are unknown: sinfo failed (no readable answer)" ] && [ "$(calls scontrol)" = 1 ]'
 	d=$(jfx_copy ofail resources-11964)
 	{ cat "$jfx/resources-11964/scontrol-node"; printf '@stderr %s\n@exit 1\n' "$swhy"; } > "$d/scontrol-node"
-	start=$(date +%s%N); why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	start=$(up_ms); why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
 	need "sinfo answering, -o exit 1 with stderr: scontrol's line byte for byte, done within 1.5 s" eval '
 		rc_is 0 && err_empty && [ "$(why_notes)" = "the nodes are unknown: scontrol failed ($swhy)" ] && [ "$(node_calls)" = "scontrol --json,sinfo,scontrol -o" ] &&
-		[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 1500 ]'
+		[ $(( $(up_ms) - start )) -lt 1500 ]'
 	{ cat "$jfx/resources-11964/scontrol-node"; printf '@exit 1\n'; } > "$d/scontrol-node"
 	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
 	need "-o exit 1, nothing on stderr, no not-found line: 'scontrol failed (exit 1)'" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (exit 1)" ]'
@@ -9763,18 +9776,18 @@ c_nodes_o_bounds() {   # AC 12 (timed)
 	d=$(jfx_copy b1 resources-11964)
 	printf '@hang 1\n@exit 1\n' > "$d/scontrol-node.json"
 	{ cat "$jfx/resources-11964/scontrol-node"; printf '@hang 10\n'; } > "$d/scontrol-node"
-	start=$(date +%s%N); why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 -- --no-color job 11964
+	start=$(up_ms); why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 -- --no-color job 11964
 	need "SQ_TIMEOUT=3, --json 1 s, sinfo at once, -o hanging: -o bound 1.5 to 2.0, done within 4.5 s, 'no response after 3s'" eval '
 		rc_is 0 && err_empty && v=$(timeout_of scontrol 2) && gawk -v v="$v" "BEGIN { exit !(v >= 1.5 && v <= 2.0) }" &&
-		[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 4500 ] && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (no response after 3s)" ]'
+		[ $(( $(up_ms) - start )) -lt 4500 ] && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (no response after 3s)" ]'
 	d=$(jfx_copy b2 resources-11964 "sinfo=@hang 3
 $(rs_sinfo)")
 	printf '@exit 1\n' > "$d/scontrol-node.json"
 	{ cat "$jfx/resources-11964/scontrol-node"; printf '@hang 10\n'; } > "$d/scontrol-node"
-	start=$(date +%s%N); why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=6 -- --no-color job 11964
+	start=$(up_ms); why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=6 -- --no-color job 11964
 	need "SQ_TIMEOUT=6, --json failing at once, sinfo taking 3 s, -o hanging: -o bound 2.5 to 3.0, done within 7.5 s (twice would be 9)" eval '
 		rc_is 0 && err_empty && v=$(timeout_of scontrol 2) && gawk -v v="$v" "BEGIN { exit !(v >= 2.5 && v <= 3.0) }" &&
-		[ $(( ($(date +%s%N) - start) / 1000000 )) -lt 7500 ] && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (no response after 6s)" ]'
+		[ $(( $(up_ms) - start )) -lt 7500 ] && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (no response after 6s)" ]'
 	d=$(jfx_copy b3 resources-11964)
 	printf '@hang 2.9\n@exit 1\n' > "$d/scontrol-node.json"
 	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 -- --no-color job 11964
@@ -9849,9 +9862,9 @@ c_stub_fast() {   # AC 15 (g) (timed)
 	mkdir -p "$d"
 	sq_env empty --
 	gawk 'BEGIN { s = "x"; while (length(s) < 10000) s = s s; for (i = 1; i <= 640; i++) printf "NodeName=n%04d CPUAlloc=0 CPUTot=1 RealMemory=1 AllocMem=0 FreeMem=1 Sockets=1 Boards=1 State=IDLE Partitions=p Comment=%s\n", i, substr(s, 1, 16000) }' > "$d/scontrol-node"
-	start=$(date +%s%N); stub_run "$d" scontrol -o show node
+	start=$(up_ms); stub_run "$d" scontrol -o show node
 	need "$(( $(wc -c < "$d/scontrol-node") / 1048576 )) MB, -o: rc 0, byte for byte, within 1 s" eval '
-		[ "$RC" = 0 ] && cmp -s "$d/scontrol-node" "$OUT" && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 1000 ]'
+		[ "$RC" = 0 ] && cmp -s "$d/scontrol-node" "$OUT" && [ $(( $(up_ms) - start )) -lt 1000 ]'
 }
 
 c_nodes_o_cost() {   # AC 16 (timed)
@@ -9861,10 +9874,10 @@ c_nodes_o_cost() {   # AC 16 (timed)
 	sed -n -e '/^# ---- the character classes/,/^# ---- character classes end/p' -e '/^# ---- the node readers/,/^# ---- node readers end/p' "$sq" > "$w/readers.awk"
 	nodes_lines; sq_env empty --
 	reader() {   # reader ANSWER GATE: node_read's figures, a node a line, within 10 s under the cap
-		start=$(date +%s%N)
+		start=$(up_ms)
 		O=$1 G=$2 systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0 env LC_ALL=$utf8 gawk -f "$w/readers.awk" -e 'END { node_read(ENVIRON["O"], ENVIRON["G"])
 			for (n = 1; n <= NN; n++) print NODE_NAME[n], NODE_CPUS[n], NODE_REALMEM[n], NODE_SPECMEM[n], ((n in NODE_BAD) ? NODE_BAD[n] : "ok") }' /dev/null > "$w/out" 2> "$w/err"
-		r=$?; T_CALLS=$((T_CALLS + 1)); [ $r = 0 ] && [ ! -s "$w/err" ] && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ]
+		r=$?; T_CALLS=$((T_CALLS + 1)); [ $r = 0 ] && [ ! -s "$w/err" ] && [ $(( $(up_ms) - start )) -lt 10000 ]
 	}
 	gawk 'BEGIN { s = "x"; while (length(s) < 65536) s = s s; s = substr(s, 1, 65536)
 		for (i = 1; i <= 1000; i++) { printf "NodeName=n%04d CPUAlloc=0 CPUTot=8 RealMemory=%d AllocMem=0 FreeMem=1 Sockets=1 Boards=1 MemSpecLimit=%d State=IDLE Partitions=p Comment=%s\n", i, 100000 + i, i, s; print "n" sprintf("%04d", i) > "/dev/stderr" } }' > "$w/a1" 2> "$w/g1"
@@ -9877,9 +9890,9 @@ c_nodes_o_cost() {   # AC 16 (timed)
 	need "a 5 MB OS of ␚ with 3000 runs: garbled" eval 'reader "$w/a3" "$w/g2" && grep -qx "fb2-bioinf -1 -1 -1 garbled" "$w/out"'
 	n=Nabcdefghijklmnopq
 	gawk -v n="$n" 'BEGIN { for (i = 1; i <= 5000; i++) printf "1/1/0/2%sfiller-node-%05d%sLocalQ%s1000%s0%sidle%s\n", n, i, n, n, n, n, n }' > "$w/s4"
-	start=$(date +%s%N)
+	start=$(up_ms)
 	F=$w/s4 N=$n systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0 env LC_ALL=C gawk -f "$w/readers.awk" -e 'END { k = node_names(ENVIRON["F"], ENVIRON["N"], 6, 1); print k, length(NODE_LIST) }' /dev/null > "$w/out" 2> "$w/err"
-	need "node_names on 5000 names: all of them, 89999 bytes, within 10 s" eval '[ "$(cat "$w/out")" = "5000 89999" ] && [ ! -s "$w/err" ] && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ]'
+	need "node_names on 5000 names: all of them, 89999 bytes, within 10 s" eval '[ "$(cat "$w/out")" = "5000 89999" ] && [ ! -s "$w/err" ] && [ $(( $(up_ms) - start )) -lt 10000 ]'
 	tr ',' '\n' < <(gawk -F"$n" '{ printf "%s%s", (NR > 1 ? "," : ""), $2 }' "$w/s4") > "$w/g4"
 	gawk 'BEGIN { for (i = 1; i <= 5000; i++) printf "NodeName=filler-node-%05d CPUAlloc=0 CPUTot=2 RealMemory=1000 AllocMem=0 FreeMem=1 Sockets=1 Boards=1 State=IDLE Partitions=LocalQ\n", i }' > "$w/a4"
 	need "... and node_read on their answer: 5000 nodes, within 10 s" eval 'reader "$w/a4" "$w/g4" && [ "$(grep -c " ok$" "$w/out")" = 5000 ]'
@@ -9888,15 +9901,15 @@ c_nodes_o_cost() {   # AC 16 (timed)
 		for (i = 1; i <= 1000; i++) printf "NodeName=filler%04d CPUAlloc=0 CPUTot=2 RealMemory=1000 AllocMem=0 FreeMem=1 Sockets=1 Boards=1 State=IDLE Partitions=LocalQ  BootTime=x Comment=%s\n", i, s }' > "$w/fillers"
 	d=$(jfx_copy cost resources-11964)
 	{ printf '%s\n' "$rs_big" "$rs_small"; cat "$w/fillers"; } > "$d/scontrol-node"
-	start=$(date +%s%N); why_run "$d" SQSTUB_NOJSON=1 SQ_TIMEOUT=10 -- --no-color job 11964
+	start=$(up_ms); why_run "$d" SQSTUB_NOJSON=1 SQ_TIMEOUT=10 -- --no-color job 11964
 	need "sq job, 1000 filler nodes in LocalQ with 8 KB Comments: fb2-bioinf's pinned row, within 10 s" eval '
-		rc_is 0 && err_empty && why_has "    fb2-bioinf    80 of 128  656.5G of 976.5G  too few CPUs free" && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ]'
+		rc_is 0 && err_empty && why_has "    fb2-bioinf    80 of 128  656.5G of 976.5G  too few CPUs free" && [ $(( $(up_ms) - start )) -lt 10000 ]'
 	d=$(dash_copy cost "scontrol-node=$(printf '%s\n' "$mb_big" "$mb_small"; cat "$w/fillers")" \
 		"sinfo=@include $fixtures/membar-busy/sinfo
 $(gawk 'BEGIN { for (i = 1; i <= 1000; i++) printf "CPUsState=0/2/0/2; NodeList=filler%04d; FreeMem=900; Memory=1000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0\n", i }')")
-	start=$(date +%s%N); sq_run "$d" SQSTUB_NOJSON=1 SQ_TIMEOUT=10 SQ_HEIGHT=1100 -- --full
+	start=$(up_ms); sq_run "$d" SQSTUB_NOJSON=1 SQ_TIMEOUT=10 SQ_HEIGHT=1100 -- --full
 	need "the dashboard, the same 1000 in its sinfo: fb2-bioinf 265/977G, within 10 s" eval '
-		rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" && [ $(( ($(date +%s%N) - start) / 1000000 )) -lt 10000 ]'
+		rc_is 0 && err_empty && mem_part_is fb2-bioinf "████░░░░░░░░░░░░ 27% 265/977G mem mixed" && [ $(( $(up_ms) - start )) -lt 10000 ]'
 }
 
 c_nodes_nopart() {   # AC 22
@@ -12048,7 +12061,7 @@ show_done() {
 		shown=$((shown + 1))
 	done
 }
-start=$(date +%s%N)
+start=$(up_ms)
 if [ "$jobs" = 1 ]; then
 	for c in "${selected[@]}"; do run_case "$c"; tally; done
 else
@@ -12075,7 +12088,7 @@ else
 		run_case_into "$c"; show_done
 	done
 fi
-ms=$(( ($(date +%s%N) - start) / 1000000 ))
+ms=$(( $(up_ms) - start ))
 printf '\n%d passed, %d failed, %d xfail, %d xpass  (%d.%03ds)\n' \
 	$n_pass $n_fail $n_xfail $n_xpass $((ms / 1000)) $((ms % 1000))
 [ -z "$failrun" ] || printf 'evidence of the failed cases in %s\n' "$failrun"
