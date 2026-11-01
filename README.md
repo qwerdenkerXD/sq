@@ -148,7 +148,7 @@ watch -n 5 'sq log --no-follow -n 20 12345'
 
 ```sh
 tests/run.sh              # no cluster needed
-tests/run.sh -j 3         # 3 cases at once, the timed ones one by one after: 36-52 min on a 12-thread WSL host shared with other load
+tests/run.sh -j 3         # 3 cases at once, the timed ones one by one after: 36-52 min on a 12-thread WSL host shared with other load; an --at run takes longer there, 52-68 min
 ```
 
 The suite puts stand-ins for `squeue`, `sinfo`, `sacct`, `sstat`, `scontrol` and `getent` first
