@@ -8674,7 +8674,7 @@ c_why_dep() {   # J6, J7
 	need "an array task parent (902_4): its own state" eval 'rc_is 0 && why_has "    902_4  RUNNING on fb2-bioinf · 1h00m left of 2h00m"'
 	d=$(dep_fx qfail 'afterok:900(unfulfilled)' '@stderr slurm_load_jobs error: Unable to contact slurm controller (connect failure)' '@exit 1')
 	why_run "$d" -- --no-color job 800
-	need "the parents' squeue failing: 'unknown: squeue did not answer'" eval 'rc_is 0 && why_has "    900  unknown: squeue did not answer"'
+	need "the parents' squeue failing: 'unknown: squeue did not answer (its reason)'" eval 'rc_is 0 && why_has "    900  unknown: squeue did not answer (slurm_load_jobs error: Unable to contact slurm controller (connect failure))"'
 	d=$(pend_fx never Reason=DependencyNeverSatisfied)
 	why_run "$d" -- --no-color job 800
 	need "DependencyNeverSatisfied and no clause left: will never start" eval '
@@ -8723,7 +8723,8 @@ c_why_parent() {   # S-v3 rule P: ACs 1-6, 7 (sacct failing), 7b-7d, 8, 9's pare
 	T_TITLE="a dependency parent's line reads its exit as sq job PARENT does (steps folded, OOM wins, squeue's 0:1 as 1, an unreadable pair ?), finds it by JobID or unique id (an array task's, a het leader's), shows no exit for a COMPLETED one, and names accounting's silence for a parent sq asked accounting about, squeue's first"
 	local f pid cols line own PARENT_ENV=()
 	local failed='    11950  FAILED · exit 1/oom · ended 12m ago' raw='    11953  FAILED · exit 1/oom · ended 12m ago'
-	local silent='must complete successfully, which can no longer happen · now unknown: accounting did not answer'
+	local refused='accounting did not answer (sacct: error: Problem talking to the database: Connection refused)'
+	local silent="must complete successfully, which can no longer happen · now unknown: $refused"
 	# AC 1-3: steps folded (OOM wins), squeue's 0:1 as 1:0, -1:0 as ?
 	parent_rows_are dep-oomstep "$failed"
 	parent_rows_are dep-sqoomacct "$failed"
@@ -8755,11 +8756,11 @@ c_why_parent() {   # S-v3 rule P: ACs 1-6, 7 (sacct failing), 7b-7d, 8, 9's pare
 	done
 	# AC 7, 7b-7d: the parents' sacct failing; asked = the id among the failed
 	# clauses', whatever clause names it on a row; squeue's silence first
-	parent_rows_are acctfail-dep-oomstep '    11950  unknown: accounting did not answer'
+	parent_rows_are acctfail-dep-oomstep "    11950  unknown: $refused"
 	parent_rows_are acctfail-dep-sqoomacct '    11950  FAILED · exit 1 · ended 12m ago'
 	parent_rows_are mixed-silent "    11950  $silent" '    11951  must end · now Slurm no longer knows it'
-	parent_rows_are twoclause-silent '    11950  must start, then 60 minutes more · now unknown: accounting did not answer' "    11950  $silent"
-	parent_rows_are bothfail '    11950  unknown: squeue did not answer'
+	parent_rows_are twoclause-silent "    11950  must start, then 60 minutes more · now unknown: $refused" "    11950  $silent"
+	parent_rows_are bothfail '    11950  unknown: squeue did not answer (squeue: error: Unable to contact slurm controller (connect failure))'
 	# AC 8: one reader, the parent line's label is sq job PARENT's, up to the
 	# first space or ":", at COLUMNS 120 and 40; two's answers are filed under
 	# both ids, so sq job 11950 cannot run on it: its strings
@@ -8791,10 +8792,31 @@ c_why_parent() {   # S-v3 rule P: ACs 1-6, 7 (sacct failing), 7b-7d, 8, 9's pare
 # AC 7 where the parents' sacct hangs past SQ_TIMEOUT (2 s): squeue forgot the
 # parent, so accounting's silence; squeue still lists it, so squeue's
 c_why_parent_hang() {   # S-v3 rule P: AC 7, sacct hanging
-	T_TITLE="a parent whose accounting answer did not come within SQ_TIMEOUT: 'unknown: accounting did not answer' where squeue forgot it, squeue's exit where it lists it"
+	T_TITLE="a parent whose accounting answer did not come within SQ_TIMEOUT: 'unknown: accounting did not answer within 2s' where squeue forgot it, squeue's exit where it lists it"
 	local PARENT_ENV=(SQ_TIMEOUT=2)
-	parent_rows_are accthang-dep-oomstep '    11950  unknown: accounting did not answer'
+	parent_rows_are accthang-dep-oomstep '    11950  unknown: accounting did not answer within 2s'
 	parent_rows_are accthang-dep-sqoomacct '    11950  FAILED · exit 1 · ended 12m ago'
+}
+# U2: the bound the line names is the call's own, which the shared deadline
+# cuts (SQ_TIMEOUT 8: 8 + 5 s in all, the job's squeue took 6, about 7 left), no
+# trailing zeros
+c_why_parent_bound() {
+	T_TITLE="the parents' sacct timing out on a bound the deadline cut: the row names that bound, under SQ_TIMEOUT's"
+	local dep=$T_DIR/fx-cut; mkdir -p "$dep"
+	{ echo '@hang 6'; sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$jfx/accthang-dep-oomstep-11963/squeue-all"; } > "$dep/squeue-all"
+	sed "s|^@include ../../_common/|@include $fixtures/_common/|" "$jfx/accthang-dep-oomstep-11963/sacct" > "$dep/sacct"
+	cp "$jfx/accthang-dep-oomstep-11963/squeue-all.11950" "$jfx/accthang-dep-oomstep-11963/sacct.11950" "$dep/"
+	why_run "$dep" SQSTUB_UID=1041 COLUMNS=120 SQ_TIMEOUT=8 -- --no-color job 11963
+	need "the row says within N s, N a cut bound below 8" eval 'rc_is 0 && parent_rows | grep -qE "^    11950  unknown: accounting did not answer within [1-7](\.[0-9]*[1-9])?s$"'
+}
+# U-design U2: an answer that cannot be read is no forgotten job, whichever
+# tool gave it; a parent the other tool holds is read from it
+c_why_parent_garbled() {
+	T_TITLE="a parent's garbled answer (rc 0, no record): 'unknown: accounting|squeue answered what cannot be read', never 'Slurm no longer knows it'; squeue's record stands beside a garbled sacct"
+	local PARENT_ENV=()
+	parent_rows_are garbage '    11950  unknown: accounting answered what cannot be read'
+	parent_rows_are qgarbage '    11950  unknown: squeue answered what cannot be read'
+	parent_rows_are garbage-sq '    11950  FAILED · exit 1 · ended 12m ago'
 }
 # AC 9: sq job PARENT's own report on each fixture of rule P that holds its
 # answers is what it was before rule P (the finder is pick()'s own): frozen
@@ -9036,7 +9058,7 @@ c_why_budget() {   # Franz #1, W2, V13, V16
 		rc_is 0 && [ "$(finished_in $start_ms)" -le 37 ] && nothing_at_exit &&
 		[ "$(plain | sed -n 2p)" = "  ↳ accounting did not answer within 30s" ] &&
 		why_has "  will never start: it may start only once 11950 has completed successfully, which can no longer happen" &&
-		why_has "    11950  unknown: squeue did not answer"'
+		why_has "    11950  unknown: squeue did not answer within 5s"'
 	# the bounds as sq gives them to timeout: SQ_TIMEOUT valid is both, and
 	# anything else is as unset (sacct 30, the queue 5)
 	for v in 2 2.5 7; do
@@ -12507,7 +12529,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	why_parent why_parent_hang why_parent_own job_width_docs dash_sinfo_env
+	why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
@@ -12529,7 +12551,7 @@ cases=(
 timed_cases=" squeue_hangs squeue_ignores_term bell_probe_killed scrub_bounded tables_pass_cost cancel_names
 	membar_json membar_fallback jobmem_outcomes jobmem_throttle job_own
 	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract clock_frozen clock_fail_read
-	why_nodes_json why_tail_hung why_budget why_parallel why_signals job_screens why_parent_hang why_parent_own
+	why_nodes_json why_tail_hung why_budget why_parallel why_signals job_screens why_parent_hang why_parent_bound why_parent_own
 	nodes_o_fail nodes_o_bounds stub_fast nodes_o_cost compact_prompt_row jobmem_lists "
 timed_cases=" $(printf '%s ' $timed_cases)"       # one space around each name
 for c in $timed_cases; do

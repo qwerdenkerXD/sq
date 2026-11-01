@@ -2176,10 +2176,12 @@ function pss_text() { return stamp(pss) " " strftime("%Z", pss) }
 function cpuline(p, cap, tail) { return "  CPU " bar(p, cpucolour(p, cap)) " " sprintf("%6s", pct1(p)) "  " tail }
 function memline(p, hue, tail) { return "  MEM " bar(p, hue) " " sprintf("%6s", pct1(p)) "  " tail }
 # accounting's failure, in place of what it would have shown
-function acct_down() {
-  if (astat == "timeout") return "accounting did not answer within " tmo "s"
-  if (astat == "bad") return "accounting answered what cannot be read"
-  return "accounting did not answer (" ENVIRON["SQJ_AWHY"] ")"
+function acct_down() { return answer_says("accounting", astat, tmo, ENVIRON["SQJ_AWHY"]) }
+# a call's failure in words: WHO, STAT timeout (BOUND its seconds), bad, or fail (WHY its reason)
+function answer_says(who, stat, bound, why) {
+  if (stat == "timeout") return who " did not answer within " bound "s"
+  if (stat == "bad") return who " answered what cannot be read"
+  return who " did not answer (" why ")"
 }
 
 # ---- the model: key/value lines, raw lines and notes, by section -------------
@@ -2533,8 +2535,9 @@ function why_uids(   r, by, seen, uids) {
 function why_load(   nu, um, i, mf, ln) {
   nu = split(ENVIRON["SQJ_UIDMAP"], um, ",")
   for (i = 1; i <= nu; i++) if (split(um[i], mf, "=") == 2) UMAP[mf[1]] = mf[2]
-  npq = read_stream(ENVIRON["SQJ_WPARENTS"], NONCE, qfields, RP, "^[0-9]+$"); if (npq < 0) npq = 0
-  npa = read_stream(ENVIRON["SQJ_WPACCT"], NONCE2, afields, AP, ID "([.][A-Za-z0-9_+.-]+)?$"); if (npa < 0) npa = 0
+  PQSTAT = ENVIRON["SQJ_WPQ"]; PASTAT = ENVIRON["SQJ_WPA"]    # the parents' two calls: an answer that cannot be read is bad, as the job's own
+  npq = read_stream(ENVIRON["SQJ_WPARENTS"], NONCE, qfields, RP, "^[0-9]+$"); if (npq < 0) { PQSTAT = "bad"; npq = 0; delete RP }
+  npa = read_stream(ENVIRON["SQJ_WPACCT"], NONCE2, afields, AP, ID "([.][A-Za-z0-9_+.-]+)?$"); if (npa < 0) { PASTAT = "bad"; npa = 0; delete AP }
   acct_index(AP, npa, prow, praw, pnsteps, pstep_row)      # the parents' rows, found as the job's own
   nrq = read_stream(ENVIRON["SQJ_WQUEUE"], NONCE, ENVIRON["SQJ_WQFIELDS"], RQ, "^[0-9]+$"); if (nrq < 0) nrq = 0
   NODESTAT = ENVIRON["SQJ_WNODESTAT"]; NODEWHY = ENVIRON["SQJ_WNODEWHY"]; NODEFMT = ENVIRON["SQJ_WNODEFMT"]
@@ -2729,8 +2732,8 @@ function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids,
 # row, found as sq job PID finds its own (acct_row); an ended one's exit as
 # sq job PID reads it (parent_exit).  ASKED: accounting was asked about it
 # (its id among the parents of failed clauses passed to sacct), so where
-# neither tool holds it and sacct did not answer, its silence is no "no
-# longer knows"
+# neither tool holds it and sacct did not answer, or answered what cannot be
+# read, its silence is no "no longer knows"
 function parent_state(pid, asked,   p, a, c, left) {
   for (p = 1; p <= npq; p++)
     if (RP[p, "JobID"] == pid || (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/ && RP[p, "ArrayJobID"] "_" RP[p, "ArrayTaskID"] == pid)) break
@@ -2747,10 +2750,13 @@ function parent_state(pid, asked,   p, a, c, left) {
     c = stcode(AP[a, "State"])
     return paint(stcolour(c), stname(c)) ((c in DONE) ? parent_exit(pid, c, "") (isepoch(AP[a, "End"]) ? " · ended " ago(NOW - AP[a, "End"]) " ago" : "") : "")
   }
-  if (ENVIRON["SQJ_WPQ"] == "fail") return "unknown: squeue did not answer"
-  if (asked && ENVIRON["SQJ_WPA"] == "fail") return "unknown: accounting did not answer"
+  if (answer_failed(PQSTAT)) return "unknown: " parents_queue_says()
+  if (asked && answer_failed(PASTAT)) return "unknown: " parents_acct_says()
   return "Slurm no longer knows it"
 }
+function answer_failed(stat) { return stat ~ /^(fail|timeout|bad)$/ }
+function parents_acct_says() { return answer_says("accounting", PASTAT, ENVIRON["SQJ_WPABOUND"], ENVIRON["SQJ_WPAWHY"]) }
+function parents_queue_says() { return answer_says("squeue", PQSTAT, ENVIRON["SQJ_WPQBOUND"], ENVIRON["SQJ_WPQWHY"]) }
 # " · exit LABEL" of a parent that ended in state C, its pair read as sq job
 # PID reads its own (exit_of): accounting's rows while they list it ended,
 # else squeue's QX.  None for a COMPLETED one: its own exit was 0 (Slurm
@@ -2776,7 +2782,7 @@ function array_state(id,   p, c, k, N, ord, out, i) {
     N[c] += k
   }
   for (k = 1; k <= i; k++) out = out (k == 1 ? "" : " · ") N[ord[k]] " " paint(stcolour(ord[k]), stname(ord[k]))
-  if (out == "") return (ENVIRON["SQJ_WPQ"] == "fail") ? "unknown: squeue did not answer" : "Slurm no longer lists its tasks"
+  if (out == "") return answer_failed(PQSTAT) ? "unknown: " parents_queue_says() : "Slurm no longer lists its tasks"
   return "its tasks now: " out
 }
 
@@ -3322,15 +3328,31 @@ job_why_start() {
 		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$w_qfmt collect -t "$lim" -b wqueue squeue -h -t PD,R
 	fi
 	if [ -n "$w_parents" ]; then
-		job_limit lim "$tmo"
-		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$qfmt collect -t "$lim" -b wparents squeue -h --jobs="$w_parents" -t all
+		job_limit w_parents_bound "$tmo"
+		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$qfmt collect -t "$w_parents_bound" -b wparents squeue -h --jobs="$w_parents" -t all
 	fi
 	if [ -n "$w_pdone" ]; then
-		job_limit lim "$job_atmo"
-		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 collect -t "$lim" -b wpacct \
+		job_limit w_pacct_bound "$job_atmo"
+		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 collect -t "$w_pacct_bound" -b wpacct \
 			sacct -p --delimiter="$nonce2" -n --noconvert -a -j "$w_pdone" -o "$afmt"
 	fi
 	[[ -z $w_tail || ! $w_start =~ ^[0-9]+$ || ! $w_end =~ ^[0-9]+$ ]] || job_tail_start
+}
+# BOUND, a job_limit's seconds, without trailing zeros (5, 2.5), into VAR
+bound_shown() {   # bound_shown VAR BOUND
+	local b=$2
+	[[ $b != *.* ]] || { b=${b%"${b##*[!0]}"}; b=${b%.}; }
+	printf -v "$1" '%s' "$b"
+}
+# how call NAME of TOOL ended (RC, as collect left it; SHOWN its bound): STATVAR
+# ok, fail or timeout, WHYVAR and WHYVAR_real as why_of has them
+call_answer() {   # call_answer STATVAR WHYVAR RC NAME TOOL SHOWN
+	why_of "$2" "$3" "$tmp/$4" "$5" "$6"
+	local real_var=$2_real
+	if [ "$3" = 0 ]; then printf -v "$1" ok
+	elif [ "${!real_var}" = "no response after ${6}s" ]; then printf -v "$1" timeout
+	else printf -v "$1" fail
+	fi
 }
 # their answers, once sacct's is in: each one a file the report reads, empty
 # when the call failed, and how it went; the nodes as node_answer has them,
@@ -3342,16 +3364,18 @@ job_why_finish() {
 		[ -n "${collect_bg[$name]-}" ] || { : > "$tmp/$name"; continue; }
 		collect_join "$name"; rc=$?
 		if [ $name = wnodes ]; then
-			shown=$w_nodes_bound; [[ $shown != *.* ]] || { shown=${shown%"${shown##*[!0]}"}; shown=${shown%.}; }
+			bound_shown shown "$w_nodes_bound"
 			node_answer w_nodes_why w_nodes_fmt $rc wnodes "$w_nodes_bound" "$shown" node_hook_job -w
 			if [ -z "$w_nodes_why" ]; then w_nodes_stat=ok; else w_nodes_stat=fail; fi
 			continue
 		fi
 		case $name:$rc in
 			*:0) printf -v "w_${name#w}_stat" ok ;;
-			# a parent Slurm forgot: rc 1 and this text, as for the job itself
-			wparents:1) env LC_ALL=C grep -q 'Invalid job id specified' "$tmp/wparents.err" 2>/dev/null &&
-			              w_parents_stat=none || w_parents_stat=fail ;;
+			wpacct:*) bound_shown w_pacct_shown "$w_pacct_bound"; call_answer w_pacct_stat w_pacct_why $rc wpacct sacct "$w_pacct_shown" ;;
+			wparents:*) # a parent Slurm forgot: rc 1 and this text, as for the job itself
+				if [ $rc = 1 ] && env LC_ALL=C grep -q 'Invalid job id specified' "$tmp/wparents.err" 2>/dev/null; then w_parents_stat=none
+				else bound_shown w_parents_shown "$w_parents_bound"; call_answer w_parents_stat w_parents_why $rc wparents squeue "$w_parents_shown"
+				fi ;;
 			*) printf -v "w_${name#w}_stat" fail ;;
 		esac
 		[ $rc = 0 ] || : > "$tmp/$name"
@@ -3393,7 +3417,7 @@ job_why_export() {
 	local me=
 	[ "$w_tailinfo" != ok ] || job_width
 	[ -z "$w_tailinfo" ] || me=$(hostname -s 2>/dev/null | scrub 64)
-	export SQJ_UIDMAP=$w_uidmap SQJ_WPQ=$w_parents_stat SQJ_WPA=$w_pacct_stat SQJ_WNODESTAT=$w_nodes_stat SQJ_WQUEUESTAT=$w_queue_stat \
+	export SQJ_UIDMAP=$w_uidmap SQJ_WPQ=$w_parents_stat SQJ_WPA=$w_pacct_stat SQJ_WPAWHY=$w_pacct_why SQJ_WPABOUND=$w_pacct_shown SQJ_WPQWHY=$w_parents_why SQJ_WPQBOUND=$w_parents_shown SQJ_WNODESTAT=$w_nodes_stat SQJ_WQUEUESTAT=$w_queue_stat \
 		SQJ_WNODEFMT=$w_nodes_fmt SQJ_WNODEWHY=$w_nodes_why SQJ_WNODEFIG=$tmp/wnodefig SQJ_WNODEGATE=$tmp/wnodes.gate \
 		SQJ_WTAILINFO=$w_tailinfo SQJ_WWHICH=$w_which SQJ_WHOST=$w_host SQJ_WME=$me SQJ_COLS=$job_cols \
 		SQJ_WPARENTS=$tmp/wparents SQJ_WPACCT=$tmp/wpacct SQJ_WNODES=$tmp/wnodes SQJ_WQUEUE=$tmp/wqueue \
@@ -3413,7 +3437,7 @@ sub_job() {
 	local qstat astat= qwhy= qwhy_real= awhy= awhy_real= verdict= raw= state= own=0
 	# the why section's plan, its answers' outcomes, and the names of cancellers
 	local w_nodes= w_queue= w_parents= w_pdone= w_tail= w_which= w_start= w_end= w_host= w_qfmt=
-	local w_nodes_stat= w_queue_stat= w_parents_stat= w_pacct_stat= w_tailinfo= w_uids= w_uidmap= job_cols=
+	local w_nodes_stat= w_queue_stat= w_parents_stat= w_pacct_stat= w_pacct_bound= w_pacct_shown= w_pacct_why= w_pacct_why_real= w_parents_bound= w_parents_shown= w_parents_why= w_parents_why_real= w_tailinfo= w_uids= w_uidmap= job_cols=
 	local w_nodes_bound= w_nodes_fmt= w_nodes_why=
 	local job_atmo job_deadline
 	while [ $# -gt 0 ]; do
@@ -3504,9 +3528,7 @@ sub_job() {
 	job_tail_wait
 	collect_join acct
 	rc=$?
-	if [ $rc = 0 ]; then astat=ok
-	else why_of awhy $rc "$tmp/acct" sacct "$job_atmo"; astat=fail; [ "$awhy_real" != "no response after ${job_atmo}s" ] || astat=timeout
-	fi
+	call_answer astat awhy $rc acct sacct "$job_atmo"
 	scrub_answer acct
 	export SQJ_AWHY=$awhy
 	job_why_finish
