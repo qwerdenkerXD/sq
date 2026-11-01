@@ -297,9 +297,11 @@ release_exports() { [ -z "${!1}" ] || export ${!1}; }
 # collect_join NAME then waits for it and returns its status.  With
 # collect_pidfile set, the pids waited for are written there (an empty file
 # once none is left), so a sentinel can end the clients once sq is gone.
-# -r has the call note its own start and end in NAME.run, as /proc/uptime has
-# them (seconds to 1/100, a clock no step of the wall clock moves; read by a
-# builtin, no process started), so what is left of its bound is known even
+# -r has the call note its own start and end in NAME.run, in microseconds on
+# sq's clock (mono_us): /proc/uptime, 1/100 s, read by a builtin, no process
+# started; where sq counts on the wall clock, date's (a process each, only
+# there); a read that fails is none, silently, so nothing reaches NAME.tmo,
+# where it would read as timeout's.  So what is left of its bound is known even
 # when it ran in the background: sh then waits for the client instead of
 # becoming it, and leaves a TERM for once the client is gone (timeout signals
 # the whole process group, the client too), so the exit status stays the
@@ -310,7 +312,7 @@ release_exports() { [ -z "${!1}" ] || export ${!1}; }
 # command it waited for went, which for the client itself is NAME.err.  sh, not
 # bash: bash warns on an LC_ALL naming no installed locale, into NAME.tmo,
 # which reads as timeout's
-collect_timed='trap "exit 143" TERM; f=$1; shift; read s x < /proc/uptime; { ( exec "$@" 2>&3 3>&- ); r=$?; } 2>/dev/null; read e x < /proc/uptime; echo "$s $e" > "$f"; exit $r'
+collect_timed='trap "exit 143" TERM; f=$1 c=$2; shift 2; now() { t=; if [ "$c" = uptime ]; then { read t x < /proc/uptime; } 2>/dev/null; case $t in *.??) t=${t%.*}${t#*.}0000 ;; *) t= ;; esac; else t=$(date +%s%6N 2>/dev/null); fi; }; now; s=$t; { ( exec "$@" 2>&3 3>&- ); r=$?; } 2>/dev/null; now; echo "$s $t" > "$f"; exit $r'
 collect() {   # collect [-t SECONDS] [-r] [-w|-b] NAME TOOL ARGS...: stdout into $tmp/NAME,
 	local limit=$tmo name how=fg timed=   # bounded by SECONDS, SQ_TIMEOUT's by default
 	[ "$1" != -t ] || { limit=$2; shift 2; }
@@ -318,7 +320,7 @@ collect() {   # collect [-t SECONDS] [-r] [-w|-b] NAME TOOL ARGS...: stdout into
 	case $1 in -w) how=wait; shift ;; -b) how=bg; shift ;; esac
 	name=$1; shift
 	if [ -n "$timed" ]; then
-		set -- timeout $verbose -k 2 "$limit" sh -c "$collect_timed" "$1" "$tmp/$name.run" "$@"
+		set -- timeout $verbose -k 2 "$limit" sh -c "$collect_timed" "$1" "$tmp/$name.run" "$mono_clock" "$@"
 	else
 		set -- timeout $verbose -k 2 "$limit" sh -c 'exec "$@" 2>&3 3>&-' "$1" "$@"
 	fi
@@ -462,8 +464,7 @@ node_answer() {   # node_answer WHYVAR FMTVAR RC NAME BOUND SHOWN HOOK [OPTION..
 node_left() {   # node_left VAR BOUND NAME (its locals named apart from any VAR)
 	local nl_start= nl_end= nl_run=0 nl_us
 	read -r nl_start nl_end < "$tmp/$3.run" 2>/dev/null
-	[[ $nl_start =~ ^[0-9]+\.[0-9][0-9]$ && $nl_end =~ ^[0-9]+\.[0-9][0-9]$ ]] &&
-		nl_run=$(( (10#${nl_end/./} - 10#${nl_start/./}) * 10000 ))
+	[[ $nl_start =~ ^[0-9]+$ && $nl_end =~ ^[0-9]+$ ]] && nl_run=$((10#$nl_end - 10#$nl_start))
 	[ "$nl_run" -ge 0 ] || nl_run=0
 	us_of nl_us "$2"; nl_us=$((nl_us - nl_run)); [ "$nl_us" -ge 0 ] || nl_us=0
 	printf -v nl_us '%d.%06d' $((nl_us / 1000000)) $((nl_us % 1000000))
@@ -1411,7 +1412,7 @@ jobmem_collect() {   # jobmem_collect [-w]
 	# node that does not answer must not hold every refresh for the whole
 	# timeout, however many lists there are
 	sstat_limit=$(env LC_ALL=C gawk -v t="$tmo" 'BEGIN { print (t + 0 < 2) ? t : 2 }')
-	now_us sstat_end; us_of left "$sstat_limit"; sstat_end=$((sstat_end + left))
+	mono_us sstat_end; us_of left "$sstat_limit"; sstat_end=$((sstat_end + left))
 	# a call per list, the first into sstat with the whole budget as ever,
 	# the others appended to it, each with what is left of the budget
 	# (job_limit: no more than sq job's deadline either); a list the budget
@@ -1421,7 +1422,7 @@ jobmem_collect() {   # jobmem_collect [-w]
 	: > "$tmp/memids"
 	while IFS= read -r list <&9; do      # on fd 9: the calls keep sq's stdin
 		k=$((k + 1)); name=sstat; [ $k = 1 ] || name=sstat.part
-		now_us left; left=$((sstat_end - left)); lim=$sstat_limit
+		mono_us left; left=$((sstat_end - left)); lim=$sstat_limit
 		if [ $k -gt 1 ] && [ "$left" -lt 100000 ]; then memrc=124
 		else
 			[ $k = 1 ] || job_limit lim "$((left / 1000000)).$(printf '%06d' $((left % 1000000)))"
@@ -3159,12 +3160,40 @@ JOBAWK
 # answered (uid_names), within the same deadline.
 job_why_qfields="JobID ArrayJobID ArrayTaskID StateCompact UserName Partition NodeList NumCPUs tres-alloc EndTime
 	TimeLeft TimeLimit SubmitTime Reason PriorityLong"
-# the time in microseconds, into VAR: bash 5's EPOCHREALTIME, whose decimal
-# point is the locale's, else whole seconds
-now_us() {   # now_us VAR
-	local t=${EPOCHREALTIME:-}; t=${t//[!0-9]/}
-	[ -n "$t" ] || printf -v t '%(%s)T000000' -1
-	printf -v "$1" '%s' "$((10#$t))"
+# /proc/uptime's seconds (TEXT, as 1234.56) in microseconds, into VAR; returns
+# 1, VAR untouched, when TEXT is not that
+uptime_us() {   # uptime_us VAR TEXT
+	[[ $2 =~ ^[0-9]+\.[0-9][0-9]$ ]] || return 1
+	printf -v "$1" '%s' "$(( 10#${2/./} * 10000 ))"
+}
+# the time in microseconds, into VAR, on a clock no step of the wall clock
+# moves, for every duration and deadline sq times by a clock (a call's share
+# of a budget, sq job's deadline, the tail reader's 2 s, a call's run as
+# collect -r notes it): /proc/uptime.  The wall clock stays where a time of
+# day is shown or set against Slurm's, or against another sq's (the JOBMEM
+# snapshot).  Waits that count naps (read -t, sq log's ticks) and timeout's
+# bounds are the kernel's relative timers and read no clock.  A host whose
+# /proc/uptime sq cannot read as it starts counts on the wall clock, as
+# before: bash 5's EPOCHREALTIME (its decimal point the locale's), else whole
+# seconds.  The clock is chosen once (mono_clock), as readings of two cannot
+# be compared.  A read of /proc/uptime that fails later moves the clock an
+# hour on for the rest of the run (mono_skew): a budget running then reads as
+# spent, one starting then counts from the last good reading, so it errs
+# short, never long, and the readings never go back
+mono_clock=wall mono_last=0 mono_skew=0
+{ read -r mono_last _ < /proc/uptime && uptime_us mono_last "$mono_last"; } 2>/dev/null && mono_clock=uptime || mono_last=0
+mono_us() {   # mono_us VAR
+	local up= t=
+	if [ "$mono_clock" = uptime ]; then
+		{ read -r up _ < /proc/uptime; } 2>/dev/null
+		if uptime_us t "$up"; then t=$((t + mono_skew))
+		else mono_skew=$((mono_skew + 3600000000)) t=$((mono_last + 3600000000)); fi
+	else
+		t=${EPOCHREALTIME:-}; t=${t//[!0-9]/}
+		[ -n "$t" ] || printf -v t '%(%s)T000000' -1
+		t=$((10#$t))
+	fi
+	mono_last=$t; printf -v "$1" '%s' "$t"
 }
 # SECONDS as a timeout takes them (2, 2.5, .5, 5.) in microseconds, into VAR
 us_of() {   # us_of VAR SECONDS
@@ -3182,7 +3211,7 @@ job_limit() {   # job_limit VAR SECONDS
 	local want now
 	us_of want "$2"
 	if [ -n "$job_deadline" ]; then
-		now_us now
+		mono_us now
 		[ $((job_deadline - now)) -ge "$want" ] || want=$((job_deadline - now))
 	fi
 	[ "$want" -ge 100000 ] || want=100000
@@ -3215,9 +3244,9 @@ job_tail_start() {
 job_tail_wait() {
 	local rc now end
 	[ -n "$job_reader_pid" ] || return 0
-	now_us now; end=$((now + 2000000))
+	mono_us now; end=$((now + 2000000))
 	while kill -0 "$job_reader_pid" 2>/dev/null && [ "$now" -lt "$end" ]; do
-		read -t 0.05 -u "$job_nap"; now_us now
+		read -t 0.05 -u "$job_nap"; mono_us now
 	done
 	if kill -0 "$job_reader_pid" 2>/dev/null; then
 		disown "$job_reader_pid" 2>/dev/null; kill -KILL "$job_reader_pid" 2>/dev/null
@@ -3453,7 +3482,7 @@ sub_job() {
 	# section's calls are made, all of them done by one deadline: sacct's
 	# budget and 5 s more
 	job_atmo=30; [ "$tmo" != "${SQ_TIMEOUT-}" ] || job_atmo=$tmo
-	now_us job_deadline; us_of v "$job_atmo"; job_deadline=$((job_deadline + v + 5000000))
+	mono_us job_deadline; us_of v "$job_atmo"; job_deadline=$((job_deadline + v + 5000000))
 	for f in $job_afields; do afmt="$afmt${afmt:+,}$f"; done
 	SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 collect -t "$job_atmo" -b acct \
 		sacct -p --delimiter="$nonce2" -n --noconvert -a -j "$label" -o "$afmt"

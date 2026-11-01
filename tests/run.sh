@@ -180,6 +180,8 @@ ESC=$'\033'
 # the suite's own bound on sq, found before any case puts a fake timeout first
 # on PATH (tests/lib/timeout-as)
 bound=$(command -v timeout) || { echo "run.sh: no timeout on PATH" >&2; exit 2; }
+nouptime=(unshare -rm sh -c 'd=$1; shift; mkdir -p "$d" && mount --rbind /proc "$d" && mount -t tmpfs none /proc &&
+	ln -s "$d"/* /proc/ && rm /proc/uptime && exec "$@"' sh "$work/nsproc")   # NOUPTIME=1 (sq_run)
 
 # ============================================================================
 # running sq
@@ -192,6 +194,8 @@ bound=$(command -v timeout) || { echo "run.sh: no timeout on PATH" >&2; exit 2; 
 # adds or overrides a variable, -VAR removes one.  --no-bell is passed unless
 # BELL=1, which only rings with a terminal (PTY=1, below).
 # NOTTY=1 runs sq in a new session (setsid), so it has no controlling terminal.
+# NOUPTIME=1 runs it where /proc/uptime is missing, as on a host without one
+# (a mount namespace of its own, unshare -rm: nouptime_ok).
 # BOUND=SECONDS raises the 30 s sq may take (sq log follows a job for a while).
 # Leaves OUT, ERR, LOG (the stub log) and RC for the assertions below.
 sq_run() {
@@ -199,7 +203,7 @@ sq_run() {
 	if [ -n "${PTY:-}" ]; then pty_exec "${ENVLIST[@]}" -- "${SQ_ARGV[@]}"
 	else  # bounded, so a hanging sq fails its case instead of hanging the suite;
 		# setsid outside timeout, so a hanging sq stays timeout's own child
-		env -i "${ENVLIST[@]}" ${NOTTY:+setsid -w} "$bound" -k 2 "${BOUND:-30}" "$sq" "${SQ_ARGV[@]}" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
+		${NOUPTIME:+"${nouptime[@]}"} env -i "${ENVLIST[@]}" ${NOTTY:+setsid -w} "$bound" -k 2 "${BOUND:-30}" "$sq" "${SQ_ARGV[@]}" > "$OUT" 2> "$ERR" < /dev/null; RC=$?
 		[ $RC -ne 124 ] || T_FAIL+=("sq did not finish within ${BOUND:-30}s")
 	fi
 	note_run
@@ -8032,6 +8036,216 @@ c_job_passes() {
 	need "a job name with a CSI under a gawk in C: rc 0, no C1 on the screen, the title a?2Jb" eval '
 		rc_is 0 && err_empty && c1_off && plain | head -n 1 | grep -qxF "▌ 11836  a?2Jb · fsill"'
 }
+# ---- T4: sq's budgets on a clock no step of the wall clock moves ------------
+# The stand-in for a step: a wall clock that stands still for the whole run,
+# i.e. one step back as long as the run.  bash reads BASH_ENV before sq, and
+# there EPOCHREALTIME and EPOCHSECONDS, once unset, lose their magic and hold
+# one value.  sq's budgets must not notice (dc22d9d's did: its tail reader
+# waited for good, a second sstat list got a budget of its own, a call after
+# sacct all of SQ_TIMEOUT instead of what was left of the deadline).  It
+# freezes bash's two only; that sq reads no other wall clock for a budget is
+# clock_inventory's.  frozen_env: the VAR=value that freezes it
+frozen_env() {
+	printf 'unset EPOCHREALTIME EPOCHSECONDS\nEPOCHREALTIME=1700000000.000000 EPOCHSECONDS=1700000000\n' > "$T_DIR/frozen.sh"
+	printf 'BASH_ENV=%s' "$T_DIR/frozen.sh"
+}
+# frozen_reads FZ: what a bash under it reads twice, 20 ms apart; stdin
+# /dev/null, as bash skips BASH_ENV for `bash -c` on a socket (sshd's rule)
+frozen_reads() { env -i "$1" bash -c 'echo $EPOCHREALTIME; sleep 0.02; echo $EPOCHREALTIME' < /dev/null | paste -sd' '; }
+# clock_pair: the wall clock and up_ms, in ms; clock_step A B: how far the wall
+# clock moved against up_ms from pair A to pair B (0 when it did not step)
+clock_pair() { printf '%s %s' "$(date +%s%3N)" "$(up_ms)"; }
+clock_step() { local a=($1) b=($2); echo $(( (b[0] - a[0]) - (b[1] - a[1]) )); }
+# A host without /proc/uptime: NOUPTIME=1 (sq_run) runs sq in a mount
+# namespace of its own where /proc is a tmpfs of links into the real one,
+# all but uptime, so it is missing, as there.  ps cannot work in it (procps
+# wants a procfs), and sq and the stubs run none.  nouptime_ok: whether this
+# host can do that (unprivileged user namespaces with mounts), else why not
+nouptime_ok() {
+	local why
+	why=$("${nouptime[@]}" sh -c '[ ! -e /proc/uptime ] && [ -r /proc/self/stat ] && echo ok' 2>&1)
+	[ "$why" = ok ] && return
+	T_FAIL+=("this host cannot stand in for one without /proc/uptime (unshare -rm, a tmpfs over /proc: ${why:-nothing said}); not a defect of sq")
+	return 1
+}
+c_clock_frozen() {
+	T_TITLE="sq's budgets by /proc/uptime, the wall clock frozen (BASH_ENV): the tail reader still cut at 2 s, a second sstat list not asked once the budget is spent, getent after a late sacct within what is left of sq job's deadline; without /proc/uptime the same by the wall clock (judged when it did not step), and a timed call killed outright reads as killed"
+	local d fz start got
+	fz=$(frozen_env); got=$(frozen_reads "$fz")
+	need "the stand-in holds: a bash under it reads EPOCHREALTIME 1700000000.000000 twice (got: $got)" \
+		test "$got" = "1700000000.000000 1700000000.000000"
+	d=$(tail_fx frozen-tail -- "$(out_file 'never read\n')" "$(dated 200s)")
+	start=$(up_ms)
+	BOUND=10 sq_run "$d" SQSTUB_UID=1041 "$fz" PATH="$here/lib/tail-as:$here/bin:$PATH" SQSTUB_TAIL=hang -- --no-color job 11836
+	need "frozen, the reader hanging: 'did not answer within 2s', under 4 s in all (took $(( $(up_ms) - start )) ms)" eval '
+		rc_is 0 && [ "$(why_notes)" = "its output file did not answer within 2s" ] && [ $(( $(up_ms) - start )) -lt 4000 ]'
+	d=$(jobmem_lists_fx frozen-lists '@hang 30')
+	sq_run "$d" SQSTUB_UID=1041 SQ_TIMEOUT=3 SQ_WIDTH=110 SQ_HEIGHT=30 "$fz" -- --full --no-color
+	need "frozen, the first sstat list hanging: one sstat call (got $(calls sstat)), the second list not asked, its ids failed (got: $(jobmem_lists_mem))" eval '
+		rc_is 0 && err_empty && [ "$(calls sstat)" = 1 ] && [ "$(jobmem_lists_mem)" = "!/100G !/15.2G !/4G" ]'
+	# sacct (SQ_TIMEOUT=5.5: its budget, the deadline 5 s later) answers
+	# after 5.2 s, so the getent that names the canceller gets about 5.2 s of
+	# the 10.5, not 5.5
+	d=$(late_acct_fx frozen-acct)
+	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=5.5 "$fz" -- --no-color job 11945
+	need "frozen, sacct answering after 5.2 s of 5.5: getent bounded by what is left of the deadline, under 5.4 s (got $(timeout_of getent))" eval '
+		rc_is 0 && gawk -v v="$(timeout_of getent)" "BEGIN { exit !(v != \"\" && v + 0 < 5.4) }"'
+	# a host without /proc/uptime: the wall clock, as before, so a step of it
+	# inside a budget moves it there: judged only when the wall clock did not
+	# step during the run (attempts), what holds anyway in every attempt
+	nouptime_ok || return
+	attempts 3 nouptime_tail
+	attempts 3 nouptime_acct
+	attempts 3 nouptime_left
+	# T5: a timed call (sq job's sinfo for the figures) killed outright: no
+	# reading of the clock it could not make reaches NAME.tmo, where it read
+	# as timeout's notice ("no response")
+	d=$(jfx_copy nouptime-sig resources-11964 "sinfo=@signal 9")
+	NOUPTIME=1 why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
+	need "no /proc/uptime, the timed sinfo killed by SIGKILL: 'sinfo failed (signal 9)', not a timeout (notes: $(why_notes | paste -sd'|'))" eval '
+		rc_is 0 && err_empty && [ "$(why_notes)" = "the nodes are unknown: sinfo failed (signal 9)" ]'
+}
+late_acct_fx() {   # late_acct_fx NAME: cancelled-11945, its sacct answering after 5.2 s, getent hanging; its directory
+	local d; d=$(jfx_copy "$1" cancelled-11945)
+	sed -i '1i @hang 5.2' "$d/sacct"; sed -i '1i @hang 20' "$d/passwd"
+	printf '%s' "$d"
+}
+nouptime_tail() {   # one attempt: the reader hanging, no /proc/uptime
+	local d c0 c1 ms
+	d=$(tail_fx nouptime-tail -- "$(out_file 'never read\n')" "$(dated 200s)")
+	c0=$(clock_pair)
+	NOUPTIME=1 BOUND=10 sq_run "$d" SQSTUB_UID=1041 PATH="$here/lib/tail-as:$here/bin:$PATH" SQSTUB_TAIL=hang -- --no-color job 11836
+	c1=$(clock_pair); ms=$(( ${c1#* } - ${c0#* } ))
+	hold "no /proc/uptime, the reader hanging: rc 0, 'did not answer within 2s' (notes: $(why_notes | paste -sd'|'))" eval '
+		rc_is 0 && [ "$(why_notes)" = "its output file did not answer within 2s" ]'
+	pre "did the wall clock keep pace with /proc/uptime during the run (the last: off by $(clock_step "$c0" "$c1") ms)" eval '
+		s=$(clock_step "$c0" "$c1"); [ ${s#-} -lt 200 ]'
+	need "no /proc/uptime, the reader hanging: cut at 2 s by the wall clock, under 4 s in all (took $ms ms)" test "$ms" -lt 4000
+}
+nouptime_acct() {   # one attempt: sacct late, getent hanging, no /proc/uptime
+	local d c0 c1
+	d=$(late_acct_fx nouptime-acct)
+	c0=$(clock_pair)
+	NOUPTIME=1 why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=5.5 -- --no-color job 11945
+	c1=$(clock_pair)
+	hold "no /proc/uptime, sacct late: rc 0, getent bounded at most 5.5 s (got $(timeout_of getent))" eval '
+		rc_is 0 && gawk -v v="$(timeout_of getent)" "BEGIN { exit !(v != \"\" && v + 0 <= 5.5) }"'
+	pre "did the wall clock keep pace with /proc/uptime during the run (the last: off by $(clock_step "$c0" "$c1") ms)" eval '
+		s=$(clock_step "$c0" "$c1"); [ ${s#-} -lt 200 ]'
+	need "no /proc/uptime, sacct answering after 5.2 s of 5.5: getent under 5.4 s by the wall clock (got $(timeout_of getent))" eval '
+		gawk -v v="$(timeout_of getent)" "BEGIN { exit !(v + 0 < 5.4) }"'
+}
+nouptime_left() {   # one attempt: --json failing after 1 s, -o hanging, no /proc/uptime (T5: what a timed call used comes off the next bound)
+	local d c0 c1 v
+	d=$(jfx_copy nouptime-left resources-11964)
+	printf '@hang 1\n@exit 1\n' > "$d/scontrol-node.json"
+	{ cat "$jfx/resources-11964/scontrol-node"; printf '@hang 10\n'; } > "$d/scontrol-node"
+	c0=$(clock_pair)
+	NOUPTIME=1 why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 -- --no-color job 11964
+	c1=$(clock_pair); v=$(timeout_of scontrol 2)
+	hold "no /proc/uptime, --json failing after 1 s: rc 0, an -o call bounded at most 3 s (got ${v:-none})" eval '
+		rc_is 0 && gawk -v v="$v" "BEGIN { exit !(v != \"\" && v + 0 <= 3) }"'
+	pre "did the wall clock keep pace with /proc/uptime during the run (the last: off by $(clock_step "$c0" "$c1") ms)" eval '
+		s=$(clock_step "$c0" "$c1"); [ ${s#-} -lt 200 ]'
+	need "no /proc/uptime, --json failing after 1 s of 3: -o gets what is left, over 1 s and at most 2.1 (got ${v:-none})" eval '
+		gawk -v v="$v" "BEGIN { exit !(v + 0 > 1 && v + 0 <= 2.1) }"'
+}
+# T4-g: a read of /proc/uptime that fails after sq chose it (fd exhaustion,
+# say).  failread_env CALLER NTH: the VAR=values whose BASH_ENV makes the NTH
+# read mono_us makes for CALLER fail, noting it in $T_DIR/failread.log
+failread_env() {
+	cat > "$T_DIR/failread.sh" <<'FR'
+read() {
+	if [ "${FUNCNAME[1]:-}" = mono_us ] && [ "${FUNCNAME[2]:-}" = "${FAILREAD_CALLER:-}" ]; then
+		failread_n=$(( ${failread_n:-0} + 1 ))
+		if [ "$failread_n" = "${FAILREAD_NTH:-1}" ]; then echo "read $failread_n of $FAILREAD_CALLER failed" >> "$FAILREAD_LOG"; return 1; fi
+	fi
+	builtin read "$@"
+}
+FR
+	: > "$T_DIR/failread.log"
+	printf 'BASH_ENV=%s FAILREAD_CALLER=%s FAILREAD_NTH=%s FAILREAD_LOG=%s' "$T_DIR/failread.sh" "$1" "$2" "$T_DIR/failread.log"
+}
+failed_read() { cat "$T_DIR/failread.log" 2>/dev/null | paste -sd'|'; }   # what the stand-in failed, if anything
+c_clock_fail_read() {
+	T_TITLE="a read of /proc/uptime failing later (T4-g), at the start of each budget and inside it: the clock moves an hour on for good, so a budget reads as spent, never as waited on: the tail reader cut, no second sstat list, getent within sq job's deadline"
+	local d start nth caller
+	for nth in 1 2; do
+		d=$(tail_fx failtail$nth -- "$(out_file 'never read\n')" "$(dated 200s)")
+		start=$(up_ms)
+		BOUND=12 sq_run "$d" SQSTUB_UID=1041 $(failread_env job_tail_wait $nth) PATH="$here/lib/tail-as:$here/bin:$PATH" SQSTUB_TAIL=hang -- --no-color job 11836
+		need "the tail reader's read $nth failing ($(failed_read)): rc 0, 'did not answer within 2s', under 4 s (took $(( $(up_ms) - start )) ms)" eval '
+			[ -n "$(failed_read)" ] && rc_is 0 && [ "$(why_notes)" = "its output file did not answer within 2s" ] && [ $(( $(up_ms) - start )) -lt 4000 ]'
+	done
+	for nth in 1 2; do
+		d=$(jobmem_lists_fx failsstat$nth '@hang 30')
+		sq_run "$d" SQSTUB_UID=1041 SQ_TIMEOUT=3 SQ_WIDTH=110 SQ_HEIGHT=30 $(failread_env jobmem_collect $nth) -- --full --no-color
+		need "sstat's read $nth failing ($(failed_read)): one sstat call (got $(calls sstat)), the second list's ids failed (got: $(jobmem_lists_mem))" eval '
+			[ -n "$(failed_read)" ] && rc_is 0 && [ "$(calls sstat)" = 1 ] && [ "$(jobmem_lists_mem)" = "!/100G !/15.2G !/4G" ]'
+	done
+	# the deadline's own reading (sub_job), and the first reading against it (job_limit)
+	for caller in sub_job job_limit; do
+		d=$(late_acct_fx failacct-$caller)
+		why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=5.5 $(failread_env $caller 1) -- --no-color job 11945
+		need "$caller's first read failing ($(failed_read)): getent within the deadline, under 5.4 s (got $(timeout_of getent))" eval '
+			[ -n "$(failed_read)" ] && rc_is 0 && gawk -v v="$(timeout_of getent)" "BEGIN { exit !(v != \"\" && v + 0 < 5.4) }"'
+	done
+}
+# Every line of sq that reads a clock (comments aside), as KIND, a tab, the
+# line trimmed: the inventory of T4, pinned (clock_inventory).  duration: a
+# budget, deadline or run time, on /proc/uptime (mono_us, collect -r);
+# fallback: the same where /proc/uptime cannot be read (the wall clock, as
+# before T4); shared: the JOBMEM snapshot's age, read by other sq processes,
+# maybe on other hosts (uptime differs per host); input: a date the user
+# gives; shown: a time of day on the screen; slurm: against Slurm's times;
+# text: the word in a message, no read
+clock_inventory='duration	collect_timed='"'"'trap "exit 143" TERM; f=$1 c=$2; shift 2; now() { t=; if [ "$c" = uptime ]; then { read t x < /proc/uptime; } 2>/dev/null; case $t in *.??) t=${t%.*}${t#*.}0000 ;; *) t= ;; esac; else t=$(date +%s%6N 2>/dev/null); fi; }; now; s=$t; { ( exec "$@" 2>&3 3>&- ); r=$?; } 2>/dev/null; now; echo "$s $t" > "$f"; exit $r'"'"'
+shared	printf -v memnow '"'"'%(%s)T'"'"' -1
+input	job_pss=$(env LC_ALL=C date -d "$v" +%s 2>/dev/null) && [[ $job_pss =~ ^[0-9]+$ ]]; then
+text	job_usage "SQ_PSS_SINCE is no date sq job reads: '"'"'$(printf '"'"'%s'"'"' "$v" | scrub 40)'"'"'; e.g. SQ_PSS_SINCE=\"2026-10-19 15:59 CEST\", 2026-10-19T13:59Z or @1792418340"
+shown	function stamp(ep) { return strftime("%Y-%m-%d %H:%M", ep) }
+shown	function pss_text() { return stamp(pss) " " strftime("%Z", pss) }
+slurm	NOW = systime(); ID = id_anchor(); BARW = 16
+duration	{ read -r mono_last _ < /proc/uptime && uptime_us mono_last "$mono_last"; } 2>/dev/null && mono_clock=uptime || mono_last=0
+duration	{ read -r up _ < /proc/uptime; } 2>/dev/null
+fallback	t=${EPOCHREALTIME:-}; t=${t//[!0-9]/}
+fallback	[ -n "$t" ] || printf -v t '"'"'%(%s)T000000'"'"' -1
+slurm	touch -d "@$((w_start - 5))" -- "$tmp/tail.lo" 2>/dev/null &&
+slurm	touch -d "@$((w_end + 60))" -- "$tmp/tail.hi" 2>/dev/null || { w_tailinfo=unreadable; return; }
+slurm	elif [ "$w_tail" -ot "$tmp/tail.lo" ];   then echo older
+slurm	elif [ "$w_tail" -nt "$tmp/tail.hi" ];   then echo later
+shown	statef=$statedir/alerted host=$(hostname -s | scrub) now=$(date '"'"'+%H:%M:%S %Z'"'"')
+slurm	return mktime(d)
+shown	if (!ep || ep < systime()) return ""
+shown	if (strftime("%F", ep) == strftime("%F", systime())) return strftime("%H:%M", ep)
+shown	if (strftime("%Y", ep) == strftime("%Y", systime())) {
+shown	return month[strftime("%m", ep) + 0] strftime("%d %H:%M", ep)
+shown	return strftime("%Y-%m-%d", ep)
+slurm	cut = systime() - 86400                             # at 24h; lines without
+shown	lo = ago(systime() - rend[g])             # apart must not claim one of their
+shown	hi = rmin[g] ? ago(systime() - rmin[g]) : lo        # times for the whole group
+slurm	if (!(gi[j] in rung) && rend[r] > systime() - horizon) ding = 1
+slurm	rung[gi[j]] = rend[r] ? rend[r] : systime()'
+# clock_lines FILE: its lines that read a clock, comments aside, trimmed
+clock_lines() {
+	gawk '
+		BEGIN { R[1] = "EPOCHREALTIME"; R[2] = "EPOCHSECONDS"; R[3] = "\\$\\{?SECONDS"; R[4] = "%\\([^)]*\\)T"
+		        R[5] = "(^|[^A-Za-z_.-])date( |\\)|\"|$)"; R[6] = "systime\\(\\)"; R[7] = "strftime\\("; R[8] = "mktime\\("
+		        R[9] = "/proc/uptime"; R[10] = "touch -d"; R[11] = "[ \t]-nt[ \t]"; R[12] = "[ \t]-ot[ \t]"
+		        R[13] = "\\(\\(SECONDS"; R[14] = "stat (-c|--format|-f)"; R[15] = "-newer"; R[16] = "-mmin"; R[17] = "-mtime"; R[18] = "\\[ -N " }
+		/^[ \t]*#/ { next }
+		{ for (i = 1; i <= 18; i++) if ($0 ~ R[i]) { l = $0; gsub(/^[ \t]+|[ \t]+$/, "", l); print l; next } }' "$1"
+}
+c_clock_inventory() {
+	T_TITLE="every line of sq that reads a clock is one of T4's inventory (clock_inventory): durations and deadlines on /proc/uptime with the wall clock as their fallback alone, the wall clock elsewhere only where a time of day is shown or meets Slurm's, the user's or another sq's"
+	local got want new gone
+	got=$(clock_lines "$sq" | LC_ALL=C sort); want=$(cut -f2- <<< "$clock_inventory" | LC_ALL=C sort)
+	new=$(LC_ALL=C comm -23 <(printf '%s\n' "$got") <(printf '%s\n' "$want") | cut -c1-80 | paste -sd'|')
+	gone=$(LC_ALL=C comm -13 <(printf '%s\n' "$got") <(printf '%s\n' "$want") | cut -c1-80 | paste -sd'|')
+	need "sq's clock reads are the inventory's${new:+ (not in it: $new)}${gone:+ (no longer in sq: $gone)}" test "$got" = "$want"
+	need "the inventory gives each line a kind it knows" eval '! cut -f1 <<< "$clock_inventory" | grep -qvxE "duration|fallback|shared|input|shown|slurm|text"'
+	stubs_answer
+}
 c_why_tail_hung() {   # V2
 	T_TITLE="a reader that does not answer (a hung NFS read, here a tail that sleeps): sq says so after 2 s, kills it, and leaves nothing behind"
 	local d
@@ -12080,7 +12294,7 @@ cases=(
 	jobmem_lists memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow memalloc_floor_M
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
-	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung why_forged why_nodes_json why_nodes_figures why_pending why_dep
+	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory why_forged why_nodes_json why_nodes_figures why_pending why_dep
 	why_parent why_parent_hang why_parent_own job_width_docs
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
@@ -12102,7 +12316,7 @@ cases=(
 # once the others are done, so no other case loads the host meanwhile.
 timed_cases=" squeue_hangs squeue_ignores_term bell_probe_killed scrub_bounded tables_pass_cost cancel_names
 	membar_json membar_fallback jobmem_outcomes jobmem_throttle job_own
-	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract
+	log_follow log_now log_not_regular log_not_utf8 log_stream job_contract clock_frozen clock_fail_read
 	why_nodes_json why_tail_hung why_budget why_parallel why_signals job_screens why_parent_hang why_parent_own
 	nodes_o_fail nodes_o_bounds stub_fast nodes_o_cost compact_prompt_row jobmem_lists "
 timed_cases=" $(printf '%s ' $timed_cases)"       # one space around each name
