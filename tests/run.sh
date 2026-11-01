@@ -2453,7 +2453,7 @@ c_wide_tmux() {
 	T_TITLE="tmux: the wide screen takes as many terminal rows as its twin where the twin fits COLUMNS, at most as many where not (FULL 40, 80 and 120, COMPACT 60x12, 80x20)"
 	local spec mode w h wo two rw rt tw
 	if ! command -v tmux > /dev/null 2>&1; then
-		T_TITLE="$T_TITLE; skipped: no tmux here"; sq_run mixed --; return
+		T_FAIL+=("tmux is not installed (needed for this case)"); sq_run mixed --; return
 	fi
 	twin_fx wide-text
 	for spec in full:40:40 full:80:40 full:120:40 compact:60:12 compact:80:20; do
@@ -12385,6 +12385,18 @@ timed_cases=" squeue_hangs squeue_ignores_term bell_probe_killed scrub_bounded t
 timed_cases=" $(printf '%s ' $timed_cases)"       # one space around each name
 for c in $timed_cases; do
 	[[ " ${cases[*]} " == *" $c "* ]] || { echo "run.sh: timed_cases names $c, which is no case" >&2; exit 2; }
+done
+# a NAME that is no case is a usage error, not a run of nothing that passes
+for o in "${only[@]}"; do
+	[[ " ${cases[*]} " == *" $o "* ]] && continue
+	near=$(printf '%s\n' "${cases[@]}" | gawk -v o="$o" '
+		function dist(a, b,   i, j, la, lb, d, c) { la = length(a); lb = length(b)
+			for (i = 0; i <= la; i++) d[i, 0] = i; for (j = 0; j <= lb; j++) d[0, j] = j
+			for (i = 1; i <= la; i++) for (j = 1; j <= lb; j++) { c = d[i-1, j-1] + (substr(a, i, 1) != substr(b, j, 1))
+				if (d[i-1, j] + 1 < c) c = d[i-1, j] + 1; if (d[i, j-1] + 1 < c) c = d[i, j-1] + 1; d[i, j] = c }
+			return d[la, lb] }
+		{ k = dist(o, $0); if (best == "" || k < bk) { best = $0; bk = k } } END { if (bk <= 3) print best }')
+	printf "run.sh: '%s' is no case%s\n" "$o" "${near:+; did you mean $near?}" >&2; exit 2
 done
 selected=()
 for c in "${cases[@]}"; do
