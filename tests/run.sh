@@ -99,7 +99,7 @@ jobs=$((10#$jobs)); [ "$jobs" -ge 1 ] || { echo "run.sh: -j takes 1 or more" >&2
 
 if [ -n "$at_given" ]; then
 	[[ $clock_at == *[![:space:]]* ]] && clock_at=$(date -d "$clock_at" +%s 2>/dev/null) || { echo "run.sh: --at takes a date, as date -d reads it" >&2; exit 2; }
-	export CLOCK_AT_DATE=$(command -v date) CLOCK_AT_GAWK=$(command -v gawk)
+	export CLOCK_AT_DATE=${CLOCK_AT_DATE:-$(command -v date)} CLOCK_AT_GAWK=${CLOCK_AT_GAWK:-$(command -v gawk)}   # kept: a run under --at has the shims first on PATH
 	export CLOCK_AT_SHIFT=$((clock_at - EPOCHSECONDS)) BASH_ENV=$here/lib/clock-at/env.bash PATH=$here/lib/clock-at:$PATH
 	. "$BASH_ENV"
 fi
@@ -10533,6 +10533,78 @@ c_invalid_colour() {
 		need "WIDE (a name with ö) $mode: INVALID bold red" eval 'rc_is 0 && LC_ALL=C grep -q "$ESC\[1;31m *INVALID$ESC\[0m" "$OUT"'
 	done
 }
+# ---- the suite's own rules: timed attempts, SKIP, names, --at's line ----------
+# No sq defect shows them, and a SKIP only on a loaded host, so a copy of this
+# file runs these synthetic cases, in its list alone (c_suite_rules): no sq, no
+# stub (T_CALLS=1 stands in for verdict's check that one answered)
+synth_n=0
+synth_retry_try() { synth_n=$((synth_n + 1)); pre "did it hold" test $synth_n -ge 2; need "need of attempt $synth_n" test $synth_n -ge 2; }
+c_synth_retry() { T_CALLS=1 synth_n=0; attempts 3 synth_retry_try; }
+synth_gated_try() { synth_n=$((synth_n + 1)); pre "did it hold" test $synth_n -ge 2; need "need judged" false; }
+c_synth_gated() { T_CALLS=1 synth_n=0; attempts 3 synth_gated_try; }
+synth_hold_try() { synth_n=$((synth_n + 1)); hold "hold of attempt 1" test $synth_n -ge 2; pre "did it hold" test $synth_n -ge 2; }
+c_synth_hold() { T_CALLS=1 synth_n=0; attempts 3 synth_hold_try; }
+synth_never_try() { synth_n=$((synth_n + 1)); hold "hold always (figure $synth_n)" false; pre "did it hold (n=$synth_n)" false; need "need dropped" false; }
+c_synth_never() { T_CALLS=1 synth_n=0; attempts 3 synth_never_try; }
+synth_skip_try() { pre "did it hold" false; need "need dropped" false; }
+c_synth_skip() { T_CALLS=1; attempts 3 synth_skip_try; }
+c_synth_skip_fail() { T_CALLS=1; attempts 2 synth_skip_try; need "plain need" false; }
+synth_ok_try() { pre "did it hold" true; hold "hold" true; need "need" true; }
+c_synth_ok() { T_CALLS=1 T_TITLE="all held"; attempts 3 synth_ok_try; }
+# rules_run ARG...: the copy, its output in $rules_out, RC its status, its own
+# TMPDIR for all runs of the case; rules_keep=N for SQ_KEEP_SKIPPED
+rules_run() {
+	TMPDIR=$T_DIR/tmp SQ_KEEP_FAILED=5 SQ_KEEP_SKIPPED=${rules_keep:-2} "$bound" -k 2 60 bash "$T_DIR/copy/run.sh" "$@" > "$rules_out" 2>&1; RC=$?
+	T_CALLS=$((T_CALLS + 1))
+}
+rules_said() { grep -qF -- "$1" "$rules_out"; }                      # rules_said TEXT: in the output, a part of a line
+rules_line() { grep -qE -- "$1" "$rules_out"; }                      # rules_line REGEX
+rules_case() { grep -E "^[A-Z]+ +$1 " "$rules_out"; }                # rules_case NAME: its line
+kept_runs() { find "$T_DIR/tmp/$1" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*Z.[0-9]*' 2>/dev/null | wc -l; }   # kept_runs sq-skipped|sq-failed: how many
+c_suite_rules() {
+	T_TITLE="the suite's own rules on synthetic cases: a SKIP is named, exit 0; FAIL beats SKIP, 'also not judged'; a discarded attempt's needs go, its holds count; sq-skipped/'s window; the summary without a SKIP; an unknown NAME and one with a space exit 2; --at's line"
+	local rules_out=$T_DIR/rules.out line run
+	mkdir -p "$T_DIR/copy" "$T_DIR/tmp"; ln -s "$here/lib" "$T_DIR/copy/lib"
+	sed 's/^cases=($/cases=(\n\tsynth_retry synth_gated synth_hold synth_never synth_skip_fail synth_skip synth_ok/' "$here/run.sh" > "$T_DIR/copy/run.sh"
+	rules_run synth_retry synth_gated synth_hold synth_never synth_skip_fail synth_ok
+	need "a discarded attempt's failed need is dropped: PASS" eval 'rules_case synth_retry | grep -q "^PASS"'
+	need "the need of the attempt that held is judged: FAIL" eval 'rules_case synth_gated | grep -qE "^FAIL +synth_gated +need judged$"'
+	need "a hold failing in a discarded attempt counts: FAIL" eval 'rules_case synth_hold | grep -qE "^FAIL +synth_hold +hold of attempt 1$"'
+	line=$(rules_case synth_never)
+	need "never held: the hold FAILs, once by its name, the need dropped, the question 'also not judged' (got: $line)" \
+		test "$line" = "$(printf '%-5s  %-24s %s' FAIL synth_never 'hold always (figure 1); also not judged: did it hold (n=3): no, in all 3 attempts')"
+	line=$(rules_case synth_skip_fail)
+	need "FAIL beats SKIP (got: $line)" test "$line" = "$(printf '%-5s  %-24s %s' FAIL synth_skip_fail 'plain need; also not judged: did it hold: no, in all 2 attempts')"
+	need "2 passed, 4 failed, rc 1, no SKIP counted" eval 'rc_is 1 && rules_line "^2 passed, 4 failed, 0 xfail, 0 xpass  \(" && ! rules_said "not judged, as"'
+	rules_run synth_skip; run=$(find "$T_DIR/tmp/sq-skipped" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*Z.[0-9]*')
+	need "a SKIP alone: rc 0, its line with the load average" eval 'rc_is 0 && rules_line "^SKIP +synth_skip +not judged: did it hold: no, in all 3 attempts \(load average [0-9.]+ [0-9.]+ [0-9.]+\); the rest passed$"'
+	need "... the summary counts and names it, says no cause, names the run kept, which holds the case" eval '
+		rules_line "^0 passed, 0 failed, 1 skipped, 0 xfail, 0 xpass  \(" && rules_said "not judged, as a timing precondition never held:" &&
+		grep -qxF "  synth_skip: did it hold: no, in all 3 attempts" "$rules_out" &&
+		grep -qxF "(why is not known: on a quiet host, alone, that is a finding; evidence under $run)" "$rules_out" && [ -d "$run/synth_skip" ]'
+	rules_run -j 2 synth_skip synth_ok
+	need "under -j too: named, rc 0, 1 passed, 1 skipped" eval 'rc_is 0 && rules_line "^1 passed, 0 failed, 1 skipped," && grep -qxF "  synth_skip: did it hold: no, in all 3 attempts" "$rules_out"'
+	rules_run synth_skip
+	need "sq-skipped/ keeps the newest 2 runs (kept $(kept_runs sq-skipped)), sq-failed/ apart keeps its 1 (kept $(kept_runs sq-failed))" eval '
+		[ "$(kept_runs sq-skipped)" = 2 ] && [ "$(kept_runs sq-failed)" = 1 ] && [ ! -e "$run" ]'
+	rules_keep=0 rules_run synth_skip
+	need "SQ_KEEP_SKIPPED=0: rc 0, not kept, and it says so, no 'evidence under'" eval '
+		rc_is 0 && [ "$(kept_runs sq-skipped)" = 0 ] && rules_said "evidence: not kept (SQ_KEEP_SKIPPED=0)" && rules_said "that is a finding)" && ! rules_said "evidence under"'
+	rules_run -k synth_skip
+	need "-k: rc 0, no 'evidence under' (it is in the kept work dir)" eval 'rc_is 0 && rules_said "that is a finding)" && ! rules_said "evidence under"'
+	rules_run synth_ok
+	need "no SKIP: its line, a blank one and the summary as ever" eval '
+		rc_is 0 && [ "$(wc -l < "$rules_out")" = 3 ] && sed -n 1p "$rules_out" | grep -qE "^PASS +synth_ok +all held$" &&
+		sed -n 3p "$rules_out" | grep -qE "^1 passed, 0 failed, 0 xfail, 0 xpass  \([0-9]+\.[0-9]{3}s\)$"'
+	rules_run synth_ski
+	need "an unknown NAME: exit 2, did you mean" eval 'rc_is 2 && [ "$(cat "$rules_out")" = "run.sh: '"'"'synth_ski'"'"' is no case; did you mean synth_skip?" ]'
+	rules_run nothing_at_all_like_a_case
+	need "... none near: exit 2, no guess" eval 'rc_is 2 && [ "$(cat "$rules_out")" = "run.sh: '"'"'nothing_at_all_like_a_case'"'"' is no case" ]'
+	rules_run 'synth_skip synth_ok'
+	need "a NAME with a space, two neighbours: exit 2" eval 'rc_is 2 && rules_said "is no case" && ! rules_said "passed,"'
+	rules_run --at '2030-06-15 12:00:00 UTC' synth_ok
+	need "--at: rc 0, the summary ends with the moment" eval 'rc_is 0 && rules_line "^1 passed, 0 failed, 0 xfail, 0 xpass  \([0-9.]+s\), started at 2030-06-15 12:00:00 UTC \(--at\)$"'
+}
 # run.sh itself, stopped: under -j its one line counts the cases finished,
 # also those not shown yet (a case later in order done before an earlier one)
 c_suite_interrupt() {
@@ -12397,7 +12469,7 @@ cases=(
 	whole_widths whole_narrow whole_monotone whole_full whole_c_mode whole_height whole_pins whole_captions whole_docs whole_accepted
 	whole_forms whole_orders whole_guard whole_v31
 	est_monotone est_pins est_columns est_widest_first est_trade est_full est_f3 est_height est_negative est_height_cols est_start
-	gawk_arg_limit plural_one invalid_colour suite_interrupt
+	gawk_arg_limit plural_one invalid_colour suite_interrupt suite_rules
 	h0_sq_color h0_display_prefs h0_number_reader h0_rc_internal h0_help_write h0_dash_undelivered h0_dash_write h0_out_rc_lines h0_sort_twice h0_sort_twice_example h0_subcommand_exact
 	help_list help_topics help_words help_widths help_same_bytes help_colour help_tmpdir help_columns_env help_env_complete
 	help_goldens help_pins help_readme_refs
