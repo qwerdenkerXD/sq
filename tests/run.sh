@@ -32,7 +32,10 @@
 # A failed case's run directories stay without -k too, as a flake may not
 # come back for a rerun: under ${TMPDIR:-/tmp}/sq-failed/<UTC start>.<pid>/,
 # one directory per run, made at its first FAIL; the newest SQ_KEEP_FAILED
-# (5) runs' stay, older ones go as a run starts and as one makes its own.
+# (5) runs' stay, older ones go as a run starts and as one makes its own.  A
+# skipped case's stay the same way under ${TMPDIR:-/tmp}/sq-skipped/, the
+# newest SQ_KEEP_SKIPPED (2) runs', a window of their own, so a SKIP never
+# pushes out a FAIL's evidence.
 #
 # Needs bash, gawk, coreutils (8.31 or later: env --default-signal), util-linux
 # `script` and `setsid` for the terminal cases, and glibc's localedef with its
@@ -50,8 +53,11 @@
 # Slurm by accident.
 #
 # Results: PASS, FAIL, XFAIL (a known defect, still there, in the documented
-# way) and XPASS (a known defect no longer reproduces: remove its xfail marker).
-# The run fails on any FAIL or XPASS.
+# way), XPASS (a known defect no longer reproduces: remove its xfail marker)
+# and SKIP (nothing failed, but the needs of a timed attempt were not judged:
+# the timing precondition they count on never held, as the line says; see
+# attempts).  The run fails on any FAIL or XPASS; a SKIP is counted and named
+# with its precondition at the end, not a failure.
 #
 # Known gaps, left out on purpose because they are cosmetic: right alignment
 # of numeric columns, the truncation of a long drain reason.  The bar glyphs
@@ -92,50 +98,54 @@ done
 [ -n "$utf8" ] || { echo "run.sh: no UTF-8 locale available (tried C.UTF-8, en_US.UTF-8)" >&2; exit 2; }
 
 # TMPDIR is honoured; with -k the evidence stays there, under a recognisable
-# name, and a failed case's stays without -k too (failrun_make, verdict)
-keep_failed=${SQ_KEEP_FAILED:-5}
-case $keep_failed in
-	*[!0-9]*|'') printf "run.sh: SQ_KEEP_FAILED is a number of runs, not '%s'\n" "$keep_failed" >&2; exit 2 ;;
-esac
-keep_failed=$((10#$keep_failed))   # base 10: 08 and 09 are numbers too, 010 is ten
+# name, and a failed case's stays without -k too (run_make, tally)
+keep_failed=${SQ_KEEP_FAILED:-5} keep_skipped=${SQ_KEEP_SKIPPED:-2}
+for v in SQ_KEEP_FAILED:$keep_failed SQ_KEEP_SKIPPED:$keep_skipped; do
+	case ${v#*:} in
+		*[!0-9]*|'') printf "run.sh: %s is a number of runs, not '%s'\n" "${v%%:*}" "${v#*:}" >&2; exit 2 ;;
+	esac
+done
+keep_failed=$((10#$keep_failed)) keep_skipped=$((10#$keep_skipped))   # base 10: 08 and 09 are numbers too, 010 is ten
 failroot=${TMPDIR:-/tmp}/sq-failed failrun= failstamp=$(date -u +%Y%m%dT%H%M%SZ)
-# prune_failed N: every run's evidence but the newest N goes, by the time it
-# was last written, unless a running suite holds its lock (flock -n); the
-# sq-failed-NAME.* directories of the suite before count as runs too
-prune_failed() {
+skiproot=${TMPDIR:-/tmp}/sq-skipped skiprun=
+# prune_runs ROOT N: every run's evidence under ROOT but the newest N goes, by
+# the time it was last written, unless a running suite holds its lock (flock
+# -n); under sq-failed the sq-failed-NAME.* directories of the suite before
+# count as runs too
+prune_runs() {
 	local d n=0
-	{ find "$failroot" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*Z.[0-9]*' -printf '%T@ %p\n'
-	  find "${TMPDIR:-/tmp}" -mindepth 1 -maxdepth 1 -type d -name 'sq-failed-*.??????' -printf '%T@ %p\n'
+	{ find "$1" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*Z.[0-9]*' -printf '%T@ %p\n'
+	  [ "$1" != "$failroot" ] || find "${TMPDIR:-/tmp}" -mindepth 1 -maxdepth 1 -type d -name 'sq-failed-*.??????' -printf '%T@ %p\n'
 	} 2>/dev/null | sort -rn | while read -r _ d; do
-		n=$((n + 1)); [ "$n" -le "$1" ] || flock -n "$d/.lock" rm -rf "$d" 2>/dev/null
+		n=$((n + 1)); [ "$n" -le "$2" ] || flock -n "$d/.lock" rm -rf "$d" 2>/dev/null
 	done
 }
-# failrun_make: this run's evidence directory, made at its first FAIL with
-# room for it among the newest SQ_KEEP_FAILED, and locked while the run
-# lasts; made under a dot name and renamed once locked, so no pruning run
-# takes it in between
-failrun_make() {
-	[ -z "$failrun" ] || return 0
-	local new=$failroot/.new.$$
-	prune_failed $((keep_failed - 1))
-	mkdir -p "$failroot" && rm -rf "$new" && mkdir "$new" &&
-		exec {faillock}> "$new/.lock" && flock -n "$faillock" &&
-		mv "$new" "$failroot/$failstamp.$$" && failrun=$failroot/$failstamp.$$
+# run_make ROOT KEEP VAR: this run's evidence directory under ROOT into VAR,
+# made at its first FAIL (or SKIP) with room for it among the newest KEEP,
+# and locked while the run lasts; made under a dot name and renamed once
+# locked, so no pruning run takes it in between
+run_make() {
+	[ -z "${!3}" ] || return 0
+	local new=$1/.new.$$ lock
+	prune_runs "$1" $(($2 - 1))
+	mkdir -p "$1" && rm -rf "$new" && mkdir "$new" &&
+		exec {lock}> "$new/.lock" && flock -n "$lock" &&
+		mv "$new" "$1/$failstamp.$$" && printf -v "$3" '%s' "$1/$failstamp.$$"
 }
-prune_failed "$keep_failed"
+prune_runs "$failroot" "$keep_failed"; prune_runs "$skiproot" "$keep_skipped"
 work=$(mktemp -d "${TMPDIR:-/tmp}/sq-tests.XXXXXX") || exit 2
 [ $keep = 0 ] || echo "evidence kept in $work"
 # every session a background sq ran in (sq_start) is emptied on the way out
 # too, those of the cases -j runs at once as well (each its own process
 # group, in case_pgids, their sessions listed in $work/sids)
 all_sids= case_pgids= stopped_by= selected=()
-n_pass=0 n_fail=0 n_xfail=0 n_xpass=0
+n_pass=0 n_fail=0 n_xfail=0 n_xpass=0 n_skip=0 skipped=
 suite_exit() {
 	local sid pgid finished shown
 	# a run stopped by a signal says so in one line, with how far it got: the
 	# cases finished, and under -j how many of them were shown (in case order)
 	if [ -n "$stopped_by" ]; then
-		finished=$((n_pass + n_fail + n_xfail + n_xpass)) shown=
+		finished=$((n_pass + n_fail + n_xfail + n_xpass + n_skip)) shown=
 		if [ -d "${results-}" ]; then
 			shown=", $finished shown"; finished=$(find "$results" -name '*.status' | wc -l)
 		fi
@@ -568,7 +578,46 @@ no_call_env() {     # no_call_env VAR TOOL...: no call of these tools had VAR se
 #   today WHY CMD...   in an xfail case: the defect's documented signature, so a
 #                      defect that changes shape is a FAIL rather than an XFAIL
 #   xfail REASON       marks the case a known defect
-need()  { "${@:2}" || T_FAIL+=("$1"); }
+#   pre   WHY CMD...   in a timed attempt (below): a condition on the host's
+#                      timing that the attempt's needs count on, e.g. a stub's
+#                      hang ending before its timeout fired; judged only from
+#                      evidence sq does not make (the stub's timeout stand-in's
+#                      own rc, the case's own clock reads), never from sq's
+#                      output.  WHY is a question ("did ...") with the figures
+#                      read, as the SKIP line and the summary quote it
+#   hold  WHY CMD...   in a timed attempt: what holds whatever the timing, so
+#                      judged in every attempt, kept or not: above all what the
+#                      pre's evidence counts on sq for (b3: no sinfo call after
+#                      a --json call that did not end by itself), so no defect
+#                      of sq can turn into an unmet pre, and a SKIP
+#   attempts N FUNC [ARG...]  FUNC, one timed attempt (runs, its pres, holds
+#                      and needs), up to N times until all its pres hold; the
+#                      needs of an attempt whose pre failed are not judged (its
+#                      holds, and sq not finishing or a stub refusing, still
+#                      count).  When none of the N held: no need of it is
+#                      judged, and the case is a SKIP naming the pre, unless
+#                      something else FAILs (then the FAIL line names what went
+#                      unjudged).  Needs only (no want or today)
+need()  {
+	"${@:2}" && return
+	if [ -n "$T_ATTEMPT" ]; then T_GATED+=("$1"); else T_FAIL+=("$1"); fi
+}
+pre()   { "${@:2}" || T_PRE+=("$1"); }
+hold()  {
+	"${@:2}" && return
+	local f; for f in "${T_FAIL[@]}"; do [ "${f%% (*}" != "${1%% (*}" ] || return 0; done   # once, by its name (the figures aside), however many attempts
+	T_FAIL+=("$1")
+}
+attempts() {   # attempts N FUNC [ARG...]
+	local max=$1 n=0; shift
+	while [ $n -lt "$max" ]; do
+		n=$((n + 1)) T_PRE=() T_GATED=() T_ATTEMPT=$n
+		"$@"
+		T_ATTEMPT=
+		if [ ${#T_PRE[@]} = 0 ]; then T_FAIL+=("${T_GATED[@]}"); return 0; fi
+	done
+	T_SKIP+=("$(IFS=$'\x1f'; echo "${T_PRE[*]}"): no, in all $max attempts")
+}
 want()  { "${@:2}" || T_WANT+=("$1"); }
 today() { "${@:2}" || T_TODAY+=("$1"); }
 xfail() { T_XFAIL=$1; }
@@ -580,8 +629,12 @@ verdict() {
 	if [ ${#T_FAIL[@]} -gt 0 ]; then
 		status=FAIL; reason=$(IFS=$'\x1f'; echo "${T_FAIL[*]}")
 		[ ${#T_WANT[@]} -gt 0 ] && [ -z "$T_XFAIL" ] && reason="$reason"$'\x1f'"$(IFS=$'\x1f'; echo "${T_WANT[*]}")"
+		[ ${#T_SKIP[@]} = 0 ] || reason="$reason"$'\x1f'"also not judged: $(IFS=$'\x1f'; echo "${T_SKIP[*]}")"
 	elif [ -z "$T_XFAIL" ]; then
 		if [ ${#T_WANT[@]} -gt 0 ]; then status=FAIL; reason=$(IFS=$'\x1f'; echo "${T_WANT[*]}")
+		elif [ ${#T_SKIP[@]} -gt 0 ]; then
+			status=SKIP T_SKIPWHY=$(IFS=$'\x1f'; echo "${T_SKIP[*]}")
+			reason="not judged: $T_SKIPWHY (load average $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)); the rest passed"
 		else status=PASS; reason=$T_TITLE; fi
 	elif [ ${#T_WANT[@]} -eq 0 ]; then
 		status=XPASS; reason="no longer broken, remove the xfail marker: $T_XFAIL"
@@ -600,13 +653,21 @@ tally() {
 	case $T_STATUS in
 		PASS) n_pass=$((n_pass+1)) ;; FAIL) n_fail=$((n_fail+1)) ;;
 		XFAIL) n_xfail=$((n_xfail+1)) ;; XPASS) n_xpass=$((n_xpass+1)) ;;
+		SKIP) n_skip=$((n_skip+1)) skipped="$skipped"$'\n'"  $T_NAME: ${T_SKIPWHY//$'\x1f'/; }" ;;
 	esac
-	if { [ $T_STATUS = FAIL ] || [ $T_STATUS = XPASS ]; } && [ $keep = 0 ]; then
-		if [ "$keep_failed" = 0 ]; then printf '       evidence: not kept (SQ_KEEP_FAILED=0), rerun with -k\n'
-		elif failrun_make && mv "$T_DIR" "$failrun/"; then printf '       evidence kept in %s\n' "$failrun/$T_NAME"
-		else printf '       evidence: rerun with -k\n'
-		fi
-	fi
+	[ $keep = 0 ] || return 0
+	case $T_STATUS in
+		FAIL|XPASS)
+			if [ "$keep_failed" = 0 ]; then printf '       evidence: not kept (SQ_KEEP_FAILED=0), rerun with -k\n'
+			elif run_make "$failroot" "$keep_failed" failrun && mv "$T_DIR" "$failrun/"; then printf '       evidence kept in %s\n' "$failrun/$T_NAME"
+			else printf '       evidence: rerun with -k\n'
+			fi ;;
+		SKIP)
+			if [ "$keep_skipped" = 0 ]; then printf '       evidence: not kept (SQ_KEEP_SKIPPED=0), rerun with -k\n'
+			elif run_make "$skiproot" "$keep_skipped" skiprun && mv "$T_DIR" "$skiprun/"; then printf '       evidence kept in %s\n' "$skiprun/$T_NAME"
+			else printf '       evidence: rerun with -k\n'
+			fi ;;
+	esac
 	return 0
 }
 
@@ -9770,6 +9831,34 @@ c_nodes_o_fail() {   # AC 11, 24 (timed)
 		rc_is 0 && err_empty && [ "$(membar_note)" = "↳ memory counts RealMemory: scontrol failed (slurm_load_node error: down)" ]'
 }
 
+# timeout_rc TOOL: the exit status of the timeout around TOOL's first call
+# (TIMEOUT-RC lines, SQSTUB_TIMEOUT=logrc); none while it runs or not so
+timeout_rc() { gawk -F'\t' -v t="$1" '$1 == "TIMEOUT-RC" && index(" " $3 " ", " " t " ") { print $2; exit }' "$LOG"; }
+# one attempt of b3: the --json call fails after 2.9 s, so sinfo gets the
+# 0.1 s floor.  Judged only when that call ended before its 3 s timeout
+# fired, as the timeout itself says (its rc, logrc): the window is the 0.1 s
+# before the bound less the start-up of timeout, sh and the stub, which a
+# loaded host may not leave (the call then times out and sq rightly asks no
+# sinfo).  What holds at any speed is judged in every attempt: the bound is
+# 3 s, and a call that did not end by itself (no mark: the stub writes it once
+# its hang is over) is followed by no sinfo call, so sq acting on the call
+# before it ends is a FAIL, not an unmet precondition
+o_bounds_floor() {
+	local d rc
+	d=$(jfx_copy b3 resources-11964)
+	printf '@hang 2.9\n@file create jsonmark ended\n@exit 1\n' > "$d/scontrol-node.json"
+	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=logrc SQ_TIMEOUT=3 -- --no-color job 11964
+	rc=$(timeout_rc scontrol)
+	hold "b3: rc 0, its --json call bounded at SQ_TIMEOUT's 3 s (got $(timeout_of scontrol))" eval 'rc_is 0 && [ "$(timeout_of scontrol)" = 3.000000 ]'
+	hold "b3: a --json call that did not end by itself (no mark) is followed by no sinfo call (sinfo's bound: $(timeout_of sinfo))" eval '
+		[ -e "$RUN/jsonmark" ] || [ -z "$(timeout_of sinfo)" ]'
+	hold "b3: a --json call its timeout cut (rc 124) reads 'no response after 3s' (notes: $(why_notes | paste -sd'|'))" eval '
+		[ "$rc" != 124 ] || why_notes | grep -qxF "the nodes are unknown: scontrol failed (no response after 3s)"'
+	hold "b3: its --json call's timeout returned (a TIMEOUT-RC line)" test -n "$rc"
+	pre "did the --json call (a 2.9 s hang) end before its 3 s timeout fired (the last: its timeout's rc ${rc:-none})" eval '
+		[ -n "$rc" ] && [ "$rc" != 124 ] && [ "$rc" != 137 ]'
+	need "SQ_TIMEOUT=3, --json failing after 2.9 s: sinfo's bound exactly 0.100000 (got $(timeout_of sinfo))" eval '[ "$(timeout_of sinfo)" = 0.100000 ]'
+}
 c_nodes_o_bounds() {   # AC 12 (timed)
 	T_TITLE="NODES -o bounds: sinfo and -o within what --json left of one budget, never waiting twice: -o gets what sinfo left (1.5 to 2.0 of 3 s; 2.5 to 3.0 of 6 s with sinfo taking 3), sinfo at least 0.1 s; timeouts named by the first bound"
 	local d start v
@@ -9788,10 +9877,7 @@ $(rs_sinfo)")
 	need "SQ_TIMEOUT=6, --json failing at once, sinfo taking 3 s, -o hanging: -o bound 2.5 to 3.0, done within 7.5 s (twice would be 9)" eval '
 		rc_is 0 && err_empty && v=$(timeout_of scontrol 2) && gawk -v v="$v" "BEGIN { exit !(v >= 2.5 && v <= 3.0) }" &&
 		[ $(( $(up_ms) - start )) -lt 7500 ] && [ "$(why_notes)" = "the nodes are unknown: scontrol failed (no response after 6s)" ]'
-	d=$(jfx_copy b3 resources-11964)
-	printf '@hang 2.9\n@exit 1\n' > "$d/scontrol-node.json"
-	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 -- --no-color job 11964
-	need "SQ_TIMEOUT=3, --json failing after 2.9 s: sinfo's bound exactly 0.100000" eval 'rc_is 0 && [ "$(timeout_of sinfo)" = 0.100000 ]'
+	attempts 3 o_bounds_floor
 	d=$(jfx_copy b4 resources-11964 "sinfo=@hang 10")
 	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQSTUB_NOJSON=1 SQ_TIMEOUT=2 -- --no-color job 11964
 	need "sinfo hanging: 'sinfo failed (no response after 2s)', no -o call" eval '
@@ -12035,6 +12121,7 @@ done
 run_case() {
 	local sid
 	T_NAME=$1 T_TITLE= T_XFAIL= T_CALLS=0 T_FAIL=() T_WANT=() T_TODAY=() run_n=0 T_SIDS=
+	T_SKIP=() T_PRE=() T_GATED=() T_ATTEMPT= T_SKIPWHY=
 	T_DIR=$work/$1; mkdir -p "$T_DIR"
 	"c_$1"
 	# whatever a background sq of this case left running is a FAIL, and goes
@@ -12049,6 +12136,7 @@ run_case() {
 results=$work/.results shown=0
 run_case_into() {   # run_case_into NAME: run_case, its output into $results
 	run_case "$1" > "$results/$1.out" 2> "$results/$1.err"
+	printf '%s\n' "$T_SKIPWHY" > "$results/$1.skip"
 	printf '%s\n' "$T_STATUS" > "$results/$1.status"
 }
 show_done() {
@@ -12057,7 +12145,7 @@ show_done() {
 		c=${selected[$shown]}
 		[ -e "$results/$c.status" ] || break
 		cat "$results/$c.out"; cat "$results/$c.err" >&2
-		T_NAME=$c T_DIR=$work/$c T_STATUS=$(cat "$results/$c.status"); tally
+		T_NAME=$c T_DIR=$work/$c T_STATUS=$(cat "$results/$c.status") T_SKIPWHY=$(cat "$results/$c.skip"); tally
 		shown=$((shown + 1))
 	done
 }
@@ -12089,7 +12177,9 @@ else
 	done
 fi
 ms=$(( $(up_ms) - start ))
-printf '\n%d passed, %d failed, %d xfail, %d xpass  (%d.%03ds)\n' \
-	$n_pass $n_fail $n_xfail $n_xpass $((ms / 1000)) $((ms % 1000))
+printf '\n%d passed, %d failed, %s%d xfail, %d xpass  (%d.%03ds)\n' \
+	$n_pass $n_fail "${skipped:+$n_skip skipped, }" $n_xfail $n_xpass $((ms / 1000)) $((ms % 1000))
+[ -z "$skipped" ] || printf 'not judged, as a timing precondition never held:%s\n%s\n' "$skipped" \
+	"(why is not known: on a quiet host, alone, that is a finding; evidence under $skiproot)"
 [ -z "$failrun" ] || printf 'evidence of the failed cases in %s\n' "$failrun"
 [ $n_fail -eq 0 ] && [ $n_xpass -eq 0 ]

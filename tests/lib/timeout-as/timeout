@@ -11,6 +11,11 @@
 #           (printf %b: several lines, any bytes)
 #   log     the real one, each call logged first as "TIMEOUT <argv>" in
 #           SQSTUB_LOG, so a case can read the bound sq gave a client
+#   logrc   as log, and once the real one returns "TIMEOUT-RC <rc> <argv>",
+#           so a case knows whether the bound fired (124) without asking sq:
+#           the real timeout runs as a child, TERM, INT and HUP sent to this
+#           one go on to it; not for a call sq may SIGKILL (that cannot be
+#           passed on: the real one would outlive it)
 real=
 IFS=: read -ra dirs <<< "$PATH"
 for dir in "${dirs[@]}"; do
@@ -34,7 +39,15 @@ case ${SQSTUB_TIMEOUT:-} in
 	log)
 		printf 'TIMEOUT\t%s\n' "$*" >> "${SQSTUB_LOG:?}"
 		exec "$real" "$@" ;;
+	logrc)
+		printf 'TIMEOUT\t%s\n' "$*" >> "${SQSTUB_LOG:?}"
+		"$real" "$@" <&0 & child=$!
+		for sig in TERM INT HUP; do trap "kill -$sig $child 2>/dev/null" "$sig"; done
+		while kill -0 "$child" 2>/dev/null; do wait "$child"; done   # a signal passed on interrupts the wait
+		wait "$child"; rc=$?
+		printf 'TIMEOUT-RC\t%s\t%s\n' "$rc" "$*" >> "$SQSTUB_LOG"
+		exit $rc ;;
 	broken)
 		printf '%b\n' "${SQSTUB_TIMEOUT_TEXT:-timeout: fork system call failed: Resource temporarily unavailable}" >&2; exit 125 ;;
-	*)	echo "tests/lib/timeout-as/timeout: SQSTUB_TIMEOUT is not old, core, broken or log" >&2; exit 125 ;;
+	*)	echo "tests/lib/timeout-as/timeout: SQSTUB_TIMEOUT is not old, core, broken, log or logrc" >&2; exit 125 ;;
 esac
