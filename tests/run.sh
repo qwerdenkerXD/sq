@@ -8066,6 +8066,15 @@ frozen_env() {
 # frozen_reads FZ: what a bash under it reads twice, 20 ms apart; stdin
 # /dev/null, as bash skips BASH_ENV for `bash -c` on a socket (sshd's rule)
 frozen_reads() { env -i "$1" bash -c 'echo $EPOCHREALTIME; sleep 0.02; echo $EPOCHREALTIME' < /dev/null | paste -sd' '; }
+# frozen_date_path: the PATH for a run whose date stands still too (the real
+# one, its now fixed), the timeout stand-in behind it: what collect -r's sh
+# would read if it noted a call's run by the wall clock where /proc/uptime exists
+frozen_date_path() {
+	mkdir -p "$T_DIR/frozen-date"
+	printf '#!/bin/sh\nexec '"'"'%s'"'"' --date=@1700000000 "$@"\n' "$(command -v date)" > "$T_DIR/frozen-date/date"
+	chmod +x "$T_DIR/frozen-date/date"
+	printf 'PATH=%s' "$T_DIR/frozen-date:$here/lib/timeout-as:$here/bin:$PATH"
+}
 # clock_pair: the wall clock and up_ms, in ms; clock_step A B: how far the wall
 # clock moved against up_ms from pair A to pair B (0 when it did not step)
 clock_pair() { printf '%s %s' "$(date +%s%3N)" "$(up_ms)"; }
@@ -8104,6 +8113,13 @@ c_clock_frozen() {
 	why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=5.5 "$fz" -- --no-color job 11945
 	need "frozen, sacct answering after 5.2 s of 5.5: getent bounded by what is left of the deadline, under 5.4 s (got $(timeout_of getent))" eval '
 		rc_is 0 && gawk -v v="$(timeout_of getent)" "BEGIN { exit !(v != \"\" && v + 0 < 5.4) }"'
+	# date frozen too: collect -r notes a call's run on sq's clock, so what the
+	# --json call used still comes off -o's bound (noted by date it would read 0)
+	d=$(json_late_fx frozen-left)
+	why_run "$d" "$(frozen_date_path)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 "$fz" -- --no-color job 11964
+	got=$(timeout_of scontrol 2)
+	need "frozen, date too, --json failing after 1 s of 3: -o gets what is left, over 1 s and at most 2.1 (got ${got:-none})" eval '
+		rc_is 0 && gawk -v v="$got" "BEGIN { exit !(v + 0 > 1 && v + 0 <= 2.1) }"'
 	# a host without /proc/uptime: the wall clock, as before, so a step of it
 	# inside a budget moves it there: judged only when the wall clock did not
 	# step during the run (attempts), what holds anyway in every attempt
@@ -8118,6 +8134,12 @@ c_clock_frozen() {
 	NOUPTIME=1 why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
 	need "no /proc/uptime, the timed sinfo killed by SIGKILL: 'sinfo failed (signal 9)', not a timeout (notes: $(why_notes | paste -sd'|'))" eval '
 		rc_is 0 && err_empty && [ "$(why_notes)" = "the nodes are unknown: sinfo failed (signal 9)" ]'
+}
+json_late_fx() {   # json_late_fx NAME: resources-11964, its --json call failing after 1 s, -o hanging; its directory
+	local d; d=$(jfx_copy "$1" resources-11964)
+	printf '@hang 1\n@exit 1\n' > "$d/scontrol-node.json"
+	{ cat "$jfx/resources-11964/scontrol-node"; printf '@hang 10\n'; } > "$d/scontrol-node"
+	printf '%s' "$d"
 }
 late_acct_fx() {   # late_acct_fx NAME: cancelled-11945, its sacct answering after 5.2 s, getent hanging; its directory
 	local d; d=$(jfx_copy "$1" cancelled-11945)
@@ -8151,9 +8173,7 @@ nouptime_acct() {   # one attempt: sacct late, getent hanging, no /proc/uptime
 }
 nouptime_left() {   # one attempt: --json failing after 1 s, -o hanging, no /proc/uptime (T5: what a timed call used comes off the next bound)
 	local d c0 c1 v
-	d=$(jfx_copy nouptime-left resources-11964)
-	printf '@hang 1\n@exit 1\n' > "$d/scontrol-node.json"
-	{ cat "$jfx/resources-11964/scontrol-node"; printf '@hang 10\n'; } > "$d/scontrol-node"
+	d=$(json_late_fx nouptime-left)
 	c0=$(clock_pair)
 	NOUPTIME=1 why_run "$d" "$(timeout_as)" SQSTUB_TIMEOUT=log SQ_TIMEOUT=3 -- --no-color job 11964
 	c1=$(clock_pair); v=$(timeout_of scontrol 2)
