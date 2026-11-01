@@ -304,9 +304,12 @@ waits_for() {   # (SECONDS may have one decimal: 2.5)
 }
 leftovers() { ps -s "$1" -o pid=,args= 2>/dev/null; }    # leftovers SID: what still runs in it
 nothing_left() { [ -z "$(leftovers "$SQ_PID")" ]; }       # in the current run's session
-session_kill() {   # session_kill SID: every process still in it, by pid
-	local pid
-	for pid in $(ps -s "$1" -o pid= 2>/dev/null); do kill -KILL "$pid" 2>/dev/null; done
+session_kill() {   # session_kill SID: every process still in it, by pid, until none is left
+	local pid pids n=0      # (one forked between ps and kill is in the next pass; zombies are only waited for)
+	while pids=$(ps -s "$1" -o pid=,stat= 2>/dev/null | gawk '$2 !~ /^Z/ { print $1 }') && [ -n "$pids" ] && [ $n -lt 50 ]; do
+		for pid in $pids; do kill -KILL "$pid" 2>/dev/null; done
+		n=$((n + 1))
+	done
 }
 stub_calls() { grep -c '^CALL' "$LOG"; }                   # how often a stub was asked
 
