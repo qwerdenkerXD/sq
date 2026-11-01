@@ -3,11 +3,13 @@
 # of its output (counts, rows, captions, escapes, widths, exit codes), never a
 # snapshot of it.
 #
-#   tests/run.sh [-k|--keep] [--pin | --pin-frozen] [-j N] [--at WHEN] [NAME...]   NAME: run only the case of that name
+#   tests/run.sh [-k|--keep] [--pin | --pin-frozen] [-j N] [--at WHEN] [NAME...]   NAME: run only the case of that name; no such case: exit 2
 #
 # --at WHEN runs as if the wall clock read WHEN at the start, e.g. --at
 # '2026-12-31 23:59:30 UTC', sq byte for byte: lib/clock-at/env.bash says how.  A
-# recorded comparison holds at any moment, so the suite passes at any WHEN.
+# recorded comparison holds at any moment, so the suite passes at any WHEN but
+# for a form boundary's few seconds: clock_step on hplus and wide-text (21:00:00,
+# 19:00:00 UTC), and same-run comparisons keeping the form (K4, wide_c_mode).
 #
 # -j N runs N cases at once (default 1, one after the other), each case whole
 # and its lines printed in the order of the cases as always; the cases that
@@ -47,7 +49,8 @@
 # util-linux `flock` (the stub's call counter, the failed cases' evidence) and
 # procps `ps` (sq log's leftover processes, found by session id) for the sq
 # log cases; Linux's /proc/uptime, the clock every elapsed time is measured by
-# (up_ms).
+# (up_ms); tmux (wide_tmux); util-linux unshare and mount, with unprivileged
+# user namespaces (clock_frozen); python3 (width_table); systemd-run (nodes_o_cost).
 # The stubs in tests/bin stand in for squeue/sinfo/sacct/sstat/scontrol
 # (tests/lib/stub.sh says how, tests/FAITHFULNESS.md how they were checked
 # against the real ones) and for getent; tests/bin/stty only logs and runs the

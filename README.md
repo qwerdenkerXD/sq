@@ -147,8 +147,8 @@ watch -n 5 'sq log --no-follow -n 20 12345'
 ## Tests
 
 ```sh
-tests/run.sh              # ~25 min, no cluster needed
-tests/run.sh -j 6         # ~8 min: 6 cases at once, the timed ones one by one after
+tests/run.sh              # no cluster needed
+tests/run.sh -j 3         # 3 cases at once, the timed ones one by one after: 36-52 min on a 12-thread WSL host shared with other load
 ```
 
 The suite puts stand-ins for `squeue`, `sinfo`, `sacct`, `sstat`, `scontrol` and `getent` first
@@ -161,6 +161,10 @@ and the help's screens anew, for a change meant to change them). Known defects a
 as expected failures, so a fix shows up as one. `tests/faithfulness.sh <host>` compares the
 stand-ins' output with the real tools, read-only, and fails wherever a real tool complains on
 stderr.
+
+A timed case whose timing precondition never held is a SKIP: named in the summary, no failure,
+evidence under `sq-skipped/`. `tests/run.sh --at WHEN` runs as if the clock read WHEN. Needs
+Linux's `/proc/uptime`.
 
 ## License
 
