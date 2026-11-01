@@ -199,6 +199,11 @@ line=$(printf 'CALL\t%s\t' "$tool"; [ $# -gt 0 ] && printf '%q ' "$@"
 		case $v in SQUEUE_FORMAT|SQUEUE_FORMAT2) ;; SQUEUE_*|SACCT_*|SCONTROL_*|SINFO_*) printf '\t%s=%q' "$v" "${!v}" ;; esac
 	done)
 printf '%s\n' "$line" >> "$SQSTUB_LOG"
+# what sinfo itself refuses of its environment (23.11.4, src/sinfo/opts.c:154)
+if [ "$tool" = sinfo ] && [ -n "${SINFO_ALL+set}" ] && [ -n "${SINFO_PARTITION+set}" ]; then
+	echo 'sinfo: error: Conflicting options, SINFO_ALL and SINFO_PARTITION, specified. Please choose one or the other.' >&2
+	exit 1
+fi
 
 # ---- argv: every option sq can send, nothing else --------------------------
 mode=; fmt=; noheader=0; nodes=0; trail=1; delim='|'; parsable=0; allsteps=0; noconvert=0; mirror=0 derive=0 json=0 figrows=0

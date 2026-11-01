@@ -8701,6 +8701,24 @@ parent_rows_are() {
 	job_run "$1-11963" COLUMNS=120 "${PARENT_ENV[@]}" -- --no-color job 11963
 	need "$1: the parent rows $(printf '[%s] ' "${@:2}" | tr -s ' ')" eval 'rc_is 0 && [ "$(parent_rows)" = "$want" ]'
 }
+no_sinfo_env() { ! gawk -F'\t' '$1 == "CALL" && $2 == "sinfo"' "$LOG" | grep -q SINFO_; }
+c_dash_sinfo_env() {   # U-design U1: no SINFO_* reaches any sinfo of sq
+	T_TITLE="the dashboard: each SINFO_* of 23.11.4's opts.c exported, alone and all seven with a name no Slurm has: the accepted screen, none reached sinfo, so SINFO_ALL with SINFO_PARTITION no longer reads 'slurm unreachable'; SLURM_CLUSTERS still reaches sinfo"
+	local how
+	for how in SINFO_ALL=1 SINFO_ALL= SINFO_FEDERATION=1 SINFO_FORMAT=%N SINFO_FUTURE=1 SINFO_LOCAL=1 SINFO_PARTITION=main SINFO_SORT=-N \
+		"SINFO_ALL=1 SINFO_PARTITION=main" "SINFO_ALL=1 SINFO_FEDERATION=1 SINFO_FORMAT=%N SINFO_FUTURE=1 SINFO_LOCAL=1 SINFO_PARTITION=main SINFO_SORT=-N SINFO_NOSUCH=1"; do
+		sq_run membar-busy SQSTUB_HOST=FranzGB $how -- --full --no-color
+		need "$how: the accepted screen, none reached sinfo, no banner" eval 'rc_is 0 && err_empty && membar_busy_is && no_sinfo_env && ! plain | grep -q "slurm unreachable"'
+	done
+	sq_run membar-busy SQSTUB_HOST=FranzGB SLURM_CLUSTERS=there -- --full --no-color
+	need "SLURM_CLUSTERS=there still reaches sinfo" eval '[ "$(env_of sinfo 1 SLURM_CLUSTERS)" = there ]'
+	sq_run membar-busy -- help env
+	need "sq help env says sinfo runs without SINFO_*, and what is out" eval 'rc_is 0 && plain | tr -s " \n" " " | grep -qF "sacct and sinfo run without your SACCT_* and SINFO_* settings: the node block lists what sinfo lists by default, so unless you are an operator no node that is only in partitions hidden or closed to you."'
+	for how in sinfo_all SINFO_PARTITION sacct_format; do
+		sq_run membar-busy -- help $how
+		need "sq help $how points at env" eval 'rc_is 2 && grep -qF "did you mean sq help env?" "$ERR"'
+	done
+}
 c_why_parent() {   # S-v3 rule P: ACs 1-6, 7 (sacct failing), 7b-7d, 8, 9's parent lines
 	T_TITLE="a dependency parent's line reads its exit as sq job PARENT does (steps folded, OOM wins, squeue's 0:1 as 1, an unreadable pair ?), finds it by JobID or unique id (an array task's, a het leader's), shows no exit for a COMPLETED one, and names accounting's silence for a parent sq asked accounting about, squeue's first"
 	local f pid cols line own PARENT_ENV=()
@@ -10097,11 +10115,11 @@ NodeList=-x; PartitionName=LocalQ")
 	why_run "$d" SQSTUB_NOJSON=1 -- --no-color job 11964
 	need "sq job, every sinfo name unlistable: no scontrol -o call, each row ?" eval '
 		rc_is 0 && err_empty && [ "$(node_calls)" = "scontrol --json,sinfo" ] && why_unknown "a,b" "did not say" && why_unknown "-x" "did not say"'
-	# the dashboard lists the names of its own sinfo, whatever SINFO_* filters
+	# the dashboard lists the names of its own sinfo; no SINFO_* reaches it
 	for how in "" SINFO_PARTITION=main; do
 		sq_run membar-busy SQSTUB_NOJSON=1 SQSTUB_HOST=FranzGB $how -- --full --no-color
-		need "the dashboard${how:+, $how exported}: its sinfo once, scontrol -o its names, no -o %N call, the accepted screen" eval '
-			rc_is 0 && err_empty && [ "$(calls sinfo)" = 1 ] && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0 && ! grep -q -- "-o %N" "$LOG" && membar_busy_is'
+		need "the dashboard${how:+, $how exported}: its sinfo once, scontrol -o its names, no -o %N call, the accepted screen, no SINFO_* reached sinfo" eval '
+			rc_is 0 && err_empty && [ "$(calls sinfo)" = 1 ] && argv_is scontrol 2 -o show node fb2-bioinf,fb2-bioinf-0 && ! grep -q -- "-o %N" "$LOG" && membar_busy_is && no_sinfo_env'
 	done
 	d=$(dash_copy dthird "sinfo=@include $fixtures/membar-busy/sinfo
 CPUsState=0/8/0/8; NodeList=fb2-extra; FreeMem=7000; Memory=8000; StateLong=idle; Reason=none; TimeStamp=Unknown; CPUsLoad=0.00; AllocMem=0")
@@ -12489,7 +12507,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	why_parent why_parent_hang why_parent_own job_width_docs
+	why_parent why_parent_hang why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
