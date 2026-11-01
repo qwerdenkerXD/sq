@@ -3,7 +3,11 @@
 # of its output (counts, rows, captions, escapes, widths, exit codes), never a
 # snapshot of it.
 #
-#   tests/run.sh [-k|--keep] [--pin | --pin-frozen] [-j N] [NAME...]   NAME: run only the case of that name
+#   tests/run.sh [-k|--keep] [--pin | --pin-frozen] [-j N] [--at WHEN] [NAME...]   NAME: run only the case of that name
+#
+# --at WHEN runs as if the wall clock read WHEN at the start, e.g. --at
+# '2026-12-31 23:59:30 UTC', sq byte for byte: lib/clock-at/env.bash says how.  A
+# recorded comparison holds at any moment, so the suite passes at any WHEN.
 #
 # -j N runs N cases at once (default 1, one after the other), each case whole
 # and its lines printed in the order of the cases as always; the cases that
@@ -67,7 +71,7 @@ set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 sq=${SQ_UNDER_TEST:-${here%/*}/sq}    # SQ_UNDER_TEST: another build of sq, e.g. an installed one
 fixtures=$here/fixtures
-keep=0; pin=0; pin_frozen=0; jobs=1; only=()
+keep=0; pin=0; pin_frozen=0; jobs=1; only=(); clock_at= at_given=
 while [ $# -gt 0 ]; do
 	case $1 in
 		-k|--keep) keep=1 ;;
@@ -75,6 +79,7 @@ while [ $# -gt 0 ]; do
 		--pin-frozen) pin_frozen=1 ;;
 		-j) jobs=${2-}; [ $# -lt 2 ] || shift ;;
 		-j*) jobs=${1#-j} ;;
+		--at) at_given=1 clock_at=${2-}; [ $# -lt 2 ] || shift ;;
 		-h|--help) sed -n '2,/^# Results:/{/^# Results:/d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
 		-*) printf 'run.sh: unknown option %s\n' "$1" >&2; exit 2 ;;
 		*) only+=("$1") ;;
@@ -89,6 +94,12 @@ case $jobs in
 esac
 jobs=$((10#$jobs)); [ "$jobs" -ge 1 ] || { echo "run.sh: -j takes 1 or more" >&2; exit 2; }
 
+if [ -n "$at_given" ]; then
+	[[ $clock_at == *[![:space:]]* ]] && clock_at=$(date -d "$clock_at" +%s 2>/dev/null) || { echo "run.sh: --at takes a date, as date -d reads it" >&2; exit 2; }
+	export CLOCK_AT_DATE=$(command -v date) CLOCK_AT_GAWK=$(command -v gawk)
+	export CLOCK_AT_SHIFT=$((clock_at - EPOCHSECONDS)) BASH_ENV=$here/lib/clock-at/env.bash PATH=$here/lib/clock-at:$PATH
+	. "$BASH_ENV"
+fi
 # sq measures widths with gawk's length(), which counts characters only in a
 # UTF-8 locale; pick one that exists, rather than inherit whatever the caller has
 utf8=
@@ -221,6 +232,7 @@ sq_env() {
 	local -A env=([PATH]="$here/bin:$PATH" [LC_ALL]=$utf8 [TZ]=UTC
 	              [SQSTUB_FIXTURE]=$([[ $fixture == /* ]] && echo "$fixture" || echo "$fixtures/$fixture")
 	              [SQ_TIMEOUT]=3 [SQ_WIDTH]=120 [SQ_HEIGHT]=50 [SQSTUB_UID]=4242 [HOME]=$RUN/home)
+	[ -z "${CLOCK_AT_SHIFT:-}" ] || env[CLOCK_AT_SHIFT]=$CLOCK_AT_SHIFT env[BASH_ENV]=$BASH_ENV env[CLOCK_AT_DATE]=$CLOCK_AT_DATE env[CLOCK_AT_GAWK]=$CLOCK_AT_GAWK    # --at
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do
 		case $1 in -*) unset "env[${1#-}]" ;; *=*) env[${1%%=*}]=${1#*=} ;; esac
 		shift
@@ -3329,20 +3341,22 @@ EOF
 # screens failed now and then.  So every end a dashboard fixture gives sits
 # mid-bucket (12h30m, 3m30s), and a step of 2 s either way (SQSTUB_SKEW) draws
 # the same screen
+mask_estimate_whole() { sed -E 's/→ ([A-Z][a-z]{2}[0-9]{2} [0-9]{2}:[0-9]{2}|[0-9]{2}:[0-9]{2}|[0-9]{4}-[0-9]{2}-[0-9]{2})/→ EST/g'; }   # an estimate in any of its forms
 c_clock_step() {
-	T_TITLE="every fixture with a relative time draws the same screen when the clock steps 2 s back or forward after the stub answered, a start estimate's clock and date aside"
+	T_TITLE="every fixture with a relative time draws the same screen when the clock steps 2 s back or forward after the stub answered, a start estimate aside"
 	local dir fx want skew
 	for dir in "$fixtures"/*/; do
 		fx=${dir%/}; fx=${fx##*/}
 		case $fx in _common|sqjob) continue ;; esac
 		grep -qE '\\\{(now|epoch)|_common/(sacct|squeue-all)-defaults' "$dir"* 2>/dev/null || continue
-		# a start estimate moves with the stub's clock (it is \{now+3h} too), and
-		# its HH:MM with it whenever a minute edge falls between the runs
+		# a start estimate moves with the stub's clock (it is \{now+3h} too), its
+		# HH:MM whenever a minute edge falls between the runs, and its form
+		# when the 2 s carry it over midnight: it goes whole, no retry to hide behind
 		sq_run "$fx" -- --full --color
-		want=$RUN/screen; without_clock "$OUT" | mask_estimates > "$want"
+		want=$RUN/screen; without_clock "$OUT" | mask_estimate_whole > "$want"
 		for skew in -2 2; do
 			sq_run "$fx" SQSTUB_SKEW=$skew -- --full --color
-			need "$fx, the clock stepped ${skew}s: the same screen, start estimates aside" eval 'cmp -s "$want" <(without_clock "$OUT" | mask_estimates)'
+			need "$fx, the clock stepped ${skew}s: the same screen, start estimates aside" eval 'cmp -s "$want" <(without_clock "$OUT" | mask_estimate_whole)'
 		done
 	done
 }
@@ -8246,6 +8260,42 @@ c_clock_inventory() {
 	need "the inventory gives each line a kind it knows" eval '! cut -f1 <<< "$clock_inventory" | grep -qvxE "duration|fallback|shared|input|shown|slurm|text"'
 	stubs_answer
 }
+# --at's stand-in itself (lib/clock-at): under a shift every clock sq reads and
+# the stubs' \{now} move together, or a shifted run would prove nothing.
+# clock_at_env N: the VAR=values that shift a run N seconds, whatever --at this suite has
+clock_at_env() { printf '%s\n' "CLOCK_AT_SHIFT=$1" "BASH_ENV=$here/lib/clock-at/env.bash" "PATH=$here/lib/clock-at:$here/bin:$PATH" "CLOCK_AT_DATE=${CLOCK_AT_DATE:-$(command -v date)}" "CLOCK_AT_GAWK=${CLOCK_AT_GAWK:-$(command -v gawk)}"; }
+c_clock_at() {
+	T_TITLE="run.sh --at's stand-in: a run 100 days 3 h 17 m on reads date, gawk's systime(), printf's %()T and the stubs' \\{now} that far on, sq byte for byte: its title clock, AGOs and snapshot move together, against a run at shift 0; under --at the clock is near WHEN; --at takes a date"
+	local shift=8651820 want want_hm snap cache=$T_DIR/cache at_ago; local -a at
+	mapfile -t at < <(clock_at_env 0)
+	sq_run finished "${at[@]}" --; want=$(without_clock "$OUT")
+	mapfile -t at < <(clock_at_env "$shift")
+	want_hm=$(TZ=UTC command date -d "@$(( EPOCHSECONDS + shift ))" +%H:%M)
+	sq_run finished "${at[@]}" --
+	need "that far on: the same screen, its clock aside: AGO reads the stub and gawk moved alike" eval 'rc_is 0 && err_empty && [ "$(without_clock "$OUT")" = "$want" ]'
+	need "... the title's clock is the shifted one, about $want_hm (got: $(head -n 1 "$OUT" | grep -oE "[0-9]{2}:[0-9]{2}:[0-9]{2}"))" eval 'shifted_hm_near "$want_hm"'
+	mem_run jobmem SQ_WIDTH=110 XDG_CACHE_HOME="$cache" "${at[@]}" -- --color
+	snap=$(head -n 1 "$cache/sq/memuse" 2>/dev/null)
+	need "... the JOBMEM snapshot is dated that far on by printf's %()T (got ${snap:-none})" eval '
+		[ -n "$snap" ] && [ $(( snap - EPOCHSECONDS - shift )) -ge -5 ] && [ $(( snap - EPOCHSECONDS - shift )) -le 5 ]'
+	if [ -n "$at_given" ]; then   # this very suite: the clock it runs on is WHEN's, a run's length on at most
+		at_ago=$(( $(date +%s) - clock_at ))
+		need "--at: date reads WHEN or up to 6 h after (it reads $at_ago s after)" eval '[ "$at_ago" -ge 0 ] && [ "$at_ago" -le 21600 ]'
+	fi
+	need "--at with no value: exit 2 and says so" at_refused no_such_case --at
+	need "--at '': exit 2 and says so" at_refused --at '' no_such_case
+	need "--at ' ': exit 2 and says so" at_refused --at ' ' no_such_case
+	need "--at no such date: exit 2 and says so" at_refused --at 'no such date' no_such_case
+}
+at_refused() {   # at_refused ARG...: run.sh with these refuses --at, before any case
+	local said; said=$("$here/run.sh" "$@" 2>&1)
+	[ $? = 2 ] && [ "$said" = "run.sh: --at takes a date, as date -d reads it" ]
+}
+# shifted_hm_near HH:MM: the title's clock is HH:MM or the minute after (the run took one over)
+shifted_hm_near() {
+	local got; got=$(head -n 1 "$OUT" | grep -oE "[0-9]{2}:[0-9]{2}:[0-9]{2}" | head -n 1 | cut -c1-5)
+	[ "$got" = "$1" ] || [ "$got" = "$(TZ=UTC command date -d "$1 UTC + 1 minute" +%H:%M 2>/dev/null)" ]
+}
 c_why_tail_hung() {   # V2
 	T_TITLE="a reader that does not answer (a hung NFS read, here a tail that sleeps): sq says so after 2 s, kills it, and leaves nothing behind"
 	local d
@@ -11678,12 +11728,20 @@ h0_nr_group() {
 h0_nr_want() {   # h0_nr_want LABEL: what 848d3d4 gave for it, or for what a listed change now means
 	if [ -n "${h0_nr_changes[$1]+set}" ]; then printf '%s' "${h0_old[${h0_nr_changes[$1]}]-}"; else printf '%s' "${h0_old[$1]-}"; fi
 }
+# the eta rows' screens hold start estimates, whose form follows the clock
+# (today HH:MM, this year MonDD HH:MM), so they run at one moment, as every
+# est_* does: est_pin's copy of sq, the stubs at est_now
+h0_nr_eta() {
+	est_pin || return
+	local sq=$EST_SQ
+	h0_nr_group eta pipe est SQ_ETA SQ_WIDTH=160 SQ_HEIGHT=60 SQSTUB_NOW=$est_now -- -- "${h0_flags[@]}"
+}
 h0_nr_all() {   # every spelling, in spellings.sh's order
 	local v bfx=$1
 	for v in SQ_CENTER SQ_FOLD SQ_RECENT SQ_COLOR SQ_COMPACT; do
 		h0_nr_group flags pipe busy24 $v -- --no-bell -- "${h0_flags[@]}"
 	done
-	h0_nr_group eta pipe est SQ_ETA SQ_WIDTH=160 SQ_HEIGHT=60 -- -- "${h0_flags[@]}"
+	h0_nr_eta
 	h0_nr_group bell pty "$bfx" SQ_BELL -- --full -- "${h0_flags[@]}"
 	h0_nr_group bell pty "$bfx" SQ_BELL_ALL SQ_BELL_USER=bob -- --full -- "${h0_flags[@]}"
 	h0_nr_group horizon pty "$bfx" SQ_BELL_HORIZON -- --full -- '<unset>' '' 60 ' 60' '60 ' +60 060 0 abc 10m -60 1.5 $'\t60' $'60\n' ++60 -0 000000060 1234567890
@@ -11737,6 +11795,11 @@ c_h0_number_reader() {   # K4, R3-L1, §2's change list
 		fi
 	done
 	need "every listed change checked ($nchanged)" [ "$nchanged" = 107 ]
+	# the eta rows ran on est_pin's copy; sq itself, on the same fixture, at this moment
+	sq_run est SQ_WIDTH=160 SQ_HEIGHT=60 -SQ_ETA --
+	need "eta: unset shows the estimates" eval 'rc_is 0 && grep -c "→" "$OUT" | grep -qx 4'
+	sq_run est SQ_WIDTH=160 SQ_HEIGHT=60 SQ_ETA=0 --
+	need "eta: 0 hides them" eval 'rc_is 0 && ! grep -q "→" "$OUT"'
 }
 
 # H0-2: exit 2 is a usage error only.  tests/bin/gawk-h0 stands in for gawk
@@ -12294,7 +12357,7 @@ cases=(
 	jobmem_lists memalloc_screens memalloc_call memalloc_fail memalloc_fold memalloc_narrow memalloc_floor_M
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
-	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory why_forged why_nodes_json why_nodes_figures why_pending why_dep
+	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
 	why_parent why_parent_hang why_parent_own job_width_docs
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
@@ -12391,8 +12454,9 @@ else
 	done
 fi
 ms=$(( $(up_ms) - start ))
-printf '\n%d passed, %d failed, %s%d xfail, %d xpass  (%d.%03ds)\n' \
-	$n_pass $n_fail "${skipped:+$n_skip skipped, }" $n_xfail $n_xpass $((ms / 1000)) $((ms % 1000))
+printf '\n%d passed, %d failed, %s%d xfail, %d xpass  (%d.%03ds)%s\n' \
+	$n_pass $n_fail "${skipped:+$n_skip skipped, }" $n_xfail $n_xpass $((ms / 1000)) $((ms % 1000)) \
+	"${at_given:+, started at $(TZ=UTC date -d "@$clock_at" '+%F %T UTC') (--at)}"
 [ -z "$skipped" ] || printf 'not judged, as a timing precondition never held:%s\n%s\n' "$skipped" \
 	"(why is not known: on a quiet host, alone, that is a finding; evidence under $skiproot)"
 [ -z "$failrun" ] || printf 'evidence of the failed cases in %s\n' "$failrun"

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# not a stub: the real gawk, every systime() in a program given as an argument
+# CLOCK_AT_SHIFT seconds on, for run.sh --at (lib/clock-at/env.bash)
+real=${CLOCK_AT_GAWK:?run.sh --at sets it}   # by name: a case may put a gawk of its own on PATH, which calls this one
+args=()
+for a; do
+	case $a in *'systime()'*) a=${a//'systime()'/"(systime() + ${CLOCK_AT_SHIFT:-0})"} ;; esac
+	args+=("$a")
+done
+exec "$real" "${args[@]}"

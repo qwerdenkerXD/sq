@@ -58,36 +58,36 @@ bell SQ_BELL_ALL=5\ 0	bells=1
 bell SQ_BELL_ALL=\ 0	bells=0
 bell SQ_BELL_ALL=\ 1	bells=1
 bell SQ_BELL_ALL=abc	bells=1
-eta SQ_ETA unset	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=$'1\n'	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=$'1\r'	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=$'\331\241'	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=$'\342\200\2031'	rc=0 30dddc5aebbf9536ea1814d670d22fc3
+eta SQ_ETA unset	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=$'1\n'	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=$'1\r'	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=$'\331\241'	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=$'\342\200\2031'	rc=0 4d56fc716bb1aab3ade14c1710286b5f
 eta SQ_ETA=$'\n0'	rc=0 bc1b6b04f2e3a64a03547c4725a60581
-eta SQ_ETA=$'\t1'	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=''	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=++1	rc=0 30dddc5aebbf9536ea1814d670d22fc3
+eta SQ_ETA=$'\t1'	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=''	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=++1	rc=0 4d56fc716bb1aab3ade14c1710286b5f
 eta SQ_ETA=+0	rc=0 bc1b6b04f2e3a64a03547c4725a60581
-eta SQ_ETA=+1	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=+\ 1	rc=0 30dddc5aebbf9536ea1814d670d22fc3
+eta SQ_ETA=+1	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=+\ 1	rc=0 4d56fc716bb1aab3ade14c1710286b5f
 eta SQ_ETA=-0	rc=0 bc1b6b04f2e3a64a03547c4725a60581
-eta SQ_ETA=-1	rc=0 30dddc5aebbf9536ea1814d670d22fc3
+eta SQ_ETA=-1	rc=0 4d56fc716bb1aab3ade14c1710286b5f
 eta SQ_ETA=0	rc=0 bc1b6b04f2e3a64a03547c4725a60581
 eta SQ_ETA=00	rc=0 bc1b6b04f2e3a64a03547c4725a60581
-eta SQ_ETA=0000000001	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=01	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=0x1	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=1	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=1.0	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=1000000001	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=1\ 	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=1\ 1	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=1x	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=2	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=5\ 0	rc=0 30dddc5aebbf9536ea1814d670d22fc3
+eta SQ_ETA=0000000001	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=01	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=0x1	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=1	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=1.0	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=1000000001	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=1\ 	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=1\ 1	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=1x	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=2	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=5\ 0	rc=0 4d56fc716bb1aab3ade14c1710286b5f
 eta SQ_ETA=\ 0	rc=0 bc1b6b04f2e3a64a03547c4725a60581
-eta SQ_ETA=\ 1	rc=0 30dddc5aebbf9536ea1814d670d22fc3
-eta SQ_ETA=abc	rc=0 30dddc5aebbf9536ea1814d670d22fc3
+eta SQ_ETA=\ 1	rc=0 4d56fc716bb1aab3ade14c1710286b5f
+eta SQ_ETA=abc	rc=0 4d56fc716bb1aab3ade14c1710286b5f
 flags SQ_CENTER unset	rc=0 73a719a5bd7ee03b1aaa497967ef05ba
 flags SQ_CENTER=$'1\n'	rc=0 af9518fba3383570610f59d6e150eb53
 flags SQ_CENTER=$'1\r'	rc=0 af9518fba3383570610f59d6e150eb53

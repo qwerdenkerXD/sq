@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# not a stub: the real date, its "now" CLOCK_AT_SHIFT seconds on, for run.sh --at
+# (lib/clock-at/env.bash says what else moves).  A -d of a date in full, or of
+# @EPOCH, is the real date's; a -d "+400 days" counts from the shifted now
+real=${CLOCK_AT_DATE:?run.sh --at sets it}
+now=$((EPOCHSECONDS + ${CLOCK_AT_SHIFT:-0})) args=() given=
+while [ $# -gt 0 ]; do
+	case $1 in
+		-d|--date)  given=1; shift; set -- "--date=$1" "${@:2}"; continue ;;
+		--date=[-+]*) given=1; args+=("--date=1970-01-01 00:00:00 UTC + $now seconds ${1#--date=}") ;;
+		--date=*|-r|--reference=*) given=1; args+=("$1") ;;
+		-d*)        given=1; set -- "--date=${1#-d}" "${@:2}"; continue ;;
+		*)          args+=("$1") ;;
+	esac
+	shift
+done
+[ -n "$given" ] || args=("--date=@$now.${EPOCHREALTIME#*[.,]}" "${args[@]}")
+exec "$real" "${args[@]}"
