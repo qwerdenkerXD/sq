@@ -10576,6 +10576,7 @@ c_suite_rules() {
 	line=$(rules_case synth_skip_fail)
 	need "FAIL beats SKIP (got: $line)" test "$line" = "$(printf '%-5s  %-24s %s' FAIL synth_skip_fail 'plain need; also not judged: did it hold: no, in all 2 attempts')"
 	need "2 passed, 4 failed, rc 1, no SKIP counted" eval 'rc_is 1 && rules_line "^2 passed, 4 failed, 0 xfail, 0 xpass  \(" && ! rules_said "not judged, as"'
+	rules_run synth_gated; rules_run synth_gated   # 3 runs of failed evidence, more than sq-skipped/'s window, for a SKIP to push out
 	rules_run synth_skip; run=$(find "$T_DIR/tmp/sq-skipped" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*Z.[0-9]*')
 	need "a SKIP alone: rc 0, its line with the load average" eval 'rc_is 0 && rules_line "^SKIP +synth_skip +not judged: did it hold: no, in all 3 attempts \(load average [0-9.]+ [0-9.]+ [0-9.]+\); the rest passed$"'
 	need "... the summary counts and names it, says no cause, names the run kept, which holds the case" eval '
@@ -10585,8 +10586,8 @@ c_suite_rules() {
 	rules_run -j 2 synth_skip synth_ok
 	need "under -j too: named, rc 0, 1 passed, 1 skipped" eval 'rc_is 0 && rules_line "^1 passed, 0 failed, 1 skipped," && grep -qxF "  synth_skip: did it hold: no, in all 3 attempts" "$rules_out"'
 	rules_run synth_skip
-	need "sq-skipped/ keeps the newest 2 runs (kept $(kept_runs sq-skipped)), sq-failed/ apart keeps its 1 (kept $(kept_runs sq-failed))" eval '
-		[ "$(kept_runs sq-skipped)" = 2 ] && [ "$(kept_runs sq-failed)" = 1 ] && [ ! -e "$run" ]'
+	need "sq-skipped/ keeps the newest 2 runs (kept $(kept_runs sq-skipped)), sq-failed/ apart keeps its 3: a SKIP never pushes out a FAIL's evidence (kept $(kept_runs sq-failed))" eval '
+		[ "$(kept_runs sq-skipped)" = 2 ] && [ "$(kept_runs sq-failed)" = 3 ] && [ ! -e "$run" ]'
 	rules_keep=0 rules_run synth_skip
 	need "SQ_KEEP_SKIPPED=0: rc 0, not kept, and it says so, no 'evidence under'" eval '
 		rc_is 0 && [ "$(kept_runs sq-skipped)" = 0 ] && rules_said "evidence: not kept (SQ_KEEP_SKIPPED=0)" && rules_said "that is a finding)" && ! rules_said "evidence under"'
