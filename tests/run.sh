@@ -8318,6 +8318,18 @@ c_clock_at() {
 	need "--at '': exit 2 and says so" at_refused --at '' no_such_case
 	need "--at ' ': exit 2 and says so" at_refused --at ' ' no_such_case
 	need "--at no such date: exit 2 and says so" at_refused --at 'no such date' no_such_case
+	local tool var value
+	for tool in date gawk; do
+		var=CLOCK_AT_${tool^^}
+		for value in "$here/lib/clock-at/$tool" "$tool" /nonexistent; do
+			need "the $tool shim given $var='$value': exit 2 and its one line, no exec" shim_refuses "$tool" "$var" "$value"
+		done
+	done
+}
+shim_refuses() {   # shim_refuses TOOL VAR VALUE: that shim, VAR at VALUE, exits 2 with its one line, bounded as one execing itself would not end
+	local shim=$here/lib/clock-at/$1 said
+	said=$(env "$2=$3" "$bound" -k 2 5 "$shim" 2>&1)
+	[ $? = 2 ] && [ "$said" = "$shim: $2 is no executable file other than this shim: '$3'" ]
 }
 at_refused() {   # at_refused ARG...: run.sh with these refuses --at, before any case
 	local said; said=$("$here/run.sh" "$@" 2>&1)
