@@ -12415,7 +12415,7 @@ for c in $timed_cases; do
 done
 # a NAME that is no case is a usage error, not a run of nothing that passes
 for o in "${only[@]}"; do
-	[[ " ${cases[*]} " == *" $o "* ]] && continue
+	[[ $o != *' '* && " ${cases[*]} " == *" $o "* ]] && continue   # a space would match across two neighbours
 	near=$(printf '%s\n' "${cases[@]}" | gawk -v o="$o" '
 		function dist(a, b,   i, j, la, lb, d, c) { la = length(a); lb = length(b)
 			for (i = 0; i <= la; i++) d[i, 0] = i; for (j = 0; j <= lb; j++) d[0, j] = j
@@ -12497,6 +12497,6 @@ printf '\n%d passed, %d failed, %s%d xfail, %d xpass  (%d.%03ds)%s\n' \
 	$n_pass $n_fail "${skipped:+$n_skip skipped, }" $n_xfail $n_xpass $((ms / 1000)) $((ms % 1000)) \
 	"${at_given:+, started at $(TZ=UTC date -d "@$clock_at" '+%F %T UTC') (--at)}"
 [ -z "$skipped" ] || printf 'not judged, as a timing precondition never held:%s\n%s\n' "$skipped" \
-	"(why is not known: on a quiet host, alone, that is a finding; evidence under $skiproot)"
+	"(why is not known: on a quiet host, alone, that is a finding${skiprun:+; evidence under $skiprun})"
 [ -z "$failrun" ] || printf 'evidence of the failed cases in %s\n' "$failrun"
 [ $n_fail -eq 0 ] && [ $n_xpass -eq 0 ]
