@@ -9,8 +9,8 @@
 # '2026-12-31 23:59:30 UTC', sq byte for byte: lib/clock-at/env.bash says how.  A
 # recorded comparison holds at any moment.  A form boundary, as at 21:00:00 UTC
 # on hplus's +3h, moves the layout, and fails a case comparing two runs that fall
-# across it, so these pin the clock (clock_pin below): clock_step, wide_c_mode,
-# wide_twin_text, whole_c_mode, h0_display_prefs.  Found by reading every use of
+# across it, so these pin the clock (est_pin, PIN_NOW): clock_step, wide_c_mode,
+# wide_twin_text, whole_c_mode, h0_display_prefs, and client_env.  Found by reading every use of
 # the estimate masks, and with a build alternating two moments across a boundary
 # on the cases using estimate fixtures (spec X8).  Run at 2026-12-31 23:59:30 UTC
 # and at the real clock; no other WHEN is promised by a run.
@@ -8671,6 +8671,9 @@ c_why_dep() {   # J6, J7
 	d=$(dep_fx delay1 'after:900+1(unfulfilled)' "$(run_rec 900)")
 	why_run "$d" -- --no-color job 800
 	need "a delay of one minute: 'and 1 minute has passed'" eval 'rc_is 0 && why_has "  waits its turn: it may start once 900 has started and 1 minute has passed"'
+	d=$(dep_fx delay1-row 'after:900+1(unfulfilled),afterok:901(unfulfilled)' "$(run_rec 900)" "$(run_rec 901)")
+	why_run "$d" -- --no-color job 800
+	need "a row's delay of one minute: 'then 1 minute more'" eval 'rc_is 0 && why_has "    900  must start, then 1 minute more · now RUNNING on fb2-bioinf · 1h00m left of 2h00m"'
 	# X1: Slurm takes +N on any clause and waits it on after alone (job_scheduler.c:2906-2910)
 	local no_wait
 	for no_wait in 'afterany|has ended' 'afterok|has completed successfully' 'afternotok|has failed' 'afterburstbuffer|has ended and staged out its burst buffer'; do
@@ -8699,6 +8702,9 @@ c_why_dep() {   # J6, J7
 	d=$(dep_fx lead-plain-star 'afterany:900(unfulfilled),afterany:902_*(unfulfilled),afterany:901(unfulfilled)' "$(run_rec 900)" 'JobID=903; ArrayJobID=902; ArrayTaskID=1; StateCompact=R' "$(run_rec 901)")
 	why_run "$d" -- --no-color job 800
 	need "plain, _*, plain: each plain one a job, in the clauses' order" eval 'rc_is 0 && why_has "  waits its turn: it may start once job 900, every task of array 902 and job 901 have ended"'
+	d=$(dep_fx lead-star-last 'afterok:900(unfulfilled),afterok:902_*(unfulfilled)' "$(run_rec 900)" 'JobID=903; ArrayJobID=902; ArrayTaskID=1; StateCompact=R')
+	why_run "$d" -- --no-color job 800
+	need "plain, _*: the array last, the plain one still a job" eval 'rc_is 0 && why_has "  waits its turn: it may start once job 900 and every task of array 902 have completed successfully"'
 	d=$(dep_fx lead-or 'afterok:902_*(unfulfilled)?afterok:900(unfulfilled)' 'JobID=903; ArrayJobID=902; ArrayTaskID=1; StateCompact=R' "$(run_rec 900)")
 	why_run "$d" -- --no-color job 800
 	need "_* or plain: 'or job 900 has'" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 902 or job 900 has completed successfully"'
@@ -8768,6 +8774,7 @@ c_dash_sinfo_env() {   # U-design U1: no SINFO_* reaches any sinfo of sq
 no_client_env() { ! grep "^CALL" "$LOG" | grep -qE "SINFO_|SACCT_|SCONTROL_" && ! grep "^CALL" "$LOG" | gawk -F'\t' '!/\tSLURM_JSON\(unset\)/ { f = 1 } END { exit !f }'; }
 c_client_env() {
 	T_TITLE="every SACCT_*, SCONTROL_*, SINFO_* of 23.11.4 and SLURM_JSON exported: the dashboard, sq job and sq log the same as without, none reached a call; SQUEUE_* and SLURM_CLUSTERS still read"
+	est_pin || return; local sq=$EST_SQ PIN_NOW=$est_now pss=SQ_PSS_SINCE=@$((est_now - pss_ago))   # two runs compared: one moment for both, as X8
 	local all=(SACCT_FEDERATION=1 SACCT_LOCAL=1 SACCT_FORMAT=JobID SCONTROL_ALL=1 SCONTROL_FEDERATION=1 SCONTROL_FUTURE=1 SCONTROL_LOCAL=1 SCONTROL_SIB=1 SCONTROL_SIBLING=1 SLURM_JSON=compact SINFO_ALL=1 SACCT_NOSUCH=1 SCONTROL_NOSUCH=1)
 	local want
 	sq_run membar-busy SQSTUB_HOST=FranzGB -- --full --no-color; want=$(without_clock "$OUT")
@@ -8775,8 +8782,8 @@ c_client_env() {
 	need "the dashboard: rc 0, the same screen, none reached a call" eval 'rc_is 0 && err_empty && no_client_env && [ "$(calls scontrol)" -ge 1 ] && [ "$(calls sacct)" -ge 1 ] && [ "$want" = "$(without_clock "$OUT")" ]'
 	sq_run membar-busy SQSTUB_HOST=FranzGB SQSTUB_NOJSON=1 "${all[@]}" -- --full --no-color
 	need "the dashboard without --json: none reached scontrol -o" eval 'rc_is 0 && err_empty && no_client_env'
-	job_run running-own -- --no-color job 11950; want=$(plain)
-	job_run running-own "${all[@]}" -- --no-color job 11950
+	job_run running-own "$pss" -- --no-color job 11950; want=$(plain)
+	job_run running-own "$pss" "${all[@]}" -- --no-color job 11950
 	need "sq job: rc 0, the same report, none reached a call" eval 'rc_is 0 && err_empty && no_client_env && [ "$(calls sacct)" -ge 1 ] && [ "$want" = "$(plain)" ]'
 	why_run badconstraints-11955 "${all[@]}" -- --no-color job 11955
 	need "sq job's why section: none reached scontrol" eval 'rc_is 0 && no_client_env && [ "$(calls scontrol)" -ge 1 ]'
@@ -8784,9 +8791,9 @@ c_client_env() {
 	need "SQUEUE_* still read by the dashboard: its filter reaches squeue's call" eval 'rc_is 0 && grep -qP "^CALL\tsqueue\t.* -t PD" "$LOG"'
 	sq_run membar-busy SQSTUB_HOST=FranzGB SLURM_CLUSTERS=there "${all[@]}" -- --full --no-color
 	need "SLURM_CLUSTERS still reaches sinfo" eval '[ "$(env_of sinfo 1 SLURM_CLUSTERS)" = there ]'
-	job_run resources-11964 -- log --no-follow 11964; want=$(plain; echo "rc=$RC")
+	job_run resources-11964 "$pss" -- log --no-follow 11964; want=$(plain; echo "rc=$RC")
 	need "sq log asked squeue" eval '[ "$(calls squeue)" -ge 1 ]'
-	job_run resources-11964 "${all[@]}" -- log --no-follow 11964
+	job_run resources-11964 "$pss" "${all[@]}" -- log --no-follow 11964
 	need "sq log: the same, none reached its squeue" eval 'no_client_env && [ "$want" = "$(plain; echo "rc=$RC")" ]'
 }
 # X7: sinfo answered and lists nothing, as for a user on a site hiding every partition
@@ -8828,6 +8835,9 @@ c_nodes_none() {
 	need "h-qerr: a queue beside it, no banner, the jobs drawn" eval 'rc_is 0 && lacks "slurm unreachable" && has "sinfo lists no node: sinfo: error: slurm_load_node" && has "RUNNING"'
 	sq_run h-both -- --full --no-color
 	need "h-both: squeue failing beside it: squeue's banner, sinfo's line" eval 'rc_is 0 && has "slurm unreachable · " && lacks "slurm unreachable · sinfo" && has "sinfo lists no node: sinfo: error: slurm_load_node"'
+	local e=$T_DIR/fxe; cp -r "$fixtures/h-stderr" "$e"; printf '@stderr \\e[31mred\n@exit 0\n' > "$e/sinfo"
+	sq_run "$e" -- --full --no-color
+	need "sinfo's stderr with a control byte: scrubbed" eval 'rc_is 0 && has "sinfo lists no node: [31mred" && ! grep -qF "$ESC" "$OUT"'
 	sq_run h-stderr SQ_WIDTH=30 -- --compact --no-color
 	need "h-stderr W=30: cut to the screen" eval 'rc_is 0 && has "sinfo lists no node: sinf"'
 	# the job's report, where scontrol sees none either (node_mgr.c:1104, parsers.c:3498: "nodes": [])
@@ -9022,6 +9032,10 @@ c_array_one_count() {
 	parent_rows_are star-cg-br '    11950  its tasks now: 1 COMPLETING · 2 COMPLETED'
 	array_title_is star-br-to-whole '5: 1 done · 4 failed'
 	need "star-br-to-whole: a whole bracket keeps its name, no hint at it" eval 'why_has "  4 reached the time limit: 11950_[3-6]" && lacks "says more"'
+	array_title_is star-br-failed '5: 1 done · 4 failed'
+	need "star-br-failed: a whole FAILED bracket keeps its name, no hint at it" eval 'why_has "  4 failed with exit 1: 11950_[3-6]" && lacks "says more"'
+	array_title_is star-rec-own '4: 1 done · 3 failed'
+	need "star-rec-own: squeue's record with a task of it on its own counts, unnamed" eval 'why_has "  2 failed with exit 1" && why_has "  1 failed with exit 2: 11950_2" && lacks "11950_[2-3]"'
 	# R-H1: the crash shape: 3+ tasks, a row not ended, no record of several (gawk 5.2.1)
 	array_title_is star-lag-3run '3: 3 running'
 	array_title_is star-lag-mix3 '3: 2 done · 1 running'
@@ -9054,6 +9068,8 @@ c_array_one_count() {
 	need "star-running: nothing lagging" eval 'lacks "maybe out of date"'
 	job_run star-qfail-11963 COLUMNS=200 -- --no-color job 11950
 	need "star-qfail: squeue silent: the top note alone, not the lag" eval 'has "squeue did not answer; shown from accounting" && lacks "$lagged"'
+	job_run star-qgarbage-11963 COLUMNS=200 -- --no-color job 11950
+	need "star-qgarbage: squeue unreadable: the top note alone, not the lag" eval 'has "squeue answered what cannot be read; shown from accounting" && lacks "$lagged"'
 	# the queue's records alone, accounting down: as ever, and no blank weakest
 	array_title_is star-partial-acctfail '≥1 (accounting did not answer): 1 failed'
 	need "star-partial-acctfail: no why section from accounting, no lag" eval 'lacks "$lagged" && lacks "the weakest"'
@@ -9629,7 +9645,7 @@ c_opts_env_inert() {   # AC5, AC6, AC7
 	need "SACCT_FEDERATION SACCT_LOCAL SACCT_FORMAT: S carries none, last 2h" eval '
 		rc_is 0 && s_is -a && has "recently finished · last 2h" && ! grep "^CALL	sacct" "$LOG" | grep -q SACCT_'
 	orun sacct-fails SACCT_FEDERATION=1 SACCT_FORMAT=x --
-	need "... sacct failing: S carries none, the fallback after it both again (unset for sacct's call alone)" eval '
+	need "... sacct failing: neither S nor the fallback after it carries them" eval '
 		rc_is 0 && calls_are 1 1 1 1 && ! grep "^CALL" "$LOG" | grep -q SACCT_ && grep -q "^CALL	squeue	.* -t all " "$LOG"'
 	job_run running-own SACCT_FEDERATION=1 SACCT_LOCAL=1 SACCT_FORMAT=x -- --no-color job 11950
 	need "... sq job 11950 as at 1eb0218: rc 0, its sacct calls without them" eval '
@@ -11705,7 +11721,7 @@ est_wait() {
 		bad=$(est_rcs "$f")
 		l=$(cat 2>/dev/null "$f.want")
 		{ [ "${l:-0}" -gt 0 ] && [ "$(wc -l 2>/dev/null < "$f")" = "$l" ]; } || bad="$bad, $(wc -l 2>/dev/null < "$f") screens of ${l:-none owed}"
-		if [ -n "$bad" ]; then T_FAIL+=("${f##*/}: a series whose every run did not end rc 0:$bad"); ok=1; fi
+		if [ -n "$bad" ]; then T_FAIL+=("${f##*/}: a series with a run not rc 0, or short of its screens:$bad"); ok=1; fi
 		[ ! -f "$f.fail" ] || while IFS= read -r l; do [ -z "$l" ] || T_FAIL+=("${f##*/}: $l"); done < "$f.fail"
 		[ ! -s "$f.calls" ] || T_CALLS=$((T_CALLS + $(cat "$f.calls")))
 	done
