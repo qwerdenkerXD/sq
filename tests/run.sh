@@ -8660,6 +8660,30 @@ c_why_dep() {   # J6, J7
 	d=$(dep_fx delay 'after:900+10(unfulfilled)' "$(run_rec 900)")
 	why_run "$d" -- --no-color job 800
 	need "a delay: 'has started and 10 minutes have passed'" eval 'rc_is 0 && why_has "  waits its turn: it may start once 900 has started and 10 minutes have passed"'
+	d=$(dep_fx delay1 'after:900+1(unfulfilled)' "$(run_rec 900)")
+	why_run "$d" -- --no-color job 800
+	need "a delay of one minute: 'and 1 minute has passed'" eval 'rc_is 0 && why_has "  waits its turn: it may start once 900 has started and 1 minute has passed"'
+	# X1: Slurm takes +N on any clause and waits it on after alone (job_scheduler.c:2906-2910)
+	local no_wait
+	for no_wait in 'afterany|has ended' 'afterok|has completed successfully' 'afternotok|has failed' 'afterburstbuffer|has ended and staged out its burst buffer'; do
+		d=$(dep_fx "delay-${no_wait%%|*}" "${no_wait%%|*}:900+30(unfulfilled)" "$(run_rec 900)")
+		why_run "$d" -- --no-color job 800
+		need "${no_wait%%|*}:900+30: no wait claimed, the clause as without it; the dependency line keeps +30" eval 'rc_is 0 && why_has "  waits its turn: it may start once 900 ${no_wait#*|}" && plain | grep -qE "^ +dependency +${no_wait%%|*}:900\\+30\\(unfulfilled\\)$"'
+	done
+	d=$(dep_fx delay-star 'aftercorr:902_*+7(unfulfilled)' 'JobID=903; ArrayJobID=902; ArrayTaskID=1; StateCompact=R')
+	why_run "$d" -- --no-color job 800
+	need "aftercorr:902_*+7: no wait claimed" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 902 has completed successfully, task by matching task"'
+	d=$(dep_fx delay-group 'afterok:900+30(unfulfilled),afterok:901(unfulfilled)' "$(run_rec 900)" "$(run_rec 901)")
+	why_run "$d" -- --no-color job 800
+	need "afterok:900+30,afterok:901: as the same clause, one lead" eval 'rc_is 0 && why_has "  waits its turn: it may start once 900 and 901 have completed successfully"'
+	d=$(dep_fx delay-rows 'after:900+10(unfulfilled),afterok:901+10(unfulfilled)' "$(run_rec 900)" "$(run_rec 901)")
+	why_run "$d" -- --no-color job 800
+	need "after:900+10,afterok:901+10: the wait on after's row alone" eval '
+		rc_is 0 && why_has "    900  must start, then 10 minutes more · now RUNNING on fb2-bioinf · 1h00m left of 2h00m" &&
+		why_has "    901  must complete successfully · now RUNNING on fb2-bioinf · 1h00m left of 2h00m"'
+	d=$(dep_fx delay-apart 'after:900+10(unfulfilled),after:901(unfulfilled)' "$(run_rec 900)" "$(run_rec 901)")
+	why_run "$d" -- --no-color job 800
+	need "after:900+10,after:901: two waits, per row" eval 'rc_is 0 && why_has "  waits its turn: it may start once all of these are met" && why_has "    901  must start · now RUNNING on fb2-bioinf · 1h00m left of 2h00m"'
 	d=$(pend_fx single Reason=Dependency 'Dependency=singleton(unfulfilled)' Name=nightly)
 	why_run "$d" -- --no-color job 800
 	need "singleton: no other job of alice's named nightly" eval 'rc_is 0 && why_has "  waits its turn: it may start once no other job of alice'"'"'s named nightly runs or waits ahead of it"'

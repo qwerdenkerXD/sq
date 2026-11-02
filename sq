@@ -2699,7 +2699,7 @@ function depcond(i, form,   t, x, h, notok_some) {      # FORM has, have (the le
     x = (t == "after") ? "started" : (t == "afterany") ? "ended" : (t == "afterok") ? "completed successfully" : (t == "afternotok") ? (DSTAR[i] ? "ended, " notok_some : "failed") \
       : (t == "aftercorr") ? "completed successfully, task by matching task" : (t == "afterburstbuffer") ? "ended and staged out its burst buffer" : "met " t
   x = (form == "must" ? "must " : h) x
-  if (DD[i] != "") x = x (form == "must" ? ", then " plural(DD[i] + 0, "minute") " more" : " and " plural(DD[i] + 0, "minute") " have passed")
+  if (DD[i] != "") x = x (form == "must" ? ", then " plural(DD[i] + 0, "minute") " more" : " and " plural(DD[i] + 0, "minute") (DD[i] + 0 == 1 ? " has" : " have") " passed")
   return x
 }
 function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids, lead, idw, st, asked) {
@@ -2714,7 +2714,9 @@ function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids,
   for (i = 1; i <= n; i++) {
     DT[i] = DP[i] = DD[i] = DS[i] = DSTAR[i] = ""
     if (depclause(cl[i], m)) {
-      DT[i] = m[1]; DP[i] = m[2] ((m[4] != "" && m[4] != "*") ? "_" m[4] : ""); DD[i] = m[6]; DS[i] = m[7]
+      # +N: Slurm takes and prints it on any clause, and waits it on after alone
+      # (job_scheduler.c:2906-2910), so elsewhere it holds nothing
+      DT[i] = m[1]; DP[i] = m[2] ((m[4] != "" && m[4] != "*") ? "_" m[4] : ""); DD[i] = (m[1] == "after") ? m[6] : ""; DS[i] = m[7]
       DSTAR[i] = (m[4] == "*" || (m[4] == "" && is_array_parent(m[2])))
       if (acct_asked(m)) asked[DP[i]]               # passed to the parents' sacct, as why_plan's pdone
     } else if (match(cl[i], /^singleton\(([a-z]+)\)$/, m)) { DT[i] = "singleton"; DS[i] = m[1] }
