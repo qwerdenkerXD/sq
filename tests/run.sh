@@ -8690,8 +8690,8 @@ c_why_dep() {   # J6, J7
 # the pair sq job PARENT's state line shows (accounting's job row and steps
 # while accounting lists it ended, else squeue's, its 0:1 read as 1:0), shown
 # as a label alone; a COMPLETED parent shows none; a parent sq asked
-# accounting about (its id among the failed clauses') that neither tool holds
-# reads "unknown: accounting did not answer" where sacct failed, squeue's
+# accounting about (acct_asked: a failed clause's, or a _* one's) that neither
+# tool holds reads "unknown: accounting did not answer (its reason)" where sacct failed, squeue's
 # silence named first.  Each parent ended \{epoch-750s}, mid-bucket: 12m ago
 parent_rows() { why_lines | grep -E '^    [0-9]'; }   # the why section's rows of parents
 # parent_rows_are FIXTURE ROW...: sq job 11963 on FIXTURE-11963 (COLUMNS 120,
@@ -8754,8 +8754,8 @@ c_why_parent() {   # S-v3 rule P: ACs 1-6, 7 (sacct failing), 7b-7d, 8, 9's pare
 		job_run $f-11963 COLUMNS=120 -- --no-color job 11950
 		need "$f: sq job 11950 keeps COMPLETED · exit 1" eval 'rc_is 0 && state_is "COMPLETED · exit 1"'
 	done
-	# AC 7, 7b-7d: the parents' sacct failing; asked = the id among the failed
-	# clauses', whatever clause names it on a row; squeue's silence first
+	# AC 7, 7b-7d: the parents' sacct failing; asked = acct_asked's id, here among
+	# the failed clauses', whatever clause names it on a row; squeue's silence first
 	parent_rows_are acctfail-dep-oomstep "    11950  unknown: $refused"
 	parent_rows_are acctfail-dep-sqoomacct '    11950  FAILED · exit 1 · ended 12m ago'
 	parent_rows_are mixed-silent "    11950  $silent" '    11951  must end · now Slurm no longer knows it'

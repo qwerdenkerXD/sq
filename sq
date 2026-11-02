@@ -3207,7 +3207,7 @@ BEGIN {
 JOBAWK
 # ---- what the why section asks for beyond the two answers ---------------------
 # Each only when the job's record calls for it (job_run plan): the parents of
-# a dependency (squeue, and accounting for those that failed), the nodes and
+# a dependency (squeue, accounting for those acct_asked names), the nodes and
 # the queue for a job waiting on resources (scontrol --json show node, or
 # where that fails sinfo for the figures and scontrol -o about its nodes for
 # CPUEfctv and MemSpecLimit, node_hook_job; squeue -t PD,R), and a failed job's
