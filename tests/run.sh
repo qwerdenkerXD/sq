@@ -8815,6 +8815,10 @@ c_why_parent_bound() {
 	cp "$jfx/accthang-dep-oomstep-11963/squeue-all.11950" "$jfx/accthang-dep-oomstep-11963/sacct.11950" "$dep/"
 	why_run "$dep" SQSTUB_UID=1041 COLUMNS=120 SQ_TIMEOUT=8 -- --no-color job 11963
 	need "the row says within N s, N a cut bound below 8" eval 'rc_is 0 && parent_rows | grep -qE "^    11950  unknown: accounting did not answer within [1-7](\.[0-9]*[1-9])?s$"'
+	# squeue's row likewise: its own call hanging, accounting answered and holds nothing
+	echo '@hang 30' > "$dep/squeue-all.11950"; : > "$dep/sacct.11950"
+	why_run "$dep" SQSTUB_UID=1041 COLUMNS=120 SQ_TIMEOUT=8 -- --no-color job 11963
+	need "squeue's row says within N s, N a cut bound below 8" eval 'rc_is 0 && parent_rows | grep -qE "^    11950  unknown: squeue did not answer within [1-7](\.[0-9]*[1-9])?s$"'
 }
 # U-design U2: an answer that cannot be read is no forgotten job, whichever
 # tool gave it; a parent the other tool holds is read from it
@@ -8881,6 +8885,14 @@ c_why_parent_array() {
 	parent_rows_are star-none '    11950  Slurm no longer lists its tasks'
 	parent_rows_are star-plain '    11950  FAILED · exit 1 · ended 12m ago'
 	parent_rows_are star-unf '    11950  its tasks now: 1 CANCELLED · 2 COMPLETED · 1 FAILED'
+	# rule A 3: a bracket not final reads PENDING, a final one its own state, whichever it is
+	parent_rows_are br-running '    11950  its tasks now: 1 FAILED · 4 PENDING'
+	parent_rows_are br-timeout '    11950  its tasks now: 1 COMPLETED · 3 TIMEOUT'
+	# rule A 5, 6: an unasked parent's row has no "maybe more" from another clause's sacct
+	parent_rows_are unasked-maybe '    11940  must complete successfully, which can no longer happen · now unknown: accounting did not answer (boom)' '    11950  must end · now its tasks: 1 RUNNING'
+	# rule A 2: 911950_1 is no task of 11950; two _* afterok keep their one lead
+	parent_rows_are prefix '    11950   its tasks now: 1 COMPLETED' '    911950  its tasks now: 1 FAILED'
+	need "prefix: two _* afterok, one lead" eval 'why_has "  waits its turn: it may start once every task of array 11950 and every task of array 911950 have completed successfully"'
 }
 # AC 9: sq job PARENT's own report on each fixture of rule P that holds its
 # answers is what it was before rule P (the finder is pick()'s own): frozen

@@ -1,0 +1,2 @@
+@include ../../_common/job-defaults
+JobID=11953; ArrayJobID=11950; ArrayTaskID=3; StateCompact=R; Reason=None; UserName=fsill; UserID=1041; Name=bwa-align; NodeList=fb2-bioinf; BatchHost=fb2-bioinf; NumCPUs=16; tres_alloc=cpu=16,mem=64G,node=1,billing=16; TimeUsed=2:01:30; TimeLeft=1:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-8100s}; StartTime=\{epoch-8010s}; EndTime=\{epoch-750s}; exit_code=0:0; WorkDir=/media/BioNAS2/fsill/wgs; STDOUT=logs/%x-%j.out; STDERR=logs/%x-%j.out
