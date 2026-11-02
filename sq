@@ -2114,7 +2114,12 @@ function bracket_left(j, own,   k, t, m) {
 # their own (it can lag), none where squeue has a record of several tasks.
 # N, ord: as task_count.  QT: task number to squeue's row, QT["record"] the
 # tasks squeue's records of several hold.  OWN: the tasks counted on their own.
-function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, x, ROW) {
+# Returns how many it read as not ended from accounting alone: with squeue
+# having answered, a task it does not list (accounting lagging, a runaway row,
+# or a job PrivateData hides from squeue alone), so what the count says of
+# those may be out of date.  A task in a record of squeue's is no such task: it
+# was still pending when squeue answered, and started since
+function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, x, unended, ROW) {
   ord[0] = 0
   QT["record"] = ""       # set before any call reads it: gawk 5.2.1 double-frees an unset element passed down
   for (r = 1; r <= nt; r++) {
@@ -2141,14 +2146,18 @@ function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, 
     j = T[TR[r], "JobID"]; if (index(j, "[")) continue
     t = substr(j, length(id) + 2) + 0
     if (t in own) continue
-    own[t]; task_count(N, ord, stcode(T[TR[r], "State"]), 1)
+    own[t]; c = stcode(T[TR[r], "State"]); task_count(N, ord, c, 1)
+    if (!(c in DONE) && !task_in(QT["record"], t)) unended++
   }
   for (r = 1; r <= nt && QT["record"] == ""; r++) {
     j = T[TR[r], "JobID"]; if (!index(j, "[")) continue
     c = stcode(T[TR[r], "State"]); k = bracket_left(j, own)
     task_count(N, ord, (c in DONE) ? c : "PD", k)
+    if (!(c in DONE) && k) unended++
   }
+  return unended + 0
 }
+function unended_says() { return "maybe out of date: squeue does not list what accounting has not seen end" }
 
 # ---- which records: the job's, a task's, or an array's -----------------------
 # sacct (acct_index): job_row[id] its job rows, row_by_unique_id[unique id] the same, step_row[id, k] / nsteps[id] the
@@ -2443,8 +2452,8 @@ function count(c, k) {
   total += k
 }
 function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax, cminid, mminid, rss, multi,
-                        polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why, N, ord, QT, own, t, seen, nover) {
-  tasks_count(job, R, nq, A, task_row, ntask_rows, N, ord, QT, own)
+                        polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why, N, ord, QT, own, unended, t, seen, nover) {
+  unended = tasks_count(job, R, nq, A, task_row, ntask_rows, N, ord, QT, own)
   for (k = 1; k <= ord[0]; k++) count(ord[k], N[ord[k]])
   if (ntask_rows) {                                       # accounting: the figures
     for (i = 1; i <= ntask_rows; i++) {
@@ -2499,6 +2508,7 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
   if (rss) note("arr", plural(rss, "task") " started before " pss_text() \
                 " (RSS accounting): shared memory counted once per process; their peaks may read high")
   if (multi) note("arr", plural(multi, "task") " peaked in a step of several tasks: that peak adds up each task's own, an upper bound")
+  if (unended && qstat != "fail" && qstat != "bad") note("arr", unended_says())
   if (ntask_rows) why_array(QT, own)
   print_sections()
 }
@@ -2858,13 +2868,14 @@ function is_array_parent(id,   p) {
 # be part of it.  With no task in either, the id reads as any parent's
 # (parent_state): its record if it has a plain one, else why neither answer
 # holds it
-function array_state(id, asked,   N, ord, QT, own, TR, nt, k, out) {
+function array_state(id, asked,   N, ord, QT, own, TR, nt, unended, k, out) {
   nt = asked ? task_rows(AP, npa, id, TR) : 0          # another clause's sacct may have brought one task's rows
-  tasks_count(id, RP, npq, AP, TR, nt, N, ord, QT, own)
+  unended = tasks_count(id, RP, npq, AP, TR, nt, N, ord, QT, own)
   for (k = 1; k <= ord[0]; k++) out = out (k == 1 ? "" : " · ") N[ord[k]] " " paint(stcolour(ord[k]), stname(ord[k]))
   if (out == "") return parent_state(id, asked, "Slurm no longer lists its tasks")
   return "its tasks now: " out (answer_failed(PQSTAT) ? " · maybe out of date: " parents_queue_says() \
-                              : (asked && answer_failed(PASTAT)) ? " · maybe more: " parents_acct_says() : "")
+                              : (asked && answer_failed(PASTAT)) ? " · maybe more: " parents_acct_says() \
+                              : unended ? " · " unended_says() : "")
 }
 
 # ---- Resources, Priority, BadConstraints: the request against the nodes.

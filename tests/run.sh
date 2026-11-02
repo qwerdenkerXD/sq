@@ -8890,8 +8890,8 @@ row_as_title() {
 			print t ": " substr(o, 4) }'
 }
 c_array_one_count() {
-	T_TITLE="sq job ARRAY counts as the parent's row does: every star fixture's title and row the same count, a task once, its why section the same tasks; figures only from a row that says COMPLETED where squeue does not say otherwise"
-	local f want n=0 d
+	T_TITLE="sq job ARRAY counts as the parent's row does: every star fixture's title and row the same count, a task once, its why section the same tasks; figures only from a row that says COMPLETED where squeue does not say otherwise; a task accounting has not seen end and squeue does not list is said on both"
+	local f want n=0 lagged='maybe out of date: squeue does not list what accounting has not seen end' d
 	for d in "$fixtures"/sqjob/star-*-11963 "$fixtures"/sqjob/br-*-11963; do
 		f=${d##*/}; f=${f%-11963}
 		case $f in star-acctfail|star-accthang|star-garbage|star-none|star-plain) continue ;; esac   # their rows hold no count
@@ -8911,6 +8911,7 @@ c_array_one_count() {
 	need "star-partial: the failure in the report, its exit from squeue's record" eval 'why_has "  1 failed with exit 1: 11950_3" && [ "$(why_notes)" = "sq job 11950_3 says more about one of them" ]'
 	need "star-partial: figures over the three that say COMPLETED" eval 'has "over the 3 completed tasks; the weakest: sq job 11950_1"'
 	array_title_is star-stale-acct '4: 1 done · 1 failed · 2 pending'
+	need "star-stale-acct: no overcount, the row of pending tasks lagging is said" eval 'has "$lagged"'
 	array_title_is star-sqonly '2: 1 done · 1 failed'
 	need "star-sqonly: a task only squeue holds has its line, squeue's 0:1 read as 1" eval 'why_has "  1 failed with exit 1: 11950_9"'
 	array_title_is star-requeued '2: 1 done · 1 running'
@@ -8954,9 +8955,28 @@ c_array_one_count() {
 	need "200 tasks of that shape: the report" eval 'rc_is 0 && plain | head -1 | grep -qF "array of 200: 200 running"'
 	array_title_is star-br-cd '5: 5 done'
 	need "star-br-cd: a COMPLETED bracket is no failure" eval 'lacks "failed"'
+	# X4
+	parent_rows_are star-lag-run "    11950  its tasks now: 1 COMPLETED · 1 RUNNING · $lagged"
+	array_title_is star-lag-run '2: 1 done · 1 running'
+	need "star-lag-run: said in sq job 11950 too" eval 'has "$lagged"'
+	parent_rows_are star-lag-rc0 "    11950  its tasks now: 2 RUNNING · $lagged"
+	array_title_is star-lag-rc0 '2: 2 running'
+	need "star-lag-rc0: squeue answering with another task's record" eval 'has "$lagged"'
+	parent_rows_are star-lag-started '    11950  its tasks now: 4 PENDING · 1 RUNNING'
+	array_title_is star-lag-started-th '5: 1 running · 4 pending'
+	need "star-lag-started-th: a throttled record holds its last term too" eval 'lacks "maybe out of date"'
+	job_run star-lag-started-th-11963 COLUMNS=120 -- --no-color job 11950_6
+	need "sq job 11950_6: found in the throttled record's last term (task_in)" eval 'rc_is 0 && plain | head -1 | grep -qF "11950_6"'
+	array_title_is star-lag-started '5: 1 running · 4 pending'
+	need "star-lag-started: a task of squeue's pending record started since: no sign of lag" eval 'lacks "maybe out of date"'
+	parent_rows_are star-running '    11950  its tasks now: 1 RUNNING · 1 FAILED'
+	array_title_is star-running '2: 1 failed · 1 running'
+	need "star-running: nothing lagging" eval 'lacks "maybe out of date"'
+	job_run star-qfail-11963 COLUMNS=200 -- --no-color job 11950
+	need "star-qfail: squeue silent: the top note alone, not the lag" eval 'has "squeue did not answer; shown from accounting" && lacks "$lagged"'
 	# the queue's records alone, accounting down: as ever, and no blank weakest
 	array_title_is star-partial-acctfail '≥1 (accounting did not answer): 1 failed'
-	need "star-partial-acctfail: no why section from accounting" eval 'lacks "the weakest"'
+	need "star-partial-acctfail: no why section from accounting, no lag" eval 'lacks "$lagged" && lacks "the weakest"'
 }
 # gawk 5.2.1 double-frees an unset element passed to a function and read again;
 # gawk's --lint names each one.  These two must stay away from it (spec H1).
@@ -8983,12 +9003,12 @@ c_why_parent_array() {
 	parent_rows_are star-partial '    11950  its tasks now: 1 FAILED · 3 COMPLETED'
 	parent_rows_are star-bracket '    11950  its tasks now: 1 COMPLETED · 1 FAILED · 4 CANCELLED'
 	parent_rows_are star-stale-sq '    11950  its tasks now: 2 FAILED · 2 COMPLETED'
-	parent_rows_are star-stale-acct '    11950  its tasks now: 1 FAILED · 1 COMPLETED · 2 PENDING'
-	parent_rows_are star-stale-one '    11950  its tasks now: 1 FAILED · 3 PENDING'
+	parent_rows_are star-stale-acct '    11950  its tasks now: 1 FAILED · 1 COMPLETED · 2 PENDING · maybe out of date: squeue does not list what accounting has not seen end'
+	parent_rows_are star-stale-one '    11950  its tasks now: 1 FAILED · 3 PENDING · maybe out of date: squeue does not list what accounting has not seen end'
 	parent_rows_are star-running '    11950  its tasks now: 1 RUNNING · 1 FAILED'
 	need "star-running: sacct asked about the _* parent under (unfulfilled), once" eval '[ "$(grep -cP "^CALL\tsacct\t.* -j 11950 " "$LOG")" = 1 ]'
 	parent_rows_are bare-task '    11950_3  must complete successfully, which can no longer happen · now FAILED · exit 1 · ended 12m ago' '    11950    must end · now its tasks: 1 RUNNING'
-	parent_rows_are star-odd-bracket '    11950  its tasks now: 1 FAILED · 3 COMPLETED · 2 PENDING'
+	parent_rows_are star-odd-bracket '    11950  its tasks now: 1 FAILED · 3 COMPLETED · 2 PENDING · maybe out of date: squeue does not list what accounting has not seen end'
 	# afternotok on a whole array says what Slurm tests: at least one not successful, not all failed
 	job_run star-notok-11963 COLUMNS=120 -- --no-color job 11963
 	need "star-notok: the lead says what Slurm tests, the row counts" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 11950 has ended, at least one of them not successfully" && [ "$(parent_rows)" = "    11950  its tasks now: 1 RUNNING · 2 COMPLETED · 1 FAILED" ]'
@@ -9026,7 +9046,7 @@ c_why_parent_array() {
 	parent_rows_are star-plain '    11950  FAILED · exit 1 · ended 12m ago'
 	parent_rows_are star-unf '    11950  its tasks now: 1 CANCELLED · 2 COMPLETED · 1 FAILED'
 	# rule A 3: a bracket not final reads PENDING, a final one its own state, whichever it is
-	parent_rows_are br-running '    11950  its tasks now: 1 FAILED · 4 PENDING'
+	parent_rows_are br-running '    11950  its tasks now: 1 FAILED · 4 PENDING · maybe out of date: squeue does not list what accounting has not seen end'
 	parent_rows_are br-timeout '    11950  its tasks now: 1 COMPLETED · 3 TIMEOUT'
 	# rule A 5, 6: an unasked parent's row has no "maybe more" from another clause's sacct
 	parent_rows_are unasked-maybe '    11940  must complete successfully, which can no longer happen · now unknown: accounting did not answer (boom)' '    11950  must end · now its tasks: 1 RUNNING'
