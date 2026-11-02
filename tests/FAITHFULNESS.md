@@ -254,6 +254,13 @@ Other limits:
   carry a signal (seen live), so it could not be rendered from a fixture that has
   them.
 
+## SINFO_* and array parents, live (2026-11-02, bioserver)
+
+`SINFO_ALL=1 SINFO_PARTITION=LocalQ sinfo -h` exits 1, as the stub does on that pair; sq under the same two
+shows the node block and no `slurm unreachable`. Test arrays with one failed task, `sq job` on dependents:
+`afterok:ID_*` reads `(failed)` with `its tasks now: 2 COMPLETED · 1 FAILED`; `afternotok:ID_*` over the same array
+started, so one task not successful is enough; over an array of all COMPLETED it reads `(failed)`.
+
 ## Known gaps of the suite
 
 Left out on purpose, as cosmetic: right alignment of the numeric columns and
