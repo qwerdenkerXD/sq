@@ -1,0 +1,2 @@
+@include ../../_common/job-sacct-defaults
+JobID=11950_[3-6]; JobIDRaw=11950; UID=1041; User=fsill; State=PENDING; ExitCode=0:0; ElapsedRaw=0; AllocCPUS=0; ReqCPUS=16; ReqTRES=billing=16,cpu=16,mem=64G,node=1; AllocTRES=; Submit=\{epoch-8100s}; Start=Unknown; End=\{epoch-750s}; NodeList=None assigned; WorkDir=/media/BioNAS2/fsill/wgs; JobName=bwa-align; TimelimitRaw=1440

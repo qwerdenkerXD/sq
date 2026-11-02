@@ -1,0 +1,2 @@
+@stderr squeue: error: Unable to contact slurm controller
+@exit 1

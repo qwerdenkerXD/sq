@@ -1,0 +1,2 @@
+@include ../../_common/job-sacct-defaults
+JobID=11963; JobIDRaw=11963; UID=1041; User=fsill; State=PENDING; ExitCode=0:0; ElapsedRaw=0; AllocCPUS=0; ReqCPUS=4; ReqTRES=billing=4,cpu=4,mem=31200M,node=1; AllocTRES=; Submit=\{epoch-9030s}; Start=Unknown; End=Unknown; NodeList=None assigned; WorkDir=/media/BioNAS2/fsill/rnaseq; JobName=merge-counts; TimelimitRaw=720

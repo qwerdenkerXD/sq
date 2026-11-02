@@ -8792,10 +8792,17 @@ c_why_parent() {   # S-v3 rule P: ACs 1-6, 7 (sacct failing), 7b-7d, 8, 9's pare
 # AC 7 where the parents' sacct hangs past SQ_TIMEOUT (2 s): squeue forgot the
 # parent, so accounting's silence; squeue still lists it, so squeue's
 c_why_parent_hang() {   # S-v3 rule P: AC 7, sacct hanging
-	T_TITLE="a parent whose accounting answer did not come within SQ_TIMEOUT: 'unknown: accounting did not answer within 2s' where squeue forgot it, squeue's exit where it lists it"
+	T_TITLE="a parent whose accounting answer did not come within SQ_TIMEOUT: 'unknown: accounting did not answer within 2s' where squeue forgot it, an array's alike, squeue's exit where it lists it"
 	local PARENT_ENV=(SQ_TIMEOUT=2)
 	parent_rows_are accthang-dep-oomstep '    11950  unknown: accounting did not answer within 2s'
 	parent_rows_are accthang-dep-sqoomacct '    11950  FAILED · exit 1 · ended 12m ago'
+	parent_rows_are star-accthang '    11950  unknown: accounting did not answer within 2s'
+	parent_rows_are star-qhang '    11950  its tasks now: 1 COMPLETED · 1 RUNNING · maybe out of date: squeue did not answer within 2s'
+	# F2's one call more under the one budget: SQ_TIMEOUT's bound, the rest answered at once
+	local start_ms=$(up_ms)
+	parent_rows_are star-running-hang '    11950  its tasks now: 1 RUNNING · maybe more: accounting did not answer within 2s'
+	local took_ms=$(( $(up_ms) - start_ms ))
+	need "star-running-hang: done within the call's 2 s and the kill's grace (took $took_ms ms)" test "$took_ms" -le 6000
 }
 # U2: the bound the line names is the call's own, which the shared deadline
 # cuts (SQ_TIMEOUT 8: 8 + 5 s in all, the job's squeue took 6, about 7 left), no
@@ -8817,6 +8824,49 @@ c_why_parent_garbled() {
 	parent_rows_are garbage '    11950  unknown: accounting answered what cannot be read'
 	parent_rows_are qgarbage '    11950  unknown: squeue answered what cannot be read'
 	parent_rows_are garbage-sq '    11950  FAILED · exit 1 · ended 12m ago'
+	parent_rows_are star-garbage '    11950  unknown: accounting answered what cannot be read'
+}
+# U-design U3: an array parent's tasks: per task squeue's record, else
+# accounting's row; counts by state are all Slurm's dependency code reads
+c_why_parent_array() {
+	T_TITLE="a _* parent, any clause: a task counts once, squeue's record first, accounting's row else, a bracket less those on their own; one source failing is said on the row; none in either: the failure or the old words; another clause's rows are no count of the array"
+	local PARENT_ENV=()
+	local refused='accounting did not answer (sacct: error: Problem talking to the database: Connection refused)'
+	parent_rows_are star-array '    11950  its tasks now: 1 CANCELLED · 2 COMPLETED · 1 FAILED'
+	need "star-array: its tasks asked of sacct as 11950" eval 'grep -qP "^CALL\tsacct\t.* -j 11950 " "$LOG"'
+	job_run star-array-11963 COLUMNS=120 -- --no-color job 11950
+	need "star-array: sq job 11950 counts the same rows" eval 'rc_is 0 && plain | head -1 | grep -qF "array of 4: 2 done · 1 failed · 1 cancelled"'
+	parent_rows_are star-partial '    11950  its tasks now: 1 FAILED · 3 COMPLETED'
+	parent_rows_are star-bracket '    11950  its tasks now: 1 COMPLETED · 1 FAILED · 4 CANCELLED'
+	parent_rows_are star-stale-sq '    11950  its tasks now: 2 FAILED · 2 COMPLETED'
+	parent_rows_are star-stale-acct '    11950  its tasks now: 1 FAILED · 1 COMPLETED · 2 PENDING'
+	parent_rows_are star-stale-one '    11950  its tasks now: 1 FAILED · 3 PENDING'
+	parent_rows_are star-running '    11950  its tasks now: 1 RUNNING · 1 FAILED'
+	need "star-running: sacct asked about the _* parent under (unfulfilled), once" eval '[ "$(grep -cP "^CALL\tsacct\t.* -j 11950 " "$LOG")" = 1 ]'
+	parent_rows_are bare-task '    11950_3  must complete successfully, which can no longer happen · now FAILED · exit 1 · ended 12m ago' '    11950    must end · now its tasks: 1 RUNNING'
+	parent_rows_are star-odd-bracket '    11950  its tasks now: 1 FAILED · 3 COMPLETED · 2 PENDING'
+	# afternotok on a whole array says what Slurm tests: at least one not successful, not all failed
+	job_run star-notok-11963 COLUMNS=120 -- --no-color job 11963
+	need "star-notok: the lead says what Slurm tests, the row counts" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 11950 has ended, at least one of them not successfully" && [ "$(parent_rows)" = "    11950  its tasks now: 1 RUNNING · 2 COMPLETED · 1 FAILED" ]'
+	job_run star-notok-failed-11963 COLUMNS=120 -- --no-color job 11963
+	need "star-notok-failed: the same lead, which can no longer happen" eval 'rc_is 0 && why_has "  will never start: it may start only once every task of array 11950 has ended, at least one of them not successfully, which can no longer happen"'
+	parent_rows_are notok-mix '    11950  must end, at least one of them not successfully · now its tasks: 1 RUNNING · 1 FAILED' '    11940  must fail · now Slurm no longer knows it'
+	# only afternotok cannot say both in one lead (rule A 7: the lead stays)
+	job_run ok-mix-11963 COLUMNS=120 -- --no-color job 11963
+	need "ok-mix: _* beside a plain afterok keeps the one lead, the rows count" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 11950 and 11940 have completed successfully" && [ "$(parent_rows)" = "    11950  its tasks now: 1 RUNNING · 1 FAILED
+    11940  Slurm no longer knows it" ]'
+	parent_rows_are star-corr '    11950  its tasks now: 1 CANCELLED · 2 COMPLETED · 1 FAILED'
+	parent_rows_are star-qfail '    11950  its tasks now: 1 COMPLETED · 1 RUNNING · maybe out of date: squeue did not answer (squeue: error: Unable to contact slurm controller)'
+	parent_rows_are star-qgarbage '    11950  its tasks now: 1 COMPLETED · 1 RUNNING · maybe out of date: squeue answered what cannot be read'
+	parent_rows_are star-bracket-sq '    11950  its tasks now: 4 PENDING · 1 COMPLETED · 1 FAILED'
+	parent_rows_are star-mixed '    11950  must complete successfully, which can no longer happen · now its tasks: 1 CANCELLED · 2 COMPLETED · 1 FAILED' \
+		'    11950  must end · now its tasks: 1 CANCELLED · 2 COMPLETED · 1 FAILED'
+	need "star-mixed: one id, one sacct argument" eval 'grep -qP "^CALL\tsacct\t.* -j 11950 " "$LOG"'
+	parent_rows_are star-partial-acctfail "    11950  its tasks now: 1 FAILED · maybe more: $refused"
+	parent_rows_are star-acctfail "    11950  unknown: $refused"
+	parent_rows_are star-none '    11950  Slurm no longer lists its tasks'
+	parent_rows_are star-plain '    11950  FAILED · exit 1 · ended 12m ago'
+	parent_rows_are star-unf '    11950  its tasks now: 1 CANCELLED · 2 COMPLETED · 1 FAILED'
 }
 # AC 9: sq job PARENT's own report on each fixture of rule P that holds its
 # answers is what it was before rule P (the finder is pick()'s own): frozen
@@ -12529,7 +12579,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_own job_width_docs dash_sinfo_env
+	why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins

@@ -2086,6 +2086,12 @@ function acct_index(T, n, JR, UR, NS, SR,   r, id, p, k) {
 # unique id (an array task named by its own job id, 11953 for 11950_3; a het
 # job's leader, 12000 for 12000+0); 0 for none
 function acct_row(id, JR, UR) { return (id in JR) ? JR[id] : (id in UR) ? UR[id] : 0 }
+# the rows of array ID's tasks in table T (rows 1..n) into TR, how many: an id
+# ID_..., no step's
+function task_rows(T, n, id, TR,   r, j, k) {
+  for (r = 1; r <= n; r++) { j = T[r, "JobID"]; if (!index(j, ".") && index(j, id "_") == 1) TR[++k] = r }
+  return k + 0
+}
 
 # ---- which records: the job's, a task's, or an array's -----------------------
 # sacct (acct_index): job_row[id] its job rows, row_by_unique_id[unique id] the same, step_row[id, k] / nsteps[id] the
@@ -2098,8 +2104,8 @@ function pick(   r, id) {
   for (r = 1; r <= na; r++) {
     id = A[r, "JobID"]
     if (index(id, "+")) het = 1
-    if (task == "" && !index(id, ".") && index(id, job "_") == 1) task_row[++ntask_rows] = r
   }
+  if (task == "") ntask_rows = task_rows(A, na, job, task_row)
   for (r = 1; r <= nq; r++) {
     if (R[r, "HetJobID"] != "N/A") het = 1
     if (R[r, "ArrayJobID"] == job && R[r, "ArrayTaskID"] != "N/A") array_record[++narray_records] = r
@@ -2486,6 +2492,10 @@ function cancel_hint() {
 # a dependency clause, type:parent[_task|_*][+minutes](state), into m: 1 the
 # type, 2 the parent, 4 its task or *, 6 the minutes, 7 the state
 function depclause(c, m) { return match(c, /^([a-z]+):([0-9]+)(_([0-9]+|\*))?(\+([0-9]+))?\(([a-z]+)\)$/, m) }
+# is accounting asked about this clause's parent (m of depclause)?  A failed
+# clause outlives its parent; an array's tasks are purged one by one while
+# others run, under any clause
+function acct_asked(m) { return m[7] == "failed" || m[4] == "*" }
 # a job of the queue answer as the report names jobs: an array task N_T, a
 # pending array's record N_[tasks], else its job id
 function qjob(p,   t) {
@@ -2497,7 +2507,7 @@ function qjob(p,   t) {
 
 # ---- the plan, from squeue's record alone: which answers more the section
 # needs, so the shell asks for them while accounting is still being asked
-function why_plan(   q, reason, dep, n, cl, i, m, id, pl, pd, host, path, which) {
+function why_plan(   q, reason, dep, n, cl, i, m, id, pl, pd, inpd, host, path, which) {
   if (verdict != "one" || !qrow) return
   q = qrow
   if (STATE == "PD") {
@@ -2510,7 +2520,7 @@ function why_plan(   q, reason, dep, n, cl, i, m, id, pl, pd, host, path, which)
       for (i = 1; i <= n; i++) if (depclause(cl[i], m)) {
         id = m[2] ((m[4] != "" && m[4] != "*") ? "_" m[4] : "")
         pl = pl (pl == "" ? "" : ",") id
-        if (m[7] == "failed") pd = pd (pd == "" ? "" : ",") id
+        if (acct_asked(m) && !(id in inpd)) { inpd[id]; pd = pd (pd == "" ? "" : ",") id }
       }
       put("parents", pl); put("pdone", pd)
     }
@@ -2676,13 +2686,15 @@ function why_pending(q, r,   reason, p, m, v) {
 }
 
 # ---- Dependency: each parent, its condition and its state now
-function depcond(i, form,   t, x, h) {      # FORM has, have (the lead line) or must (a row)
-  t = DT[i]; h = (form == "must") ? "" : form " "
+# afternotok on a whole array: Slurm clears it once all ended and not all
+# completed (job_scheduler.c:2921-2928), so one task failing is enough
+function depcond(i, form,   t, x, h, notok_some) {      # FORM has, have (the lead line) or must (a row)
+  t = DT[i]; h = (form == "must") ? "" : form " "; notok_some = "at least one of them not successfully"
   if (form == "must")
-    x = (t == "after") ? "start" : (t == "afterany") ? "end" : (t == "afterok") ? "complete successfully" : (t == "afternotok") ? "fail" \
+    x = (t == "after") ? "start" : (t == "afterany") ? "end" : (t == "afterok") ? "complete successfully" : (t == "afternotok") ? (DSTAR[i] ? "end, " notok_some : "fail") \
       : (t == "aftercorr") ? "complete successfully, task by matching task" : (t == "afterburstbuffer") ? "end and stage out its burst buffer" : "meet " t
   else
-    x = (t == "after") ? "started" : (t == "afterany") ? "ended" : (t == "afterok") ? "completed successfully" : (t == "afternotok") ? "failed" \
+    x = (t == "after") ? "started" : (t == "afterany") ? "ended" : (t == "afterok") ? "completed successfully" : (t == "afternotok") ? (DSTAR[i] ? "ended, " notok_some : "failed") \
       : (t == "aftercorr") ? "completed successfully, task by matching task" : (t == "afterburstbuffer") ? "ended and staged out its burst buffer" : "met " t
   x = (form == "must" ? "must " : h) x
   if (DD[i] != "") x = x (form == "must" ? ", then " plural(DD[i] + 0, "minute") " more" : " and " plural(DD[i] + 0, "minute") " have passed")
@@ -2702,11 +2714,11 @@ function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids,
     if (depclause(cl[i], m)) {
       DT[i] = m[1]; DP[i] = m[2] ((m[4] != "" && m[4] != "*") ? "_" m[4] : ""); DD[i] = m[6]; DS[i] = m[7]
       DSTAR[i] = (m[4] == "*" || (m[4] == "" && is_array_parent(m[2])))
-      if (m[7] == "failed") asked[DP[i]]            # passed to the parents' sacct, as why_plan's pdone
+      if (acct_asked(m)) asked[DP[i]]               # passed to the parents' sacct, as why_plan's pdone
     } else if (match(cl[i], /^singleton\(([a-z]+)\)$/, m)) { DT[i] = "singleton"; DS[i] = m[1] }
     else { DT[i] = "raw"; DP[i] = cl[i] }
     if (DS[i] == "failed") nf++; else nu++
-    if (DT[i] != DT[1] || DD[i] != DD[1] || DT[i] ~ /^(singleton|raw)$/) same = 0
+    if (DT[i] != DT[1] || DD[i] != DD[1] || (DT[i] == "afternotok" && DSTAR[i] != DSTAR[1]) || DT[i] ~ /^(singleton|raw)$/) same = 0
     if (DT[i] != "raw" && length(DP[i]) > idw) idw = length(DP[i])
   }
   never = anyof ? (nu == 0) : (nf > 0)
@@ -2722,8 +2734,8 @@ function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids,
   for (i = 1; i <= n; i++) {
     if (DT[i] == "singleton") { wl2(sprintf("%-*s  %s", idw, "", "no other job of " (OWN ? "yours" : OWNER "'s") " named " R[q, "Name"] " runs or waits ahead of it")); continue }
     if (DT[i] == "raw") { wl2(DP[i]); continue }
-    st = DSTAR[i] ? array_state(DP[i]) : parent_state(DP[i], DP[i] in asked)
-    if (!same) st = depcond(i, "must") (DS[i] == "failed" ? ", which can no longer happen" : "") " · now " st
+    st = DSTAR[i] ? array_state(DP[i], DP[i] in asked) : parent_state(DP[i], DP[i] in asked)
+    if (!same) { sub(/^its tasks now: /, "its tasks: ", st); st = depcond(i, "must") (DS[i] == "failed" ? ", which can no longer happen" : "") " · now " st }
     wl2(sprintf("%-*s  %s", idw, DP[i], st))
   }
   if (never) cancel_hint()
@@ -2731,10 +2743,11 @@ function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids,
 # a parent's state now: squeue's record while it has one, else accounting's
 # row, found as sq job PID finds its own (acct_row); an ended one's exit as
 # sq job PID reads it (parent_exit).  ASKED: accounting was asked about it
-# (its id among the parents of failed clauses passed to sacct), so where
+# (acct_asked: its id among those passed to sacct), so where
 # neither tool holds it and sacct did not answer, or answered what cannot be
-# read, its silence is no "no longer knows"
-function parent_state(pid, asked,   p, a, c, left) {
+# read, its silence is no "no longer knows".  GONE: what to say where both
+# answered and neither holds it
+function parent_state(pid, asked, gone,   p, a, c, left) {
   for (p = 1; p <= npq; p++)
     if (RP[p, "JobID"] == pid || (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/ && RP[p, "ArrayJobID"] "_" RP[p, "ArrayTaskID"] == pid)) break
   if (p <= npq) {
@@ -2752,7 +2765,7 @@ function parent_state(pid, asked,   p, a, c, left) {
   }
   if (answer_failed(PQSTAT)) return "unknown: " parents_queue_says()
   if (asked && answer_failed(PASTAT)) return "unknown: " parents_acct_says()
-  return "Slurm no longer knows it"
+  return (gone != "") ? gone : "Slurm no longer knows it"
 }
 function answer_failed(stat) { return stat ~ /^(fail|timeout|bad)$/ }
 function parents_acct_says() { return answer_says("accounting", PASTAT, ENVIRON["SQJ_WPABOUND"], ENVIRON["SQJ_WPAWHY"]) }
@@ -2769,21 +2782,51 @@ function parent_exit(pid, c, qx,   a, k) {
   exit_of(k, AP, a, pnsteps, pstep_row, qx)
   return " · exit " exlabel(jrc(k), jsg(k))
 }
-# an array parent: does squeue answer task records for it?  Its tasks' states, counted
+# an array parent: does squeue answer task records for it?
 function is_array_parent(id,   p) {
   for (p = 1; p <= npq; p++) if (RP[p, "ArrayJobID"] == id && RP[p, "ArrayTaskID"] != "N/A") return 1
   return 0
 }
-function array_state(id,   p, c, k, N, ord, out, i) {
+# K tasks of state C into array_state's count, states in the order they come
+function task_count(N, ord, c, k) {
+  if (!k) return
+  if (!(c in N)) ord[++ord[0]] = c
+  N[c] += k
+}
+# An array parent's tasks, counted by state, which is what Slurm's dependency
+# code reads of an array as a whole (test_job_array_complete and _completed):
+# a task counts once, per task squeue's record while it has one, else
+# accounting's row (asked; the rows as sq job ARRAY finds them).  Slurm purges
+# task records one by one, so squeue alone may hold some or none.  A bracket
+# row counts its tasks less those on their own (it can lag), none where squeue
+# has a pending record.  One source failing is said on the row, as what is
+# shown may be part of it.  With no task in either, the id reads as any
+# parent's (parent_state): its record if it has a plain one, else why neither
+# answer holds it
+function array_state(id, asked,   p, c, k, N, ord, out, own, inrecord, TR, nt, r, j, t, m) {
+  ord[0] = 0
   for (p = 1; p <= npq; p++) {
     if (RP[p, "ArrayJobID"] != id || RP[p, "ArrayTaskID"] == "N/A") continue
-    c = RP[p, "StateCompact"]; k = (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/) ? 1 : ntasks(id "_[" RP[p, "ArrayTaskID"] "]", ID)
-    if (!(c in N)) ord[++i] = c
-    N[c] += k
+    if (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/) { k = 1; own[RP[p, "ArrayTaskID"] + 0] }
+    else { k = ntasks(id "_[" RP[p, "ArrayTaskID"] "]", ID); inrecord = 1 }
+    task_count(N, ord, RP[p, "StateCompact"], k)
   }
-  for (k = 1; k <= i; k++) out = out (k == 1 ? "" : " · ") N[ord[k]] " " paint(stcolour(ord[k]), stname(ord[k]))
-  if (out == "") return answer_failed(PQSTAT) ? "unknown: " parents_queue_says() : "Slurm no longer lists its tasks"
-  return "its tasks now: " out
+  nt = asked ? task_rows(AP, npa, id, TR) : 0          # another clause's sacct may have brought one task's rows
+  for (r = 1; r <= nt; r++) {
+    j = AP[TR[r], "JobID"]; if (index(j, "[")) continue
+    t = substr(j, length(id) + 2) + 0
+    if (!(t in own)) { own[t]; task_count(N, ord, stcode(AP[TR[r], "State"]), 1) }
+  }
+  for (r = 1; r <= nt && !inrecord; r++) {
+    j = AP[TR[r], "JobID"]; if (!index(j, "[")) continue
+    c = stcode(AP[TR[r], "State"]); k = ntasks(j, ID)
+    if (match(j, /\[(.*)\]/, m)) for (t in own) if (task_in(m[1], t + 0)) k--
+    task_count(N, ord, (c in DONE) ? c : "PD", k)
+  }
+  for (k = 1; k <= ord[0]; k++) out = out (k == 1 ? "" : " · ") N[ord[k]] " " paint(stcolour(ord[k]), stname(ord[k]))
+  if (out == "") return parent_state(id, asked, "Slurm no longer lists its tasks")
+  return "its tasks now: " out (answer_failed(PQSTAT) ? " · maybe out of date: " parents_queue_says() \
+                              : (asked && answer_failed(PASTAT)) ? " · maybe more: " parents_acct_says() : "")
 }
 
 # ---- Resources, Priority, BadConstraints: the request against the nodes.
