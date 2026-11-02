@@ -7,9 +7,13 @@
 #
 # --at WHEN runs as if the wall clock read WHEN at the start, e.g. --at
 # '2026-12-31 23:59:30 UTC', sq byte for byte: lib/clock-at/env.bash says how.  A
-# recorded comparison holds at any moment, so the suite passes at any WHEN but
-# for a form boundary's few seconds: clock_step on hplus and wide-text (21:00:00,
-# 19:00:00 UTC), and same-run comparisons keeping the form (K4, wide_c_mode).
+# recorded comparison holds at any moment.  A form boundary, as at 21:00:00 UTC
+# on hplus's +3h, moves the layout, and fails a case comparing two runs that fall
+# across it, so these pin the clock (clock_pin below): clock_step, wide_c_mode,
+# wide_twin_text, whole_c_mode, h0_display_prefs.  Found by reading every use of
+# the estimate masks, and with a build alternating two moments across a boundary
+# on the cases using estimate fixtures (spec X8).  Run at 2026-12-31 23:59:30 UTC
+# and at the real clock; no other WHEN is promised by a run.
 #
 # -j N runs N cases at once (default 1, one after the other), each case whole
 # and its lines printed in the order of the cases as always; the cases that
@@ -237,6 +241,7 @@ sq_env() {
 	local -A env=([PATH]="$here/bin:$PATH" [LC_ALL]=$utf8 [TZ]=UTC
 	              [SQSTUB_FIXTURE]=$([[ $fixture == /* ]] && echo "$fixture" || echo "$fixtures/$fixture")
 	              [SQ_TIMEOUT]=3 [SQ_WIDTH]=120 [SQ_HEIGHT]=50 [SQSTUB_UID]=4242 [HOME]=$RUN/home)
+	[ -z "${PIN_NOW:-}" ] || env[SQSTUB_NOW]=$PIN_NOW    # clock_pin
 	[ -z "${CLOCK_AT_SHIFT:-}" ] || env[CLOCK_AT_SHIFT]=$CLOCK_AT_SHIFT env[BASH_ENV]=$BASH_ENV env[CLOCK_AT_DATE]=$CLOCK_AT_DATE env[CLOCK_AT_GAWK]=$CLOCK_AT_GAWK    # --at
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do
 		case $1 in -*) unset "env[${1#-}]" ;; *=*) env[${1%%=*}]=${1#*=} ;; esac
@@ -2204,6 +2209,7 @@ twin_sweep() {
 wide_cols=(-o i,j,u,a,P,T,M,L,C,m,N,R,Z)
 c_wide_twin_text() {
 	T_TITLE="CJK, kana, Hangul, U+1F600, combining marks, ZWJ, a flag, a lone RI, VS16 and a skin tone in names, users, accounts, partitions, node lists, nodes, a drain reason, work dirs: every sampled screen as its ASCII twin, by the oracle (widest, over, rows, each line, the columns)"
+	est_pin || return; local sq=$EST_SQ PIN_NOW=$est_now   # clock_pin: est_now for sq and the stub
 	twin_fx wide-text
 	twin_sweep wide-text "${wide_cols[@]}"
 }
@@ -2385,6 +2391,7 @@ c_wide_job_ahead() {
 # as its own characters and whose [[:cntrl:]] ate a byte of "…")
 c_wide_c_mode() {
 	T_TITLE="no UTF-8 locale (gawk in C): the wide screens as their twins at 50, 80 and 120; array-running's JOBID header and ×-rows as under UTF-8; LC_ALL=ja_JP.eucJP and de_DE.ISO-8859-1 give the LC_ALL=C screen (start estimates aside), every gawk in C"
+	est_pin || return; local sq=$EST_SQ PIN_NOW=$est_now   # clock_pin: est_now for sq and the stub
 	local nobin=$T_DIR/nobin loc=$T_DIR/loc gbin=$T_DIR/gbin glog=$T_DIR/gawk.log l want src charmap name
 	mkdir -p "$nobin" "$loc"
 	no_utf8_locale "$nobin"
@@ -3349,6 +3356,7 @@ EOF
 mask_estimate_whole() { sed -E 's/→ ([A-Z][a-z]{2}[0-9]{2} [0-9]{2}:[0-9]{2}|[0-9]{2}:[0-9]{2}|[0-9]{4}-[0-9]{2}-[0-9]{2})/→ EST/g'; }   # an estimate in any of its forms
 c_clock_step() {
 	T_TITLE="every fixture with a relative time draws the same screen when the clock steps 2 s back or forward after the stub answered, a start estimate aside"
+	est_pin || return; local sq=$EST_SQ PIN_NOW=$est_now   # clock_pin: est_now for sq and the stub
 	local dir fx want skew
 	for dir in "$fixtures"/*/; do
 		fx=${dir%/}; fx=${fx##*/}
@@ -11179,6 +11187,7 @@ c_whole_full() {   # WHOLE AC 6 (R-H3, R-H4, decision 4)
 }
 c_whole_c_mode() {   # WHOLE AC 9
 	T_TITLE="no UTF-8 locale (gawk in C): COMPACT on ASCII fixtures at W 21..60 step 3, with and without colour, byte for byte the UTF-8 screen"
+	est_pin || return; local sq=$EST_SQ PIN_NOW=$est_now   # clock_pin: est_now for sq and the stub
 	local nobin=$T_DIR/nobin fx wd col want bad=
 	no_utf8_locale "$nobin"
 	for fx in busy24 noacct oddfin mix30 memalloc-r nboot; do
@@ -12107,6 +12116,7 @@ c_h0_sq_color() {   # H0-1a-g
 }
 c_h0_display_prefs() {   # H0-7a-e, K4
 	T_TITLE="every display preference that is no number or not one of its values is as unset; another spelling of a value is that value; SQ_WIDTH/SQ_HEIGHT junk is measured, a number under the minimum keeps its fallback"
+	est_pin || return; local sq=$EST_SQ PIN_NOW=$est_now   # clock_pin: est_now for sq and the stub
 	local v unset fx
 	unset=$T_DIR/unset
 	for v in SQ_CENTER=no SQ_CENTER=yes SQ_CENTER=3 SQ_FOLD=no SQ_FOLD=1x SQ_RECENT=off SQ_RECENT=-0 SQ_ETA=no 'SQ_ETA=0 0' \
