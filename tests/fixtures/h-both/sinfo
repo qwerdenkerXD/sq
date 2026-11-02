@@ -1,0 +1,2 @@
+@stderr sinfo: error: slurm_load_node: Access/permission denied
+@exit 0

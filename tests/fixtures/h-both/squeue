@@ -1,0 +1,3 @@
+# the controller refuses: squeue's real wording, rc 1, nothing on stdout
+@stderr squeue: error: Unable to contact slurm controller (connect failure)
+@exit 1

@@ -1,0 +1,3 @@
+@include ../_common/sacct-defaults
+JobID=1001; JobName=done
+JobID=1001.batch; User=; JobName=batch

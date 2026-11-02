@@ -1,0 +1,3 @@
+@stderr first line
+@stderr second line
+@exit 0

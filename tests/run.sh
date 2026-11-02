@@ -8781,6 +8781,53 @@ c_client_env() {
 	job_run resources-11964 "${all[@]}" -- log --no-follow 11964
 	need "sq log: the same, none reached its squeue" eval 'no_client_env && [ "$want" = "$(plain; echo "rc=$RC")" ]'
 }
+# X7: sinfo answered and lists nothing, as for a user on a site hiding every partition
+nonodes_line='sinfo lists no node you can see'
+c_nodes_none() {
+	T_TITLE="sinfo answers rc 0 and no row: one dim line in place of the block, COMPACT and FULL, no banner, rc 0; not when sinfo failed or answered what cannot be read; a short screen keeps its height"
+	local d=$T_DIR/fx h; ln -s "$fixtures/_common" "$T_DIR/_common"; cp -r "$fixtures/empty" "$d"; : > "$d/sinfo"
+	sq_run "$d" -- --compact --no-color
+	need "COMPACT: rc 0, stderr empty, the line once, no banner, the queue's caption as ever" eval 'rc_is 0 && err_empty && [ "$(plain | grep -cxF "  $nonodes_line")" = 1 ] && lacks "slurm unreachable" && has "queue is empty"'
+	sq_run "$d" -- --full --no-color
+	need "FULL: the same line" eval 'rc_is 0 && err_empty && [ "$(plain | grep -cxF "  $nonodes_line")" = 1 ]'
+	sq_run "$d" -- --full --color
+	need "with colour: dim" eval 'rc_is 0 && grep -qF "$ESC[2m$nonodes_line" "$OUT"'
+	for h in 3 4 5 6 7 8 9 10; do
+		sq_run "$d" SQ_HEIGHT=$h -- --compact --no-color
+		need "H=$h: no more lines than the screen" eval 'rc_is 0 && [ "$(wc -l < "$OUT")" -le $h ]'
+	done
+	sq_run "$d" SQ_WIDTH=30 -- --compact --no-color
+	need "W=30: cut to the screen" eval 'rc_is 0 && ! plain | gawk "length(\$0) > 30 { f = 1 } END { exit !f }"'
+	local q=$T_DIR/fxq; cp -r "$fixtures/squeue-fails" "$q"; : > "$q/sinfo"
+	sq_run "$q" -- --full --no-color
+	need "squeue failing beside it: the banner and the line, sinfo did answer" eval 'rc_is 0 && has "slurm unreachable" && has "$nonodes_line"'
+	for h in sinfo-fails both-fail squeue-hangs trailing-junk empty; do
+		sq_run $h -- --full --no-color
+		need "$h: no such line" eval 'lacks "sinfo lists no node"'
+	done
+	# rc 0, no row: what sinfo said beside it, in the same dim line, no banner; rc not 0: as main (sinfo-fails above)
+	sq_run h-stderr -- --full --no-color
+	need "h-stderr: a refusal: rc 0, the line with sinfo's words, no banner, scontrol asked" eval 'rc_is 0 && err_empty && [ "$(plain | grep -cxF "  sinfo lists no node: sinfo: error: slurm_load_node: Access/permission denied")" = 1 ] && lacks "slurm unreachable" && [ "$(calls scontrol)" = 1 ]'
+	sq_run h-stderr -- --full --color
+	need "h-stderr: dim" eval 'grep -qF "$ESC[2msinfo lists no node: sinfo: error" "$OUT"'
+	sq_run h-noise -- --compact --no-color
+	need "h-noise: a warning alike" eval 'rc_is 0 && [ "$(plain | grep -cxF "  sinfo lists no node: sinfo: error: Ignoring ControlMachine since SlurmctldHost is set.")" = 1 ] && lacks "slurm unreachable"'
+	sq_run h-2line -- --full --no-color
+	need "h-2line: its first line" eval 'rc_is 0 && has "sinfo lists no node: first line" && lacks "second line"'
+	sq_run h-blankerr -- --full --no-color
+	need "h-blankerr: blank after scrubbing is no stderr" eval 'rc_is 0 && [ "$(plain | grep -cxF "  $nonodes_line")" = 1 ] && lacks "slurm unreachable"'
+	sq_run h-qerr -- --full --no-color
+	need "h-qerr: a queue beside it, no banner, the jobs drawn" eval 'rc_is 0 && lacks "slurm unreachable" && has "sinfo lists no node: sinfo: error: slurm_load_node" && has "RUNNING"'
+	sq_run h-both -- --full --no-color
+	need "h-both: squeue failing beside it: squeue's banner, sinfo's line" eval 'rc_is 0 && has "slurm unreachable · " && lacks "slurm unreachable · sinfo" && has "sinfo lists no node: sinfo: error: slurm_load_node"'
+	sq_run h-stderr SQ_WIDTH=30 -- --compact --no-color
+	need "h-stderr W=30: cut to the screen" eval 'rc_is 0 && has "sinfo lists no node: sinf"'
+	# the job's report, where scontrol sees none either (node_mgr.c:1104, parsers.c:3498: "nodes": [])
+	why_run res-allhid-11964 -- --no-color job 11964
+	need "res-allhid: the job seen, scontrol shows no node there" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "scontrol shows no node in partition LocalQ" ]'
+	why_run res-other-11964 -- --no-color job 11964
+	need "res-other: nodes shown, none says it is in the job's partition" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "scontrol shows no node in partition LocalQ" ]'
+}
 c_why_parent() {   # S-v3 rule P: ACs 1-6, 7 (sacct failing), 7b-7d, 8, 9's parent lines
 	T_TITLE="a dependency parent's line reads its exit as sq job PARENT does (steps folded, OOM wins, squeue's 0:1 as 1, an unreadable pair ?), finds it by JobID or unique id (an array task's, a het leader's), shows no exit for a COMPLETED one, and names accounting's silence for a parent sq asked accounting about, squeue's first"
 	local f pid cols line own PARENT_ENV=()
@@ -10313,7 +10360,7 @@ $f3row")
 }
 
 c_nodes_o_pairs() {   # AC 9, 10, 24
-	T_TITLE="NODES -o pair check and gate: a pair run naming the job's partition whose node sinfo lacks there is D4's note (several partitions: the one named); an honest Reason naming another partition changes nothing; an empty sinfo answer is W6's line and no -o call; nodes sinfo lists that scontrol does not know read ? (not found, rc 1 used); no node in the job's partition is W5b's line on -o, 'no node is in partition' on --json; N6's name cut to 40 columns, controls as ?; names that cannot be listed reach no list and read ?, the dashboard's caption; the dashboard lists its own names whatever SINFO_* says"
+	T_TITLE="NODES -o pair check and gate: a pair run naming the job's partition whose node sinfo lacks there is D4's note (several partitions: the one named); an honest Reason naming another partition changes nothing; an empty sinfo answer is W6's line and no -o call; nodes sinfo lists that scontrol does not know read ? (not found, rc 1 used); no node in the job's partition is W5b's line on -o, 'scontrol shows no node in partition' on --json; N6's name cut to 40 columns, controls as ?; names that cannot be listed reach no list and read ?, the dashboard's caption; the dashboard lists its own names whatever SINFO_* says"
 	local d how line long shown
 	nodes_lines
 	# several partitions: the ghost names small, the job is in LocalQ,small
@@ -10357,7 +10404,7 @@ c_nodes_o_pairs() {   # AC 9, 10, 24
 	sed -i 's/^\(JobID=11964;.*\)Partition=LocalQ;/\1Partition=gpu;/' "$d/squeue-queue"
 	sed -i 's/^\(JobID=11964;.*\)$/\1; Partition=gpu/' "$d/squeue-all"
 	why_run "$d" -- --no-color job 11964
-	need "no node in partition gpu, --json: 'no node is in partition gpu'" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "no node is in partition gpu" ]'
+	need "no node in partition gpu, --json: 'scontrol shows no node in partition gpu'" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "scontrol shows no node in partition gpu" ]'
 	for how in nojson garbage; do
 		o_path "$d" $how; why_run "$d" $O_ENV -- --no-color job 11964
 		need "no node in partition gpu, -o ($how): W5b's line" eval 'rc_is 0 && err_empty && [ "$(why_notes)" = "sinfo lists no node in partition gpu" ]'
@@ -12819,7 +12866,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env array_one_count no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins

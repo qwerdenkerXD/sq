@@ -1,0 +1,3 @@
+# accounting (slurmdbd) is a different daemon and still answers
+@include ../_common/sacct-defaults
+JobID=1001; JobName=done

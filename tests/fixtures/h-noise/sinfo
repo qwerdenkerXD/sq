@@ -1,0 +1,2 @@
+@stderr sinfo: error: Ignoring ControlMachine since SlurmctldHost is set.
+@exit 0
