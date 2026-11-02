@@ -8684,6 +8684,19 @@ c_why_dep() {   # J6, J7
 	d=$(dep_fx delay-apart 'after:900+10(unfulfilled),after:901(unfulfilled)' "$(run_rec 900)" "$(run_rec 901)")
 	why_run "$d" -- --no-color job 800
 	need "after:900+10,after:901: two waits, per row" eval 'rc_is 0 && why_has "  waits its turn: it may start once all of these are met" && why_has "    901  must start · now RUNNING on fb2-bioinf · 1h00m left of 2h00m"'
+	# X2: beside an array, a plain parent reads as a job
+	d=$(dep_fx lead-star-plain 'afterok:902_*(unfulfilled),afterok:900(unfulfilled)' 'JobID=903; ArrayJobID=902; ArrayTaskID=1; StateCompact=R' "$(run_rec 900)")
+	why_run "$d" -- --no-color job 800
+	need "_* and plain: 'every task of array 902 and job 900 have'" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 902 and job 900 have completed successfully"'
+	d=$(dep_fx lead-plain-star 'afterany:900(unfulfilled),afterany:902_*(unfulfilled),afterany:901(unfulfilled)' "$(run_rec 900)" 'JobID=903; ArrayJobID=902; ArrayTaskID=1; StateCompact=R' "$(run_rec 901)")
+	why_run "$d" -- --no-color job 800
+	need "plain, _*, plain: each plain one a job, in the clauses' order" eval 'rc_is 0 && why_has "  waits its turn: it may start once job 900, every task of array 902 and job 901 have ended"'
+	d=$(dep_fx lead-or 'afterok:902_*(unfulfilled)?afterok:900(unfulfilled)' 'JobID=903; ArrayJobID=902; ArrayTaskID=1; StateCompact=R' "$(run_rec 900)")
+	why_run "$d" -- --no-color job 800
+	need "_* or plain: 'or job 900 has'" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 902 or job 900 has completed successfully"'
+	d=$(dep_fx lead-task 'afterok:902_*(unfulfilled),afterok:900_3(unfulfilled)' 'JobID=903; ArrayJobID=902; ArrayTaskID=1; StateCompact=R')
+	why_run "$d" -- --no-color job 800
+	need "_* and a task: the task keeps its id" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 902 and 900_3 have completed successfully"'
 	d=$(pend_fx single Reason=Dependency 'Dependency=singleton(unfulfilled)' Name=nightly)
 	why_run "$d" -- --no-color job 800
 	need "singleton: no other job of alice's named nightly" eval 'rc_is 0 && why_has "  waits its turn: it may start once no other job of alice'"'"'s named nightly runs or waits ahead of it"'
@@ -8895,7 +8908,7 @@ c_why_parent_array() {
     11970  $some · now its tasks: 1 COMPLETED · 1 FAILED" ]'
 	# only afternotok cannot say both in one lead (rule A 7: the lead stays)
 	job_run ok-mix-11963 COLUMNS=120 -- --no-color job 11963
-	need "ok-mix: _* beside a plain afterok keeps the one lead, the rows count" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 11950 and 11940 have completed successfully" && [ "$(parent_rows)" = "    11950  its tasks now: 1 RUNNING · 1 FAILED
+	need "ok-mix: _* beside a plain afterok keeps the one lead, the rows count" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 11950 and job 11940 have completed successfully" && [ "$(parent_rows)" = "    11950  its tasks now: 1 RUNNING · 1 FAILED
     11940  Slurm no longer knows it" ]'
 	parent_rows_are star-corr '    11950  its tasks now: 1 CANCELLED · 2 COMPLETED · 1 FAILED'
 	parent_rows_are star-qfail '    11950  its tasks now: 1 COMPLETED · 1 RUNNING · maybe out of date: squeue did not answer (squeue: error: Unable to contact slurm controller)'

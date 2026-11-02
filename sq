@@ -2702,7 +2702,7 @@ function depcond(i, form,   t, x, h, notok_some) {      # FORM has, have (the le
   if (DD[i] != "") x = x (form == "must" ? ", then " plural(DD[i] + 0, "minute") " more" : " and " plural(DD[i] + 0, "minute") (DD[i] + 0 == 1 ? " has" : " have") " passed")
   return x
 }
-function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids, lead, idw, st, asked) {
+function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids, lead, idw, st, asked, anystar) {
   dep = R[q, "Dependency"]
   if (dep == "" || dep == "(null)") {
     if (reason == "DependencyNeverSatisfied") { wl(vword("will", "a job it depends on ended the wrong way")); cancel_hint() }
@@ -2731,7 +2731,9 @@ function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids,
     wl(vword(never ? "will" : "wait", lead)); if (never) cancel_hint(); return
   }
   if (same) {
-    for (i = 1; i <= n; i++) ids = ids (i == 1 ? "" : (i == n ? (anyof ? " or " : " and ") : ", ")) (DSTAR[i] ? "every task of array " DP[i] : DP[i])
+    for (i = 1; i <= n; i++) if (DSTAR[i]) anystar = 1
+    # beside an array, a bare number would read as one more array
+    for (i = 1; i <= n; i++) ids = ids (i == 1 ? "" : (i == n ? (anyof ? " or " : " and ") : ", ")) (DSTAR[i] ? "every task of array " DP[i] : (anystar && !index(DP[i], "_")) ? "job " DP[i] : DP[i])
     lead = "it may start " (never ? "only " : "") "once " ids " " depcond(1, (n > 1 && !anyof) ? "have" : "has")
   } else lead = "it may start " (never ? "only " : "") "once " (anyof ? "one" : "all") " of these " (anyof ? "is" : "are") " met"
   wl(vword(never ? "will" : "wait", lead (never ? ", which can no longer happen" : "")))
