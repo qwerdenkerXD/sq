@@ -1,0 +1,3 @@
+# R-H1: squeue failing, three tasks
+@stderr squeue: error: Unable to contact slurm controller
+@exit 1

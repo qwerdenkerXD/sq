@@ -1,0 +1,4 @@
+# X3: a final bracket counts in its own state: COMPLETED is no failure
+# squeue forgot it
+@stderr slurm_load_jobs error: Invalid job id specified
+@exit 1

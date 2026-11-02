@@ -2061,7 +2061,8 @@ function read_stream(file, nonce, names, ARR, anchor, RAW, rawname,   saved, n, 
 # does a pending array's task expression (squeue's ArrayTaskID: a, a-b,
 # a-b:step, comma-separated, maybe %throttle) hold task T?
 function task_in(x, t,   p, np, i, m, a, b, s) {
-  sub(/%[0-9]+$/, "", x); np = split(x, p, ",")
+  np = split(x, p, ",")
+  if (np) sub(/%[0-9]+$/, "", p[np])
   for (i = 1; i <= np; i++) {
     if (!match(p[i], /^([0-9]+)(-([0-9]+)(:([0-9]+))?)?$/, m)) continue
     a = m[1] + 0; b = (m[3] != "") ? m[3] + 0 : a; s = (m[5] != "") ? m[5] + 0 : 1
@@ -2091,6 +2092,62 @@ function acct_row(id, JR, UR) { return (id in JR) ? JR[id] : (id in UR) ? UR[id]
 function task_rows(T, n, id, TR,   r, j, k) {
   for (r = 1; r <= n; r++) { j = T[r, "JobID"]; if (!index(j, ".") && index(j, id "_") == 1) TR[++k] = r }
   return k + 0
+}
+# K tasks of state C into tasks_count's count, states in the order they come
+function task_count(N, ord, c, k) {
+  if (!k) return
+  if (!(c in N)) ord[++ord[0]] = c
+  N[c] += k
+}
+# the tasks of accounting's bracket row J that are not on their own (OWN)
+function bracket_left(j, own,   k, t, m) {
+  k = ntasks(j, ID)
+  if (match(j, /\[(.*)\]/, m)) for (t in own) if (task_in(m[1], t + 0)) k--
+  return k
+}
+# An array's tasks, counted by state, one count for sq job ARRAY and a parent's
+# row (rule A): a task counts once, per task squeue's record (table Q, rows
+# 1..nq) while it has one, else accounting's row (table T, the rows TR[1..nt],
+# as task_rows finds them); a task squeue reads COMPLETING goes by its row if
+# that lists it ended.  Slurm purges task records one by one, so squeue
+# alone may hold some or none.  A bracket row counts its tasks less those on
+# their own (it can lag), none where squeue has a record of several tasks.
+# N, ord: as task_count.  QT: task number to squeue's row, QT["record"] the
+# tasks squeue's records of several hold.  OWN: the tasks counted on their own.
+function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, x, ROW) {
+  ord[0] = 0
+  QT["record"] = ""       # set before any call reads it: gawk 5.2.1 double-frees an unset element passed down
+  for (r = 1; r <= nt; r++) {
+    j = T[TR[r], "JobID"]; if (index(j, "[")) continue
+    t = substr(j, length(id) + 2) + 0
+    if (!(t in ROW)) ROW[t] = TR[r]
+  }
+  for (p = 1; p <= nq; p++) {
+    if (Q[p, "ArrayJobID"] != id || Q[p, "ArrayTaskID"] == "N/A") continue
+    if (Q[p, "ArrayTaskID"] ~ /^[0-9]+$/) {
+      t = Q[p, "ArrayTaskID"] + 0
+      # COMPLETING with an ended row: Slurm writes that row as CG begins
+      # (job_mgr.c:6582, 6592), and the row counts, with its figures and exit
+      if (Q[p, "StateCompact"] == "CG" && (t in ROW) && (stcode(T[ROW[t], "State"]) in DONE)) continue
+      k = 1; own[t]; QT[t] = p
+    }
+    else {
+      k = ntasks(id "_[" Q[p, "ArrayTaskID"] "]", ID); x = Q[p, "ArrayTaskID"]; sub(/%[0-9]+$/, "", x)
+      QT["record"] = QT["record"] (QT["record"] == "" ? "" : ",") x
+    }
+    task_count(N, ord, Q[p, "StateCompact"], k)
+  }
+  for (r = 1; r <= nt; r++) {
+    j = T[TR[r], "JobID"]; if (index(j, "[")) continue
+    t = substr(j, length(id) + 2) + 0
+    if (t in own) continue
+    own[t]; task_count(N, ord, stcode(T[TR[r], "State"]), 1)
+  }
+  for (r = 1; r <= nt && QT["record"] == ""; r++) {
+    j = T[TR[r], "JobID"]; if (!index(j, "[")) continue
+    c = stcode(T[TR[r], "State"]); k = bracket_left(j, own)
+    task_count(N, ord, (c in DONE) ? c : "PD", k)
+  }
 }
 
 # ---- which records: the job's, a task's, or an array's -----------------------
@@ -2386,17 +2443,20 @@ function count(c, k) {
   total += k
 }
 function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax, cminid, mminid, rss, multi,
-                        polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why) {
-  if (ntask_rows) {                                       # accounting: every task, and the figures
+                        polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why, N, ord, QT, own, t, seen, nover) {
+  tasks_count(job, R, nq, A, task_row, ntask_rows, N, ord, QT, own)
+  for (k = 1; k <= ord[0]; k++) count(ord[k], N[ord[k]])
+  if (ntask_rows) {                                       # accounting: the figures
     for (i = 1; i <= ntask_rows; i++) {
       r = task_row[i]; id = A[r, "JobID"]
       if (name == "") { name = A[r, "JobName"]; user = A[r, "User"] }
-      c = stcode(A[r, "State"])
-      if (id ~ /\[/) {                             # tasks still in a pending array's record
-        count((c == "CA") ? "CA" : (c in DONE) ? "F" : "PD", ntasks(id, ID)); continue
-      }
-      count(c, 1)
-      if (c != "CD") continue                      # Franz: the statistics are the COMPLETED tasks'
+      if (id ~ /\[/) continue
+      t = substr(id, length(job) + 2) + 0
+      if (seen[t]++) continue
+      # Franz: the statistics are the COMPLETED tasks', and a row that does not
+      # say so yet (squeue's record says it) has no final figures to give
+      if (stcode(A[r, "State"]) != "CD" || ((t in QT) && R[QT[t], "StateCompact"] != "CD")) continue
+      nover++
       effcalc(id, r)
       if (eff_cpu_pct >= 0) {
         CV[++ncv] = eff_cpu_pct
@@ -2416,8 +2476,6 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
     for (i = 1; i <= narray_records; i++) {
       r = array_record[i]
       if (name == "") { name = R[r, "Name"]; user = R[r, "UserName"] }
-      k = onetask(r) ? 1 : ntasks(job "_[" R[r, "ArrayTaskID"] "]", ID)
-      count(R[r, "StateCompact"], k)
     }
   for (i = 1; i <= narray_records && why == ""; i++)          # what the pending tasks wait for
     if (R[array_record[i], "StateCompact"] == "PD" && R[array_record[i], "Reason"] != "None") why = R[array_record[i], "Reason"]
@@ -2437,11 +2495,11 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
   else if (!done) note("arr", "no task has completed yet" (why != "" ? "; pending (" why ")" : ""))
   if (!mixed && cap) note("arr", captext(req, ncpu, cap))
   if (polled) note("arr", plural(polled, "task") ": " POLLED)
-  if (done) note("arr", "over the " plural(done, "completed task") "; the weakest: sq job " cminid)
+  if (cminid != "") note("arr", "over the " plural(nover, "completed task") "; the weakest: sq job " cminid)
   if (rss) note("arr", plural(rss, "task") " started before " pss_text() \
                 " (RSS accounting): shared memory counted once per process; their peaks may read high")
   if (multi) note("arr", plural(multi, "task") " peaked in a step of several tasks: that peak adds up each task's own, an upper bound")
-  if (ntask_rows) why_array()
+  if (ntask_rows) why_array(QT, own)
   print_sections()
 }
 
@@ -2793,42 +2851,16 @@ function is_array_parent(id,   p) {
   for (p = 1; p <= npq; p++) if (RP[p, "ArrayJobID"] == id && RP[p, "ArrayTaskID"] != "N/A") return 1
   return 0
 }
-# K tasks of state C into array_state's count, states in the order they come
-function task_count(N, ord, c, k) {
-  if (!k) return
-  if (!(c in N)) ord[++ord[0]] = c
-  N[c] += k
-}
 # An array parent's tasks, counted by state, which is what Slurm's dependency
 # code reads of an array as a whole (test_job_array_complete and _completed):
-# a task counts once, per task squeue's record while it has one, else
-# accounting's row (asked; the rows as sq job ARRAY finds them).  Slurm purges
-# task records one by one, so squeue alone may hold some or none.  A bracket
-# row counts its tasks less those on their own (it can lag), none where squeue
-# has a pending record.  One source failing is said on the row, as what is
-# shown may be part of it.  With no task in either, the id reads as any
-# parent's (parent_state): its record if it has a plain one, else why neither
-# answer holds it
-function array_state(id, asked,   p, c, k, N, ord, out, own, inrecord, TR, nt, r, j, t, m) {
-  ord[0] = 0
-  for (p = 1; p <= npq; p++) {
-    if (RP[p, "ArrayJobID"] != id || RP[p, "ArrayTaskID"] == "N/A") continue
-    if (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/) { k = 1; own[RP[p, "ArrayTaskID"] + 0] }
-    else { k = ntasks(id "_[" RP[p, "ArrayTaskID"] "]", ID); inrecord = 1 }
-    task_count(N, ord, RP[p, "StateCompact"], k)
-  }
+# tasks_count's count of what the parents' calls hold, accounting's rows only
+# if it was asked.  One source failing is said on the row, as what is shown may
+# be part of it.  With no task in either, the id reads as any parent's
+# (parent_state): its record if it has a plain one, else why neither answer
+# holds it
+function array_state(id, asked,   N, ord, QT, own, TR, nt, k, out) {
   nt = asked ? task_rows(AP, npa, id, TR) : 0          # another clause's sacct may have brought one task's rows
-  for (r = 1; r <= nt; r++) {
-    j = AP[TR[r], "JobID"]; if (index(j, "[")) continue
-    t = substr(j, length(id) + 2) + 0
-    if (!(t in own)) { own[t]; task_count(N, ord, stcode(AP[TR[r], "State"]), 1) }
-  }
-  for (r = 1; r <= nt && !inrecord; r++) {
-    j = AP[TR[r], "JobID"]; if (!index(j, "[")) continue
-    c = stcode(AP[TR[r], "State"]); k = ntasks(j, ID)
-    if (match(j, /\[(.*)\]/, m)) for (t in own) if (task_in(m[1], t + 0)) k--
-    task_count(N, ord, (c in DONE) ? c : "PD", k)
-  }
+  tasks_count(id, RP, npq, AP, TR, nt, N, ord, QT, own)
   for (k = 1; k <= ord[0]; k++) out = out (k == 1 ? "" : " · ") N[ord[k]] " " paint(stcolour(ord[k]), stname(ord[k]))
   if (out == "") return parent_state(id, asked, "Slurm no longer lists its tasks")
   return "its tasks now: " out (answer_failed(PQSTAT) ? " · maybe out of date: " parents_queue_says() \
@@ -3116,32 +3148,61 @@ function why_tail(   info, which, me, host, k) {
 }
 
 # ---- an array: its tasks that did not complete, grouped by why
-function why_array(   i, r, id, c, by, never, key, k, n, GN, GI, GK, a, b, t, first, x, y, m) {
-  for (i = 1; i <= ntask_rows; i++) {
-    r = task_row[i]; id = A[r, "JobID"]; c = stcode(A[r, "State"])
-    if (c == "CD" || !(c in DONE)) continue
-    if (c == "CA") {
-      by = canceller(A[r, "State"]); never = (A[r, "AllocCPUS"] + 0 == 0 || A[r, "Start"] == "None" || A[r, "Start"] == "Unknown")
-      key = "cancelled" (by != "" ? " by " who(by, A[r, "User"], A[r, "UID"]) : "") (never ? " while pending" : " while running")
-    } else if (c == "F") {
-      exit_of(id, A, r, nsteps, step_row)
-      x = jsg(id); y = jrc(id)
-      key = (y < 0) ? "failed with an exit code that cannot be read" : (x >= 1 && x <= 31) ? "failed by " signame(x) \
-          : (x > 31 && x != 125) ? "failed by Slurm error " x : "failed with exit " y
-      if (first == "") first = id
-    } else {
-      key = (c == "OOM") ? "ran out of memory" : (c == "TO") ? "reached the time limit" : (c == "NF") ? "lost their node" : "ended " stname(c)
-      if (first == "") first = id
-    }
-    if (!(key in GN)) GK[++n] = key
-    GN[key] += ntasks(id, ID); if (GN[key] - ntasks(id, ID) < 3 || GI[key] == "") GI[key] = GI[key] (GI[key] == "" ? "" : ", ") id
-    else if (GI[key] !~ /…$/) GI[key] = GI[key] ", …"
+# One line per way the array's tasks ended: each task by its state in
+# tasks_count's count.  Its words from accounting's row where that names the
+# same state (AROW), else squeue's record (Q) says what it can: not who
+# cancelled.  An id is named only if all its tasks are in that state (NAMED: a
+# bracket less a task on its own is not), and the hint names a numbered task
+function why_array_task(id, k, c, arow, q, named, GN, GI, GS, GK,   by, never, key, x, y) {
+  if (c == "CD" || !(c in DONE) || !k) return
+  if (c == "CA") {
+    by = arow ? canceller(A[arow, "State"]) : ""
+    never = arow ? (A[arow, "AllocCPUS"] + 0 == 0 || A[arow, "Start"] == "None" || A[arow, "Start"] == "Unknown") : ""
+    key = "cancelled" (by != "" ? " by " who(by, A[arow, "User"], A[arow, "UID"]) : "") (!arow ? "" : never ? " while pending" : " while running")
+  } else if (c == "F") {
+    exit_of(id, A, arow, nsteps, step_row, q ? R[q, "exit_code"] : "")
+    x = jsg(id); y = jrc(id)
+    key = (y < 0) ? "failed with an exit code that cannot be read" : (x >= 1 && x <= 31) ? "failed by " signame(x) \
+        : (x > 31 && x != 125) ? "failed by Slurm error " x : "failed with exit " y
+    if (WHY_FIRST == "" && !index(id, "[")) WHY_FIRST = id
+  } else {
+    key = (c == "OOM") ? "ran out of memory" : (c == "TO") ? "reached the time limit" : (c == "NF") ? "lost their node" : "ended " stname(c)
+    if (WHY_FIRST == "" && !index(id, "[")) WHY_FIRST = id
   }
+  if (!(key in GN)) { GK[++GK[0]] = key; GI[key] = "" }
+  GN[key] += k
+  if (named && (GN[key] - k < 3 || GI[key] == "")) { GI[key] = GI[key] (GI[key] == "" ? "" : ", ") id; GS[key] += k }
+}
+function why_array(QT, own,   i, r, q, id, c, ac, k, n, GN, GI, GS, GK, a, b, t, seen, x, m) {
+  for (i = 1; i <= ntask_rows; i++) {
+    r = task_row[i]; id = A[r, "JobID"]; ac = stcode(A[r, "State"])
+    if (index(id, "[")) {
+      if (QT["record"] == "") { k = bracket_left(id, own); why_array_task(id, k, ac, (ac in DONE) ? r : 0, 0, k == ntasks(id, ID), GN, GI, GS, GK) }
+      continue
+    }
+    t = substr(id, length(job) + 2) + 0
+    if (seen[t]++) continue
+    q = (t in QT) ? QT[t] : 0; c = q ? R[q, "StateCompact"] : ac
+    why_array_task(id, 1, c, (ac in DONE && ac == c) ? r : 0, q, 1, GN, GI, GS, GK)
+  }
+  for (i = 1; i <= narray_records; i++) {          # squeue's alone: a task accounting has no row of; a record of several, ended
+    q = array_record[i]; c = R[q, "StateCompact"]
+    if (onetask(q)) {
+      t = R[q, "ArrayTaskID"] + 0
+      if (!seen[t]++) why_array_task(job "_" t, 1, c, 0, q, 1, GN, GI, GS, GK)
+    } else {
+      id = job "_[" R[q, "ArrayTaskID"] "]"; r = 0
+      for (k = 1; k <= ntask_rows && !r; k++) if (index(A[task_row[k], "JobID"], "[") && stcode(A[task_row[k], "State"]) == c) r = task_row[k]
+      why_array_task(id, ntasks(id, ID), c, r, q, bracket_left(id, own) == ntasks(id, ID), GN, GI, GS, GK)
+    }
+  }
+  n = GK[0]
   for (a = 2; a <= n; a++) for (b = a; b > 1 && (GK[b] !~ /^cancelled/ && GK[b - 1] ~ /^cancelled/ || \
                                                (GK[b] ~ /^cancelled/) == (GK[b - 1] ~ /^cancelled/) && GN[GK[b]] > GN[GK[b - 1]]); b--) {
     t = GK[b]; GK[b] = GK[b - 1]; GK[b - 1] = t
   }
-  for (k = 1; k <= n; k++) wl(GN[GK[k]] " " GK[k] ": " GI[GK[k]])
+  # the ids named, "…" where they are fewer than the count
+  for (k = 1; k <= n; k++) wl(GN[GK[k]] " " GK[k] (GI[GK[k]] != "" ? ": " GI[GK[k]] (GS[GK[k]] < GN[GK[k]] ? ", …" : "") : ""))
   for (i = 1; i <= narray_records; i++) {          # the pending tasks, by the record that holds them
     r = array_record[i]
     if (R[r, "StateCompact"] != "PD" || onetask(r)) continue
@@ -3149,7 +3210,7 @@ function why_array(   i, r, id, c, by, never, key, k, n, GN, GI, GK, a, b, t, fi
     wl(ntasks(job "_[" R[r, "ArrayTaskID"] "]", ID) " pending: " \
        ((x == "JobArrayTaskLimit" && match(R[r, "ArrayTaskID"], /%([0-9]+)$/, m)) ? "the array runs at most " m[1] (m[1] + 0 == 1 ? " task" : " tasks") " at once" : "Slurm's reason: " x))
   }
-  if (first != "") wn("sq job " first " says more about one of them")
+  if (WHY_FIRST != "") wn("sq job " WHY_FIRST " says more about one of them")
 }
 
 BEGIN {
@@ -6958,7 +7019,8 @@ ENDFILE   {                     # unreadable (our format never took effect, e.g.
     q++
     for (i=1; i<=n; i++) raw[q,i] = F[i+1]
     qstate[q] = F[n+2]; qlimit[q] = F[n+3]; qstart[q] = F[n+4]
-    if (compact) { qwhy[q] = F[n+5]; qsec[q] = dur(F[n+6]) }
+    qwhy[q] = compact ? F[n+5] : ""             # jclass takes it either way, so never unset
+    if (compact) qsec[q] = dur(F[n+6])
     if (memon) { row_jobid[q] = F[qpos_jobid]; row_uid[q] = F[qpos_uid] }
     qw[q] = tw; qjobs += tw                     # a pending bracket is many jobs in one
     cnt[F[n+2]] += tw                           # row; tw is read from the hidden %i, so

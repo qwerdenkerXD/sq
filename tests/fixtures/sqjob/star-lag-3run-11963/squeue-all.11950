@@ -1,0 +1,4 @@
+# R-H1: three rows not ended, squeue forgot
+# squeue forgot it
+@stderr slurm_load_jobs error: Invalid job id specified
+@exit 1

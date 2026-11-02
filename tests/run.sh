@@ -8869,6 +8869,109 @@ c_why_parent_garbled() {
 }
 # U-design U3: an array parent's tasks: per task squeue's record, else
 # accounting's row; counts by state are all Slurm's dependency code reads
+# X3: sq job ARRAY and a parent's row are one count (tasks_count); the title in
+# its words: done COMPLETED, cancelled CANCELLED, pending PENDING, running what
+# is not final, failed any other final state
+array_title_is() {   # array_title_is FIXTURE TEXT: sq job 11950's title ends in "array of TEXT"
+	job_run "$1-11963" COLUMNS=120 -- --no-color job 11950
+	local title=$2
+	need "$1: sq job 11950 is array of $2" eval 'rc_is 0 && [ "$(plain | head -1 | sed "s/.* · array of //")" = "$title" ]'
+}
+# the row of sq job 11963 in the title's words, in the title's order, and how
+# many tasks in all: "4: 3 done · 1 failed"
+row_as_title() {
+	parent_rows | head -1 | sed 's/^ *[0-9]* *//' | LC_ALL=$utf8 gawk '
+		{	sub(/ · maybe .*/, ""); sub(/^.* · now its tasks: /, "its tasks now: "); if (!sub(/^its tasks now: /, "")) exit
+			n = split($0, P, " · ")
+			for (i = 1; i <= n; i++) { split(P[i], W, " "); k = W[1]; s = W[2]; t += k
+				if (s == "COMPLETED") d += k; else if (s == "CANCELLED") c += k; else if (s == "PENDING") p += k
+				else if (s == "RUNNING" || s == "COMPLETING" || s == "SUSPENDED" || s == "STOPPED") r += k; else f += k }
+			o = (d ? " · " d " done" : "") (f ? " · " f " failed" : "") (c ? " · " c " cancelled" : "") (r ? " · " r " running" : "") (p ? " · " p " pending" : "")
+			print t ": " substr(o, 4) }'
+}
+c_array_one_count() {
+	T_TITLE="sq job ARRAY counts as the parent's row does: every star fixture's title and row the same count, a task once, its why section the same tasks; figures only from a row that says COMPLETED where squeue does not say otherwise"
+	local f want n=0 d
+	for d in "$fixtures"/sqjob/star-*-11963 "$fixtures"/sqjob/br-*-11963; do
+		f=${d##*/}; f=${f%-11963}
+		case $f in star-acctfail|star-accthang|star-garbage|star-none|star-plain) continue ;; esac   # their rows hold no count
+		job_run "$f-11963" COLUMNS=200 -- --no-color job 11963; want=$(row_as_title)
+		[ -n "$want" ] || { T_FAIL+=("$f: no count on the row"); continue; }
+		job_run "$f-11963" COLUMNS=200 -- --no-color job 11950; n=$((n + 1))
+		# accounting down, the title's count is a floor, in its own words, and no rows make no why section (spec, Found, not fixed 5)
+		need "$f: sq job 11950 is 'array of $want'" eval 'rc_is 0 && plain | head -1 | sed -E "s/≥([0-9]+) \(accounting did not answer\)/\1/" | grep -qE "array of $want\$"'
+		plain | head -1 | grep -qF '≥' && continue
+		# every task the title has as failed or cancelled has a line of the why section
+		need "$f: the why section holds the title's failed and cancelled" eval '[ "$(plain | LC_ALL=$utf8 gawk "
+			NR == 1 { if (match(\$0, /([0-9]+) failed/, m)) t += m[1]; if (match(\$0, /([0-9]+) cancelled/, m)) t += m[1] }
+			/^why/ { w = 1; next } w && /^  [0-9]+ / && !/^  [0-9]+ pending: / { s += \$1 } END { print s + 0 - t }")" = 0 ]'
+	done
+	need "enough fixtures seen ($n)" [ "$n" -ge 20 ]
+	array_title_is star-partial '4: 3 done · 1 failed'
+	need "star-partial: the failure in the report, its exit from squeue's record" eval 'why_has "  1 failed with exit 1: 11950_3" && [ "$(why_notes)" = "sq job 11950_3 says more about one of them" ]'
+	need "star-partial: figures over the three that say COMPLETED" eval 'has "over the 3 completed tasks; the weakest: sq job 11950_1"'
+	array_title_is star-stale-acct '4: 1 done · 1 failed · 2 pending'
+	array_title_is star-sqonly '2: 1 done · 1 failed'
+	need "star-sqonly: a task only squeue holds has its line, squeue's 0:1 read as 1" eval 'why_has "  1 failed with exit 1: 11950_9"'
+	array_title_is star-requeued '2: 1 done · 1 running'
+	need "star-requeued: running again: no figures of its earlier row" eval 'has "over the 1 completed task; the weakest: sq job 11950_2"'
+	array_title_is star-cdlag '2: 2 done'
+	need "star-cdlag: counted done, its RUNNING row gives no figures" eval 'has "over the 1 completed task; the weakest: sq job 11950_2"'
+	array_title_is star-cdlag-all '1: 1 done'
+	need "star-cdlag-all: no figures to speak of, no blank weakest" eval 'rc_is 0 && lacks "the weakest" && lacks "no task has completed yet"'
+	array_title_is star-sq-ca '1: 1 cancelled'
+	need "star-sq-ca: squeue's word alone, nobody named" eval 'why_has "  1 cancelled: 11950_1"'
+	array_title_is star-br-ca-sq '5: 1 done · 4 cancelled'
+	need "star-br-ca-sq: both sources' record once, accounting's canceller" eval 'why_has "  4 cancelled by you while pending: 11950_[3-6]"'
+	# R-M1, COMPLETING with an ended row reads as the row, in both reports; with none, COMPLETING
+	array_title_is star-cg '2: 1 done · 1 failed'
+	need "star-cg: the row's exit and figures" eval 'why_has "  1 failed with exit 1: 11950_2" && has "over the 1 completed task; the weakest: sq job 11950_1"'
+	parent_rows_are star-cg '    11950  its tasks now: 1 COMPLETED · 1 FAILED'
+	array_title_is star-cg-norow '1: 1 running'
+	parent_rows_are star-cg-norow '    11950  its tasks now: 1 COMPLETING'
+	# R-M2, the words from accounting's row only where it names the state counted
+	array_title_is star-cdf '1: 1 failed'
+	need "star-cdf: squeue's exit, not the COMPLETED row's" eval 'why_has "  1 failed with exit 1: 11950_3" && lacks "exit 0"'
+	# R-L1, no id with a task not in the state named; a hint names a numbered task or nothing
+	array_title_is br-timeout '4: 1 done · 3 failed'
+	need "br-timeout: the count, no bracket holding the task on its own, no hint at a refused id" eval 'why_has "  3 reached the time limit" && lacks "says more" && lacks "11950_[3-6]"'
+	array_title_is star-idn '5: 1 done · 4 failed'
+	need "star-idn: an unnamed bracket first: the id named, and … as it names fewer than it counts" eval 'why_has "  4 reached the time limit: 11950_8, …"'
+	array_title_is star-cg-br '3: 2 done · 1 running'
+	parent_rows_are star-cg-br '    11950  its tasks now: 1 COMPLETING · 2 COMPLETED'
+	array_title_is star-br-to-whole '5: 1 done · 4 failed'
+	need "star-br-to-whole: a whole bracket keeps its name, no hint at it" eval 'why_has "  4 reached the time limit: 11950_[3-6]" && lacks "says more"'
+	# R-H1: the crash shape: 3+ tasks, a row not ended, no record of several (gawk 5.2.1)
+	array_title_is star-lag-3run '3: 3 running'
+	array_title_is star-lag-mix3 '3: 2 done · 1 running'
+	job_run star-qfail3-11963 COLUMNS=200 -- --no-color job 11950
+	need "star-qfail3: squeue failing, 3 tasks: the report" eval 'rc_is 0 && plain | head -1 | grep -qF "array of 3: 2 done · 1 running"'
+	local big=$T_DIR/big-11963 r; ln -s "$fixtures/_common" "$T_DIR/_common" 2>/dev/null; mkdir -p "$T_DIR/sqjob"; ln -s "$fixtures/_common" "$T_DIR/sqjob/_common" 2>/dev/null
+	cp -r "$fixtures/sqjob/star-lag-run-11963" "$big"
+	sed -i 's#\.\./\.\./_common#'"$fixtures"'/_common#' "$big"/*
+	{ sed -n 1p "$big/sacct.11950"; for r in $(seq 1 200); do sed -n '/^JobID=11950_2;/p' "$fixtures/sqjob/star-lag-run-11963/sacct.11950" | sed "s/11950_2/11950_$r/; s/JobIDRaw=[0-9]*/JobIDRaw=$((20000 + r))/"; done; } > "$big/sacct.new"; mv "$big/sacct.new" "$big/sacct.11950"
+	job_run "$big" COLUMNS=200 -- --no-color job 11950
+	need "200 tasks of that shape: the report" eval 'rc_is 0 && plain | head -1 | grep -qF "array of 200: 200 running"'
+	array_title_is star-br-cd '5: 5 done'
+	need "star-br-cd: a COMPLETED bracket is no failure" eval 'lacks "failed"'
+	# the queue's records alone, accounting down: as ever, and no blank weakest
+	array_title_is star-partial-acctfail '≥1 (accounting did not answer): 1 failed'
+	need "star-partial-acctfail: no why section from accounting" eval 'lacks "the weakest"'
+}
+# gawk 5.2.1 double-frees an unset element passed to a function and read again;
+# gawk's --lint names each one.  These two must stay away from it (spec H1).
+c_no_unset_args() {
+	T_TITLE="gawk --lint sees neither qwhy nor QT unset, on the dashboard, COMPACT and FULL, and on sq job ARRAY, H1's shape included"
+	local bin=$T_DIR/bin real log=$T_DIR/lint.log run
+	real=$(command -v gawk); mkdir -p "$bin"; : > "$log"
+	printf '#!/usr/bin/env bash\nexec 2>>"%s"\nexec "%s" --lint "$@"\n' "$log" "$real" > "$bin/gawk"; chmod +x "$bin/gawk"
+	sq_run mixed "PATH=$bin:$here/bin:$PATH" -- --full --no-color;    need "FULL ran" rc_is 0
+	sq_run mixed "PATH=$bin:$here/bin:$PATH" -- --compact --no-color; need "COMPACT ran" rc_is 0
+	job_run star-lag-mix3-11963 "PATH=$bin:$here/bin:$PATH" -- --no-color job 11950; need "sq job ARRAY ran" rc_is 0
+	job_run star-lag-mix3-11963 "PATH=$bin:$here/bin:$PATH" -- --no-color job 11963; need "sq job, the row, ran" rc_is 0
+	need "lint ran" grep -q warning "$log"
+	need "no unset qwhy or QT" eval '! grep -aE "uninitialized element .(qwhy|QT)\[" "$log"'
+}
 c_why_parent_array() {
 	T_TITLE="a _* parent, any clause: a task counts once, squeue's record first, accounting's row else, a bracket less those on their own; one source failing is said on the row; none in either: the failure or the old words; another clause's rows are no count of the array"
 	local PARENT_ENV=()
@@ -12644,7 +12747,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	array_one_count no_unset_args why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins

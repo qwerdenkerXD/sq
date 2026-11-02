@@ -1,0 +1,4 @@
+# R-L1: a whole final bracket keeps its name; no hint at it
+# squeue forgot it
+@stderr slurm_load_jobs error: Invalid job id specified
+@exit 1
