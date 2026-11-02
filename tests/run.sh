@@ -11575,11 +11575,13 @@ qhdr_is() { [ "$(labelled QHDR | sed -E 's/ +/ /g')" = "$1" ]; }   # qhdr_is TEX
 # est_series FILE FIXTURE "WxH..." VIEW [VAR=value]... -- [sq args]: each
 # screen's VIEW (a function: est_view, est_hview) into FILE as "W H RC VIEW";
 # its runs apart (T_DIR, run_n), so several series run at once (est_bg, after
-# the case's est_pin); its FAILs into FILE.fail, its stub calls into FILE.calls
+# the case's est_pin); how many screens it owes into FILE.want, its FAILs into
+# FILE.fail, its stub calls into FILE.calls
 est_series() {
 	local file=$1 fx=$2 confs=$3 view=$4 c; shift 4
 	local -a envs=(); while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done; [ $# -gt 0 ] && shift
 	local T_DIR=$T_DIR/s-${file##*/} run_n=0 T_CALLS=0; local -a T_FAIL=(); mkdir -p "$T_DIR"
+	wc -w <<< "$confs" > "$file.want"
 	for c in $confs; do
 		est_run "$fx" SQ_WIDTH="${c%x*}" SQ_HEIGHT="${c#*x}" "${envs[@]}" -- "$@"
 		printf '%s %s %s %s\n' "${c%x*}" "${c#*x}" "$RC" "$($view)"
@@ -11598,22 +11600,41 @@ est_bg() {
 }
 # est_confs "W..." "H...": every WxH, H by H, the widths in their order
 est_confs() { local h w; for h in $2; do for w in $1; do printf '%sx%s ' "$w" "$h"; done; done; }
+# est_rcs FILE: " W:H:rcN" for each run of the series that did not exit 0
+est_rcs() { gawk '$3 != 0 { printf " %s:%s:rc%s", $1, $2, $3 }' "$1" 2>/dev/null; }
+c_est_wait_rules() {
+	T_TITLE="est_wait: a series that owes no screen, wrote none, is short of them or has a run not rc 0 is a FAIL and returns 1; one with all its screens rc 0 is none"
+	local f=$T_DIR/s rc
+	sq_run empty -- --no-color; need "a stub answers" rc_is 0
+	est_wait_is() { ( local T_FAIL=() EST_PIDS=(); est_wait "$f"; rc=$?; [ "$rc" = "$1" ] && [ "${#T_FAIL[@]}" = "$1" ] ); }
+	need "no file, no .want" est_wait_is 1
+	: > "$f"; need "an empty file, no .want" est_wait_is 1
+	echo 0 > "$f.want"; need "an empty file owing 0" est_wait_is 1
+	echo 2 > "$f.want"; printf '40 8 0 x\n' > "$f"; need "one screen of 2" est_wait_is 1
+	printf '40 8 0 x\n40 9 1 x\n' > "$f"; need "two of 2, one rc 1" est_wait_is 1
+	printf '40 8 0 x\n40 9 0 x\n' > "$f"; need "two of 2, rc 0" est_wait_is 0
+}
 # est_wait FILE...: the series of these files done (est_bg's, the rest of
-# EST_PIDS), their FAILs and stub calls taken over; a series that left no
-# screens is a FAIL
+# EST_PIDS), their FAILs and stub calls taken over; a series short of its
+# screens, or with a run that failed, is a FAIL, and est_wait returns 1: its
+# case writes no golden and compares none
 est_wait() {
-	local f l
+	local f l bad ok=0
 	[ ${#EST_PIDS[@]} -eq 0 ] || wait "${EST_PIDS[@]}"; EST_PIDS=()
 	for f; do
-		[ -s "$f" ] || T_FAIL+=("${f##*/}: the series left no screens")
+		bad=$(est_rcs "$f")
+		l=$(cat 2>/dev/null "$f.want")
+		{ [ "${l:-0}" -gt 0 ] && [ "$(wc -l 2>/dev/null < "$f")" = "$l" ]; } || bad="$bad, $(wc -l 2>/dev/null < "$f") screens of ${l:-none owed}"
+		if [ -n "$bad" ]; then T_FAIL+=("${f##*/}: a series whose every run did not end rc 0:$bad"); ok=1; fi
 		[ ! -f "$f.fail" ] || while IFS= read -r l; do [ -z "$l" ] || T_FAIL+=("${f##*/}: $l"); done < "$f.fail"
 		[ ! -s "$f.calls" ] || T_CALLS=$((T_CALLS + $(cat "$f.calls")))
 	done
+	return $ok
 }
 # est_mono FILE: the steps from W to the next width of the series, W+1 or
 # further (each H apart), where a row that showed its start estimate (a "→"
 # in NODE/REASON, or a date in a START column) shows none, as
-# " H:W>W'(ids)"; and " W:rcN" for a run that failed
+# " H:W>W'(ids)"
 est_mono() {
 	gawk '
 		function shown(   x, n, E, P, i, o) {
@@ -11623,7 +11644,6 @@ est_mono() {
 		}
 		{	delete F; for (i = 4; i <= NF; i++) { p = index($i, "="); F[substr($i, 1, p - 1)] = substr($i, p + 1) }
 			w = $1; h = $2; now = shown()
-			if ($3 != 0) printf " %s:rc%s", w, $3
 			if ((h in PW) && PW[h] < w) {
 				n = split(PS[h], E, ","); lost = ""
 				for (i = 1; i <= n; i++) if (E[i] != "" && index(now, "," E[i] ",") == 0) lost = lost (lost == "" ? "" : ",") E[i]
@@ -11636,7 +11656,7 @@ est_mono() {
 # they differ (291a4a8's, from a build of 7fd9bd6: see above); otherwise
 # prints " W:H:what" for each screen of FILE whose column set is not
 # GOLDEN's, that shows ST where GOLDEN shows STATE, or that lacks a ×N or a
-# task GOLDEN shows (AC 15)
+# task GOLDEN shows (AC 15); est_wait has seen every run end rc 0
 est_golden() {
 	if [ $pin_frozen = 1 ]; then gawk '{ print $1, $2, $4, $5, $9 }' "$1" | frozen_put "$2"; return 0; fi
 	[ -s "$2" ] || { echo " no golden ${2#"$here"/}"; return 0; }
@@ -11649,11 +11669,18 @@ est_golden() {
 			for (i = 1; i <= n; i++) if (index(have, "," P[i] ",") == 0) printf " %s:%s:lost-%s", $1, $2, P[i]
 		}' "$2" "$1"
 }
-# est_screen_golden GOLDEN: --pin-frozen writes the last screen into GOLDEN
-# where it differs, else the screen is GOLDEN byte for byte
+# est_screen_golden GOLDEN: --pin-frozen keeps the last screen for GOLDEN (for
+# est_screens_write), else the screen is GOLDEN byte for byte
+EST_SCREENS=()
 est_screen_golden() {
-	if [ $pin_frozen = 1 ]; then frozen_put "$1" < "$OUT"; return 0; fi
+	if [ $pin_frozen = 1 ]; then cp "$OUT" "$T_DIR/screen.${#EST_SCREENS[@]}"; EST_SCREENS+=("$1"); return 0; fi
 	cmp -s "$1" "$OUT"
+}
+# est_screens_write: --pin-frozen's writes, only if all of the case has passed
+est_screens_write() {
+	local i
+	[ ${#T_FAIL[@]} -eq 0 ] || return 0
+	for i in "${!EST_SCREENS[@]}"; do frozen_put "${EST_SCREENS[i]}" < "$T_DIR/screen.$i"; done
 }
 
 # Its grid is the review's (LOW 6) plus nboot at H 13: of the earlier one (H
@@ -11682,7 +11709,7 @@ c_est_monotone() {   # EST AC 4: an estimate shown at W is shown at W+1
 	files+=("$T_DIR/mono-est-colour" "$T_DIR/mono-est-c")
 	est_bg "$T_DIR/mono-est-colour" est "$(est_confs "$(seq 21 130)" 40)" est_view -- --compact --color
 	est_bg "$T_DIR/mono-est-c" est "$(est_confs "$(seq 21 130)" 40)" est_view LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --compact --no-color
-	est_wait "${files[@]}"
+	est_wait "${files[@]}" || return
 	for f in "${files[@]}"; do
 		lost=$(est_mono "$f")
 		need "${f##*/mono-}: no estimate lost from W to the next width (at H:W>W'(rows):${lost:- none})" test -z "$lost"
@@ -11748,7 +11775,7 @@ c_est_columns() {   # EST AC 15: the estimates never cost a column, the long sta
 		f=$T_DIR/cols-$fx; files+=("$f")
 		est_bg "$f" "$fx" "$(est_confs "$(seq 21 100)" 40)" est_view -- --compact --no-color
 	done
-	est_wait "${files[@]}"
+	est_wait "${files[@]}" || return
 	for fx in est estreal mixed mix30 wide-text estarr; do
 		bad=$(est_golden "$T_DIR/cols-$fx" "$est_goldens/$fx-columns.txt")
 		need "$fx: 291a4a8's columns, state form, ×N and tasks at every width (not at W:H:${bad:- none})" test -z "$bad"
@@ -11781,6 +11808,7 @@ c_est_full() {   # EST F0: FULL as 291a4a8
 	need "mixed FULL W=64: (Resources), no estimate" eval 'has "(Resources)" && est_is ""'
 	est_run mixed SQ_WIDTH=66 -- --full --no-color
 	need "mixed FULL W=66: → 2027-11-30" est_is "1103=2027-11-30"
+	est_screens_write
 }
 c_est_f3() {   # EST: DISPLAY F3's second pass (JOBID held) with the estimates
 	T_TITLE="EST (DISPLAY F3's second pass): estarr COMPACT H=40 at W 59, 60, 61, 62, 64 and 70, the ids and the estimates as the design's prototype draws them; what the first pass let go stays gone"
@@ -11804,7 +11832,7 @@ c_est_height() {   # EST, decision 8: H11's hmono on the estimate fixtures
 		# shellcheck disable=SC2086
 		est_bg "$f" "$fx" "$(est_confs "40 80 120" "$(seq 2 60)" | tr ' ' '\n' | sort -t x -k1,1n -k2,2n | tr '\n' ' ')" est_hview -- --compact --no-color ${args//_/ }
 	done
-	est_wait "${files[@]}"
+	est_wait "${files[@]}" || return
 	for f in "${files[@]}"; do
 		tall=$(gawk '{ split($4, L, "="); if (L[2] > $2) printf " %s:%s", $1, $2 }' "$f")
 		lost=$(gawk '{ split($5, I, "="); now = "," I[2] ","
@@ -11855,7 +11883,7 @@ c_est_height_cols() {   # EST: the H grid against 291a4a8 (decision 8, the state
 		f=$T_DIR/grid-$fx; files+=("$f")
 		est_bg "$f" "$fx" "$(est_confs "$(seq 44 2 70) 55" "$(seq 8 30)" | tr ' ' '\n' | sort -t x -k1,1n -k2,2n | tr '\n' ' ')" est_view -- --compact --no-color
 	done
-	est_wait "${files[@]}"
+	est_wait "${files[@]}" || return
 	for fx in hplus hplus-busy hplus2 hplus3 far40 mixed mix30; do
 		f=$T_DIR/grid-$fx
 		if [ $pin_frozen = 1 ]; then gawk '{ print $1, $2, $4, $6 }' "$f" | frozen_put "$est_goldens/$fx-grid.txt"; continue; fi
@@ -11879,7 +11907,7 @@ c_est_start() {   # EST S: a START column holds the estimates' dates
 	local c wd o cols est start f bad lost EST_PIDS=()
 	est_pin || return
 	est_bg "$T_DIR/start-arrtask" arrtask "$(est_confs "$(seq 21 60)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R'
-	est_wait "$T_DIR/start-arrtask"
+	est_wait "$T_DIR/start-arrtask" || return
 	bad=$(est_golden "$T_DIR/start-arrtask" "$est_goldens/arrtask-start-columns.txt")
 	need "arrtask -o '%i %j %T %S %R' W 21..60: 291a4a8's columns, ×N and tasks (not at W:H:${bad:- none})" test -z "$bad"
 	[ $pin_frozen = 1 ] && return   # the golden written; what follows is EST's own property, which an older build lacks
@@ -11905,7 +11933,7 @@ c_est_start() {   # EST S: a START column holds the estimates' dates
 	PINS
 	est_bg "$T_DIR/start-u" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %u %T %S %R'
 	est_bg "$T_DIR/start-nou" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R'
-	est_wait "$T_DIR/start-u" "$T_DIR/start-nou"
+	est_wait "$T_DIR/start-u" "$T_DIR/start-nou" || return
 	for f in start-u start-nou; do
 		lost=$(est_mono "$T_DIR/$f")
 		need "estopt $f: no estimate lost from W to W+1, START's dates counted (at H:W>W+1(rows):${lost:- none})" test -z "$lost"
@@ -12767,7 +12795,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	array_one_count no_unset_args why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	array_one_count no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
