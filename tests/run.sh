@@ -11692,6 +11692,11 @@ c_est_start() {   # EST S: a START column holds the estimates' dates
 	T_TITLE="EST (S): estopt -o '%i %j %u %T %S %R' W 30 none, W 46 all four in NODE/REASON, W 53 START; -o '%i %j %T %S %R' W 30 1205 alone, W 40 all four, W 47 START; the arrow beside START a copy (W 52/53, 58/59, 57/58); arrtask -o '%i %j %T %S %R' W 21..60 no ×N or task fewer than 291a4a8; estopt with both START lists W 21..120: no estimate lost W -> W+1, a date in START counting as shown"
 	local c wd o cols est start f bad lost EST_PIDS=()
 	est_pin || return
+	est_bg "$T_DIR/start-arrtask" arrtask "$(est_confs "$(seq 21 60)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R'
+	est_wait "$T_DIR/start-arrtask"
+	bad=$(est_golden "$T_DIR/start-arrtask" "$est_goldens/arrtask-start-columns.txt")
+	need "arrtask -o '%i %j %T %S %R' W 21..60: 291a4a8's columns, ×N and tasks (not at W:H:${bad:- none})" test -z "$bad"
+	[ $pin_frozen = 1 ] && return   # the golden written; what follows is EST's own property, which an older build lacks
 	# W | -o LIST | the columns | the estimates in NODE/REASON | the rows with a date in START
 	while IFS='|' read -r wd o cols est start; do
 		[ -n "$wd" ] || continue
@@ -11712,12 +11717,9 @@ c_est_start() {   # EST S: a START column holds the estimates' dates
 		57|%i %j %T %P %S %Q %R|JOBID,NAME,STATE,PART,START,NODE/REASON|1205=10:33|1201,1204,1205,1206
 		58|%i %j %T %P %S %Q %R|JOBID,NAME,STATE,PART,START,PRIO,NODE/REASON||1201,1204,1205,1206
 	PINS
-	est_bg "$T_DIR/start-arrtask" arrtask "$(est_confs "$(seq 21 60)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R'
 	est_bg "$T_DIR/start-u" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %u %T %S %R'
 	est_bg "$T_DIR/start-nou" estopt "$(est_confs "$(seq 21 120)" 40)" est_view -- --compact --no-color -o '%i %j %T %S %R'
-	est_wait "$T_DIR/start-arrtask" "$T_DIR/start-u" "$T_DIR/start-nou"
-	bad=$(est_golden "$T_DIR/start-arrtask" "$est_goldens/arrtask-start-columns.txt")
-	need "arrtask -o '%i %j %T %S %R' W 21..60: 291a4a8's columns, ×N and tasks (not at W:H:${bad:- none})" test -z "$bad"
+	est_wait "$T_DIR/start-u" "$T_DIR/start-nou"
 	for f in start-u start-nou; do
 		lost=$(est_mono "$T_DIR/$f")
 		need "estopt $f: no estimate lost from W to W+1, START's dates counted (at H:W>W+1(rows):${lost:- none})" test -z "$lost"
