@@ -8851,6 +8851,20 @@ c_why_parent_array() {
 	job_run star-notok-failed-11963 COLUMNS=120 -- --no-color job 11963
 	need "star-notok-failed: the same lead, which can no longer happen" eval 'rc_is 0 && why_has "  will never start: it may start only once every task of array 11950 has ended, at least one of them not successfully, which can no longer happen"'
 	parent_rows_are notok-mix '    11950  must end, at least one of them not successfully · now its tasks: 1 RUNNING · 1 FAILED' '    11940  must fail · now Slurm no longer knows it'
+	# each afternotok clause is tested alone: a _* one beside any other goes per row, with , or ?
+	local some='must end, at least one of them not successfully'
+	job_run two-notok-unf-11963 COLUMNS=120 -- --no-color job 11963
+	need "two-notok-unf: per row, no lead across the arrays" eval 'rc_is 0 && why_has "  waits its turn: it may start once all of these are met" && [ "$(parent_rows)" = "    11950  $some · now its tasks: 2 COMPLETED
+    11970  $some · now its tasks: 1 COMPLETED · 1 FAILED" ]'
+	job_run two-notok-doomed-11963 COLUMNS=120 -- --no-color job 11963
+	need "two-notok-doomed: per row, the failed clause says so on its own" eval 'rc_is 0 && why_has "  will never start: it may start only once all of these are met, which can no longer happen" && [ "$(parent_rows)" = "    11950  $some, which can no longer happen · now its tasks: 2 COMPLETED
+    11970  $some · now its tasks: 1 COMPLETED · 1 FAILED" ]'
+	job_run two-notok-any-11963 COLUMNS=120 -- --no-color job 11963
+	need "two-notok-any: with ? too" eval 'rc_is 0 && why_has "  waits its turn: it may start once one of these is met" && [ "$(parent_rows)" = "    11950  $some · now its tasks: 2 COMPLETED
+    11970  $some · now its tasks: 1 COMPLETED · 1 FAILED" ]'
+	job_run notok-bare-star-11963 COLUMNS=120 -- --no-color job 11963
+	need "notok-bare-star: a bare clause on an array beside a _* one, per row" eval 'rc_is 0 && why_has "  waits its turn: it may start once all of these are met" && [ "$(parent_rows)" = "    11950  $some · now its tasks: 1 RUNNING
+    11970  $some · now its tasks: 1 COMPLETED · 1 FAILED" ]'
 	# only afternotok cannot say both in one lead (rule A 7: the lead stays)
 	job_run ok-mix-11963 COLUMNS=120 -- --no-color job 11963
 	need "ok-mix: _* beside a plain afterok keeps the one lead, the rows count" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 11950 and 11940 have completed successfully" && [ "$(parent_rows)" = "    11950  its tasks now: 1 RUNNING · 1 FAILED

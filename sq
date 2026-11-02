@@ -2687,7 +2687,9 @@ function why_pending(q, r,   reason, p, m, v) {
 
 # ---- Dependency: each parent, its condition and its state now
 # afternotok on a whole array: Slurm clears it once all ended and not all
-# completed (job_scheduler.c:2921-2928), so one task failing is enough
+# completed (job_scheduler.c:2921-2928), so one task failing is enough.  Each
+# clause is tested alone (:3103-3116), and "at least one" in one lead reads
+# across them: beside any other afternotok, such a clause goes per row
 function depcond(i, form,   t, x, h, notok_some) {      # FORM has, have (the lead line) or must (a row)
   t = DT[i]; h = (form == "must") ? "" : form " "; notok_some = "at least one of them not successfully"
   if (form == "must")
@@ -2718,7 +2720,7 @@ function why_dep(q, reason,   dep, anyof, n, cl, i, m, nf, nu, never, same, ids,
     } else if (match(cl[i], /^singleton\(([a-z]+)\)$/, m)) { DT[i] = "singleton"; DS[i] = m[1] }
     else { DT[i] = "raw"; DP[i] = cl[i] }
     if (DS[i] == "failed") nf++; else nu++
-    if (DT[i] != DT[1] || DD[i] != DD[1] || (DT[i] == "afternotok" && DSTAR[i] != DSTAR[1]) || DT[i] ~ /^(singleton|raw)$/) same = 0
+    if (DT[i] != DT[1] || DD[i] != DD[1] || (n > 1 && DT[i] == "afternotok" && DSTAR[i]) || DT[i] ~ /^(singleton|raw)$/) same = 0
     if (DT[i] != "raw" && length(DP[i]) > idw) idw = length(DP[i])
   }
   never = anyof ? (nu == 0) : (nf > 0)
