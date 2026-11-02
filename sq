@@ -2459,6 +2459,7 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
                         polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why, N, ord, QT, own, unended, t, seen, nover) {
   unended = tasks_count(job, R, nq, A, task_row, ntask_rows, N, ord, QT, own)
   for (k = 1; k <= ord[0]; k++) count(ord[k], N[ord[k]])
+  total += 0                                       # no task read (an id sq cannot read): "array of 0"
   if (ntask_rows) {                                       # accounting: the figures
     for (i = 1; i <= ntask_rows; i++) {
       r = task_row[i]; id = A[r, "JobID"]
@@ -2933,8 +2934,8 @@ function node_table(q, how, rq_c, rq_m,   i, k, w, cw, mw, CT, MT, VT, hc, hm, f
   wl2(sprintf("%-*s  %*s  %*s", w, "it asks", cw, CT[0], mw, MT[0]))
   for (k = 1; k <= nuse; k++) wl2(sprintf("%s  %*s  %*s  %s", colpad(NODE_NAME[USE[k]], -w), cw, CT[k], mw, MT[k], VT[k]))
 }
-# no node to show: why.  With an answer, none is in the partition; under -o
-# that rests on sinfo's rows alone, and the note says so
+# no node to show: why.  With an answer, what that answer shows, which is no
+# proof the partition has none (a hidden node is not in it); the note says whose
 function nodes_unknown_note(q) {
   if (NODESTAT != "ok") wn("the nodes are unknown: " NODEWHY)
   else if (NODEFMT == "text") wn("sinfo lists no node in partition " R[q, "Partition"])
@@ -5794,9 +5795,10 @@ statef=$statedir/alerted host=$(hostname -s | scrub) now=$(date '+%H:%M:%S %Z')
 uwhy=$(first_why nerr jerr) fwhy=$(first_why rwhy rerr jerr)
 # sinfo rc 0 and no row: no node you can see (sinfo.c:607 makes rows by the
 # partitions it was given), or what it said beside that: a refusal, a warning
-# or noise, sinfo.c's _get_info failing only on a NULL list, so rc 0 tells none
+# or noise, sinfo.c's _get_info failing only on a NULL list, so rc 0 tells none.
+# Its first line with text, the bidi controls gone before that is judged
 nonodes=0 noderr=
-if [ -z "$nerr" ] && [ ! -s "$tmp/nodes" ]; then nonodes=1; noderr=$(scrub -f "$tmp/nodes.err"); [[ $noderr == *[![:space:]]* ]] || noderr=; fi
+if [ -z "$nerr" ] && [ ! -s "$tmp/nodes" ]; then nonodes=1; noderr=$(scrub -f <(scrub -s < "$tmp/nodes.err" | env LC_ALL=C grep -am1 '[^[:space:][:cntrl:]]')); [[ $noderr == *[![:space:]]* ]] || noderr=; fi
 memallocf=$tmp/memalloc memreadf=$tmp/memread memtotalf=$tmp/memtotal nodespecf=$tmp/nodespec nodespecg=$tmp/nodespec.gate
 sqv="center fold color bell eta recent bellall me statef statetmp uwhy nonodes noderr jerr rwhy fwhy wtxt sfilt host now memallocf memreadf memtotalf nodespecf nodespecg nodespecfmt serr"
 for v in $sqv; do export "SQV_$v=${!v}"; done
@@ -7545,7 +7547,7 @@ END{
                        textcut("⚠ node output " (nbad ? "unreadable (unexpected sinfo output?)" : "incomplete"), linew),
                        e("0"))
   if (SHOW["nodes"] == 2 && nonodes)
-    out[++o] = sprintf("%s%s%s%s", lm, e("2"), textcut("sinfo lists no node" (noderr != "" ? ": " noderr : " you can see"), linew), e("0"))
+    out[++o] = sprintf("%s%s%s%s", lm, e("2"), textcut("sinfo lists no node" (noderr != "" ? ": " noderr : " you can see"), cols - left), e("0"))
   barc = int(bar/2); barm = bar - barc
   for (r=1; r<=nn && SHOW["nodes"] == 2; r++) {
     down = (nst[r] ~ /down|drain|fail|inval|unk/)

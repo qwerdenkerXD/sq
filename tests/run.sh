@@ -8838,6 +8838,24 @@ c_nodes_none() {
 	local e=$T_DIR/fxe; cp -r "$fixtures/h-stderr" "$e"; printf '@stderr \\e[31mred\n@exit 0\n' > "$e/sinfo"
 	sq_run "$e" -- --full --no-color
 	need "sinfo's stderr with a control byte: scrubbed" eval 'rc_is 0 && has "sinfo lists no node: [31mred" && ! grep -qF "$ESC" "$OUT"'
+	# the first line with text; "you can see" only if all of stderr is blank
+	local b=$T_DIR/fxb; cp -r "$fixtures/h-stderr" "$b"
+	printf '@stderr \\s\n@stderr sinfo: error: on line two\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
+	need "a blank first line, text on the second: its words" eval 'rc_is 0 && [ "$(plain | grep -cxF "  sinfo lists no node: sinfo: error: on line two")" = 1 ] && lacks "$nonodes_line"'
+	printf '@stderr \\e\n@stderr sinfo: error: after a control\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
+	need "a first line of a control alone: the next one's words" eval 'rc_is 0 && has "sinfo lists no node: sinfo: error: after a control"'
+	printf '@stderr \\s\n@stderr \\s\\s\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
+	need "every line blank: you can see" eval 'rc_is 0 && [ "$(plain | grep -cxF "  $nonodes_line")" = 1 ]'
+	printf '@stderr \\s\\xc2\\x80\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
+	need "blank only after scrubbing: you can see, no bare colon" eval 'rc_is 0 && [ "$(plain | grep -cxF "  $nonodes_line")" = 1 ]'
+	# one line, one row, in every mode
+	local mode
+	for mode in --full --compact ''; do
+		sq_run h-stderr SQ_WIDTH=40 -- $mode --no-color
+		need "h-stderr W=40 ${mode:-default}: one line, cut to the width" eval 'rc_is 0 && plain | LC_ALL=$utf8 gawk "/sinfo lists no node: / { n++; if (length(\$0) > 40) bad = 1 } END { exit !(n == 1 && !bad) }"'
+	done
+	printf '@stderr sinfo: error: %0300d\n@exit 0\n' 7 > "$b/sinfo"; sq_run "$b" -- --full --no-color
+	need "300 columns of stderr, FULL at W=120: one line, cut to the width" eval 'rc_is 0 && plain | LC_ALL=$utf8 gawk "/sinfo lists no node: / { n++; if (length(\$0) > 120) bad = 1 } END { exit !(n == 1 && !bad) }"'
 	sq_run h-stderr SQ_WIDTH=30 -- --compact --no-color
 	need "h-stderr W=30: cut to the screen" eval 'rc_is 0 && has "sinfo lists no node: sinf"'
 	# the job's report, where scontrol sees none either (node_mgr.c:1104, parsers.c:3498: "nodes": [])
@@ -9036,6 +9054,14 @@ c_array_one_count() {
 	need "star-br-failed: a whole FAILED bracket keeps its name, no hint at it" eval 'why_has "  4 failed with exit 1: 11950_[3-6]" && lacks "says more"'
 	array_title_is star-rec-own '4: 1 done · 3 failed'
 	need "star-rec-own: squeue's record with a task of it on its own counts, unnamed" eval 'why_has "  2 failed with exit 1" && why_has "  1 failed with exit 2: 11950_2" && lacks "11950_[2-3]"'
+	# a task id sq cannot read counts none: the title keeps its number, as on main
+	local odd=$T_DIR/odd-11963; mkdir -p "$odd"; : > "$odd/sacct.11950"; : > "$odd/sacct"
+	{ printf '@include %s\n' "$fixtures/_common/job-defaults"; grep '^JobID=' "$fixtures/sqjob/star-br-ca-sq-11963/squeue-all.11950" | sed 's/ArrayTaskID=3-6/ArrayTaskID=zz/; s/StateCompact=CA/StateCompact=PD/'; } > "$odd/squeue-all.11950"
+	job_run "$odd" COLUMNS=120 -- --no-color job 11950
+	need "an unreadable id: 'array of 0'" eval 'rc_is 0 && plain | head -1 | grep -qE "array of 0\$"'
+	printf '@stderr sacct: error: down\n@exit 1\n' > "$odd/sacct.11950"; printf '@stderr sacct: error: down\n@exit 1\n' > "$odd/sacct"
+	job_run "$odd" COLUMNS=120 -- --no-color job 11950
+	need "an unreadable id, accounting down: 'array of ≥0 (…)'" eval 'plain | head -1 | grep -qF "array of ≥0 (accounting did not answer)"'
 	# R-H1: the crash shape: 3+ tasks, a row not ended, no record of several (gawk 5.2.1)
 	array_title_is star-lag-3run '3: 3 running'
 	array_title_is star-lag-mix3 '3: 2 done · 1 running'
