@@ -263,9 +263,8 @@ trap cleanup EXIT
 tmo=${SQ_TIMEOUT:-5}
 case $tmo in ''|*[!0-9.]*|*.*.*) tmo=5 ;; esac          # 2.5 is valid to timeout
 [ -n "$(printf '%s' "$tmo" | tr -d '0.')" ] || tmo=5    # 0, 0.0 mean "no limit"
-# A caller's SQUEUE_*, SACCT_* and SINFO_* settings filter, sort or reformat,
-# even under --jobs / -j (SACCT_FEDERATION and SACCT_LOCAL too), so a question sq
-# asks for itself must not inherit them.  exported_names PATTERN...: the
+# A caller's SQUEUE_* settings filter, sort or reformat, even under --jobs, so a
+# question sq asks for itself must not inherit them.  exported_names PATTERN...: the
 # exported variables whose names match one of these shell patterns, one a line
 exported_names() {
 	local name pattern
@@ -281,12 +280,17 @@ hold_exports() {
 	[ -z "${!1}" ] || export -n ${!1}
 }
 release_exports() { [ -z "${!1}" ] || export ${!1}; }
-# sinfo reads SINFO_ALL, _FEDERATION, _FORMAT, _FUTURE, _LOCAL, _PARTITION and
-# _SORT (23.11.4's src/sinfo/opts.c): they filter, widen or reorder what it
-# lists, and SINFO_ALL with SINFO_PARTITION makes it exit 1.  No command of sq
-# has a use for that, and no sinfo call of sq may inherit it.  SLURM_CLUSTERS
-# is no SINFO_* and stays: the dashboard reads it as -M
-unset $(exported_names 'SINFO_*')
+# What only a client reads and sq has no use for goes here, once, for every
+# command.  23.11.4: sinfo reads SINFO_ALL, _FEDERATION, _FORMAT, _FUTURE,
+# _LOCAL, _PARTITION and _SORT (src/sinfo/opts.c): they filter, widen or reorder
+# what it lists, and SINFO_ALL with SINFO_PARTITION makes it exit 1.  sacct reads
+# SACCT_FEDERATION, _LOCAL and _FORMAT (src/sacct/options.c), scontrol
+# SCONTROL_ALL and _FUTURE, which change what show node lists, and _FEDERATION,
+# _LOCAL, _SIB and _SIBLING, which only show job reads (src/scontrol/scontrol.c).
+# SLURM_JSON changes how --json prints (25.05).  SQUEUE_* stay: the dashboard
+# reads them itself, into its filters.  SLURM_CLUSTERS stays: the dashboard reads
+# it as -M, and sq job and sq log refuse it
+unset $(exported_names 'SINFO_*' 'SACCT_*' 'SCONTROL_*') SLURM_JSON
 # Every collector runs through collect, so its own stderr (NAME.err) and
 # timeout's (NAME.tmo) land apart: the client's fd 3 becomes its stderr, and
 # timeout keeps fd 2.  sh -c exec keeps the pid, so TERM and KILL reach the
@@ -3596,10 +3600,8 @@ sub_job() {
 	job_pss_since
 	[ -z "$off" ] || job_fail "het jobs are not supported yet"
 	trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
-	# every SQUEUE_*, SACCT_* and SCONTROL_* setting unset (see exported_names;
-	# SCONTROL_ALL, SCONTROL_FEDERATION and the like change what show node
-	# lists), and SLURM_JSON, which changes how --json prints (25.05)
-	unset $(exported_names 'SQUEUE_*' 'SACCT_*' 'SCONTROL_*') SLURM_JSON
+	# every SQUEUE_* setting unset (see exported_names)
+	unset $(exported_names 'SQUEUE_*')
 	# three nonces, as the dashboard has: sacct's --delimiter and sinfo's -O
 	# are on their command lines for anyone to read, the queue's stays in
 	# the environment
@@ -4823,10 +4825,10 @@ help_screen_env() { cat <<'HELP_SCREEN_EOF'
 - TMPDIR	Where sq makes its temporary directory; sq exits 1 when it cannot
 - LC_ALL, LC_CTYPE, LANG	The locale gawk counts characters in, else C.UTF-8 (sq help display)
 
-> SQUEUE_SORT is ignored, and sacct and sinfo run without your SACCT_* and
-> SINFO_* settings: the node block lists what sinfo lists by default, so
-> unless you are an operator no node that is only in partitions hidden or
-> closed to you.
+> SQUEUE_SORT is ignored, and sacct, scontrol and sinfo run without your
+> SACCT_*, SCONTROL_*, SLURM_JSON and SINFO_* settings: the node block lists
+> what sinfo lists by default, so unless you are an operator no node that is
+> only in partitions hidden or closed to you.
 HELP_SCREEN_EOF
 }
 help_screen_why() { cat <<'HELP_SCREEN_EOF'
@@ -5069,7 +5071,7 @@ help_hint() {
 		timeout|timeouts|sq_timeout|slurm|outage) hint=slurm ;;
 		verdict|pending|reason|held|tail) hint=why ;;
 		seff|cpu|peak|sq_pss_since|pss) hint=efficiency ;;
-		environment|variables|variable|vars|var|sinfo_*|sacct_*) hint=env ;;
+		environment|variables|variable|vars|var|sinfo_*|sacct_*|scontrol_*|slurm_json) hint=env ;;
 		*)  for t in $help_topics; do      # a prefix only one topic has
 				[ ${#low} -ge 2 ] && [ "${t#"$low"}" != "$t" ] || continue
 				[ -z "$hint" ] || { hint=; return; }
@@ -5381,7 +5383,7 @@ export SQ_NONCE2=$nonce2
 export SQ_NONCE3=$nonce3
 unset SQUEUE_FORMAT SQUEUE_FORMAT2   # each collector exports or passes the one it
                                      # needs, so an inherited setting can never win
-                                     # over ours (SINFO_*: at exported_names)
+                                     # over ours
 
 # qfield appends one field to the queue format and counts it, so a hidden field
 # is found by the position recorded as it is added, never by arithmetic on
@@ -5594,9 +5596,7 @@ why_of nerr $? "$tmp/nodes" sinfo
 # text (Reason=, Comment=, Extra=, OS=) can forge a figure, else -o about the
 # nodes this sinfo answer lists, which node_read is made for (node_answer;
 # the hook below names them, from the answer as sinfo sent it, so it is
-# scrubbed only after).  A caller's SCONTROL_* settings change what show
-# node lists (SCONTROL_ALL, SCONTROL_FEDERATION), and SLURM_JSON (25.05) how
-# --json prints, so they are unset, as sq job unsets them.
+# scrubbed only after).
 # For gawk: $tmp/nodespec, empty when no answer was used, nodespecfmt its
 # format (json, text), nodespecg the names asked (text), and serr why none
 # was, whole ("scontrol failed (...)")
@@ -5608,7 +5608,6 @@ node_hook_dash() {   # node_hook_dash LEFT SHOWN: node_answer's hook, no call of
 gawk_locale
 : > "$tmp/nodespec"; : > "$tmp/nodespec.gate"; serr= nodespecfmt=json
 if [ -z "$nerr" ]; then
-	unset $(exported_names 'SCONTROL_*') SLURM_JSON
 	collect -r nodespec scontrol --json show node
 	node_answer serr nodespecfmt $? nodespec "$tmo" "$tmo" node_hook_dash
 fi
@@ -5746,16 +5745,11 @@ rsrc=none; rwhy=$sskip rwhy_real=$sskip; rerr= rerr_real=; rwhyc=
 # invariant the reassembler asserts.
 if [ "$recent" != 0 ] && [ -z "$sskip" ]; then
 	aflag=(-a); [ "$suser" = 0 ] || aflag=()
-	# a caller's SACCT_* settings (SACCT_FEDERATION, SACCT_LOCAL,
-	# SACCT_FORMAT) would change the question, as for sq job: unexported for
-	# this call alone
-	hold_exports sacct_held 'SACCT_*'
 	SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 collect recent \
 		sacct -p --delimiter="$nonce2" -n -S "$since" -E now \
 		"${aflag[@]+"${aflag[@]}"}" "${sargs[@]+"${sargs[@]}"}" ${sarray:+"$sarray"} \
 		${slocal:+"$slocal"} ${sfed:+"$sfed"} -o JobID,User,State,ExitCode,Elapsed,End,NodeList,JobName
 	se=$?
-	release_exports sacct_held
 	# rc=0 with no rows is not proof of success (-M/-r typos are silent), which
 	# is what the closed whitelist above is for; rc!=0 can still leave a partial
 	# file behind, so that is thrown away rather than rendered

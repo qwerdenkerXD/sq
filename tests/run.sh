@@ -8750,11 +8750,36 @@ c_dash_sinfo_env() {   # U-design U1: no SINFO_* reaches any sinfo of sq
 	sq_run membar-busy SQSTUB_HOST=FranzGB SLURM_CLUSTERS=there -- --full --no-color
 	need "SLURM_CLUSTERS=there still reaches sinfo" eval '[ "$(env_of sinfo 1 SLURM_CLUSTERS)" = there ]'
 	sq_run membar-busy -- help env
-	need "sq help env says sinfo runs without SINFO_*, and what is out" eval 'rc_is 0 && plain | tr -s " \n" " " | grep -qF "sacct and sinfo run without your SACCT_* and SINFO_* settings: the node block lists what sinfo lists by default, so unless you are an operator no node that is only in partitions hidden or closed to you."'
-	for how in sinfo_all SINFO_PARTITION sacct_format; do
+	need "sq help env says sinfo runs without SINFO_*, and what is out" eval 'rc_is 0 && plain | tr -s " \n" " " | grep -qF "sacct, scontrol and sinfo run without your SACCT_*, SCONTROL_*, SLURM_JSON and SINFO_* settings: the node block lists what sinfo lists by default, so unless you are an operator no node that is only in partitions hidden or closed to you."'
+	for how in sinfo_all SINFO_PARTITION sacct_format scontrol_all SLURM_JSON; do
 		sq_run membar-busy -- help $how
 		need "sq help $how points at env" eval 'rc_is 2 && grep -qF "did you mean sq help env?" "$ERR"'
 	done
+}
+# X6: no client variable sq has no use for reaches any call of any command
+no_client_env() { ! grep "^CALL" "$LOG" | grep -qE "SINFO_|SACCT_|SCONTROL_" && ! grep "^CALL" "$LOG" | gawk -F'\t' '!/\tSLURM_JSON\(unset\)/ { f = 1 } END { exit !f }'; }
+c_client_env() {
+	T_TITLE="every SACCT_*, SCONTROL_*, SINFO_* of 23.11.4 and SLURM_JSON exported: the dashboard, sq job and sq log the same as without, none reached a call; SQUEUE_* and SLURM_CLUSTERS still read"
+	local all=(SACCT_FEDERATION=1 SACCT_LOCAL=1 SACCT_FORMAT=JobID SCONTROL_ALL=1 SCONTROL_FEDERATION=1 SCONTROL_FUTURE=1 SCONTROL_LOCAL=1 SCONTROL_SIB=1 SCONTROL_SIBLING=1 SLURM_JSON=compact SINFO_ALL=1 SACCT_NOSUCH=1 SCONTROL_NOSUCH=1)
+	local want
+	sq_run membar-busy SQSTUB_HOST=FranzGB -- --full --no-color; want=$(without_clock "$OUT")
+	sq_run membar-busy SQSTUB_HOST=FranzGB "${all[@]}" -- --full --no-color
+	need "the dashboard: rc 0, the same screen, none reached a call" eval 'rc_is 0 && err_empty && no_client_env && [ "$(calls scontrol)" -ge 1 ] && [ "$(calls sacct)" -ge 1 ] && [ "$want" = "$(without_clock "$OUT")" ]'
+	sq_run membar-busy SQSTUB_HOST=FranzGB SQSTUB_NOJSON=1 "${all[@]}" -- --full --no-color
+	need "the dashboard without --json: none reached scontrol -o" eval 'rc_is 0 && err_empty && no_client_env'
+	job_run running-own -- --no-color job 11950; want=$(plain)
+	job_run running-own "${all[@]}" -- --no-color job 11950
+	need "sq job: rc 0, the same report, none reached a call" eval 'rc_is 0 && err_empty && no_client_env && [ "$(calls sacct)" -ge 1 ] && [ "$want" = "$(plain)" ]'
+	why_run badconstraints-11955 "${all[@]}" -- --no-color job 11955
+	need "sq job's why section: none reached scontrol" eval 'rc_is 0 && no_client_env && [ "$(calls scontrol)" -ge 1 ]'
+	sq_run membar-busy SQSTUB_HOST=FranzGB SQUEUE_STATES=PD "${all[@]}" -- --full --no-color
+	need "SQUEUE_* still read by the dashboard: its filter reaches squeue's call" eval 'rc_is 0 && grep -qP "^CALL\tsqueue\t.* -t PD" "$LOG"'
+	sq_run membar-busy SQSTUB_HOST=FranzGB SLURM_CLUSTERS=there "${all[@]}" -- --full --no-color
+	need "SLURM_CLUSTERS still reaches sinfo" eval '[ "$(env_of sinfo 1 SLURM_CLUSTERS)" = there ]'
+	job_run resources-11964 -- log --no-follow 11964; want=$(plain; echo "rc=$RC")
+	need "sq log asked squeue" eval '[ "$(calls squeue)" -ge 1 ]'
+	job_run resources-11964 "${all[@]}" -- log --no-follow 11964
+	need "sq log: the same, none reached its squeue" eval 'no_client_env && [ "$want" = "$(plain; echo "rc=$RC")" ]'
 }
 c_why_parent() {   # S-v3 rule P: ACs 1-6, 7 (sacct failing), 7b-7d, 8, 9's parent lines
 	T_TITLE="a dependency parent's line reads its exit as sq job PARENT does (steps folded, OOM wins, squeue's 0:1 as 1, an unreadable pair ?), finds it by JobID or unique id (an array task's, a het leader's), shows no exit for a COMPLETED one, and names accounting's silence for a parent sq asked accounting about, squeue's first"
@@ -9532,7 +9557,7 @@ EOF
 	o_refused "-v prints squeue's own parameters into the output sq parses" SQUEUE_USERS= -- -v
 }
 c_opts_env_inert() {   # AC5, AC6, AC7
-	T_TITLE="unknown SQUEUE_* names stay with squeue, SQUEUE_SORT is unset, SACCT_* leave the dashboard's sacct (that call alone), --noheader keeps sacct and reaches no call"
+	T_TITLE="unknown SQUEUE_* names stay with squeue, SQUEUE_SORT is unset, SACCT_* reach no call of the dashboard, --noheader keeps sacct and reaches no call"
 	orun empty SQUEUE_FOO=1 SQUEUE_USER=bob --
 	need "SQUEUE_FOO=1 SQUEUE_USER=bob: S called, last 2h, no fallback, Q carries both" eval '
 		rc_is 0 && calls_are 1 1 0 1 && s_is -a && has "recently finished · last 2h" &&
@@ -9550,8 +9575,7 @@ c_opts_env_inert() {   # AC5, AC6, AC7
 		rc_is 0 && s_is -a && has "recently finished · last 2h" && ! grep "^CALL	sacct" "$LOG" | grep -q SACCT_'
 	orun sacct-fails SACCT_FEDERATION=1 SACCT_FORMAT=x --
 	need "... sacct failing: S carries none, the fallback after it both again (unset for sacct's call alone)" eval '
-		rc_is 0 && calls_are 1 1 1 1 && ! grep "^CALL	sacct" "$LOG" | grep -q SACCT_ &&
-		fb=$(grep "^CALL	squeue	.* -t all " "$LOG") && [[ $fb == *"	SACCT_FEDERATION=1"* ]] && [[ $fb == *"	SACCT_FORMAT=x"* ]]'
+		rc_is 0 && calls_are 1 1 1 1 && ! grep "^CALL" "$LOG" | grep -q SACCT_ && grep -q "^CALL	squeue	.* -t all " "$LOG"'
 	job_run running-own SACCT_FEDERATION=1 SACCT_LOCAL=1 SACCT_FORMAT=x -- --no-color job 11950
 	need "... sq job 11950 as at 1eb0218: rc 0, its sacct calls without them" eval '
 		rc_is 0 && [ "$(calls sacct)" -ge 1 ] && ! grep "^CALL	sacct" "$LOG" | grep -q SACCT_'
@@ -12795,7 +12819,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	array_one_count no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env array_one_count no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
