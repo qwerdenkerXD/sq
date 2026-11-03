@@ -9169,11 +9169,11 @@ c_array_over_counts() {
 }
 # Y2, Y3: an array's report from squeue's records alone, accounting holding no
 # row or not answering.  The why section goes by the title's count, so a failed
-# or cancelled task squeue holds has its line; running and pending alone draw
-# none, as before.  Accounting down, the note says which ended tasks the floor
+# or cancelled task squeue holds has its line; running, done and pending alone
+# draw none, as before.  Accounting down, the note says which ended tasks the floor
 # leaves out where the title counts one squeue still holds
 c_array_why_norows() {
-	T_TITLE="sq job ARRAY without accounting's rows: squeue's failed and cancelled tasks in the why section, running and pending alone no section; accounting down, the note names the ended tasks not counted as those squeue no longer lists where the title counts an ended one; an unreadable answer said so in the title too"
+	T_TITLE="sq job ARRAY without accounting's rows: squeue's failed and cancelled tasks in the why section, running, done and pending alone no section; accounting down, the note names the ended tasks not counted as those squeue no longer lists where the title counts an ended one; an unreadable answer said so in the title too"
 	local refused="accounting did not answer (sacct: error: Problem talking to the database: Connection refused)"
 	local floor="done, failed and cancelled tasks are not counted: $refused" floor_sq="done, failed and cancelled tasks squeue no longer lists are not counted: $refused"
 	local hint="  ↳ sq job 11950_1 says more about one of them"
@@ -9188,6 +9188,9 @@ c_array_why_norows() {
 		rc_is 0 && [ "$(why_lines)" = "$(printf "%s\n" "  1 failed with exit 1: 11950_1" "  3 pending: Slurm'"'"'s reason: Resources" "$hint")" ]'
 	job_run arr-norows-run-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-norows-run: running and pending alone: no why section" eval 'rc_is 0 && why_lacks_section'
+	job_run arr-norows-cd-pd-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-norows-cd-pd: done and pending alone: no why section" eval '
+		rc_is 0 && plain | head -1 | grep -qE "array of 4: 1 done · 3 pending\$" && why_lacks_section'
 	job_run arr-af-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-af: a floor counting a failed task: the note names those squeue no longer lists; the failure's line" eval '
 		rc_is 0 && plain | head -1 | grep -qF "array of ≥2 (accounting did not answer): 1 failed · 1 running" &&
