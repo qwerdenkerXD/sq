@@ -8341,11 +8341,11 @@ at_says() {   # at_says LINE VAR=VALUE: run.sh --at with that value exits 2, say
 	local said; said=$(env "$2" "$bound" -k 2 20 "$here/run.sh" --at '2030-06-15 12:00:00 UTC' no_such_case 2>&1)
 	[ $? = 2 ] && [ "$said" = "$1" ]
 }
-at_month_on() {   # the summary's moment, a tick of the day between the two reads allowed
+at_month_on() {   # the summary's moment, in UTC as it prints, a tick of the day between the two reads allowed
 	local real_date=${CLOCK_AT_DATE:-$(command -v date)} before after said
-	before=$("$real_date" -d '+1 month' +%F)
+	before=$("$real_date" -u -d '+1 month' +%F)
 	said=$("$here/run.sh" --at '+1 month' help_env_complete 2>&1)
-	after=$("$real_date" -d '+1 month' +%F)
+	after=$("$real_date" -u -d '+1 month' +%F)
 	[[ $said == *"started at $before "* || $said == *"started at $after "* ]]
 }
 shim_refuses() {   # shim_refuses TOOL VAR VALUE: that shim, VAR at VALUE, exits 2 with its one line, bounded as one execing itself would not end
