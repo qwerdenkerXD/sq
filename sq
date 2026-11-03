@@ -2497,14 +2497,14 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
   # Franz (#1): while accounting is missing, the done, failed and cancelled
   # tasks are, so the count is a floor and says why
   TITLE = paint("1;36", "▌ ") paint("1", job) "  " name " · " user " · array of " \
-          ((!ntask_rows && astat != "ok") ? "≥" total " (accounting did not answer)" : total) (st != "" ? ": " substr(st, 4) : "")
+          ((!ntask_rows && astat != "ok") ? "≥" total " (accounting " (astat == "bad" ? "answered what cannot be read" : "did not answer") ")" : total) (st != "" ? ": " substr(st, 4) : "")
   source_notes(1)
   if (ncv) cmed = median(CV, ncv)
   if (nmv) mmed = median(MV, nmv)
   if (ncv) line("arr", cpuline(cmed, cap, "median · min " pct1(cmin) " (" cminid ") · max " pct1(cmax) \
                 ((!mixed && cap) ? " · " plural(ncpu, "CPU") " per task (" req " requested)" : "")))
   if (nmv) line("arr", memline(mmed, memcolour(mmed), "median · min " pct1(mmin) " (" mminid ") · max " pct1(mmax)))
-  if (astat != "ok") note("arr", (!ntask_rows ? "done, failed and cancelled tasks are not counted: " : "") acct_down())
+  if (astat != "ok") note("arr", (!ntask_rows ? "done, failed and cancelled tasks " (done + fail + canc ? "squeue no longer lists " : "") "are not counted: " : "") acct_down())
   else if (!done) note("arr", "no task has completed yet" (why != "" ? "; pending (" why ")" : ""))
   if (!mixed && cap) note("arr", captext(req, ncpu, cap))
   if (polled) note("arr", plural(polled, "task") ": " POLLED)
@@ -4932,7 +4932,7 @@ help_screen_efficiency() { cat <<'HELP_SCREEN_EOF'
 > then looks at one), and why the other tasks did not complete.  A task is
 > 12345_7, or its own job id.  While accounting does not answer, the count is
 > a floor (array of ≥5 (accounting did not answer)): its done, failed and
-> cancelled tasks are only known there.
+> cancelled tasks are only known there once squeue no longer lists them.
 HELP_SCREEN_EOF
 }
 help_screen_job() { cat <<'HELP_SCREEN_EOF'

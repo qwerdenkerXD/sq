@@ -9132,12 +9132,15 @@ c_array_over_counts() {
 	job_run arr-both-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-both, two counts of 2, not the same two tasks: one count (a count, not which tasks)" eval 'rc_is 0 && notes_are "over the 2 completed tasks; $weakest"'
 }
-# Y2: an array's report from squeue's records alone, accounting holding no
+# Y2, Y3: an array's report from squeue's records alone, accounting holding no
 # row or not answering.  The why section goes by the title's count, so a failed
 # or cancelled task squeue holds has its line; running and pending alone draw
-# none, as before
+# none, as before.  Accounting down, the note says which ended tasks the floor
+# leaves out where the title counts one squeue still holds
 c_array_why_norows() {
-	T_TITLE="sq job ARRAY without accounting's rows: squeue's failed and cancelled tasks in the why section, running and pending alone no section"
+	T_TITLE="sq job ARRAY without accounting's rows: squeue's failed and cancelled tasks in the why section, running and pending alone no section; accounting down, the note names the ended tasks not counted as those squeue no longer lists where the title counts an ended one; an unreadable answer said so in the title too"
+	local refused="accounting did not answer (sacct: error: Problem talking to the database: Connection refused)"
+	local floor="done, failed and cancelled tasks are not counted: $refused" floor_sq="done, failed and cancelled tasks squeue no longer lists are not counted: $refused"
 	local hint="  ↳ sq job 11950_1 says more about one of them"
 	job_run arr-norows-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-norows: the title's failed and cancelled, each its line, squeue's exit" eval '
@@ -9151,13 +9154,20 @@ c_array_why_norows() {
 	job_run arr-norows-run-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-norows-run: running and pending alone: no why section" eval 'rc_is 0 && why_lacks_section'
 	job_run arr-af-11950 COLUMNS=200 -- --no-color job 11950
-	need "arr-af: a floor counting a failed task: the failure's line" eval '
+	need "arr-af: a floor counting a failed task: the note names those squeue no longer lists; the failure's line" eval '
 		rc_is 0 && plain | head -1 | grep -qF "array of ≥2 (accounting did not answer): 1 failed · 1 running" &&
-		why_has "  1 failed with exit 1: 11950_1"'
+		notes_raw | head -1 | grep -qxF "$floor_sq" && why_has "  1 failed with exit 1: 11950_1"'
+	job_run arr-af-ca-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-af-ca: a floor counting a cancelled task: the note names those squeue no longer lists; its line" eval '
+		rc_is 0 && notes_raw | head -1 | grep -qxF "$floor_sq" && why_has "  1 cancelled: 11950_1"'
+	job_run arr-bad-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-bad: accounting unreadable: the title says so as the note does" eval '
+		rc_is 0 && plain | head -1 | grep -qF "array of ≥2 (accounting answered what cannot be read): 1 failed · 1 running" &&
+		notes_raw | head -1 | grep -qxF "done, failed and cancelled tasks squeue no longer lists are not counted: accounting answered what cannot be read"'
 	job_run arr-af-cd-11950 COLUMNS=200 -- --no-color job 11950
-	need "arr-af-cd: a floor counting a done task: no why section" eval 'rc_is 0 && why_lacks_section'
+	need "arr-af-cd: a floor counting a done task: the same note, no why section" eval 'rc_is 0 && notes_raw | head -1 | grep -qxF "$floor_sq" && why_lacks_section'
 	job_run arr-af-run-11950 COLUMNS=200 -- --no-color job 11950
-	need "arr-af-run: a floor of running and pending: no why section" eval 'rc_is 0 && why_lacks_section'
+	need "arr-af-run: a floor of running and pending: the note as accepted, no why section" eval 'rc_is 0 && notes_raw | head -1 | grep -qxF "$floor" && why_lacks_section'
 }
 # gawk 5.2.1 double-frees an unset element passed to a function and read again;
 # gawk's --lint names each one.  These two must stay away from it (spec H1).
