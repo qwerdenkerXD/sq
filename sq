@@ -138,10 +138,11 @@ BEGIN {
 # the names are compared); each broken piece becomes one ␚ and the bidi
 # controls go, as decoded characters; C1 stays, a whole character.  No MAX.
 # Under env, so bash itself never switches locale for it.
+scrub_bound=1048576   # the bytes of a stderr sq reads: scrub -f's of FILE, and sinfo's read ahead of it
 scrub() (   # scrub [-s | -f FILE] [MAX]: stdin, or the first line of FILE, onto stdout
 	bound=0 stream=0
 	[ "${1-}" != -s ] || { stream=1; shift; }
-	[ "${1-}" != -f ] || { bound=1048576; exec < <(head -c $((bound + 1)) -- "$2"); shift 2; }
+	[ "${1-}" != -f ] || { bound=$scrub_bound; exec < <(head -c $((bound + 1)) -- "$2"); shift 2; }
 	exec env LC_ALL=C gawk -v max="${1:-4096}" -v bound=$bound -v stream=$stream "$chars_awk"'
 	BEGIN {
 		CONT = "[\200-\277]"; BAD = "\342\220\232"     # a continuation byte; U+241A
@@ -5802,7 +5803,7 @@ uwhy=$(first_why nerr jerr) fwhy=$(first_why rwhy rerr jerr)
 # Its first line with text, the bidi controls gone before that is judged, within
 # scrub -f's bound (1 MiB): no stderr is read whole
 nonodes=0 noderr=
-if [ -z "$nerr" ] && [ ! -s "$tmp/nodes" ]; then nonodes=1; noderr=$(scrub -f <(head -c 1048577 -- "$tmp/nodes.err" | scrub -s | env LC_ALL=C grep -am1 '[^[:space:][:cntrl:]]')); [[ $noderr == *[![:space:]]* ]] || noderr=; fi
+if [ -z "$nerr" ] && [ ! -s "$tmp/nodes" ]; then nonodes=1; noderr=$(scrub -f <(head -c $((scrub_bound + 1)) -- "$tmp/nodes.err" | scrub -s | env LC_ALL=C grep -am1 '[^[:space:][:cntrl:]]')); [[ $noderr == *[![:space:]]* ]] || noderr=; fi
 memallocf=$tmp/memalloc memreadf=$tmp/memread memtotalf=$tmp/memtotal nodespecf=$tmp/nodespec nodespecg=$tmp/nodespec.gate
 sqv="center fold color bell eta recent bellall me statef statetmp uwhy nonodes noderr jerr rwhy fwhy wtxt sfilt host now memallocf memreadf memtotalf nodespecf nodespecg nodespecfmt serr"
 for v in $sqv; do export "SQV_$v=${!v}"; done
