@@ -909,6 +909,9 @@ function node_pairs(ln, nm,   n, X, XS, i, v) {
   }
 }
 function node_num(x) { return (x ~ /^[0-9]{1,12}$/) ? x + 0 : -1 }
+# element K of array A, "" where it has none: an element that may be unset is
+# never passed down itself, as gawk 5.2.1 double-frees one passed and read again
+function elem(A, k) { return (k in A) ? A[k] : "" }
 # ---- scontrol --json show node: the same arrays, from the pretty layout of
 # json-c (Slurm 23.02 and later prints every member on a line of its own, a string
 # with every quote, backslash and control character escaped, so no string
@@ -1005,10 +1008,10 @@ function node_json_add(nm, seen, V,   n) {
   if (!("name" in seen)) return 0
   if (nm in NODE_AT) { NODE_BAD[NODE_AT[nm]] = "twice"; return 1 }
   n = NODE_AT[nm] = ++NN; NODE_NAME[n] = nm
-  NODE_CPUS[n] = node_num(("effective_cpus" in seen) ? V["effective_cpus"] : V["cpus"])
-  NODE_CPUALLOC[n] = node_num(V["alloc_cpus"]); NODE_REALMEM[n] = node_num(V["real_memory"])
-  NODE_ALLOCMEM[n] = node_num(V["alloc_memory"])
-  NODE_SPECMEM[n] = ("specialized_memory" in seen) ? node_num(V["specialized_memory"]) : -1
+  NODE_CPUS[n] = node_num(elem(V, ("effective_cpus" in seen) ? "effective_cpus" : "cpus"))
+  NODE_CPUALLOC[n] = node_num(elem(V, "alloc_cpus")); NODE_REALMEM[n] = node_num(elem(V, "real_memory"))
+  NODE_ALLOCMEM[n] = node_num(elem(V, "alloc_memory"))
+  NODE_SPECMEM[n] = node_num(elem(V, "specialized_memory"))
   NODE_STATE[n] = V["state"]; NODE_PARTS[n] = V["partitions"]
   if (V["bad"]) NODE_BAD[n] = "garbled"
   return 1
@@ -7124,7 +7127,7 @@ END{
     a = row_jobid[r]
     if (memfail) { row_outcome[r] = "failed"; continue }
     row_alloc_mb[r] = job_alloc_mb[a] + 0
-    row_outcome[r] = mem_outcome(a, row_alloc_mb[r], job_nodes[a])
+    row_outcome[r] = mem_outcome(a, row_alloc_mb[r], elem(job_nodes, a))   # a job ended since the allocation call has none
     row_bytes[r] = job_bytes[a]
   }
 

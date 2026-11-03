@@ -9193,7 +9193,7 @@ c_array_why_norows() {
 # gawk 5.2.1 double-frees an unset element passed to a function and read again;
 # gawk's --lint names each one.  These two must stay away from it (spec H1).
 c_no_unset_args() {
-	T_TITLE="gawk --lint sees neither qwhy nor QT unset, on the dashboard, COMPACT and FULL, and on sq job ARRAY, H1's shape included"
+	T_TITLE="gawk --lint sees neither qwhy nor QT unset, on the dashboard, COMPACT and FULL, and on sq job ARRAY, H1's shape included; nor a node figure of scontrol --json's passed to node_num unset, nor job_nodes of a job gone from the allocation call"
 	local bin=$T_DIR/bin real log=$T_DIR/lint.log run
 	real=$(command -v gawk); mkdir -p "$bin"; : > "$log"
 	printf '#!/usr/bin/env bash\nexec 2>>"%s"\nexec "%s" --lint "$@"\n' "$log" "$real" > "$bin/gawk"; chmod +x "$bin/gawk"
@@ -9201,8 +9201,16 @@ c_no_unset_args() {
 	sq_run mixed "PATH=$bin:$here/bin:$PATH" -- --compact --no-color; need "COMPACT ran" rc_is 0
 	job_run star-lag-mix3-11963 "PATH=$bin:$here/bin:$PATH" -- --no-color job 11950; need "sq job ARRAY ran" rc_is 0
 	job_run star-lag-mix3-11963 "PATH=$bin:$here/bin:$PATH" -- --no-color job 11963; need "sq job, the row, ran" rc_is 0
+	# Y7: a node object without its figures (scontrol --json): node_num is given
+	# none unset (sinfo's CPUsState is four figures by read_stream's anchor)
+	local d=$(json_fx membar-busy '!/^ *"(cpus|effective_cpus|alloc_cpus|real_memory|alloc_memory|specialized_memory)": /')
+	sq_run "$d" "PATH=$bin:$here/bin:$PATH" -- --full --no-color; need "no figure members: the dashboard ran" rc_is 0
+	# job 4008 running in squeue, gone from the allocation call: no nodes of its own
+	mem_run jobmem-outcomes "PATH=$bin:$here/bin:$PATH" -- --color; need "jobmem-outcomes ran" rc_is 0
 	need "lint ran" grep -q warning "$log"
 	need "no unset qwhy or QT" eval '! grep -aE "uninitialized element .(qwhy|QT)\[" "$log"'
+	need "no node figure passed unset" eval '! grep -aE "uninitialized element .(V\[\"(cpus|effective_cpus|alloc_cpus|real_memory|alloc_memory|specialized_memory)\")\]" "$log"'
+	need "no job's nodes passed unset" eval '! grep -aE "uninitialized element .job_nodes\[" "$log"'
 }
 c_why_parent_array() {
 	T_TITLE="a _* parent, any clause: a task counts once, squeue's record first, accounting's row else, a bracket less those on their own; one source failing is said on the row; none in either: the failure or the old words; another clause's rows are no count of the array"
