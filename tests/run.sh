@@ -8341,11 +8341,11 @@ at_says() {   # at_says LINE VAR=VALUE: run.sh --at with that value exits 2, say
 	local said; said=$(env "$2" "$bound" -k 2 20 "$here/run.sh" --at '2030-06-15 12:00:00 UTC' no_such_case 2>&1)
 	[ $? = 2 ] && [ "$said" = "$1" ]
 }
-at_month_on() {   # the summary's moment, in UTC as it prints, a tick of the day between the two reads allowed
+at_month_on() {   # the summary's moment as it counts it: the month in the local zone, printed in UTC; a tick of the day between the two reads allowed
 	local real_date=${CLOCK_AT_DATE:-$(command -v date)} before after said
-	before=$("$real_date" -u -d '+1 month' +%F)
+	before=$("$real_date" -u -d "@$("$real_date" -d '+1 month' +%s)" +%F)
 	said=$("$here/run.sh" --at '+1 month' help_env_complete 2>&1)
-	after=$("$real_date" -u -d '+1 month' +%F)
+	after=$("$real_date" -u -d "@$("$real_date" -d '+1 month' +%s)" +%F)
 	[[ $said == *"started at $before "* || $said == *"started at $after "* ]]
 }
 shim_refuses() {   # shim_refuses TOOL VAR VALUE: that shim, VAR at VALUE, exits 2 with its one line, bounded as one execing itself would not end
@@ -8844,6 +8844,8 @@ c_nodes_none() {
 	need "a blank first line, text on the second: its words" eval 'rc_is 0 && [ "$(plain | grep -cxF "  sinfo lists no node: sinfo: error: on line two")" = 1 ] && lacks "$nonodes_line"'
 	printf '@stderr \\e\n@stderr sinfo: error: after a control\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
 	need "a first line of a control alone: the next one's words" eval 'rc_is 0 && has "sinfo lists no node: sinfo: error: after a control"'
+	printf '@stderr \\xe2\\x80\\xae\n@stderr sinfo: error: after a bidi control\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
+	need "a first line of a bidi control alone, blank once scrubbed: the next one's words" eval 'rc_is 0 && has "sinfo lists no node: sinfo: error: after a bidi control"'
 	printf '@stderr \\s\n@stderr \\s\\s\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
 	need "every line blank: you can see" eval 'rc_is 0 && [ "$(plain | grep -cxF "  $nonodes_line")" = 1 ]'
 	printf '@stderr \\s\\xc2\\x80\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
@@ -8854,8 +8856,10 @@ c_nodes_none() {
 		sq_run h-stderr SQ_WIDTH=40 -- $mode --no-color
 		need "h-stderr W=40 ${mode:-default}: one line, cut to the width" eval 'rc_is 0 && plain | LC_ALL=$utf8 gawk "/sinfo lists no node: / { n++; if (length(\$0) > 40) bad = 1 } END { exit !(n == 1 && !bad) }"'
 	done
-	printf '@stderr sinfo: error: %0300d\n@exit 0\n' 7 > "$b/sinfo"; sq_run "$b" -- --full --no-color
+	printf '@stderr sinfo: error:%s\n@exit 0\n' "$(printf ' word%.0s' {1..60})" > "$b/sinfo"; sq_run "$b" -- --full --no-color
 	need "300 columns of stderr, FULL at W=120: one line, cut to the width" eval 'rc_is 0 && plain | LC_ALL=$utf8 gawk "/sinfo lists no node: / { n++; if (length(\$0) > 120) bad = 1 } END { exit !(n == 1 && !bad) }"'
+	sq_run "$b" SQ_CENTER=1 -- --full --no-color
+	need "300 columns, centred, W=120: one line, cut to the width right of the margin" eval 'rc_is 0 && plain | LC_ALL=$utf8 gawk "/sinfo lists no node: / { n++; if (length(\$0) > 120) bad = 1 } END { exit !(n == 1 && !bad) }"'
 	sq_run h-stderr SQ_WIDTH=30 -- --compact --no-color
 	need "h-stderr W=30: cut to the screen" eval 'rc_is 0 && has "sinfo lists no node: sinf"'
 	# the job's report, where scontrol sees none either (node_mgr.c:1104, parsers.c:3498: "nodes": [])
