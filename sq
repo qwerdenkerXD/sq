@@ -138,7 +138,7 @@ BEGIN {
 # the names are compared); each broken piece becomes one ␚ and the bidi
 # controls go, as decoded characters; C1 stays, a whole character.  No MAX.
 # Under env, so bash itself never switches locale for it.
-scrub_bound=1048576   # the bytes of a stderr sq reads: scrub -f's of FILE, and sinfo's read ahead of it
+scrub_bound=1048576   # the bytes of a stderr sq reads: scrub -f's of FILE, and every other reader's (no stderr is read whole)
 scrub() (   # scrub [-s | -f FILE] [MAX]: stdin, or the first line of FILE, onto stdout
 	bound=0 stream=0
 	[ "${1-}" != -s ] || { stream=1; shift; }
@@ -204,6 +204,11 @@ scrub() (   # scrub [-s | -f FILE] [MAX]: stdin, or the first line of FILE, onto
 	}'
 )
 # ---- scrub end
+# Does the stderr FILE say "Invalid job id specified"?  squeue prints it as
+# "slurm_load_jobs error: ..." for a job Slurm no longer knows and exits 1
+# (squeue.c:234-235, 99-113), so the caller asks for rc 1 too.  Like every
+# stderr sq reads, within scrub_bound
+says_forgotten() { head -c "$scrub_bound" -- "$1" 2>/dev/null | env LC_ALL=C grep -q 'Invalid job id specified'; }
 
 # The field separator is a nonce minted per run, never per session: a job name
 # is fixed at submit time and a node's drain reason when the admin sets it, so
@@ -1452,7 +1457,8 @@ jobmem_collect() {   # jobmem_collect [-w]
 	# mem= over them.  "failed" when the call failed, a stderr line
 	# names the job ("job N", "StepId=N.", bar "No steps running"), or
 	# its rows carry no mem= at all; "none" otherwise.  A line naming
-	# no job asked for is ignored.  Each stderr line is read once.
+	# no job asked for is ignored.  Each stderr line is read once, its first
+	# scrub_bound bytes: every line, as one cut off would leave its job "ok"
 	env LC_ALL=C gawk '
 		ARGIND == 1 { split($0, f, "\t"); Q[++n] = f[1]; REQ[f[1]] = 1; RC[f[1]] = f[2]; next }
 		ARGIND == 2 {
@@ -1480,7 +1486,7 @@ jobmem_collect() {   # jobmem_collect [-w]
 				  : (id in ROWS) ? "ok" : "none"
 				printf "%s\t%s\t%.0f\n", id, o, (o == "ok") ? BYTES[id] : 0
 			}
-		}' "$tmp/memids" "$tmp/sstat" "$tmp/sstat.err" > "$tmp/memread"
+		}' "$tmp/memids" "$tmp/sstat" <(cut -b "-$scrub_bound" -- "$tmp/sstat.err" 2>/dev/null) > "$tmp/memread"
 	# renamed into place, so a reader never meets half a snapshot
 	if [ -n "$memdir" ] && memtmp=$(mktemp "$memdir/memuse.XXXXXX" 2>/dev/null); then
 		{ printf '%s\n' "$memnow"; cat "$tmp/memread"; } > "$memtmp" 2>/dev/null &&
@@ -1538,7 +1544,7 @@ log_ask() {   # log_ask ID HOW JOB [TASK]: ask about ID, the record HOW names in
 	log_verdict= log_why=
 	if [ $rc -ne 0 ]; then
 		# a job Slurm no longer knows is rc 1 and this text (23.11.4, measured)
-		if [ $rc = 1 ] && env LC_ALL=C grep -q 'Invalid job id specified' "$tmp/facts.err" 2>/dev/null
+		if [ $rc = 1 ] && says_forgotten "$tmp/facts.err"
 		then log_verdict=none
 		else log_verdict=fail; why_of log_why $rc "$tmp/facts" squeue
 		fi
@@ -2109,7 +2115,7 @@ function task_count(N, ord, c, k) {
 }
 # the tasks of accounting's bracket row J that are not on their own (OWN)
 function bracket_left(j, own,   k, t, m) {
-  k = ntasks(j, ID)
+  if (!(k = ntasks(j, ID))) return 0                       # one sq cannot read counts none
   if (match(j, /\[(.*)\]/, m)) for (t in own) if (task_in(m[1], t + 0)) k--
   return k
 }
@@ -3506,7 +3512,7 @@ job_why_finish() {
 			*:0) printf -v "w_${name#w}_stat" ok ;;
 			wpacct:*) bound_shown w_pacct_shown "$w_pacct_bound"; call_answer w_pacct_stat w_pacct_why $rc wpacct sacct "$w_pacct_shown" ;;
 			wparents:*) # a parent Slurm forgot: rc 1 and this text, as for the job itself
-				if [ $rc = 1 ] && env LC_ALL=C grep -q 'Invalid job id specified' "$tmp/wparents.err" 2>/dev/null; then w_parents_stat=none
+				if [ $rc = 1 ] && says_forgotten "$tmp/wparents.err"; then w_parents_stat=none
 				else bound_shown w_parents_shown "$w_parents_bound"; call_answer w_parents_stat w_parents_why $rc wparents squeue "$w_parents_shown"
 				fi ;;
 			*) printf -v "w_${name#w}_stat" fail ;;
@@ -3649,7 +3655,7 @@ sub_job() {
 	rc=$?
 	# a job Slurm no longer knows is rc 1 and this text (23.11.4, measured)
 	if [ $rc = 0 ]; then qstat=ok
-	elif [ $rc = 1 ] && env LC_ALL=C grep -q 'Invalid job id specified' "$tmp/queue.err" 2>/dev/null; then qstat=none
+	elif [ $rc = 1 ] && says_forgotten "$tmp/queue.err"; then qstat=none
 	else qstat=fail; why_of qwhy $rc "$tmp/queue" squeue
 	fi
 	[ "$qstat" = ok ] || scrub_answer queue          # no plan reads it (job_why_start)

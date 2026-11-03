@@ -9128,6 +9128,8 @@ c_array_one_count() {
 	# the queue's records alone, accounting down: squeue's failure has its line (Y2), no blank weakest
 	array_title_is star-partial-acctfail '≥1 (accounting did not answer): 1 failed'
 	need "star-partial-acctfail: squeue's failure in the why section, no lag" eval 'why_has "  1 failed with exit 1: 11950_3" && lacks "$lagged" && lacks "the weakest"'
+	# Y8: a bracket sq cannot read counts none, also less a task of it on its own
+	array_title_is star-brneg '2: 1 done · 1 failed'
 }
 # Y1: how many tasks each median is over.  A task of 0 s has no CPU share, one
 # without a step's peak no memory figure, so the CPU and MEM lines can stand on
@@ -9190,6 +9192,52 @@ c_array_why_norows() {
 	job_run arr-af-run-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-af-run: a floor of running and pending: the note as accepted, no why section" eval 'rc_is 0 && notes_raw | head -1 | grep -qxF "$floor" && why_lacks_section'
 }
+# Y8: squeue exits 1 after "slurm_load_jobs error: Invalid job id specified"
+# (squeue.c:112-113, 234-235): that pair alone is a job Slurm forgot.  The text
+# beside another rc (no squeue's: a wrapper's, a kill's) is a call that failed
+c_forgot_rc_one() {
+	T_TITLE="'Invalid job id specified' reads as a job Slurm forgot only beside squeue's rc 1: with rc 2 sq log, sq job and a parent's row read a failing call"
+	local d=$T_DIR/fx-forgot d2 rc
+	mkdir -p "$d"
+	printf '@include %s\n' "$fixtures/_common/sacct-defaults" > "$d/sacct"
+	for rc in 1 2; do
+		printf '@stderr slurm_load_jobs error: Invalid job id specified\n@exit %s\n' $rc > "$d/squeue-all"
+		sq_run "$d" -- log 500
+		if [ $rc = 1 ]; then need "sq log, rc 1: Slurm does not know job 500" eval 'rc_is 1 && grep -qF "sq log: Slurm does not know job 500" "$ERR"'
+		else need "sq log, rc 2: a failing call, with squeue's words" eval 'rc_is 1 && ! grep -qF "does not know" "$ERR" && grep -qF "Invalid job id specified" "$ERR"'; fi
+		sq_run "$d" -- job 500
+		if [ $rc = 1 ]; then need "sq job, rc 1: Slurm does not know job 500" eval 'rc_is 1 && grep -qF "sq job: Slurm does not know job 500" "$ERR"'
+		else need "sq job, rc 2: a failing call, with squeue's words" eval 'rc_is 1 && ! grep -qF "does not know" "$ERR" && grep -qF "Invalid job id specified" "$ERR"'; fi
+		d2=$(dep_fx forgot$rc 'afterok:900(unfulfilled)' '@stderr slurm_load_jobs error: Invalid job id specified' "@exit $rc")
+		why_run "$d2" -- --no-color job 800
+		if [ $rc = 1 ]; then need "a parent's row, rc 1: Slurm no longer knows it" eval 'rc_is 0 && why_has "    900  Slurm no longer knows it"'
+		else need "a parent's row, rc 2: unknown, squeue's failure" eval 'rc_is 0 && why_lines | grep -qE "^    900  unknown: squeue .*Invalid job id specified" && lacks "no longer knows"'; fi
+	done
+}
+# Y8 (v2): no stderr is read whole: the forgotten-job text is looked for in
+# its first scrub_bound bytes (says_forgotten), sstat's in each line's
+# (every line still read, as a job named on a line left out would read "ok")
+c_stderr_bounded_reads() {
+	T_TITLE="stderr read within scrub_bound: 'Invalid job id specified' past the first 1 MiB is a failing call, not a job Slurm forgot (sq job, sq log); sstat's job named past a line's first 1 MiB is not read, a job named on a later line still is"
+	local d=$T_DIR/fx-big pad x
+	mkdir -p "$d"; pad=$((1048576 + 16))
+	printf '@include %s\n' "$fixtures/_common/sacct-defaults" > "$d/sacct"
+	for x in near far; do
+		{ printf '@stderr squeue: error: '; [ $x = near ] || head -c $pad /dev/zero | tr '\0' x
+		  printf '\n@stderr slurm_load_jobs error: Invalid job id specified\n@exit 1\n'; } > "$d/squeue-all"
+		sq_run "$d" -- job 500
+		if [ $x = near ]; then need "sq job, the text within the bound: Slurm does not know job 500" eval 'rc_is 1 && grep -qF "sq job: Slurm does not know job 500" "$ERR"'
+		else need "sq job, the text past the bound: a failing call" eval 'rc_is 1 && ! grep -qF "does not know" "$ERR"'; fi
+		sq_run "$d" -- log 500
+		if [ $x = near ]; then need "sq log, the text within the bound: Slurm does not know job 500" eval 'rc_is 1 && grep -qF "sq log: Slurm does not know job 500" "$ERR"'
+		else need "sq log, the text past the bound: a failing call" eval 'rc_is 1 && ! grep -qF "does not know" "$ERR"'; fi
+	done
+	# sstat: job 4001 named only past its line's first 1 MiB; 4002's own line after it
+	d=$(mem_fixture jobmem-outcomes sstat "@stderr sstat: error: $(head -c $pad /dev/zero | tr '\0' x) job 4001\n@include $fixtures/jobmem-outcomes/sstat")
+	mem_run "$d" -- --color
+	need "sstat: 4001 named past its line's bound: ok, 1/4G; 4002 named on a later line: !" eval '
+		rc_is 0 && err_empty && row_has 4001 "$ESC[32m  1/4G$ESC[0m" && row_has 4002 "$ESC[31m!$ESC[0m/4G"'
+}
 # gawk 5.2.1 double-frees an unset element passed to a function and read again;
 # gawk's --lint names each one.  These two must stay away from it (spec H1).
 c_no_unset_args() {
@@ -9229,6 +9277,7 @@ c_why_parent_array() {
 	need "star-running: sacct asked about the _* parent under (unfulfilled), once" eval '[ "$(grep -cP "^CALL\tsacct\t.* -j 11950 " "$LOG")" = 1 ]'
 	parent_rows_are bare-task '    11950_3  must complete successfully, which can no longer happen · now FAILED · exit 1 · ended 12m ago' '    11950    must end · now its tasks: 1 RUNNING'
 	parent_rows_are star-odd-bracket '    11950  its tasks now: 1 FAILED · 3 COMPLETED · 2 PENDING · maybe out of date: squeue does not list what accounting has not seen end'
+	parent_rows_are star-brneg '    11950  its tasks now: 1 FAILED · 1 COMPLETED'
 	# afternotok on a whole array says what Slurm tests: at least one not successful, not all failed
 	job_run star-notok-11963 COLUMNS=120 -- --no-color job 11963
 	need "star-notok: the lead says what Slurm tests, the row counts" eval 'rc_is 0 && why_has "  waits its turn: it may start once every task of array 11950 has ended, at least one of them not successfully" && [ "$(parent_rows)" = "    11950  its tasks now: 1 RUNNING · 2 COMPLETED · 1 FAILED" ]'
@@ -13016,7 +13065,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
