@@ -10,7 +10,8 @@
 # recorded comparison holds at any moment.  A form boundary, as at 21:00:00 UTC
 # on hplus's +3h, moves the layout, and fails a case comparing two runs that fall
 # across it, so these pin the clock (est_pin, PIN_NOW): clock_step, wide_c_mode,
-# wide_twin_text, whole_c_mode, h0_display_prefs, and client_env.  Found by reading every use of
+# wide_twin_text, whole_c_mode, h0_display_prefs, and client_env; ago_days pins
+# it for ages exact to the second.  Found by reading every use of
 # the estimate masks, and with a build alternating two moments across a boundary
 # on the cases using estimate fixtures (spec X8).  Run at 2026-12-31 23:59:30 UTC
 # and at the real clock; no other WHEN is promised by a run.
@@ -3377,7 +3378,7 @@ c_clock_step() {
 # prints a day, where hours alone ran to 8736h; below 48 h byte for byte as
 # before.  The dashboard shows one only when SQ_SINCE reaches back that far
 c_ago_days() {
-	T_TITLE="the finished block's AGO from 48 h on in days and hours (2d02h, a group's range too), below 48 h as before (47h)"
+	T_TITLE="the finished block's AGO from 48 h on in days and hours (2d02h, a group's range too), below 48 h as before (47h); on the pinned clock an end after sq's (Slurm's ahead) no negative age but -, in the block and on a parent's row, one this very second 0s"
 	local d=$T_DIR/fx; mkdir -p "$d"
 	printf '@include %s\n' "$fixtures/_common/sinfo-two-idle" > "$d/sinfo"
 	: > "$d/squeue"
@@ -3393,6 +3394,26 @@ EOF
 	need "47h30m ago: 47h" eval 'rows recent | grep -qE "^ +701 +new +COMPLETED .* 47h$"'
 	need "50h30m ago: 2d02h" eval 'rows recent | grep -qE "^ +702 +old +COMPLETED .* 2d02h$"'
 	need "a group from 47h10m to 77h30m ago: 47h-3d05h" eval 'rows recent | grep -qE "^ +703_\[0-1\] ×2 +arr +COMPLETED .* 47h-3d05h$"'
+	# ago()'s clamp, on the clock-pinned sq (est_pin), so every age is exact.
+	# Level clocks: 10s, an end this very second 0s.  Slurm's clock 30 s ahead
+	# of sq's (the stub prints 30 s later): an end 10 s ago by Slurm's is 20 s
+	# after sq's now, "-", no negative age; the same run's 10s proves End read
+	est_pin || return; local sq=$EST_SQ PIN_NOW=$est_now
+	cat > "$d/sacct" <<EOF
+@include $fixtures/_common/sacct-defaults
+JobID=704; JobName=ahead; End=\{now-10s}
+JobID=705; JobName=level; End=\{now}
+EOF
+	sq_run "$d" -- --full
+	need "level clocks: an end 10 s ago 10s, one this second 0s, stderr empty" eval '
+		rc_is 0 && err_empty && rows recent | grep -qE "^ +704 +ahead +COMPLETED .* 10s$" && rows recent | grep -qE "^ +705 +level +COMPLETED .* 0s$"'
+	sq_run "$d" SQSTUB_SKEW=-30 -- --full
+	need "an end 20 s after sq's clock: AGO -, no negative age, stderr empty" eval 'rc_is 0 && err_empty && rows recent | grep -qE "^ +704 +ahead +COMPLETED .* -$"'
+	# the same clamp on a parent's row: Slurm's clock 15 min ahead, the parent
+	# ended 12 min ago by it: after sq's now (the words, Found by Y, as they are)
+	job_run bare-task-11963 SQSTUB_SKEW=-900 COLUMNS=120 -- --no-color job 11963
+	need "a parent's end after sq's clock: 'ended - ago', no negative age" eval '
+		rc_is 0 && err_empty && why_has "    11950_3  must complete successfully, which can no longer happen · now FAILED · exit 1 · ended - ago"'
 }
 # V15 (why-v2): the cancellers' names come from one getent call through
 # collect, shared with sq job: bounded by SQ_TIMEOUT like any Slurm call
