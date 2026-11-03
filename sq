@@ -2517,7 +2517,7 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
                 " (RSS accounting): shared memory counted once per process; their peaks may read high")
   if (multi) note("arr", plural(multi, "task") " peaked in a step of several tasks: that peak adds up each task's own, an upper bound")
   if (unended && qstat != "fail" && qstat != "bad") note("arr", unended_says())
-  if (ntask_rows) why_array(QT, own)
+  if (ntask_rows || fail || canc) why_array(QT, own)          # squeue's records alone name a failure too
   print_sections()
 }
 

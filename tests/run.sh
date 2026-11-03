@@ -9015,10 +9015,9 @@ c_array_one_count() {
 		job_run "$f-11963" COLUMNS=200 -- --no-color job 11963; want=$(row_as_title)
 		[ -n "$want" ] || { T_FAIL+=("$f: no count on the row"); continue; }
 		job_run "$f-11963" COLUMNS=200 -- --no-color job 11950; n=$((n + 1))
-		# accounting down, the title's count is a floor, in its own words, and no rows make no why section (spec, Found, not fixed 5)
+		# accounting down, the title's count is a floor, in its own words
 		need "$f: sq job 11950 is 'array of $want'" eval 'rc_is 0 && plain | head -1 | sed -E "s/≥([0-9]+) \(accounting did not answer\)/\1/" | grep -qE "array of $want\$"'
-		plain | head -1 | grep -qF '≥' && continue
-		# every task the title has as failed or cancelled has a line of the why section
+		# every task the title has as failed or cancelled has a line of the why section, with rows or without (Y2)
 		need "$f: the why section holds the title's failed and cancelled" eval '[ "$(plain | LC_ALL=$utf8 gawk "
 			NR == 1 { if (match(\$0, /([0-9]+) failed/, m)) t += m[1]; if (match(\$0, /([0-9]+) cancelled/, m)) t += m[1] }
 			/^why/ { w = 1; next } w && /^  [0-9]+ / && !/^  [0-9]+ pending: / { s += \$1 } END { print s + 0 - t }")" = 0 ]'
@@ -9105,9 +9104,9 @@ c_array_one_count() {
 	need "star-qfail: squeue silent: the top note alone, not the lag" eval 'has "squeue did not answer; shown from accounting" && lacks "$lagged"'
 	job_run star-qgarbage-11963 COLUMNS=200 -- --no-color job 11950
 	need "star-qgarbage: squeue unreadable: the top note alone, not the lag" eval 'has "squeue answered what cannot be read; shown from accounting" && lacks "$lagged"'
-	# the queue's records alone, accounting down: as ever, and no blank weakest
+	# the queue's records alone, accounting down: squeue's failure has its line (Y2), no blank weakest
 	array_title_is star-partial-acctfail '≥1 (accounting did not answer): 1 failed'
-	need "star-partial-acctfail: no why section from accounting, no lag" eval 'lacks "$lagged" && lacks "the weakest"'
+	need "star-partial-acctfail: squeue's failure in the why section, no lag" eval 'why_has "  1 failed with exit 1: 11950_3" && lacks "$lagged" && lacks "the weakest"'
 }
 # Y1: how many tasks each median is over.  A task of 0 s has no CPU share, one
 # without a step's peak no memory figure, so the CPU and MEM lines can stand on
@@ -9132,6 +9131,33 @@ c_array_over_counts() {
 	need "arr-memonly, one task of 0 s: MEM over 1" eval 'rc_is 0 && notes_are "MEM over the 1 completed task"'
 	job_run arr-both-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-both, two counts of 2, not the same two tasks: one count (a count, not which tasks)" eval 'rc_is 0 && notes_are "over the 2 completed tasks; $weakest"'
+}
+# Y2: an array's report from squeue's records alone, accounting holding no
+# row or not answering.  The why section goes by the title's count, so a failed
+# or cancelled task squeue holds has its line; running and pending alone draw
+# none, as before
+c_array_why_norows() {
+	T_TITLE="sq job ARRAY without accounting's rows: squeue's failed and cancelled tasks in the why section, running and pending alone no section"
+	local hint="  ↳ sq job 11950_1 says more about one of them"
+	job_run arr-norows-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-norows: the title's failed and cancelled, each its line, squeue's exit" eval '
+		rc_is 0 && plain | head -1 | grep -qE "array of 3: 1 done · 1 failed · 1 cancelled\$" &&
+		[ "$(why_lines)" = "$(printf "%s\n" "  1 failed with exit 1: 11950_1" "  1 cancelled: 11950_2" "$hint")" ]'
+	job_run arr-norows-ca-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-norows-ca: a cancelled task alone has its line, nobody named" eval 'rc_is 0 && [ "$(why_lines)" = "  1 cancelled: 11950_1" ]'
+	job_run arr-norows-pd-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-norows-pd: the failure, then the pending record by its reason, as with rows" eval '
+		rc_is 0 && [ "$(why_lines)" = "$(printf "%s\n" "  1 failed with exit 1: 11950_1" "  3 pending: Slurm'"'"'s reason: Resources" "$hint")" ]'
+	job_run arr-norows-run-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-norows-run: running and pending alone: no why section" eval 'rc_is 0 && why_lacks_section'
+	job_run arr-af-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-af: a floor counting a failed task: the failure's line" eval '
+		rc_is 0 && plain | head -1 | grep -qF "array of ≥2 (accounting did not answer): 1 failed · 1 running" &&
+		why_has "  1 failed with exit 1: 11950_1"'
+	job_run arr-af-cd-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-af-cd: a floor counting a done task: no why section" eval 'rc_is 0 && why_lacks_section'
+	job_run arr-af-run-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-af-run: a floor of running and pending: no why section" eval 'rc_is 0 && why_lacks_section'
 }
 # gawk 5.2.1 double-frees an unset element passed to a function and read again;
 # gawk's --lint names each one.  These two must stay away from it (spec H1).
@@ -12951,7 +12977,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
