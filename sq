@@ -2456,7 +2456,7 @@ function count(c, k) {
   total += k
 }
 function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax, cminid, mminid, rss, multi,
-                        polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why, N, ord, QT, own, unended, t, seen, nover) {
+                        polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why, N, ord, QT, own, unended, t, seen) {
   unended = tasks_count(job, R, nq, A, task_row, ntask_rows, N, ord, QT, own)
   for (k = 1; k <= ord[0]; k++) count(ord[k], N[ord[k]])
   total += 0                                       # no task read (an id sq cannot read): "array of 0"
@@ -2470,7 +2470,6 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
       # Franz: the statistics are the COMPLETED tasks', and a row that does not
       # say so yet (squeue's record says it) has no final figures to give
       if (stcode(A[r, "State"]) != "CD" || ((t in QT) && R[QT[t], "StateCompact"] != "CD")) continue
-      nover++
       effcalc(id, r)
       if (eff_cpu_pct >= 0) {
         CV[++ncv] = eff_cpu_pct
@@ -2509,7 +2508,11 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
   else if (!done) note("arr", "no task has completed yet" (why != "" ? "; pending (" why ")" : ""))
   if (!mixed && cap) note("arr", captext(req, ncpu, cap))
   if (polled) note("arr", plural(polled, "task") ": " POLLED)
-  if (cminid != "") note("arr", "over the " plural(nover, "completed task") "; the weakest: sq job " cminid)
+  # how many tasks each median is over: a task of 0 s has no CPU share, one
+  # without a step's peak no memory figure, so the two lines can differ
+  if (cminid != "") note("arr", (nmv && nmv != ncv ? "CPU over the " plural(ncv, "completed task") ", MEM over the " nmv : "over the " plural(ncv, "completed task")) \
+                         "; the weakest: sq job " cminid)
+  else if (nmv) note("arr", "MEM over the " plural(nmv, "completed task"))     # no CPU line: every task 0 s
   if (rss) note("arr", plural(rss, "task") " started before " pss_text() \
                 " (RSS accounting): shared memory counted once per process; their peaks may read high")
   if (multi) note("arr", plural(multi, "task") " peaked in a step of several tasks: that peak adds up each task's own, an upper bound")

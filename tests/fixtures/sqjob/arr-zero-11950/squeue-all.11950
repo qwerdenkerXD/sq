@@ -1,0 +1,3 @@
+# Y1: a COMPLETED task of 0 s: no CPU share, a memory peak (rusage's, written at the step's end)
+@stderr slurm_load_jobs error: Invalid job id specified
+@exit 1

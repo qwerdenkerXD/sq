@@ -9109,6 +9109,30 @@ c_array_one_count() {
 	array_title_is star-partial-acctfail '≥1 (accounting did not answer): 1 failed'
 	need "star-partial-acctfail: no why section from accounting, no lag" eval 'lacks "$lagged" && lacks "the weakest"'
 }
+# Y1: how many tasks each median is over.  A task of 0 s has no CPU share, one
+# without a step's peak no memory figure, so the CPU and MEM lines can stand on
+# different counts: then the note names both
+c_array_over_counts() {
+	T_TITLE="sq job ARRAY: the figures' note says how many tasks each line's median is over: one count where the CPU and MEM lines agree or MEM has none, both where they differ, MEM's alone where there is no CPU line"
+	local weakest="the weakest: sq job 11950_1"
+	job_run arr-zero-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-zero, a task of 0 s: CPU over 2, MEM over 3" eval 'rc_is 0 && notes_are "CPU over the 2 completed tasks, MEM over the 3; $weakest"'
+	job_run arr-nostep-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-nostep, a task with no step row: CPU over 3, MEM over 2" eval 'rc_is 0 && notes_are "CPU over the 3 completed tasks, MEM over the 2; $weakest"'
+	job_run arr-one-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-one, one CPU figure: CPU over 1, its median, min and max that task's" eval '
+		rc_is 0 && notes_are "CPU over the 1 completed task, MEM over the 2; $weakest" && has "median · min 30.9% (11950_1) · max 30.9%"'
+	job_run arr-same-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-same, both lines over the same tasks: one count, as before" eval 'rc_is 0 && notes_are "over the 2 completed tasks; $weakest"'
+	job_run arr-nomem-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-nomem, no MEM line: one count" eval 'rc_is 0 && lacks "  MEM " && notes_are "over the 2 completed tasks; $weakest"'
+	job_run arr-allzero-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-allzero, every task 0 s: no CPU line, MEM over 2" eval 'rc_is 0 && lacks "  CPU " && notes_are "MEM over the 2 completed tasks"'
+	job_run arr-memonly-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-memonly, one task of 0 s: MEM over 1" eval 'rc_is 0 && notes_are "MEM over the 1 completed task"'
+	job_run arr-both-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-both, two counts of 2, not the same two tasks: one count (a count, not which tasks)" eval 'rc_is 0 && notes_are "over the 2 completed tasks; $weakest"'
+}
 # gawk 5.2.1 double-frees an unset element passed to a function and read again;
 # gawk's --lint names each one.  These two must stay away from it (spec H1).
 c_no_unset_args() {
@@ -12927,7 +12951,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
