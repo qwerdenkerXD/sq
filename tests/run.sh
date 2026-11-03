@@ -9229,7 +9229,7 @@ c_forgot_rc_one() {
 		else need "a parent's row, rc 2: unknown, squeue's failure" eval 'rc_is 0 && why_lines | grep -qE "^    900  unknown: squeue .*Invalid job id specified" && lacks "no longer knows"'; fi
 	done
 }
-# Y8 (v2): no stderr is read whole: the forgotten-job text is looked for in
+# Y8 (v2): no Slurm stderr is read whole: the forgotten-job text is looked for in
 # its first scrub_bound bytes (says_forgotten), sstat's in each line's
 # (every line still read, as a job named on a line left out would read "ok")
 c_stderr_bounded_reads() {

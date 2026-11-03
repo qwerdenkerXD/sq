@@ -211,7 +211,7 @@ scrub() (   # scrub [-s | -f FILE] [MAX]: stdin, or the first line of FILE, onto
 # ---- scrub end
 # Does the stderr FILE say "Invalid job id specified"?  squeue prints it as
 # "slurm_load_jobs error: ..." for a job Slurm no longer knows and exits 1
-# (squeue.c:234-235, 99-113), so the caller asks for rc 1 too.  Like every
+# (squeue.c:234-235, 99-113), so the caller asks for rc 1 too.  Like every Slurm
 # stderr sq reads, within scrub_bound
 says_forgotten() { head -c "$scrub_bound" -- "$1" 2>/dev/null | env LC_ALL=C grep -q 'Invalid job id specified'; }
 
@@ -5815,7 +5815,7 @@ uwhy=$(first_why nerr jerr) fwhy=$(first_why rwhy rerr jerr)
 # partitions it was given), or what it said beside that: a refusal, a warning
 # or noise, sinfo.c's _get_info failing only on a NULL list, so rc 0 tells none.
 # Its first line with text, the bidi controls gone before that is judged, within
-# scrub -f's bound (1 MiB): no stderr is read whole
+# scrub -f's bound (1 MiB): not read whole
 nonodes=0 noderr=
 if [ -z "$nerr" ] && [ ! -s "$tmp/nodes" ]; then nonodes=1; noderr=$(scrub -f <(head -c $((scrub_bound + 1)) -- "$tmp/nodes.err" | scrub -s | env LC_ALL=C grep -am1 '[^[:space:][:cntrl:]]')); [[ $noderr == *[![:space:]]* ]] || noderr=; fi
 memallocf=$tmp/memalloc memreadf=$tmp/memread memtotalf=$tmp/memtotal nodespecf=$tmp/nodespec nodespecg=$tmp/nodespec.gate
