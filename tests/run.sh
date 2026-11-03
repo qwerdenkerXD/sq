@@ -5721,7 +5721,8 @@ c_membar_json() {
 	done
 	d=$(json_fx membar-busy '!/^ *"specialized_memory": / { print }')
 	sq_run "$d" -- --full
-	need "no specialized_memory: RealMemory counts for both" eval 'rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && membar_real'
+	need "no specialized_memory: RealMemory counts for both, the caption names them" eval 'rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] && membar_real &&
+		membar_note | grep -qxE "↳ memory counts RealMemory on fb2-bioinf and 1 more node: scontrol gave no usable MemSpecLimit( for them| ?…)"'
 	# escapes in a name: decoded before it is matched with sinfo's
 	local u; u=$(printf '\134u')     # a backslash and u
 	d=$(json_fx membar-busy "$json_name" NODE=fb2-bioinf J="\"fb2${u}002dbio${u}0069nf\"")
@@ -8541,8 +8542,8 @@ c_why_nodes_json() {
 		why_has "    fb2-bioinf     128           976.5G  too few CPUs, too little memory"'
 }
 c_why_nodes_figures() {
-	T_TITLE="sq job's node table from scontrol --json (effective_cpus, state) and where Slurm has none from -o's CPUEfctv and sinfo's StateComplete: the effective CPUs where they differ from the total, a state of two flags shown joined by +"
-	local d nojson ncalls efctv state
+	T_TITLE="sq job's node table from scontrol --json (effective_cpus, state) and where Slurm has none from -o's CPUEfctv and sinfo's StateComplete: the effective CPUs where they differ from the total, a state of two flags shown joined by +; a figure member --json leaves out is unknown, not 0"
+	local d nojson ncalls efctv state k
 	for nojson in "" SQSTUB_NOJSON=1; do
 		if [ -n "$nojson" ]; then ncalls=2 efctv="no --json, CPUEfctv=120 and CPUTot=128" state="no --json, State=MIXED+FAIL"
 		else ncalls=1 efctv="--json, effective_cpus 120 and cpus 128" state='--json, state ["MIXED", "FAIL"]'; fi
@@ -8556,6 +8557,17 @@ c_why_nodes_figures() {
 		need "$state: a node down, its state shown as mixed+fail" eval '
 			rc_is 0 && err_empty && [ "$(calls scontrol)" = $ncalls ] &&
 			why_has "  waits for an admin: every node big enough for it is down or drained" && why_has "    fb2-bioinf            -            -  mixed+fail"'
+	done
+	# Y7: a figure member scontrol --json leaves out reads unknown, never as 0
+	# (elem gives "" for it, which node_num reads as no figure)
+	for k in 'cpus|effective_cpus' alloc_cpus real_memory alloc_memory; do
+		d=$(json_fx "$jfx/resources-11964" '!/^ *"('"$k"')": /')
+		why_run "$d" -- --no-color job 11964
+		need "--json without $k: both nodes unknown, no figure of 0, no fit" eval '
+			rc_is 0 && err_empty && [ "$(calls scontrol)" = 1 ] &&
+			why_has "  waits its turn: Slurm finds too little free now on the nodes it may use (LocalQ)" &&
+			why_has "    fb2-bioinf            ?            ?  unknown: scontrol did not say" &&
+			why_has "    fb2-bioinf-0          ?            ?  unknown: scontrol did not say"'
 	done
 }
 
