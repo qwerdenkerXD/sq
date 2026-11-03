@@ -138,7 +138,12 @@ BEGIN {
 # the names are compared); each broken piece becomes one ␚ and the bidi
 # controls go, as decoded characters; C1 stays, a whole character.  No MAX.
 # Under env, so bash itself never switches locale for it.
-scrub_bound=1048576   # the bytes of a stderr sq reads: scrub -f's of FILE, and every other reader's (no stderr is read whole)
+# scrub_bound: how many bytes sq reads of a stderr: scrub -f's of FILE, and,
+# outside scrub, of sinfo's (ahead of scrub -f), says_forgotten's and each
+# line of sstat's.  Not bounded: tail.err (log_tail_verdict), show.err and
+# render.err (out_rc's reason), the stderr of coreutils tail and of sq's own
+# gawk rather than of a Slurm call: a line or two in practice
+scrub_bound=1048576
 scrub() (   # scrub [-s | -f FILE] [MAX]: stdin, or the first line of FILE, onto stdout
 	bound=0 stream=0
 	[ "${1-}" != -s ] || { stream=1; shift; }
