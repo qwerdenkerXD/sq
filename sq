@@ -5796,9 +5796,10 @@ uwhy=$(first_why nerr jerr) fwhy=$(first_why rwhy rerr jerr)
 # sinfo rc 0 and no row: no node you can see (sinfo.c:607 makes rows by the
 # partitions it was given), or what it said beside that: a refusal, a warning
 # or noise, sinfo.c's _get_info failing only on a NULL list, so rc 0 tells none.
-# Its first line with text, the bidi controls gone before that is judged
+# Its first line with text, the bidi controls gone before that is judged, within
+# scrub -f's bound (1 MiB): no stderr is read whole
 nonodes=0 noderr=
-if [ -z "$nerr" ] && [ ! -s "$tmp/nodes" ]; then nonodes=1; noderr=$(scrub -f <(scrub -s < "$tmp/nodes.err" | env LC_ALL=C grep -am1 '[^[:space:][:cntrl:]]')); [[ $noderr == *[![:space:]]* ]] || noderr=; fi
+if [ -z "$nerr" ] && [ ! -s "$tmp/nodes" ]; then nonodes=1; noderr=$(scrub -f <(head -c 1048577 -- "$tmp/nodes.err" | scrub -s | env LC_ALL=C grep -am1 '[^[:space:][:cntrl:]]')); [[ $noderr == *[![:space:]]* ]] || noderr=; fi
 memallocf=$tmp/memalloc memreadf=$tmp/memread memtotalf=$tmp/memtotal nodespecf=$tmp/nodespec nodespecg=$tmp/nodespec.gate
 sqv="center fold color bell eta recent bellall me statef statetmp uwhy nonodes noderr jerr rwhy fwhy wtxt sfilt host now memallocf memreadf memtotalf nodespecf nodespecg nodespecfmt serr"
 for v in $sqv; do export "SQV_$v=${!v}"; done

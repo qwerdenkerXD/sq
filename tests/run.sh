@@ -8846,6 +8846,11 @@ c_nodes_none() {
 	need "a first line of a control alone: the next one's words" eval 'rc_is 0 && has "sinfo lists no node: sinfo: error: after a control"'
 	printf '@stderr \\xe2\\x80\\xae\n@stderr sinfo: error: after a bidi control\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
 	need "a first line of a bidi control alone, blank once scrubbed: the next one's words" eval 'rc_is 0 && has "sinfo lists no node: sinfo: error: after a bidi control"'
+	# sinfo as a script, as the stub's renderer takes too long over a MiB: over 1 MiB of blank lines, then text
+	local big=$T_DIR/bigbin; mkdir -p "$big"
+	printf '#!/bin/sh\nhead -c 1100000 /dev/zero | tr "\\\\000" "\\\\n" >&2; echo "sinfo: error: past the bound" >&2\n' > "$big/sinfo"; chmod +x "$big/sinfo"
+	sq_run h-stderr "PATH=$big:$here/bin:$PATH" -- --full --no-color
+	need "text only after over 1 MiB of blank lines: read within scrub's bound, so none" eval 'rc_is 0 && [ "$(plain | grep -cxF "  $nonodes_line")" = 1 ]'
 	printf '@stderr \\s\n@stderr \\s\\s\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
 	need "every line blank: you can see" eval 'rc_is 0 && [ "$(plain | grep -cxF "  $nonodes_line")" = 1 ]'
 	printf '@stderr \\s\\xc2\\x80\n@exit 0\n' > "$b/sinfo"; sq_run "$b" -- --full --no-color
