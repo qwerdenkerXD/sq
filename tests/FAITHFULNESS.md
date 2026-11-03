@@ -261,6 +261,12 @@ shows the node block and no `slurm unreachable`. Test arrays with one failed tas
 `afterok:ID_*` reads `(failed)` with `its tasks now: 2 COMPLETED · 1 FAILED`; `afternotok:ID_*` over the same array
 started, so one task not successful is enough; over an array of all COMPLETED it reads `(failed)`.
 
+## Dependency delays and array counts, live (2026-11-03, bioserver)
+
+`afterok:P+2` started within 10 s of P ending; `after:P+2` still waited 30 s later: only `after` reads the
+delay, as sq now says. `afterok:A_*,afterok:P` leads `every task of array A and job P`; `sq job A` and the
+dependent's row both count `2 COMPLETED · 1 FAILED` (title `2 done · 1 failed`).
+
 ## Known gaps of the suite
 
 Left out on purpose, as cosmetic: right alignment of the numeric columns and
