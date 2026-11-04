@@ -4959,9 +4959,12 @@ help_screen_efficiency() { cat <<'HELP_SCREEN_EOF'
 > 12345_7, or its own job id.  While accounting does not answer, the count is
 > a floor (array of ≥5 (accounting did not answer)): its done, failed and
 > cancelled tasks are only known there once squeue no longer lists them.
-> Running counts what squeue lists as R, as the dashboard's footer does, and
-> other every task neither ended, running nor pending: COMPLETING, SUSPENDED,
-> or a hold squeue lists on its own (a SPECIAL_EXIT task counts as failed).
+> Running counts the tasks squeue lists as R (and, for a task squeue does not
+> list, accounting's RUNNING row); other counts the rest that are neither
+> ended nor pending, such as a COMPLETING, SUSPENDED or held task.  A task
+> COMPLETING or STAGE_OUT whose ended row accounting already has counts as
+> that row says, and a SPECIAL_EXIT task as failed: the dashboard's footer
+> counts both as other.
 HELP_SCREEN_EOF
 }
 help_screen_job() { cat <<'HELP_SCREEN_EOF'
