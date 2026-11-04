@@ -2150,9 +2150,11 @@ function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, 
     if (Q[p, "ArrayJobID"] != id || Q[p, "ArrayTaskID"] == "N/A") continue
     if (Q[p, "ArrayTaskID"] ~ /^[0-9]+$/) {
       t = Q[p, "ArrayTaskID"] + 0
-      # COMPLETING with an ended row: Slurm writes that row as CG begins
-      # (job_mgr.c:6582, 6592), and the row counts, with its figures and exit
-      if (Q[p, "StateCompact"] == "CG" && (t in ROW) && (stcode(T[ROW[t], "State"]) in DONE)) continue
+      # COMPLETING or STAGE_OUT with an ended row: Slurm writes that row as CG
+      # begins (job_mgr.c:6582, 6592), and STAGE_OUT is set in the same call,
+      # just before (job_completion_logger, :16655, 16754); the row counts,
+      # with its figures and exit
+      if ((Q[p, "StateCompact"] == "CG" || Q[p, "StateCompact"] == "SO") && (t in ROW) && (stcode(T[ROW[t], "State"]) in DONE)) continue
       k = 1; own[t]; QT[t] = p
     }
     else {
@@ -2465,9 +2467,12 @@ function median(V, n,   S, k) {
 }
 # a task, or K of them still in a pending array's record, counted by state C:
 # done (COMPLETED), cancelled, failed (any other final state), pending, running
+# (squeue's R alone), and other: any other state that has not ended
+# (COMPLETING, SUSPENDED, a hold after a requeue, one sq does not know), as
+# the dashboard's footer and COMPACT's last section count them
 function count(c, k) {
   if (c == "CD") done += k; else if (c == "CA") canc += k; else if (c == "PD") pend += k
-  else if (c in DONE) fail += k; else run += k
+  else if (c in DONE) fail += k; else if (c == "R") run += k; else other += k
   total += k
 }
 function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax, cminid, mminid, rss, multi,
@@ -2508,7 +2513,7 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
   for (i = 1; i <= narray_records && why == ""; i++)          # what the pending tasks wait for
     if (R[array_record[i], "StateCompact"] == "PD" && R[array_record[i], "Reason"] != "None") why = R[array_record[i], "Reason"]
   st = (done ? " · " done " done" : "") (fail ? " · " fail " failed" : "") (canc ? " · " canc " cancelled" : "") \
-       (run ? " · " run " running" : "") (pend ? " · " pend " pending" : "")
+       (run ? " · " run " running" : "") (pend ? " · " pend " pending" : "") (other ? " · " other " other" : "")
   # Franz (#1): while accounting is missing, the done, failed and cancelled
   # tasks are, so the count is a floor and says why
   TITLE = paint("1;36", "▌ ") paint("1", job) "  " name " · " user " · array of " \
@@ -4948,6 +4953,9 @@ help_screen_efficiency() { cat <<'HELP_SCREEN_EOF'
 > 12345_7, or its own job id.  While accounting does not answer, the count is
 > a floor (array of ≥5 (accounting did not answer)): its done, failed and
 > cancelled tasks are only known there once squeue no longer lists them.
+> Running counts what squeue lists as R, as the dashboard's footer does, and
+> other every task neither ended, running nor pending: COMPLETING, SUSPENDED,
+> or a hold squeue lists on its own (a SPECIAL_EXIT task counts as failed).
 HELP_SCREEN_EOF
 }
 help_screen_job() { cat <<'HELP_SCREEN_EOF'

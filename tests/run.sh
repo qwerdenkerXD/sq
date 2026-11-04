@@ -9020,8 +9020,8 @@ c_why_parent_garbled() {
 # U-design U3: an array parent's tasks: per task squeue's record, else
 # accounting's row; counts by state are all Slurm's dependency code reads
 # X3: sq job ARRAY and a parent's row are one count (tasks_count); the title in
-# its words: done COMPLETED, cancelled CANCELLED, pending PENDING, running what
-# is not final, failed any other final state
+# its words: done COMPLETED, cancelled CANCELLED, pending PENDING, running
+# RUNNING, failed any other final state, other what is neither (Z1)
 array_title_is() {   # array_title_is FIXTURE TEXT: sq job 11950's title ends in "array of TEXT"
 	job_run "$1-11963" COLUMNS=120 -- --no-color job 11950
 	local title=$2
@@ -9035,8 +9035,9 @@ row_as_title() {
 			n = split($0, P, " · ")
 			for (i = 1; i <= n; i++) { split(P[i], W, " "); k = W[1]; s = W[2]; t += k
 				if (s == "COMPLETED") d += k; else if (s == "CANCELLED") c += k; else if (s == "PENDING") p += k
-				else if (s == "RUNNING" || s == "COMPLETING" || s == "SUSPENDED" || s == "STOPPED") r += k; else f += k }
-			o = (d ? " · " d " done" : "") (f ? " · " f " failed" : "") (c ? " · " c " cancelled" : "") (r ? " · " r " running" : "") (p ? " · " p " pending" : "")
+				else if (s == "RUNNING") r += k
+				else if (s ~ /^(FAILED|TIMEOUT|NODE_FAIL|OUT_OF_MEMORY|DEADLINE|PREEMPTED|BOOT_FAIL|REVOKED|SPECIAL_EXIT)$/) f += k; else x += k }
+			o = (d ? " · " d " done" : "") (f ? " · " f " failed" : "") (c ? " · " c " cancelled" : "") (r ? " · " r " running" : "") (p ? " · " p " pending" : "") (x ? " · " x " other" : "")
 			print t ": " substr(o, 4) }'
 }
 c_array_one_count() {
@@ -9077,7 +9078,7 @@ c_array_one_count() {
 	array_title_is star-cg '2: 1 done · 1 failed'
 	need "star-cg: the row's exit and figures" eval 'why_has "  1 failed with exit 1: 11950_2" && has "over the 1 completed task; the weakest: sq job 11950_1"'
 	parent_rows_are star-cg '    11950  its tasks now: 1 COMPLETED · 1 FAILED'
-	array_title_is star-cg-norow '1: 1 running'
+	array_title_is star-cg-norow '1: 1 other'
 	parent_rows_are star-cg-norow '    11950  its tasks now: 1 COMPLETING'
 	# R-M2, the words from accounting's row only where it names the state counted
 	array_title_is star-cdf '1: 1 failed'
@@ -9087,7 +9088,7 @@ c_array_one_count() {
 	need "br-timeout: the count, no bracket holding the task on its own, no hint at a refused id" eval 'why_has "  3 reached the time limit" && lacks "says more" && lacks "11950_[3-6]"'
 	array_title_is star-idn '5: 1 done · 4 failed'
 	need "star-idn: an unnamed bracket first: the id named, and … as it names fewer than it counts" eval 'why_has "  4 reached the time limit: 11950_8, …"'
-	array_title_is star-cg-br '3: 2 done · 1 running'
+	array_title_is star-cg-br '3: 2 done · 1 other'
 	parent_rows_are star-cg-br '    11950  its tasks now: 1 COMPLETING · 2 COMPLETED'
 	array_title_is star-br-to-whole '5: 1 done · 4 failed'
 	need "star-br-to-whole: a whole bracket keeps its name, no hint at it" eval 'why_has "  4 reached the time limit: 11950_[3-6]" && lacks "says more"'
@@ -9206,6 +9207,52 @@ c_array_why_norows() {
 	need "arr-af-cd: a floor counting a done task: the same note, no why section" eval 'rc_is 0 && notes_raw | head -1 | grep -qxF "$floor_sq" && why_lacks_section'
 	job_run arr-af-run-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-af-run: a floor of running and pending: the note as accepted, no why section" eval 'rc_is 0 && notes_raw | head -1 | grep -qxF "$floor" && why_lacks_section'
+}
+# Z1: the title's running is squeue's R alone, as the dashboard's footer and
+# COMPACT's running section count it; a task in any other state that has not
+# ended (COMPLETING, SUSPENDED, a hold, a state sq does not know) is other, the
+# footer's word, and decision 7's for the jobs COMPACT does not count as running
+c_array_other_states() {
+	T_TITLE="sq job ARRAY: running counts squeue's R alone; every other state that has not ended, squeue's or accounting's, Slurm's ? and an empty or unknown one, counts other, after pending; a hold squeue folds into the pending record pending; STAGE_OUT with an ended row by its row; the parent's row names each state"
+	local code d st
+	# squeue without -r folds a pending-base task (RH here) into the array's
+	# pending record (squeue print.c:193-260), so it reads pending there
+	job_run arr-other-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-other: S, CG without a row: other; R running; the record, RH task 3 folded in, pending" eval '
+		rc_is 0 && title_is "▌ 11950  bwa-align · fsill · array of 6: 1 running · 3 pending · 2 other" &&
+		notes_are "no task has completed yet; pending (Resources,JobHoldMaxRequeue)" && why_lacks_section'
+	# no pending record left: squeue lists a hold on its own
+	job_run arr-other-held-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-other-held: RH and RD on their own rows: other" eval '
+		rc_is 0 && title_is "▌ 11950  bwa-align · fsill · array of 3: 1 running · 2 other" && why_lacks_section'
+	# STAGE_OUT with an ended row counts by the row, as COMPLETING does
+	job_run arr-so-row-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-so-row: SO with a COMPLETED row: 1 done, its figures" eval '
+		rc_is 0 && title_is "▌ 11950  bwa-align · fsill · array of 1: 1 done" && has "over the 1 completed task; the weakest: sq job 11950_1"'
+	job_run arr-other-acct-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-other-acct: accounting's SUSPENDED row alone counts other, and is said maybe out of date" eval '
+		rc_is 0 && plain | head -1 | grep -qE "array of 2: 1 done · 1 other\$" &&
+		has "maybe out of date: squeue does not list what accounting has not seen end"'
+	# every code job_state_string_compact prints for a state that has not ended
+	# (slurm_protocol_defs.c, 23.11.4), its ? for a base state it does not know,
+	# and two Slurm never prints: an empty field and a word of no Slurm
+	for code in R S CG SO CF RS RQ RF RH RD ST SI '?' '' ZZ; do
+		d=$T_DIR/fx-st$code; mkdir -p "$d"; : > "$d/sacct.11950"; : > "$d/squeue-all"; : > "$d/sacct"
+		printf '@include %s\n' "$fixtures/_common/passwd-bioserver" > "$d/passwd"
+		sed -E "s/StateCompact=S;/StateCompact=$code;/; s#^@include \.\./\.\./_common/#@include $fixtures/_common/#" "$jfx/arr-other-11950/squeue-all.11950" | gawk 'NR <= 3' > "$d/squeue-all.11950"
+		st=other; [ "$code" = R ] && st=running
+		job_run "$d" COLUMNS=200 -- --no-color job 11950
+		need "squeue's ${code:-(empty)}: array of 1: 1 $st" eval 'rc_is 0 && plain | head -1 | grep -qE "array of 1: 1 $st\$"'
+	done
+	# the floor (accounting refused): the same words beside it
+	job_run arr-af-run-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-af-run: R running, PD pending, as accepted" eval 'rc_is 0 && plain | head -1 | grep -qF "array of ≥4 (accounting did not answer): 1 running · 3 pending"'
+	# the parent's row names the state itself, as before
+	parent_rows_are star-cg-norow '    11950  its tasks now: 1 COMPLETING'
+	# the help says what other counts
+	help_run -- help efficiency
+	need "sq help efficiency: running is squeue's R, other what is neither ended, running nor pending, SPECIAL_EXIT failed" eval '
+		rc_is 0 && plain | tr -s " \n" "  " | grep -qF "Running counts what squeue lists as R, as the dashboard'"'"'s footer does, and other every task neither ended, running nor pending: COMPLETING, SUSPENDED, or a hold squeue lists on its own (a SPECIAL_EXIT task counts as failed)."'
 }
 # Y8: squeue exits 1 after "slurm_load_jobs error: Invalid job id specified"
 # (squeue.c:112-113, 234-235): that pair alone is a job Slurm forgot.  The text
@@ -13080,7 +13127,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
