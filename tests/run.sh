@@ -9232,6 +9232,11 @@ c_array_other_states() {
 	job_run arr-so-row-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-so-row: SO with a COMPLETED row: 1 done, its figures" eval '
 		rc_is 0 && title_is "▌ 11950  bwa-align · fsill · array of 1: 1 done" && has "over the 1 completed task; the weakest: sq job 11950_1"'
+	# and by any ended row, not only a COMPLETED one: FAILED, with its why line
+	job_run arr-so-failed-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-so-failed: SO with a FAILED row: 1 failed, its why line" eval '
+		rc_is 0 && title_is "▌ 11950  bwa-align · fsill · array of 2: 1 failed · 1 running" &&
+		[ "$(why_lines)" = "$(printf "%s\n" "  1 failed with exit 1: 11950_1" "  ↳ sq job 11950_1 says more about one of them")" ]'
 	job_run arr-other-acct-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-other-acct: accounting's SUSPENDED row alone counts other, and is said maybe out of date" eval '
 		rc_is 0 && plain | head -1 | grep -qE "array of 2: 1 done · 1 other\$" &&
@@ -9282,6 +9287,11 @@ c_array_unread_record() {
 	job_run arr-norows-pd-11950 COLUMNS=200 -- --no-color job 11950
 	need "arr-norows-pd: 3 pending and the reason, as before" eval '
 		rc_is 0 && why_has "  3 pending: Slurm'"'"'s reason: Resources" && has "no task has completed yet; pending (Resources)"'
+	# a pending remainder of one task (squeue prints its one id) holds a task: its reason
+	job_run arr-pd-one-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-pd-one: a record of one task gives the note its reason" eval '
+		rc_is 0 && title_is "▌ 11950  bwa-align · fsill · array of 2: 1 running · 1 pending" &&
+		notes_are "no task has completed yet; pending (Priority)" && why_lacks_section'
 }
 # Z4: 0:125 is no exit 0.  The second field 125 is Slurm's out-of-memory mark
 # (SIG_OOM 253, printed 0:125: slurm_protocol_defs.h), the first is 0 because
