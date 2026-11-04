@@ -574,12 +574,17 @@ function tres_mem(tres,   x) {
 # component (10646+0), array task (10646_3) and pending array
 # (10646_[0-9,12%2], 10646_[0-12:2]).  The bracket is the grammar Slurm prints
 # and nothing looser, because the anchor is what a forged record has to get
-# past: term ("," term)* ("%" N)?, term = N | N-N | N-N:N.  N is at most 7
+# past: term ("," term)* ("%" T)?, term = N | N-N | N-N:N.  N is at most 7
 # digits (MaxArraySize cannot exceed 4000001), so no row can count 1e20 or
-# NaN, which passes every "< 1" test
+# NaN, which passes every "< 1" test; that holds where the anchor ends with
+# the id ("$" after it: JOBID, SACCTID).  T, the throttle, is printed as %u
+# of max_run_tasks where it is above 0, set from an int by the %N of sbatch
+# --array and by scontrol ArrayTaskThrottle (job_mgr.c:5005, 12439;
+# slurm_protocol_defs.c:6887), so up to 10 digits; it limits how many run at
+# once and is never counted
 function id_anchor(   an, at) {
   an = "[0-9]{1,7}"; at = an "(-" an "(:" an ")?)?"
-  return "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[" at "(," at ")*(%" an ")?\\]))?"
+  return "^[0-9]+([+][0-9]+)?(_([0-9]+|\\[" at "(," at ")*(%[0-9]{1,10})?\\]))?"
 }
 # How many jobs an id stands for: a Slurm bracket its tasks, any other id one.
 # 0 means it is no id, and the record gate skips it: the anchor cannot say
@@ -2120,7 +2125,7 @@ function task_count(N, ord, c, k) {
 }
 # the tasks of accounting's bracket row J that are not on their own (OWN)
 function bracket_left(j, own,   k, t, m) {
-  if (!(k = ntasks(j, ID))) return 0                       # one sq cannot read counts none
+  if (!(k = ntasks(j, JOBID))) return 0                    # one sq cannot read counts none
   if (match(j, /\[(.*)\]/, m)) for (t in own) if (task_in(m[1], t + 0)) k--
   return k
 }
@@ -2159,7 +2164,7 @@ function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, 
       k = 1; own[t]; QT[t] = p
     }
     else {
-      k = ntasks(id "_[" Q[p, "ArrayTaskID"] "]", ID); x = Q[p, "ArrayTaskID"]; sub(/%[0-9]+$/, "", x)
+      k = ntasks(id "_[" Q[p, "ArrayTaskID"] "]", JOBID); x = Q[p, "ArrayTaskID"]; sub(/%[0-9]+$/, "", x)
       QT["record"] = QT["record"] (QT["record"] == "" ? "" : ",") x
     }
     task_count(N, ord, Q[p, "StateCompact"], k)
@@ -2478,7 +2483,7 @@ function count(c, k) {
 }
 # how many tasks squeue's record R of array JOB holds; 0 for a range sq
 # cannot read, which counts none (ntasks), so it says nothing of them either
-function record_tasks(r) { return ntasks(job "_[" R[r, "ArrayTaskID"] "]", ID) }
+function record_tasks(r) { return ntasks(job "_[" R[r, "ArrayTaskID"] "]", JOBID) }
 function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax, cminid, mminid, rss, multi,
                         polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why, N, ord, QT, own, unended, t, seen) {
   unended = tasks_count(job, R, nq, A, task_row, ntask_rows, N, ord, QT, own)
@@ -3223,7 +3228,7 @@ function why_array(QT, own,   i, r, q, id, c, ac, k, n, GN, GI, GS, GK, a, b, t,
   for (i = 1; i <= ntask_rows; i++) {
     r = task_row[i]; id = A[r, "JobID"]; ac = stcode(A[r, "State"])
     if (index(id, "[")) {
-      if (QT["record"] == "") { k = bracket_left(id, own); why_array_task(id, k, ac, (ac in DONE) ? r : 0, 0, k == ntasks(id, ID), GN, GI, GS, GK) }
+      if (QT["record"] == "") { k = bracket_left(id, own); why_array_task(id, k, ac, (ac in DONE) ? r : 0, 0, k == ntasks(id, JOBID), GN, GI, GS, GK) }
       continue
     }
     t = substr(id, length(job) + 2) + 0
@@ -3239,7 +3244,7 @@ function why_array(QT, own,   i, r, q, id, c, ac, k, n, GN, GI, GS, GK, a, b, t,
     } else {
       id = job "_[" R[q, "ArrayTaskID"] "]"; r = 0
       for (k = 1; k <= ntask_rows && !r; k++) if (index(A[task_row[k], "JobID"], "[") && stcode(A[task_row[k], "State"]) == c) r = task_row[k]
-      why_array_task(id, ntasks(id, ID), c, r, q, bracket_left(id, own) == ntasks(id, ID), GN, GI, GS, GK)
+      why_array_task(id, ntasks(id, JOBID), c, r, q, bracket_left(id, own) == ntasks(id, JOBID), GN, GI, GS, GK)
     }
   }
   n = GK[0]
@@ -3267,6 +3272,7 @@ BEGIN {
   color = ENVIRON["SQJ_COLOR"]
   POLLED = "CPU time includes processes Slurm killed or never waited for (polled between two samples, so still a lower bound)"
   NOW = systime(); ID = id_anchor(); BARW = 16
+  JOBID = ID "$"                                   # a whole id (ntasks); ID: the start of a sacct row
   final_states()
   # every state squeue's StateCompact or sacct's State can name, both ways
   split("PD R CG S CD CA F TO NF PR BF DL OOM RQ RV RS SE CF RH RF RD SI SO ST", sc, " ")

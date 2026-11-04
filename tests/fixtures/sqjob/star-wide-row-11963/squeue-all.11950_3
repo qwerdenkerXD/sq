@@ -1,0 +1,3 @@
+# AA3: the same record and a FAILED row of a task inside its range: a record sq cannot read holds no task (AA1), the row counts
+@stderr slurm_load_jobs error: Invalid job id specified
+@exit 1

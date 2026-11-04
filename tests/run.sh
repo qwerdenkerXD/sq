@@ -2931,6 +2931,10 @@ c_pending_throttle() {
 	T_TITLE="a pending _[1-20%4] row counts 20 jobs (the throttle limits concurrency, not membership)"
 	pending_bracket "7004_[1-20%4]" 7004 20
 }
+c_pending_throttle_wide() {
+	T_TITLE="a pending _[1-20%2147483647] row counts 20 jobs: a throttle of 10 digits is what Slurm can print, no unreadable row"
+	pending_bracket "7005_[1-20%2147483647]" 7005 20
+}
 c_pending_no_id_column() {
 	T_TITLE="sq -o j,T with a pending _[1-20]: the footer counts 20 pending"
 	sq_run pending-range -- -o j,T
@@ -9262,6 +9266,18 @@ c_array_other_states() {
 	need "sq help efficiency: running is squeue's R or accounting's RUNNING row, other the rest neither ended nor pending; an ended row and SPECIAL_EXIT where the footer says other" eval '
 		rc_is 0 && plain | tr -s " \n" "  " | grep -qF "Running counts the tasks squeue lists as R (and, for a task squeue does not list, accounting'"'"'s RUNNING row); other counts the rest that are neither ended nor pending, such as a COMPLETING or SUSPENDED task, or one held after a requeue or by a deleted reservation (a task on user or admin hold is pending). A task COMPLETING or STAGE_OUT whose ended row accounting already has counts as that row says, and a SPECIAL_EXIT task on its own row as failed: the dashboard'"'"'s footer counts both as other."'
 }
+# AA3: every id ntasks reads is whole, as on the dashboard: a term past 7 digits
+# counts none, a throttle of up to 10 digits (max_run_tasks, %u) is read
+c_array_id_whole() {
+	T_TITLE="sq job ARRAY: an id is read whole: a record of a 20-digit term counts none and holds none, a throttle of 10 digits reads, from squeue and from accounting, one of 11 does not"
+	array_title_is star-wide '1: 1 running'
+	need "star-wide: nothing of the record" eval 'notes_are "no task has completed yet" && why_lacks_section'
+	array_title_is star-wide-row '2: 1 failed · 1 running'
+	need "star-wide-row: the row of a task in its range counts, with its line" eval 'why_has "  1 failed with exit 1: 11950_3"'
+	array_title_is star-thr11 '1: 1 running'
+	array_title_is star-thr10 '6: 1 running · 5 pending'
+	need "star-thr10: accounting's bracket reads, squeue's record is counted" eval 'lacks "cannot be read" && why_has "  5 pending: Slurm'"'"'s reason: Resources"'
+}
 # Z2: a squeue record whose range sq cannot read counts none (ntasks, Y8a's
 # rule for a bracket), so it gives no why line and no reason either
 c_array_unread_record() {
@@ -13166,7 +13182,7 @@ cases=(
 	finished user_filter backslash_text control_text scrub_sites scrub_not_utf8 scrub_bounded scrub_counts scrub_read_bound scrub_sigpipe scrub_stream tables_not_utf8 tables_pass_cost tables_c1 width_table wide_clip wide_twin_text wide_twin_seps wide_twin_ascii wide_compact_fin wide_compact_fin_c fin_caption_fills wide_fin_cut wide_twin_parts wide_c_floor wide_c_mode locale_big5 wide_tmux bidi_sites silent_failure real_reason_wins bell_text bell_not_utf8 bell_statedir bell_notty bell_probe_killed bell_state_odd centre sacct_fallback sacct_flags
 	refuse_t_empty refuse_states_eq state_filter_queue_only accept_S_empty refuse_s refuse_json refuse_O
 	colour layout_size
-	pending_range pending_commas pending_throttle pending_no_id_column
+	pending_range pending_commas pending_throttle pending_throttle_wide pending_no_id_column
 	pending_strided pending_long
 	malformed_step0 malformed_dots malformed_reversed malformed_multi malformed_dash malformed_huge
 	finished_throttled finished_malformed fallback_throttled fallback_malformed
@@ -13198,7 +13214,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
