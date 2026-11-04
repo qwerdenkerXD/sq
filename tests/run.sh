@@ -13069,7 +13069,7 @@ help bell	SQ_BELL_USER
 help efficiency	green from 70 % of what it can reach (100 %, or that cap), yellow from 30 % of it, red below
 help efficiency	sq reads sstat only for your own jobs
 help efficiency	(sq job 12345_7 then looks at one), and why the other tasks did not complete
-help why	A batch job that ended FAILED (not a timeout, an out-of-memory or a cancelled job)
+help why	A batch job whose state is FAILED (one of its steps may have run out of memory; not a TIMEOUT, OUT_OF_MEMORY or CANCELLED job)
 help why	that are not blank
 help why	read on the machine sq job runs on
 help why	in green, waits its turn; in yellow, needs action

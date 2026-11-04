@@ -2127,10 +2127,11 @@ function bracket_left(j, own,   k, t, m) {
 # An array's tasks, counted by state, one count for sq job ARRAY and a parent's
 # row (rule A): a task counts once, per task squeue's record (table Q, rows
 # 1..nq) while it has one, else accounting's row (table T, the rows TR[1..nt],
-# as task_rows finds them); a task squeue reads COMPLETING goes by its row if
-# that lists it ended.  Slurm purges task records one by one, so squeue
-# alone may hold some or none.  A bracket row counts its tasks less those on
-# their own (it can lag), none where squeue has a record of several tasks.
+# as task_rows finds them); a task squeue reads COMPLETING or STAGE_OUT goes
+# by its row if that lists it ended.  Slurm purges task records one by one,
+# so squeue alone may hold some or none.  A bracket row counts its tasks less
+# those on their own (it can lag), none where squeue has a record of several
+# tasks.
 # N, ord: as task_count.  QT: task number to squeue's row, QT["record"] the
 # tasks squeue's records of several hold.  OWN: the tasks counted on their own.
 # Returns how many it read as not ended from accounting alone: with squeue
@@ -4883,9 +4884,10 @@ help_screen_why() { cat <<'HELP_SCREEN_EOF'
 > it lost; for an array, its tasks that did not complete.
 
 = Its output's last lines:
-> A batch job that ended FAILED (not a timeout, an out-of-memory or a
-> cancelled job) ends the section with the last 5 lines of its output that
-> are not blank, for every job whose file you can read, other users' too.
+> A batch job whose state is FAILED (one of its steps may have run out of
+> memory; not a TIMEOUT, OUT_OF_MEMORY or CANCELLED job) ends the section
+> with the last 5 lines of its output that are not blank, for every job
+> whose file you can read, other users' too.
 > The file is read on the machine sq job runs on, so one on a node's local
 > disk reads as missing (the report names the node that wrote it).  The
 > lines come from the last 4096 bytes of the file (its stderr when that has
