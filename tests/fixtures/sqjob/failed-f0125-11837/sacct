@@ -1,0 +1,3 @@
+# Z4: a plain job (failed1's shape): squeue's FAILED 0:125, no accounting row
+@include ../../_common/job-sacct-defaults
+@defaults UID=1029; User=schroder; Submit=\{epoch-2700s}; Start=\{epoch-2650s}; End=\{epoch-210s}; WorkDir=/media/BioNAS2/schroder/kraken; ElapsedRaw=2470; AllocCPUS=8; ReqCPUS=8; ReqTRES=billing=8,cpu=8,mem=25600M,node=1; AllocTRES=billing=8,cpu=8,mem=25600M,node=1; NodeList=fb2-bioinf-0; Partition=small; TimelimitRaw=480

@@ -9280,6 +9280,38 @@ c_array_unread_record() {
 	need "arr-norows-pd: 3 pending and the reason, as before" eval '
 		rc_is 0 && why_has "  3 pending: Slurm'"'"'s reason: Resources" && has "no task has completed yet; pending (Resources)"'
 }
+# Z4: 0:125 is no exit 0.  The second field 125 is Slurm's out-of-memory mark
+# (SIG_OOM 253, printed 0:125: slurm_protocol_defs.h), the first is 0 because
+# the status is no exit (WIFEXITED false), and sq reads it as 0/oom: out of
+# memory everywhere else.  A pair with an exit status keeps its exit
+c_failed_oom_mark() {
+	T_TITLE="a FAILED task whose pair is 0:125 (squeue's, or the fold of a FAILED row and a step OUT_OF_MEMORY) ran out of memory in sq job ARRAY's why and in sq job TASK's, never 'exit 0' or 'no exit code'; 1:125 keeps its exit 1"
+	local f
+	for f in f0125 f015-oom; do
+		job_run arr-$f-11950 COLUMNS=200 -- --no-color job 11950
+		need "arr-$f: the array's why line is ran out of memory" eval 'rc_is 0 && why_has "  1 ran out of memory: 11950_1" && lacks "exit 0"'
+		job_run arr-$f-11950 COLUMNS=200 -- --no-color job 11950_1
+		need "arr-$f: the task's state 0/oom, its why line ran out of memory" eval '
+			rc_is 0 && state_is "FAILED · exit 0/oom: out of memory" && [ "$(why_lines | head -1)" = "  it ran out of memory" ] && lacks "neither the job nor a step"'
+	done
+	# a plain job: the fold through a step, and squeue's own pair
+	for f in failed-f015-oom failed-f0125; do
+		job_run $f-11837 COLUMNS=120 -- --no-color job 11837
+		need "$f: a plain job's state 0/oom, its why line ran out of memory" eval '
+			rc_is 0 && state_is "FAILED · exit 0/oom: out of memory" && [ "$(why_lines | head -1)" = "  it ran out of memory" ] && lacks "neither the job nor a step"'
+	done
+	# a FAILED 0:125 task joins the OUT_OF_MEMORY group
+	job_run arr-f0125-oom-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-f0125-oom: one group of two" eval '
+		rc_is 0 && [ "$(why_lines)" = "$(printf "%s\n" "  2 ran out of memory: 11950_1, 11950_2" "  ↳ sq job 11950_1 says more about one of them")" ]'
+	job_run arr-f10-oom-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-f10-oom: 1:125 keeps its exit 1 in the array" why_has "  1 failed with exit 1: 11950_1"
+	job_run arr-f10-oom-11950 COLUMNS=200 -- --no-color job 11950_1
+	need "arr-f10-oom: and in the task's why" eval 'rc_is 0 && state_is "FAILED · exit 1/oom: out of memory" && why_has "  exit 1: the program reported an error itself; its output should say which"'
+	# OUT_OF_MEMORY itself, and the canceller before the mark, as before
+	job_run cxl-0-125-11837 COLUMNS=120 -- --no-color job 11837
+	need "cxl-0-125: the canceller still first" why_has "  the batch script was cancelled by its owner"
+}
 # Y8: squeue exits 1 after "slurm_load_jobs error: Invalid job id specified"
 # (squeue.c:112-113, 234-235): that pair alone is a job Slurm forgot.  The text
 # beside another rc (no squeue's: a wrapper's, a kill's) is a call that failed
@@ -13153,7 +13185,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins

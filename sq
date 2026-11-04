@@ -3148,6 +3148,7 @@ function why_failed(q, r,   rc, sg, k, s, by, sname, rawrc, m, node) {
     wl(sg == 53 ? "its script never started: Slurm could not open its output file" : "Slurm error " sg ((sg in SLERR) ? ": " SLERR[sg] : ""))
     if (sg == 53) wn("e.g. -o or -e names a directory that does not exist, or one it may not write to")
   }
+  else if (sg == 125 && !rc) wl("it ran out of memory")     # 0:125: Slurm's out-of-memory mark, no exit status
   else if (rawrc != "" && rawrc >= 129 && rawrc <= 159) {
     wl("exit " rawrc ": a command in it was killed by " signame(rawrc - 128))
     wn("a shell reports a command killed by signal N as exit 128+N; sacct will print exit " rawrc - 128 ", as it prints any exit above 128 less 128")
@@ -3204,8 +3205,10 @@ function why_array_task(id, k, c, arow, q, named, GN, GI, GS, GK,   by, never, k
   } else if (c == "F") {
     exit_of(id, A, arow, nsteps, step_row, q ? R[q, "exit_code"] : "")
     x = jsg(id); y = jrc(id)
+    # 0:125 is no exit 0: 125 is Slurm's out-of-memory mark (exlabel), and
+    # no row recorded an exit status
     key = (y < 0) ? "failed with an exit code that cannot be read" : (x >= 1 && x <= 31) ? "failed by " signame(x) \
-        : (x > 31 && x != 125) ? "failed by Slurm error " x : "failed with exit " y
+        : (x > 31 && x != 125) ? "failed by Slurm error " x : (x == 125 && !y) ? "ran out of memory" : "failed with exit " y
     if (WHY_FIRST == "" && !index(id, "[")) WHY_FIRST = id
   } else {
     key = (c == "OOM") ? "ran out of memory" : (c == "TO") ? "reached the time limit" : (c == "NF") ? "lost their node" : "ended " stname(c)
