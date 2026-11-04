@@ -1104,9 +1104,12 @@ function json_bytes(   b, i) {
 function nodes_read(file, format, gate) { if (format == "json") node_json_read(file); else node_read(file, gate) }
 # ---- node readers end
 # the final states, by squeue code, into DONE, and those that are failures
-# (worth a bell, red) into BAD
+# (worth a bell, red) into BAD.  Not SE: SPECIAL_EXIT is a job requeued and
+# held, JOB_PENDING with the flag, priority 0, until a release runs it again
+# (job_mgr.c:18732-18741, 17716-17721, 12202), so squeue lists it with the
+# pending ones; accounting never stores it (as_mysql_job.c:390, 1158-1163)
 function final_states(   ts, i) {
-  split("CD F CA TO NF OOM DL PR BF RV SE", ts, " "); for (i in ts) DONE[ts[i]] = 1
+  split("CD F CA TO NF OOM DL PR BF RV", ts, " "); for (i in ts) DONE[ts[i]] = 1
   split("F TO NF OOM DL BF", ts, " "); for (i in ts) BAD[ts[i]] = 1
 }
 '
@@ -2401,7 +2404,18 @@ function exit_text(c,   t, sg, rc) {
   if (sg == 125) return t (c == "OOM" ? "" : ": out of memory")
   return t ": Slurm error" ((sg in SLERR) ? ", " SLERR[sg] : "")
 }
-function build_job(   q, r, c, final, never, name, user, unique, state, reason, dependency, start, submit,
+# a job sq job and a parent's row show as pending (its reason, the start
+# estimate, what it asks for): PD, and SE and RH, which Slurm holds pending
+# after a requeue (final_states; job_mgr.c:6401).  Not RD: it can sit on a
+# running job (reservation.c:4559).  Not RF: on a running sibling
+# (fed_mgr.c:5078).  Not RQ: squeue never shows it, so it is a REQUEUED row of
+# accounting, a run with its nodes
+function pending_form(c) { return c == "PD" || c == "SE" || c == "RH" }
+# SE's exit, SAID as a finished job's reads (" · exit 3"): the one fact that
+# decides a release, which zeroes it (job_mgr.c:12204), and accounting's row
+# soon says PENDING; nothing for 0:0
+function held_exit(said) { return (said == " · exit 0") ? "" : said }
+function build_job(   q, r, c, final, never, name, user, unique, state, reason, held, dependency, start, submit,
                       left, ended, req_cpus, req_mb, req_text, alloc_cpus, limit, out, err) {
   q = qrow; r = arow; c = STATE
   final = (c in DONE); never = final && never_started(q, r)
@@ -2410,9 +2424,10 @@ function build_job(   q, r, c, final, never, name, user, unique, state, reason, 
   TITLE = paint("1;36", "▌ ") paint("1", jid) unique "  " name " · " user
   source_notes(final)
   state = paint(stcolour(c), stname(c))
-  if (c == "PD") {
+  if (pending_form(c)) {
     reason = q ? R[q, "Reason"] : ""
-    kv("state", "state", state (reason != "" && reason != "None" ? " (" reason ")" : ""))
+    if (c == "SE" && q) { exit_of(jid, A, 0, nsteps, step_row, R[q, "exit_code"]); held = held_exit(" · " exit_text(c)) }
+    kv("state", "state", state (reason != "" && reason != "None" ? " (" reason ")" : "") held)
     dependency = q ? R[q, "Dependency"] : ""
     if (dependency != "" && dependency != "(null)") kv("state", "dependency", dependency)
     start = q ? R[q, "StartTime"] : ""             # a pending job's: Slurm's estimate
@@ -2451,13 +2466,13 @@ function build_job(   q, r, c, final, never, name, user, unique, state, reason, 
   # resources: a pending job's request (or one that never ran), else what it
   # was given and asked for.  The memory a running job uses is the
   # efficiency section's, not repeated here
-  if (c == "PD" || never) {
+  if (pending_form(c) || never) {
     req_cpus = (r && (never || !q)) ? A[r, "ReqCPUS"] : R[q, "NumCPUs"]   # squeue's NumCPUs: the request, while pending
     kv("res", "CPUs", req_cpus " requested")
     req_mb = (r && (never || !q)) ? tres_mem(A[r, "ReqTRES"]) : tres_mem(R[q, "tres-alloc"])
     if (req_mb > 0) kv("res", "memory", memsize(req_mb, 0) " requested")
     limit = q ? R[q, "TimeLimit"] : ""
-    if (c == "PD" && limit != "") kv("res", "time limit", (limit == "UNLIMITED") ? "none" : elap(dur(limit)))
+    if (pending_form(c) && limit != "") kv("res", "time limit", (limit == "UNLIMITED") ? "none" : elap(dur(limit)))
   } else {
     alloc_cpus = r ? A[r, "AllocCPUS"] + 0 : R[q, "NumCPUs"] + 0; req_cpus = r ? A[r, "ReqCPUS"] + 0 : 0
     kv("res", "CPUs", alloc_cpus " allocated" ((req_cpus && req_cpus != alloc_cpus) ? " (" req_cpus " requested)" : ""))
@@ -2885,7 +2900,7 @@ function parent_state(pid, asked, gone,   p, a, c, left) {
     if (RP[p, "JobID"] == pid || (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/ && RP[p, "ArrayJobID"] "_" RP[p, "ArrayTaskID"] == pid)) break
   if (p <= npq) {
     c = RP[p, "StateCompact"]
-    if (c == "PD") return paint(stcolour(c), "PENDING") " (" RP[p, "Reason"] ")" (isepoch(RP[p, "StartTime"]) && RP[p, "StartTime"] > NOW ? " · Slurm's estimate: " when(RP[p, "StartTime"]) : " · no start estimate")
+    if (pending_form(c)) return paint(stcolour(c), stname(c)) " (" RP[p, "Reason"] ")" (c == "SE" ? held_exit(parent_exit(pid, c, RP[p, "exit_code"])) : "") (isepoch(RP[p, "StartTime"]) && RP[p, "StartTime"] > NOW ? " · Slurm's estimate: " when(RP[p, "StartTime"]) : " · no start estimate")
     if (c in DONE)
       return paint(stcolour(c), stname(c)) parent_exit(pid, c, RP[p, "exit_code"]) (isepoch(RP[p, "EndTime"]) ? " · ended " ago(NOW - RP[p, "EndTime"]) " ago" : "")
     left = RP[p, "TimeLeft"]
@@ -4993,9 +5008,9 @@ help_screen_efficiency() { cat <<'HELP_SCREEN_EOF'
 > list, accounting's RUNNING row); other counts the rest that are neither
 > ended nor pending, such as a COMPLETING or SUSPENDED task, or one held after
 > a requeue or by a deleted reservation (a task on user or admin hold is
-> pending).  A task COMPLETING or STAGE_OUT whose ended row accounting already
-> has counts as that row says, and a SPECIAL_EXIT task on its own row as
-> failed: the dashboard's footer counts both as other.
+> pending, as is a held task squeue lists inside the pending record).  A task
+> COMPLETING or STAGE_OUT whose ended row accounting already has counts as
+> that row says: the dashboard's footer counts it as other.
 HELP_SCREEN_EOF
 }
 help_screen_job() { cat <<'HELP_SCREEN_EOF'

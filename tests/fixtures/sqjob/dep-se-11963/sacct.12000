@@ -1,0 +1,3 @@
+# AA2: a plain parent SE 3:0: held pending, afterok waits on it
+@include ../../_common/job-sacct-defaults
+JobID=12000; JobIDRaw=12000; UID=1041; User=fsill; State=REQUEUED; ExitCode=3:0; JobName=prep

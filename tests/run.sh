@@ -9040,7 +9040,7 @@ row_as_title() {
 			for (i = 1; i <= n; i++) { split(P[i], W, " "); k = W[1]; s = W[2]; t += k
 				if (s == "COMPLETED") d += k; else if (s == "CANCELLED") c += k; else if (s == "PENDING") p += k
 				else if (s == "RUNNING") r += k
-				else if (s ~ /^(FAILED|TIMEOUT|NODE_FAIL|OUT_OF_MEMORY|DEADLINE|PREEMPTED|BOOT_FAIL|REVOKED|SPECIAL_EXIT)$/) f += k; else x += k }
+				else if (s ~ /^(FAILED|TIMEOUT|NODE_FAIL|OUT_OF_MEMORY|DEADLINE|PREEMPTED|BOOT_FAIL|REVOKED)$/) f += k; else x += k }
 			o = (d ? " · " d " done" : "") (f ? " · " f " failed" : "") (c ? " · " c " cancelled" : "") (r ? " · " r " running" : "") (p ? " · " p " pending" : "") (x ? " · " x " other" : "")
 			print t ": " substr(o, 4) }'
 }
@@ -9264,8 +9264,9 @@ c_array_other_states() {
 	parent_rows_are star-cg-norow '    11950  its tasks now: 1 COMPLETING'
 	# the help says what other counts
 	help_run -- help efficiency
-	need "sq help efficiency: running is squeue's R or accounting's RUNNING row, other the rest neither ended nor pending; an ended row and SPECIAL_EXIT where the footer says other" eval '
-		rc_is 0 && plain | tr -s " \n" "  " | grep -qF "Running counts the tasks squeue lists as R (and, for a task squeue does not list, accounting'"'"'s RUNNING row); other counts the rest that are neither ended nor pending, such as a COMPLETING or SUSPENDED task, or one held after a requeue or by a deleted reservation (a task on user or admin hold is pending). A task COMPLETING or STAGE_OUT whose ended row accounting already has counts as that row says, and a SPECIAL_EXIT task on its own row as failed: the dashboard'"'"'s footer counts both as other."'
+	need "sq help efficiency: running is squeue's R or accounting's RUNNING row, other the rest neither ended nor pending; an ended row where the footer says other" eval '
+		rc_is 0 && plain | tr -s " \n" "  " | grep -qF "Running counts the tasks squeue lists as R (and, for a task squeue does not list, accounting'"'"'s RUNNING row); other counts the rest that are neither ended nor pending, such as a COMPLETING or SUSPENDED task, or one held after a requeue or by a deleted reservation (a task on user or admin hold is pending, as is a held task squeue lists inside the pending record). A task COMPLETING or STAGE_OUT whose ended row accounting already has counts as that row says: the dashboard'"'"'s footer counts it as other."'
+	need "... and nothing of SPECIAL_EXIT as failed" eval '! has "SPECIAL_EXIT"'
 }
 # AA1: a task counts once.  squeue folds a requeued task back into the pending
 # record (squeue print.c:193-260) while accounting keeps a row of it: the
@@ -9297,6 +9298,62 @@ c_array_task_once() {
 	need "star-fold-step: task 3 lies between the step's tasks: its row counts" eval 'why_has "  1 failed with exit 1: 11950_3"'
 	array_title_is star-fold-out '7: 1 failed · 1 running · 5 pending'
 	need "star-fold-out: a row outside the record counts, with its line" eval 'why_has "  1 failed with exit 1: 11950_7" && why_has "  5 pending: Slurm'"'"'s reason: Resources"'
+}
+# AA2: SPECIAL_EXIT is a job Slurm holds pending (final_states), no final state
+c_special_exit() {
+	T_TITLE="SPECIAL_EXIT, requeued and held, has not ended: on its own row it counts other and has no why line; folded it counts pending while sq job TASK reads its own record; sq job shows the pending form with the exit that sent it there, none for 0:0, in cyan, and a parent's row too; the finished block of the squeue fallback lists it no more, the queue still does"
+	array_title_is star-se-rq '2: 1 running · 1 other'
+	need "star-se-rq: no why section, the note as for a hold" eval 'why_lacks_section && notes_are "no task has completed yet"'
+	parent_rows_are star-se-rq '    11950  its tasks now: 1 SPECIAL_EXIT · 1 RUNNING'
+	array_title_is star-se-fold '4: 1 running · 3 pending'
+	job_run star-se-fold-11963 COLUMNS=200 -- --no-color job 11950_1
+	need "star-se-fold: the title reads the fold, sq job 11950_1 the task's own record" eval 'rc_is 0 && has "  state       SPECIAL_EXIT (JobHeldUser) · exit 3"'
+	array_title_is star-se-mix '3: 1 done · 1 failed · 1 other'
+	need "star-se-mix: only the failure has a line" eval '
+		[ "$(why_lines)" = "$(printf "%s\n" "  1 failed with exit 1: 11950_2" "  ↳ sq job 11950_2 says more about one of them")" ]'
+	job_run star-se-af-11963 COLUMNS=200 -- --no-color job 11950
+	need "star-se-af: the floor: other, and no 'squeue no longer lists' for a task it lists" eval '
+		rc_is 0 && plain | head -1 | grep -qF "array of ≥2 (accounting did not answer): 1 running · 1 other" && has "done, failed and cancelled tasks are not counted" && lacks "no longer lists"'
+	job_run star-se-rq-11963 COLUMNS=200 -- --no-color job 11950_1
+	need "sq job 11950_1: the pending form, the verdict, nothing of a run or an allocation" eval '
+		rc_is 0 && has "  state       SPECIAL_EXIT (JobHeldUser) · exit 3" && has "  start       no estimate yet" && has "  CPUs        16 requested" && has "  time limit  1d00h" &&
+		why_has "  needs action: held after a requeue (special exit): scontrol release 11950_1" &&
+		lacks "allocated" && lacks "  ran " && lacks "never started" && lacks "efficiency"'
+	job_run star-se-rq-11963 COLUMNS=200 -- job 11950_1
+	need "the state in the colour of RH and RD, cyan" eval 'rc_is 0 && grep -qF "$(printf "\033[36mSPECIAL_EXIT\033[0m")" "$OUT"'
+	job_run star-se-af-11963 COLUMNS=200 -- --no-color job 11950_1
+	need "accounting down: said on top, as for a live job" eval 'rc_is 0 && has "accounting did not answer (sacct: error: Problem talking to the database: Connection refused)" && lacks "efficiency"'
+	job_run star-se-desc-11963 COLUMNS=200 -- --no-color job 11950_1
+	need "an exit of 0:0: no exit, Slurm's own words" eval 'rc_is 0 && has "  state       SPECIAL_EXIT (job requeued in special exit state)" && lacks "exit 0"'
+	job_run star-se-sig-11963 COLUMNS=200 -- --no-color job 11950_1
+	need "a signal reads as a finished job's" eval 'rc_is 0 && has "  state       SPECIAL_EXIT (JobHeldUser) · exit 0/sig9: signal 9 (SIGKILL)"'
+	parent_rows_are dep-se '    12000  SPECIAL_EXIT (JobHeldUser) · exit 3 · no start estimate'
+	parent_rows_are dep-se-sig '    12000  SPECIAL_EXIT (JobHeldUser) · exit 0/sig9 · no start estimate'
+	parent_rows_are dep-se-zero '    12000  SPECIAL_EXIT (JobHeldUser) · no start estimate'
+	# gawk in C counts bytes: the exit is compared whole, never cut by position
+	local nobin=$T_DIR/nobin PARENT_ENV; no_utf8_locale "$nobin"; PARENT_ENV=(LC_ALL=C "PATH=$nobin:$here/bin:$PATH")
+	parent_rows_are dep-se '    12000  SPECIAL_EXIT (JobHeldUser) · exit 3 · no start estimate'
+	parent_rows_are dep-se-zero '    12000  SPECIAL_EXIT (JobHeldUser) · no start estimate'
+	sq_run se-fallback --
+	need "se-fallback: in the queue, not in the finished block; counted other" eval '
+		rc_is 0 && rows queue | grep -q held-se && ! rows recent | grep -q held-se && rows recent | grep -q finished-one && footer_is 2 1 0 1'
+}
+# AA2 v2: REQUEUE_HOLD takes the pending form as SE does, with no exit, as main
+# shows it none; RD, RF and RQ keep the layout of a job with nodes, as each has
+# a path where it is one (the fixtures hold those paths)
+c_held_form() {
+	T_TITLE="sq job TASK and a parent's row: REQUEUE_HOLD is held pending: the pending form, no exit; RD on a running job, RF on a running sibling and accounting's REQUEUED row keep what they were given"
+	array_title_is star-rh-own '2: 1 running · 1 other'
+	job_run star-rh-own-11963 COLUMNS=200 -- --no-color job 11950_1
+	need "RH: the pending form, the verdict, nothing allocated" eval '
+		rc_is 0 && has "  state       REQUEUE_HOLD (launch failure limit exceeded requeued held)" && has "  start       no estimate yet" && has "  CPUs        16 requested" && has "  time limit  1d00h" &&
+		why_has "  needs action: held after a requeue: scontrol release 11950_1" && lacks "· exit" && lacks "allocated" && lacks " elapsed" && lacks "efficiency"'
+	parent_rows_are dep-rh '    12000  REQUEUE_HOLD (JobHoldMaxRequeue) · no start estimate'
+	local c
+	for c in rd-run:RESV_DEL_HOLD rf-run:REQUEUE_FED rq-row:REQUEUED; do
+		job_run star-${c%:*}-11963 COLUMNS=200 -- --no-color job 11950_1
+		need "${c#*:}: the layout of a job with nodes" eval 'rc_is 0 && has "  state     ${c#*:} on fb2-bioinf (LocalQ)" && has "  CPUs      16 allocated" && lacks "no estimate yet"'
+	done
 }
 # AA3: every id ntasks reads is whole, as on the dashboard: a term past 7 digits
 # counts none, a throttle of up to 10 digits (max_run_tasks, %u) is read
@@ -13246,7 +13303,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once special_exit held_form array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins

@@ -1,0 +1,2 @@
+# AA2: a plain parent SE 3:0: held pending, afterok waits on it
+@include ../../_common/job-sacct-defaults

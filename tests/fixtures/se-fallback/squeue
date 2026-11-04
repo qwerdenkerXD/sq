@@ -1,0 +1,4 @@
+# AA2: accounting down, the finished block from squeue -t all: an SE job beside a COMPLETED one
+@include ../_common/squeue-defaults
+i=3001; j=still-running
+i=3002; j=held-se; T=SPECIAL_EXIT; t=SE; M=0:00; L=1:00:00; R=JobHeldUser; r=JobHeldUser

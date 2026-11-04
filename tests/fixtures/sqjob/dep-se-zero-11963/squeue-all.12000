@@ -1,0 +1,3 @@
+# AA2: a plain parent SE 0:0: held pending, afterok waits on it
+@include ../../_common/job-defaults
+JobID=12000; ArrayJobID=12000; StateCompact=SE; Reason=JobHeldUser; UserName=fsill; UserID=1041; Name=prep; NodeList=; BatchHost=; NumCPUs=4; TimeUsed=0:00; TimeLeft=12:00:00; TimeLimit=12:00:00; SubmitTime=\{epoch-9030s}; StartTime=N/A; EndTime=N/A; exit_code=0:0

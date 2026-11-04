@@ -1,0 +1,3 @@
+# AA2 v2: squeue never shows RQ outside a write lock: sq reads it from accounting's REQUEUED row, a run with its nodes
+@stderr slurm_load_jobs error: Invalid job id specified
+@exit 1

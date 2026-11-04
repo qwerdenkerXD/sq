@@ -1,0 +1,5 @@
+# AA2: accounting down, the finished block from squeue -t all: an SE job beside a COMPLETED one
+@include ../_common/squeue-all-defaults
+JobID=3001; StateCompact=R; State=RUNNING; TimeUsed=10:00; EndTime=\{now-10h30m}; Name=still-running
+JobID=3002; StateCompact=SE; State=SPECIAL_EXIT; exit_code=3:0; TimeUsed=0:00; EndTime=N/A; Name=held-se
+JobID=6001; Name=finished-one
