@@ -9080,6 +9080,9 @@ c_array_one_count() {
 	parent_rows_are star-cg '    11950  its tasks now: 1 COMPLETED · 1 FAILED'
 	array_title_is star-cg-norow '1: 1 other'
 	parent_rows_are star-cg-norow '    11950  its tasks now: 1 COMPLETING'
+	# Z1: STAGE_OUT with an ended row counts by the row, as COMPLETING, on the parent's row too
+	array_title_is star-so '2: 1 done · 1 failed'
+	parent_rows_are star-so '    11950  its tasks now: 1 COMPLETED · 1 FAILED'
 	# R-M2, the words from accounting's row only where it names the state counted
 	array_title_is star-cdf '1: 1 failed'
 	need "star-cdf: squeue's exit, not the COMPLETED row's" eval 'why_has "  1 failed with exit 1: 11950_3" && lacks "exit 0"'
