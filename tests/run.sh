@@ -9254,6 +9254,32 @@ c_array_other_states() {
 	need "sq help efficiency: running is squeue's R, other what is neither ended, running nor pending, SPECIAL_EXIT failed" eval '
 		rc_is 0 && plain | tr -s " \n" "  " | grep -qF "Running counts what squeue lists as R, as the dashboard'"'"'s footer does, and other every task neither ended, running nor pending: COMPLETING, SUSPENDED, or a hold squeue lists on its own (a SPECIAL_EXIT task counts as failed)."'
 }
+# Z2: a squeue record whose range sq cannot read counts none (ntasks, Y8a's
+# rule for a bracket), so it gives no why line and no reason either
+c_array_unread_record() {
+	T_TITLE="sq job ARRAY: squeue's pending record of a range Slurm never prints (6-3) counts none: no '0 pending' why line and its reason not in the note, with accounting's rows and without"
+	job_run arr-qbr-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-qbr: rows: the failure alone in the why section, no 0 pending" eval '
+		rc_is 0 && plain | head -1 | grep -qE "array of 2: 1 done · 1 failed\$" &&
+		[ "$(why_lines)" = "$(printf "%s\n" "  1 failed with exit 1: 11950_1" "  ↳ sq job 11950_1 says more about one of them")" ]'
+	job_run arr-qbr-norows-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-qbr-norows: no rows: the same, and the note names no reason" eval '
+		rc_is 0 && plain | head -1 | grep -qE "array of 1: 1 failed\$" && notes_are "no task has completed yet" "sq job 11950_1 says more about one of them" &&
+		[ "$(why_lines)" = "$(printf "%s\n" "  1 failed with exit 1: 11950_1" "  ↳ sq job 11950_1 says more about one of them")" ]'
+	# an unreadable record beside a readable one: only the readable one says anything
+	job_run arr-qbr-mixed-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-qbr-mixed: the readable record's count, line and reason; none of the unreadable one" eval '
+		rc_is 0 && title_is "▌ 11950  bwa-align · fsill · array of 4: 1 failed · 3 pending" &&
+		notes_are "no task has completed yet; pending (Priority)" "sq job 11950_1 says more about one of them" &&
+		[ "$(why_lines)" = "$(printf "%s\n" "  1 failed with exit 1: 11950_1" "  3 pending: Slurm'"'"'s reason: Priority" "  ↳ sq job 11950_1 says more about one of them")" ]'
+	job_run arr-qbr-only-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-qbr-only: the record alone: array of 0, the note names no reason" eval '
+		rc_is 0 && title_is "▌ 11950  bwa-align · fsill · array of 0" && notes_are "no task has completed yet" && why_lacks_section'
+	# a readable record keeps its line and its reason
+	job_run arr-norows-pd-11950 COLUMNS=200 -- --no-color job 11950
+	need "arr-norows-pd: 3 pending and the reason, as before" eval '
+		rc_is 0 && why_has "  3 pending: Slurm'"'"'s reason: Resources" && has "no task has completed yet; pending (Resources)"'
+}
 # Y8: squeue exits 1 after "slurm_load_jobs error: Invalid job id specified"
 # (squeue.c:112-113, 234-235): that pair alone is a job Slurm forgot.  The text
 # beside another rc (no squeue's: a wrapper's, a kill's) is a call that failed
@@ -13127,7 +13153,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
