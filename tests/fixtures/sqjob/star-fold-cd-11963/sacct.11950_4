@@ -1,0 +1,2 @@
+# AA1: a COMPLETED row of a task the record holds (requeued after completing, accounting lagging)
+@include ../../_common/job-sacct-defaults

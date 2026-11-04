@@ -1,0 +1,4 @@
+# AA1: a step record 2-14:2 (Slurm prints a step past 10 ids and 5 tasks) holds the even ids: a row of task 3 lies between them, one of task 4, started since squeue answered, inside
+@include ../../_common/job-sacct-defaults
+JobID=11950_4; JobIDRaw=11954; UID=1041; User=fsill; State=RUNNING; ExitCode=0:0; ElapsedRaw=7290; AllocCPUS=16; ReqCPUS=16; ReqTRES=billing=16,cpu=16,mem=64G,node=1; AllocTRES=billing=16,cpu=16,mem=64G,node=1; TotalCPU=01:00:00; Submit=\{epoch-8100s}; Start=\{epoch-8010s}; End=\{epoch-750s}; WorkDir=/media/BioNAS2/fsill/wgs; JobName=bwa-align; TimelimitRaw=1440
+JobID=11950_4.batch; JobIDRaw=11954.batch; UID=; User=; State=RUNNING; ExitCode=0:0; ElapsedRaw=7290; AllocCPUS=16; ReqCPUS=16; ReqTRES=; AllocTRES=cpu=16,mem=64G,node=1; TotalCPU=01:00:00; TRESUsageInTot=cpu=01:00:00,mem=20G; TRESUsageInMax=cpu=01:00:00,mem=20G; NTasks=1; Submit=\{epoch-8010s}; Start=\{epoch-8010s}; End=\{epoch-750s}; Partition=; WorkDir=; JobName=batch

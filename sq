@@ -2131,14 +2131,19 @@ function bracket_left(j, own,   k, t, m) {
 }
 # An array's tasks, counted by state, one count for sq job ARRAY and a parent's
 # row (rule A): a task counts once, per task squeue's record (table Q, rows
-# 1..nq) while it has one, else accounting's row (table T, the rows TR[1..nt],
-# as task_rows finds them); a task squeue reads COMPLETING or STAGE_OUT goes
-# by its row if that lists it ended.  Slurm purges task records one by one,
-# so squeue alone may hold some or none.  A bracket row counts its tasks less
-# those on their own (it can lag), none where squeue has a record of several
-# tasks.
+# 1..nq) while it has one, its own or a record of several that holds it, else
+# accounting's row (table T, the rows TR[1..nt], as task_rows finds them); a
+# task squeue reads COMPLETING or STAGE_OUT goes by its row if that lists it
+# ended.  A row of a task a record holds is its last run (squeue folds a
+# requeued task back into the pending record, print.c:193-260, while its row
+# says REQUEUED, PREEMPTED, NODE_FAIL, PENDING for its next run) or a start
+# since squeue answered: the record counts it.  Slurm purges task records one
+# by one, so squeue alone may hold some or none.  A bracket row counts its
+# tasks less those on their own (it can lag), none where squeue has a record
+# of several tasks.
 # N, ord: as task_count.  QT: task number to squeue's row, QT["record"] the
-# tasks squeue's records of several hold.  OWN: the tasks counted on their own.
+# tasks squeue's records of several hold, record_of the row of the one that
+# holds a task with a row of accounting's.  OWN: the tasks counted on their own.
 # Returns how many it read as not ended from accounting alone: with squeue
 # having answered, a task it does not list (accounting lagging, a runaway row,
 # or a job PrivateData hides from squeue alone), so what the count says of
@@ -2147,6 +2152,7 @@ function bracket_left(j, own,   k, t, m) {
 function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, x, unended, ROW) {
   ord[0] = 0
   QT["record"] = ""       # set before any call reads it: gawk 5.2.1 double-frees an unset element passed down
+  split("", ROW)          # an array before length() reads it: with no task row an untyped ROW turns scalar
   for (r = 1; r <= nt; r++) {
     j = T[TR[r], "JobID"]; if (index(j, "[")) continue
     t = substr(j, length(id) + 2) + 0
@@ -2166,15 +2172,16 @@ function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, 
     else {
       k = ntasks(id "_[" Q[p, "ArrayTaskID"] "]", JOBID); x = Q[p, "ArrayTaskID"]; sub(/%[0-9]+$/, "", x)
       QT["record"] = QT["record"] (QT["record"] == "" ? "" : ",") x
+      if (k && length(ROW)) record_holds(x, p, QT, ROW)           # one sq cannot read holds none
     }
     task_count(N, ord, Q[p, "StateCompact"], k)
   }
   for (r = 1; r <= nt; r++) {
     j = T[TR[r], "JobID"]; if (index(j, "[")) continue
     t = substr(j, length(id) + 2) + 0
-    if (t in own) continue
+    if ((t in own) || record_of(QT, t)) continue
     own[t]; c = stcode(T[TR[r], "State"]); task_count(N, ord, c, 1)
-    if (!(c in DONE) && !task_in(QT["record"], t)) unended++
+    if (!(c in DONE)) unended++
   }
   for (r = 1; r <= nt && QT["record"] == ""; r++) {
     j = T[TR[r], "JobID"]; if (!index(j, "[")) continue
@@ -2184,6 +2191,19 @@ function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, 
   }
   return unended + 0
 }
+# squeue's record of several, row P, expression X (read by ntasks, no throttle)
+# holds the tasks of its terms: into QT those that have a row in ROW.  Walks
+# its tasks once, as a test per row and term is quadratic in a comma list
+function record_holds(x, p, QT, ROW,   T, n, i, m, t, last, step) {
+  n = split(x, T, ",")
+  for (i = 1; i <= n; i++) {
+    match(T[i], /^([0-9]+)(-([0-9]+)(:([0-9]+))?)?$/, m)
+    last = (m[3] != "") ? m[3] + 0 : m[1] + 0; step = (m[5] != "") ? m[5] + 0 : 1
+    for (t = m[1] + 0; t <= last; t += step) if (t in ROW) QT["record of " t] = p
+  }
+}
+# the row of squeue's record of several that holds task T, 0 for none
+function record_of(QT, t) { return (("record of " t) in QT) ? QT["record of " t] : 0 }
 function unended_says() { return "maybe out of date: squeue does not list what accounting has not seen end" }
 
 # ---- which records: the job's, a task's, or an array's -----------------------
@@ -2484,7 +2504,7 @@ function count(c, k) {
 # how many tasks squeue's record R of array JOB holds; 0 for a range sq
 # cannot read, which counts none (ntasks), so it says nothing of them either
 function record_tasks(r) { return ntasks(job "_[" R[r, "ArrayTaskID"] "]", JOBID) }
-function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax, cminid, mminid, rss, multi,
+function build_array(   i, q, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax, cminid, mminid, rss, multi,
                         polled, name, user, cap, req, ncpu, mixed, st, cmed, mmed, why, N, ord, QT, own, unended, t, seen) {
   unended = tasks_count(job, R, nq, A, task_row, ntask_rows, N, ord, QT, own)
   for (k = 1; k <= ord[0]; k++) count(ord[k], N[ord[k]])
@@ -2497,8 +2517,10 @@ function build_array(   i, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, mmax
       t = substr(id, length(job) + 2) + 0
       if (seen[t]++) continue
       # Franz: the statistics are the COMPLETED tasks', and a row that does not
-      # say so yet (squeue's record says it) has no final figures to give
-      if (stcode(A[r, "State"]) != "CD" || ((t in QT) && R[QT[t], "StateCompact"] != "CD")) continue
+      # say so yet (squeue's record says it, its own or one that holds it) has
+      # no final figures to give
+      q = (t in QT) ? QT[t] : record_of(QT, t)
+      if (stcode(A[r, "State"]) != "CD" || (q && R[q, "StateCompact"] != "CD")) continue
       effcalc(id, r)
       if (eff_cpu_pct >= 0) {
         CV[++ncv] = eff_cpu_pct
@@ -3232,7 +3254,7 @@ function why_array(QT, own,   i, r, q, id, c, ac, k, n, GN, GI, GS, GK, a, b, t,
       continue
     }
     t = substr(id, length(job) + 2) + 0
-    if (seen[t]++) continue
+    if (seen[t]++ || record_of(QT, t)) continue          # a record holds it: counted, and said, by the record
     q = (t in QT) ? QT[t] : 0; c = q ? R[q, "StateCompact"] : ac
     why_array_task(id, 1, c, (ac in DONE && ac == c) ? r : 0, q, 1, GN, GI, GS, GK)
   }

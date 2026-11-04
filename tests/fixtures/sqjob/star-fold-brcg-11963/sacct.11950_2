@@ -1,0 +1,2 @@
+# AA1: no task row at all (accounting's bracket alone), the record first, a numbered CG after it: length(ROW) on a ROW nothing filled
+@include ../../_common/job-sacct-defaults

@@ -1,0 +1,2 @@
+# AA1, control: a row of a task outside the record still counts by its row
+@include ../../_common/job-sacct-defaults

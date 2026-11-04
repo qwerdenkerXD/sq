@@ -1,0 +1,3 @@
+# AA1, the review's fold-hold: task 1 R, record 2-6 PD; rows task 3 REQUEUED (its last run), task 4 PENDING (its new record); task 3 held on its own record
+@include ../../_common/job-defaults
+JobID=11963; ArrayJobID=11963; StateCompact=PD; Reason=Dependency; Dependency=afterok:11950_*(unfulfilled); UserName=fsill; UserID=1041; Name=merge-counts; NodeList=; BatchHost=; NumCPUs=4; tres_alloc=cpu=4,mem=31200M,node=1,billing=4; TimeUsed=0:00; TimeLeft=12:00:00; TimeLimit=12:00:00; SubmitTime=\{epoch-9030s}; StartTime=N/A; WorkDir=/media/BioNAS2/fsill/rnaseq; STDOUT=logs/%x-%j.out; STDERR=logs/%x-%j.out; EndTime=N/A

@@ -1,0 +1,2 @@
+# AA1: the record throttled, its %N stripped; a fold drops %N, so the row inside is a start since squeue answered
+@include ../../_common/job-sacct-defaults

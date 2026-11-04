@@ -1,0 +1,2 @@
+# AA1: a preempted and requeued task, folded; its row PREEMPTED (job_mgr.c:17630-17633 writes it so)
+@include ../../_common/job-sacct-defaults

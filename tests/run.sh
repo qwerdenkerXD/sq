@@ -9101,8 +9101,9 @@ c_array_one_count() {
 	need "star-br-to-whole: a whole bracket keeps its name, no hint at it" eval 'why_has "  4 reached the time limit: 11950_[3-6]" && lacks "says more"'
 	array_title_is star-br-failed '5: 1 done · 4 failed'
 	need "star-br-failed: a whole FAILED bracket keeps its name, no hint at it" eval 'why_has "  4 failed with exit 1: 11950_[3-6]" && lacks "says more"'
-	array_title_is star-rec-own '4: 1 done · 3 failed'
-	need "star-rec-own: squeue's record with a task of it on its own counts, unnamed" eval 'why_has "  2 failed with exit 1" && why_has "  1 failed with exit 2: 11950_2" && lacks "11950_[2-3]"'
+	# AA1: the record names the state of every task it holds, its row counts none
+	array_title_is star-rec-own '3: 1 done · 2 failed'
+	need "star-rec-own: squeue's record counts each task once and names itself, the row of a task it holds says nothing" eval 'why_has "  2 failed with exit 1: 11950_[2-3]" && lacks "exit 2"'
 	# a task id sq cannot read counts none: the title keeps its number, as on main
 	local odd=$T_DIR/odd-11963; mkdir -p "$odd"; : > "$odd/sacct.11950"; : > "$odd/sacct"
 	{ printf '@include %s\n' "$fixtures/_common/job-defaults"; grep '^JobID=' "$fixtures/sqjob/star-br-ca-sq-11963/squeue-all.11950" | sed 's/ArrayTaskID=3-6/ArrayTaskID=zz/; s/StateCompact=CA/StateCompact=PD/'; } > "$odd/squeue-all.11950"
@@ -9131,12 +9132,12 @@ c_array_one_count() {
 	parent_rows_are star-lag-rc0 "    11950  its tasks now: 2 RUNNING · $lagged"
 	array_title_is star-lag-rc0 '2: 2 running'
 	need "star-lag-rc0: squeue answering with another task's record" eval 'has "$lagged"'
-	parent_rows_are star-lag-started '    11950  its tasks now: 4 PENDING · 1 RUNNING'
-	array_title_is star-lag-started-th '5: 1 running · 4 pending'
+	parent_rows_are star-lag-started '    11950  its tasks now: 4 PENDING'
+	array_title_is star-lag-started-th '4: 4 pending'
 	need "star-lag-started-th: a throttled record holds its last term too" eval 'lacks "maybe out of date"'
 	job_run star-lag-started-th-11963 COLUMNS=120 -- --no-color job 11950_6
 	need "sq job 11950_6: found in the throttled record's last term (task_in)" eval 'rc_is 0 && plain | head -1 | grep -qF "11950_6"'
-	array_title_is star-lag-started '5: 1 running · 4 pending'
+	array_title_is star-lag-started '4: 4 pending'
 	need "star-lag-started: a task of squeue's pending record started since: no sign of lag" eval 'lacks "maybe out of date"'
 	parent_rows_are star-running '    11950  its tasks now: 1 RUNNING · 1 FAILED'
 	array_title_is star-running '2: 1 failed · 1 running'
@@ -9265,6 +9266,37 @@ c_array_other_states() {
 	help_run -- help efficiency
 	need "sq help efficiency: running is squeue's R or accounting's RUNNING row, other the rest neither ended nor pending; an ended row and SPECIAL_EXIT where the footer says other" eval '
 		rc_is 0 && plain | tr -s " \n" "  " | grep -qF "Running counts the tasks squeue lists as R (and, for a task squeue does not list, accounting'"'"'s RUNNING row); other counts the rest that are neither ended nor pending, such as a COMPLETING or SUSPENDED task, or one held after a requeue or by a deleted reservation (a task on user or admin hold is pending). A task COMPLETING or STAGE_OUT whose ended row accounting already has counts as that row says, and a SPECIAL_EXIT task on its own row as failed: the dashboard'"'"'s footer counts both as other."'
+}
+# AA1: a task counts once.  squeue folds a requeued task back into the pending
+# record (squeue print.c:193-260) while accounting keeps a row of it: the
+# record names its state, the row counts nowhere (title, parent's row, why
+# section, figures).  The star-* fixtures are array_one_count's too
+c_array_task_once() {
+	T_TITLE="sq job ARRAY: a task squeue's record of several holds counts by that record, once, whatever its row says, in the title, a parent's row, the why section and the figures; a row outside the record counts by the row"
+	array_title_is star-fold-hold '6: 1 running · 5 pending'
+	need "star-fold-hold: the reason, one pending line of the record's tasks" eval '
+		has "no task has completed yet; pending (Resources,JobHeldUser)" &&
+		[ "$(why_lines)" = "  5 pending: Slurm'"'"'s reason: Resources,JobHeldUser" ]'
+	parent_rows_are star-fold-hold '    11950  its tasks now: 1 RUNNING · 5 PENDING'
+	array_title_is star-fold-pr '6: 1 running · 5 pending'
+	need "star-fold-pr: an ended row of a task the record holds: no why line, no hint" eval '
+		[ "$(why_lines)" = "  5 pending: Slurm'"'"'s reason: Resources" ] && lacks "PREEMPTED"'
+	parent_rows_are star-fold-pr '    11950  its tasks now: 1 RUNNING · 5 PENDING'
+	job_run star-fold-pr-11963 COLUMNS=200 -- --no-color job 11950_3
+	need "star-fold-pr: sq job 11950_3, its own record: pending" eval 'rc_is 0 && has "PENDING (BeginTime)"'
+	array_title_is star-fold-comma '5: 1 running · 4 pending'
+	need "star-fold-comma: a fold's comma list holds the rows of both terms" eval '[ "$(why_lines)" = "  4 pending: Slurm'"'"'s reason: Resources" ] && lacks "PREEMPTED"'
+	parent_rows_are star-fold-comma '    11950  its tasks now: 1 RUNNING · 4 PENDING'
+	array_title_is star-fold-brcg '3: 2 pending · 1 other'
+	array_title_is star-fold-cdfirst '6: 1 done · 5 pending'
+	need "star-fold-cdfirst: the record, not squeue's first row, decides the held row's figures" eval 'has "over the 1 completed task; the weakest: sq job 11950_1" && lacks "11950_3"'
+	array_title_is star-fold-cd '7: 1 done · 1 running · 5 pending'
+	need "star-fold-cd: figures of the task outside the record alone" eval 'has "over the 1 completed task; the weakest: sq job 11950_7" && lacks "11950_3"'
+	array_title_is star-fold-th '6: 1 running · 5 pending'
+	array_title_is star-fold-step '9: 1 failed · 1 running · 7 pending'
+	need "star-fold-step: task 3 lies between the step's tasks: its row counts" eval 'why_has "  1 failed with exit 1: 11950_3"'
+	array_title_is star-fold-out '7: 1 failed · 1 running · 5 pending'
+	need "star-fold-out: a row outside the record counts, with its line" eval 'why_has "  1 failed with exit 1: 11950_7" && why_has "  5 pending: Slurm'"'"'s reason: Resources"'
 }
 # AA3: every id ntasks reads is whole, as on the dashboard: a term past 7 digits
 # counts none, a throttle of up to 10 digits (max_run_tasks, %u) is read
@@ -13214,7 +13246,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins

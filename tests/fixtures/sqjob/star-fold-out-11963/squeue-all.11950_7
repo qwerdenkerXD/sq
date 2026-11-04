@@ -1,0 +1,3 @@
+# AA1, control: a row of a task outside the record still counts by its row
+@stderr slurm_load_jobs error: Invalid job id specified
+@exit 1
