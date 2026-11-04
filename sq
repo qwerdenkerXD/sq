@@ -4963,10 +4963,11 @@ help_screen_efficiency() { cat <<'HELP_SCREEN_EOF'
 > cancelled tasks are only known there once squeue no longer lists them.
 > Running counts the tasks squeue lists as R (and, for a task squeue does not
 > list, accounting's RUNNING row); other counts the rest that are neither
-> ended nor pending, such as a COMPLETING, SUSPENDED or held task.  A task
-> COMPLETING or STAGE_OUT whose ended row accounting already has counts as
-> that row says, and a SPECIAL_EXIT task as failed: the dashboard's footer
-> counts both as other.
+> ended nor pending, such as a COMPLETING or SUSPENDED task, or one held after
+> a requeue or by a deleted reservation (a task on user or admin hold is
+> pending).  A task COMPLETING or STAGE_OUT whose ended row accounting already
+> has counts as that row says, and a SPECIAL_EXIT task on its own row as
+> failed: the dashboard's footer counts both as other.
 HELP_SCREEN_EOF
 }
 help_screen_job() { cat <<'HELP_SCREEN_EOF'

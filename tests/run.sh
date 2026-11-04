@@ -9260,7 +9260,7 @@ c_array_other_states() {
 	# the help says what other counts
 	help_run -- help efficiency
 	need "sq help efficiency: running is squeue's R or accounting's RUNNING row, other the rest neither ended nor pending; an ended row and SPECIAL_EXIT where the footer says other" eval '
-		rc_is 0 && plain | tr -s " \n" "  " | grep -qF "Running counts the tasks squeue lists as R (and, for a task squeue does not list, accounting'"'"'s RUNNING row); other counts the rest that are neither ended nor pending, such as a COMPLETING, SUSPENDED or held task. A task COMPLETING or STAGE_OUT whose ended row accounting already has counts as that row says, and a SPECIAL_EXIT task as failed: the dashboard'"'"'s footer counts both as other."'
+		rc_is 0 && plain | tr -s " \n" "  " | grep -qF "Running counts the tasks squeue lists as R (and, for a task squeue does not list, accounting'"'"'s RUNNING row); other counts the rest that are neither ended nor pending, such as a COMPLETING or SUSPENDED task, or one held after a requeue or by a deleted reservation (a task on user or admin hold is pending). A task COMPLETING or STAGE_OUT whose ended row accounting already has counts as that row says, and a SPECIAL_EXIT task on its own row as failed: the dashboard'"'"'s footer counts both as other."'
 }
 # Z2: a squeue record whose range sq cannot read counts none (ntasks, Y8a's
 # rule for a bracket), so it gives no why line and no reason either
