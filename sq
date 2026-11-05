@@ -2566,7 +2566,7 @@ function build_array(   i, q, r, id, c, k, ncv, nmv, CV, MV, cmin, cmax, mmin, m
   # Franz (#1): while accounting is missing, the done, failed and cancelled
   # tasks are, so the count is a floor and says why
   TITLE = paint("1;36", "▌ ") paint("1", job) "  " name " · " user " · array of " \
-          ((!ntask_rows && astat != "ok") ? "≥" total " (accounting " (astat == "bad" ? "answered what cannot be read" : "did not answer") ")" : total) (st != "" ? ": " substr(st, 4) : "")
+          ((!ntask_rows && astat != "ok") ? "≥" total " (accounting " (astat == "bad" ? "answered what cannot be read" : "did not answer") ")" : total) (st != "" ? ": " substr(st, length(" · ") + 1) : "")
   source_notes(1)
   if (ncv) cmed = median(CV, ncv)
   if (nmv) mmed = median(MV, nmv)

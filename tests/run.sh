@@ -9384,6 +9384,19 @@ c_rd_two_forms() {
 	need "a pending RF under the cluster lock: no reason to say, the pending form" eval '
 		rc_is 0 && has "  state       REQUEUE_FED" && has "  start       no estimate yet" && has "  CPUs        16 requested" && lacks " on " && lacks "allocated"'
 }
+# AB4: with no UTF-8 locale on the host gawk counts bytes, so nothing that
+# holds a " · " is cut by position
+c_no_utf8_cuts() {
+	T_TITLE="gawk in C (no UTF-8 locale): sq job ARRAY's title and a whole report as under UTF-8, byte for byte"
+	local nobin=$T_DIR/nobin want f
+	no_utf8_locale "$nobin"
+	for f in star-se-mix-11963:11950 star-fold-hold-11963:11950 star-se-af-11963:11950 star-rd-pd-11963:11950_1; do
+		job_run "${f%:*}" COLUMNS=200 -- --no-color job "${f#*:}"; want=$RUN/report.utf8; job_mask "$OUT" > "$want"
+		job_run "${f%:*}" COLUMNS=200 LC_ALL=C "PATH=$nobin:$here/bin:$PATH" -- --no-color job "${f#*:}"
+		need "${f%:*}, sq job ${f#*:}: the report under C is the UTF-8 one" eval 'rc_is 0 && cmp -s "$want" <(job_mask "$OUT")'
+	done
+	array_title_is star-se-mix '3: 1 done · 1 failed · 1 other'
+}
 # AA3: every id ntasks reads is whole, as on the dashboard: a term past 7 digits
 # counts none, a throttle of up to 10 digits (max_run_tasks, %u) is read
 c_array_id_whole() {
@@ -13332,7 +13345,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once special_exit held_form rd_two_forms array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once special_exit held_form rd_two_forms no_utf8_cuts array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins
