@@ -9330,6 +9330,8 @@ c_special_exit() {
 	parent_rows_are dep-se '    12000  SPECIAL_EXIT (JobHeldUser) · exit 3 · no start estimate'
 	parent_rows_are dep-se-sig '    12000  SPECIAL_EXIT (JobHeldUser) · exit 0/sig9 · no start estimate'
 	parent_rows_are dep-se-zero '    12000  SPECIAL_EXIT (JobHeldUser) · no start estimate'
+	job_run dep-se-pd-11963 COLUMNS=200 -- --no-color job 12000
+	need "accounting's row already PENDING 0:0, the case the exit is kept for: squeue's exit on the state line" eval 'rc_is 0 && has "  state       SPECIAL_EXIT (JobHeldUser) · exit 3"'
 	# gawk in C counts bytes: the exit is compared whole, never cut by position
 	local nobin=$T_DIR/nobin PARENT_ENV; no_utf8_locale "$nobin"; PARENT_ENV=(LC_ALL=C "PATH=$nobin:$here/bin:$PATH")
 	parent_rows_are dep-se '    12000  SPECIAL_EXIT (JobHeldUser) · exit 3 · no start estimate'
@@ -9348,7 +9350,7 @@ c_held_form() {
 	need "RH: the pending form, the verdict, nothing allocated" eval '
 		rc_is 0 && has "  state       REQUEUE_HOLD (launch failure limit exceeded requeued held)" && has "  start       no estimate yet" && has "  CPUs        16 requested" && has "  time limit  1d00h" &&
 		why_has "  needs action: held after a requeue: scontrol release 11950_1" && lacks "· exit" && lacks "allocated" && lacks " elapsed" && lacks "efficiency"'
-	parent_rows_are dep-rh '    12000  REQUEUE_HOLD (JobHoldMaxRequeue) · no start estimate'
+	parent_rows_are dep-rh '    12000  REQUEUE_HOLD (launch failure limit exceeded requeued held) · no start estimate'
 	local c
 	for c in rd-run:RESV_DEL_HOLD rf-run:REQUEUE_FED rq-row:REQUEUED; do
 		job_run star-${c%:*}-11963 COLUMNS=200 -- --no-color job 11950_1

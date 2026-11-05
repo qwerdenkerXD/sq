@@ -2150,8 +2150,9 @@ function bracket_left(j, own,   k, t, m) {
 # Returns how many it read as not ended from accounting alone: with squeue
 # having answered, a task it does not list (accounting lagging, a runaway row,
 # or a job PrivateData hides from squeue alone), so what the count says of
-# those may be out of date.  A task in a record of squeue's is no such task: it
-# was still pending when squeue answered, and started since
+# those may be out of date.  A row of a task a record of squeue's holds is not
+# one: that record counts the task, so the row never reaches this count.  A
+# record sq cannot read holds none, so a row in its range may be one
 function tasks_count(id, Q, nq, T, TR, nt, N, ord, QT, own,   p, k, r, j, t, c, x, unended, ROW) {
   ord[0] = 0
   QT["record"] = ""       # set before any call reads it: gawk 5.2.1 double-frees an unset element passed down
