@@ -1,4 +1,4 @@
-# AB2: 11964 PD Priority; ahead of it PD 11960, a released RH 11965, a released RD 11966; held RH 11961 and RD 11962 at priority 0 and later PD 11970 are not
+# AB2: 11964 PD Priority; ahead of it PD 11960, a released RH 11965, a released RD 11966; held RH 11961 and RD 11962 at priority 0 and later PD 11970 are not, nor PD 11958 on BurstBufferResources, which holds the word in a longer one; 11959, a pending RF on Priority, a federation shape alone (a sibling under the cluster lock, job_mgr.c:17563-17565, fed_mgr.c:5078), is not either
 # squeue -h -t PD,R,CF,ST,SI,RD,RH,RF: 11875 and 11950 running on fb2-bioinf, 11964 itself pending;
 # every PriorityLong 1, as on bioserver (all PriorityWeight* 0)
 @defaults ArrayJobID=0; ArrayTaskID=N/A; PriorityLong=1
@@ -11,3 +11,5 @@ JobID=11961; ArrayJobID=11961; StateCompact=RH; UserName=schroder; Partition=Loc
 JobID=11962; ArrayJobID=11962; StateCompact=RD; UserName=schroder; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=128G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-7400s}; Reason=Reservation maint was deleted; PriorityLong=0
 JobID=11970; ArrayJobID=11970; StateCompact=PD; UserName=schroder; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=128G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-60s}; Reason=Priority
 JobID=11967; ArrayJobID=11967; StateCompact=PD; UserName=schroder; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=128G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-7100s}; Reason=Dependency
+JobID=11958; ArrayJobID=11958; StateCompact=PD; UserName=schroder; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=128G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-7250s}; Reason=BurstBufferResources; PriorityLong=1
+JobID=11959; ArrayJobID=11959; StateCompact=RF; UserName=schroder; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=128G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-7220s}; Reason=Priority; PriorityLong=1

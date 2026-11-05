@@ -9372,6 +9372,9 @@ c_rd_two_forms() {
 		lacks " on " && lacks " elapsed" && lacks "allocated" && lacks "  started " && why_lacks_section'
 	job_run star-rd-pd-11963 COLUMNS=200 -- job 11950_1
 	need "its colour stays cyan" eval 'rc_is 0 && grep -qF "$(printf "\033[36mRESV_DEL_HOLD\033[0m")" "$OUT"'
+	job_run rd-salloc-11964 COLUMNS=200 -- --no-color job 11964
+	need "a salloc job held RD before it got nodes: BatchHost is where salloc ran, NodeList is empty and tells: the pending form" eval '
+		rc_is 0 && has "  state       RESV_DEL_HOLD (Reservation maint was deleted)" && has "  start       no estimate yet" && has "  CPUs        100 requested" && lacks " on " && lacks "allocated"'
 	array_title_is star-rd-rec '6: 1 running · 5 other'
 	job_run star-rd-rec-11963 COLUMNS=200 -- --no-color job 11950_4
 	need "a task of a record of several held RD, numbered from it: the same form" eval '
@@ -9407,7 +9410,7 @@ c_why_queue_states() {
 # word of a reason squeue may have merged in a fold (print.c:173-188).  The
 # stub folds nothing: each squeue-queue is what print.c answers
 c_why_ahead() {
-	T_TITLE="sq job, reason Priority: the jobs ahead: a fold's merged reason read word by word, its words printed as Slurm's, a released RH or RD with its own state word, a held one and a later one not"
+	T_TITLE="sq job, reason Priority: the jobs ahead: a fold's merged reason read word by word, its words printed as Slurm's, a released RH or RD with its own state word, a held one, a later one, a longer word holding one of theirs and a pending RF not"
 	why_run prio-fold-rd-11964 -- --no-color job 11964
 	need "an RD task folded into an array: the array and the plain job" eval '
 		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -qF "12000_[1,3-6]  schroder   64 CPUs    128G  PENDING (Priority,ReservationDeleted), submitted" && why_lines | grep -q "11990  "'
@@ -9427,6 +9430,8 @@ c_why_ahead() {
 	need "a released RH and RD come first, each by its own word; held at priority 0, a PD on a dependency and later jobs do not" eval '
 		rc_is 0 && why_has "  waits its turn: 3 jobs submitted before it come first" && why_lines | grep -qF "11965  schroder   64 CPUs    128G  REQUEUE_HOLD (Priority), submitted" &&
 		why_lines | grep -qF "11966  schroder   64 CPUs    128G  RESV_DEL_HOLD (Resources), submitted" && why_lines | grep -qF "11960  schroder   64 CPUs    128G  PENDING (Resources), submitted" && ! why_lines | grep -qE "1196[127]|11970"'
+	need "BurstBufferResources holds Resources inside a longer word: not ahead" eval '! why_lines | grep -q 11958'
+	need "a pending RF on Priority, a federation shape, a sibling under the cluster lock: not ahead, by its code" eval '! why_lines | grep -q 11959'
 	why_run prio-rel-ahead-11964 -- job 11964
 	need "... RH's word in cyan, as on its own screen" eval 'rc_is 0 && grep -qF "$(printf "\033[36mREQUEUE_HOLD\033[0m (Priority)")" "$OUT"'
 }
@@ -9434,7 +9439,7 @@ c_why_ahead() {
 # its own record nor a later job reads ahead of it.  The tasks of its array
 # that come before it stay unsaid
 c_why_own_record() {
-	T_TITLE="sq job TASK, reason Priority: its own row found: numbered from its record, folded back into it, by its unique id, a released RH folded in, the record answered whole; a later job not named, an earlier one and a tie by id named"
+	T_TITLE="sq job TASK, reason Priority: its own row found: numbered from its record, folded back into it, by its unique id, a released RH folded in, the record answered whole, a task beside a record with a step; its submit time its own, not the record's; a later job, by one second too, not named, an earlier one and a tie by its own id named"
 	why_run own-rec-11950 -- --no-color job 11950_7
 	need "a task numbered from its record: the record is not ahead, nor 11975 or 11955; 11960 and the tie 11940 are" eval '
 		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -q "11960  " && why_lines | grep -q "11940  " && ! why_lines | grep -qE "11950_|11955|11975"'
@@ -9449,7 +9454,13 @@ c_why_own_record() {
 		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -q "11960  " && why_lines | grep -qF "11945_[1-9]" && ! why_lines | grep -qE "11950_|11975"'
 	why_run own-rh-11950 -- --no-color job 11950_3
 	need "a released RH task, folded in by -t RH's bit: the same" eval '
-		rc_is 0 && has "  state       REQUEUE_HOLD (Priority)" && why_has "  waits its turn: 1 job submitted before it comes first" && why_lines | grep -q "11960  " && ! why_lines | grep -qE "11950_|11975"'
+		rc_is 0 && has "  state       REQUEUE_HOLD (Priority)" && why_has "  waits its turn: 1 job submitted before it comes first" && why_lines | grep -qF "11960  schroder   64 CPUs    128G  PENDING (Resources), submitted" && ! why_lines | grep -qE "11950_|11975"'
+	why_run own-tie-11950 -- --no-color job 11950_3
+	need "at the task's own second: the tie by its own id, not its record's: 11952 ahead, 11954 not; one second later not" eval '
+		rc_is 0 && why_has "  waits its turn: 3 jobs submitted before it come first" && why_lines | grep -q "11952  " && ! why_lines | grep -qE "11950_|11954|11975"'
+	why_run own-step-11950 -- --no-color job 11950_4
+	need "a record with a step that does not hold the task, its own row beside it: the record is another row, and ahead" eval '
+		rc_is 0 && why_has "  waits its turn: 3 jobs submitted before it come first" && why_lines | grep -qF "11950_[0-15:3]" && why_lines | grep -qF "11945_[1-9]" && why_lines | grep -q "11960  " && ! why_lines | grep -q 11975'
 }
 # AB3: nothing clears RH but a start, so a released job prints it until then
 # (job_mgr.c:6401, 12202); the reason tells, and what it says is a pending job's

@@ -1,0 +1,3 @@
+# AB2: sq job 11950_4, a requeued task of its own, renamed, so squeue does not fold it (print.c:222-224); record 0-15:3, its array's remaining tasks, does not hold task 4, so the record is another row of the queue, earlier, and comes first
+@include ../../_common/job-defaults
+JobID=11953; RestartCnt=5; ArrayJobID=11950; ArrayTaskID=4; StateCompact=PD; Reason=Priority; UserName=fsill; UserID=1041; Name=assembly-b; NodeList=; BatchHost=; NumCPUs=100; tres_alloc=cpu=100,mem=200G,node=1,billing=100; TimeUsed=0:00; TimeLeft=3-00:00:00; TimeLimit=3-00:00:00; SubmitTime=\{epoch-1290s}; StartTime=\{epoch+31451400s}; WorkDir=/media/BioNAS2/fsill/asm; STDOUT=/media/BioNAS2/fsill/asm/slurm-11964.out; STDERR=/media/BioNAS2/fsill/asm/slurm-11964.out; EndTime=N/A

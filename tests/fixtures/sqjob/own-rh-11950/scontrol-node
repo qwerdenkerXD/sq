@@ -1,4 +1,4 @@
-# AB2: sq job 11950_3, a released RH task, folded into 3,5-9 by -t RH's bit
+# AB2: sq job 11950_3, a released RH task, folded into 3,5-9 by -t RH's bit; requeued, its SubmitTime is its own, later than the record's (batch_requeue_fini, job_mgr.c:16493-16498)
 # scontrol -o show node as bioserver prints it (Stage B layout, the live line's
 # token order and spacing, attack-whymem notes): fb2-bioinf holds 11875 (32 CPUs, 256G,
 # no time limit) and 11950 (16 CPUs, 64G); fb2-bioinf-0 idle

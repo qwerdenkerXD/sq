@@ -1,9 +1,9 @@
-# AB2: sq job 11950_3, a requeued PD task with a record of its own, folded back into 3,5-9 by squeue (print.c:205-235), so no row bears its id; array 11945 earlier holds a task 3 of its own and is ahead
+# AB2: sq job 11950_3, a requeued PD task with a record of its own, folded back into 3,5-9 by squeue (print.c:205-235), so no row bears its id; array 11945 earlier holds a task 3 of its own and is ahead; requeued, its SubmitTime is its own, later than the record's (batch_requeue_fini, job_mgr.c:16493-16498)
 # squeue -h -t PD,R,CF,ST,SI,RD,RH,RF: 11875 and 11950 running on fb2-bioinf, 11964 itself pending;
 # every PriorityLong 1, as on bioserver (all PriorityWeight* 0)
 @defaults ArrayJobID=0; ArrayTaskID=N/A; PriorityLong=1
 JobID=11875; ArrayJobID=11875; StateCompact=R; UserName=schroder; Partition=LocalQ; NodeList=fb2-bioinf; NumCPUs=32; tres_alloc=cpu=32,mem=256G,node=1,billing=32; EndTime=\{epoch+31451400s}; TimeLeft=UNLIMITED; TimeLimit=UNLIMITED; SubmitTime=\{epoch-86400s}; Reason=None
 JobID=11945; ArrayJobID=11945; ArrayTaskID=1-9; StateCompact=PD; UserName=schroder; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=128G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-7300s}; Reason=Priority
-JobID=11950; ArrayJobID=11950; ArrayTaskID=3,5-9; StateCompact=PD; UserName=fsill; Partition=LocalQ; NodeList=; NumCPUs=100; tres_alloc=cpu=100,mem=200G,node=1,billing=100; EndTime=N/A; TimeLeft=3-00:00:00; TimeLimit=3-00:00:00; SubmitTime=\{epoch-1290s}; Reason=Priority
+JobID=11950; ArrayJobID=11950; ArrayTaskID=3,5-9; StateCompact=PD; UserName=fsill; Partition=LocalQ; NodeList=; NumCPUs=100; tres_alloc=cpu=100,mem=200G,node=1,billing=100; EndTime=N/A; TimeLeft=3-00:00:00; TimeLimit=3-00:00:00; SubmitTime=\{epoch-7250s}; Reason=Priority
 JobID=11960; ArrayJobID=11960; StateCompact=PD; UserName=schroder; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=128G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-7200s}; Reason=Resources
 JobID=11975; ArrayJobID=11975; StateCompact=PD; UserName=schroder; Partition=LocalQ; NodeList=; NumCPUs=64; tres_alloc=cpu=64,mem=128G,node=1,billing=64; EndTime=N/A; TimeLeft=1-00:00:00; TimeLimit=1-00:00:00; SubmitTime=\{epoch-60s}; Reason=Priority

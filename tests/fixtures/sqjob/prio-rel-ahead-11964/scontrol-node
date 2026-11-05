@@ -1,4 +1,4 @@
-# AB2: 11964 PD Priority; ahead of it PD 11960, a released RH 11965, a released RD 11966; held RH 11961 and RD 11962 at priority 0 and later PD 11970 are not
+# AB2: 11964 PD Priority; ahead of it PD 11960, a released RH 11965, a released RD 11966; held RH 11961 and RD 11962 at priority 0 and later PD 11970 are not, nor PD 11958 on BurstBufferResources, which holds the word in a longer one; 11959, a pending RF on Priority, a federation shape alone (a sibling under the cluster lock, job_mgr.c:17563-17565, fed_mgr.c:5078), is not either
 # scontrol -o show node as bioserver prints it (Stage B layout, the live line's
 # token order and spacing, attack-whymem notes): fb2-bioinf holds 11875 (32 CPUs, 256G,
 # no time limit) and 11950 (16 CPUs, 64G); fb2-bioinf-0 idle
