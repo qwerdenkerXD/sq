@@ -322,10 +322,11 @@ case $tool in
 		elif [ -n "${SQUEUE_FORMAT2:-}" ]; then mode=long; fmt=$SQUEUE_FORMAT2
 		else refuse "squeue's default format is not emulated: set a format"
 		fi
-		# "-t all" is the one filter that picks the fixture: it is a different
-		# question (finished jobs too), not a narrower one; sq job's list is
-		# its whole queue, a question of its own as well, and any other list
-		# fails the case: this pins it
+		# two -t lists pick a file, and none filters its rows: "-t all" is a
+		# different question (finished jobs too), not a narrower one, squeue-all;
+		# sq job's list is its whole queue, a question of its own as well,
+		# squeue-queue; any other list reads as no -t, squeue, which an sq job
+		# fixture does not hold, so the stub refuses: this pins the list
 		case $states in [Aa][Ll][Ll]) file=squeue-all ;; PD,R,CF,ST,SI,RD,RH,RF) file=squeue-queue ;; *) file=squeue ;; esac
 		# sq's allocation call and its mirror call are questions of their own
 		# too, answered apart, so a case can fail either alone; but "-t all"

@@ -3395,9 +3395,11 @@ JOBAWK
 # R alone drops a running job with a flag: its CPUs are in CPUAlloc until it
 # ends, CONFIGURING, STOPPED, SIGNALING, RD after a restart, RF on a sibling.
 # Left out for that reason: COMPLETING and STAGE_OUT, whose CPUs left CPUAlloc
-# as they ended (deallocate_nodes, node_scheduler.c:333), and a job suspended,
-# whose did as it stopped (select_cons_tres.c:837).  RH: a released job is in
-# this queue.  A bit brings a CG row too (why_blockers), and the filter runs
+# as they ended (deallocate_nodes, node_scheduler.c:333), and a job suspended
+# by scontrol suspend, whose did as it stopped (select_cons_tres.c:837).  Under
+# gang scheduling a suspended job keeps them (:834 returns first) and stays out
+# too: its code S does not tell the two.  RH: a released job is in this queue.
+# A bit brings a CG row too (why_blockers), and the filter runs
 # before the fold, so SE stays out of the arrays' records and RH and RD join
 job_why_states=PD,R,CF,ST,SI,RD,RH,RF
 job_why_qfields="JobID ArrayJobID ArrayTaskID StateCompact UserName Partition NodeList NumCPUs tres-alloc EndTime
