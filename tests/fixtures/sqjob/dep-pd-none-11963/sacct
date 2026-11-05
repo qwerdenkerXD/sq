@@ -1,0 +1,2 @@
+# AB3: a plain parent PD the scheduler has not looked at: its reason None
+@include ../../_common/job-sacct-defaults

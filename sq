@@ -2414,6 +2414,8 @@ function exit_text(c,   t, sg, rc) {
 # cluster lock, without (fed_mgr.c:5078, job_mgr.c:17566).  Not RQ: squeue never
 # shows it, so it is a REQUEUED row of accounting, a run with its nodes
 function pending_form(c, nodes) { return c == "PD" || c == "SE" || c == "RH" || (c ~ /^R[DF]$/ && nodes == "") }
+# " (REASON)", none for no reason: Slurm's None says nothing
+function reason_said(reason) { return (reason != "" && reason != "None") ? " (" reason ")" : "" }
 # SE's exit, SAID as a finished job's reads (" · exit 3"): the one fact that
 # decides a release, which zeroes it (job_mgr.c:12204), and accounting's row
 # soon says PENDING; nothing for 0:0
@@ -2430,7 +2432,7 @@ function build_job(   q, r, c, final, pending, never, name, user, unique, state,
   if (pending) {
     reason = q ? R[q, "Reason"] : ""
     if (c == "SE" && q) { exit_of(jid, A, 0, nsteps, step_row, R[q, "exit_code"]); held = held_exit(" · " exit_text(c)) }
-    kv("state", "state", state (reason != "" && reason != "None" ? " (" reason ")" : "") held)
+    kv("state", "state", state reason_said(reason) held)
     dependency = q ? R[q, "Dependency"] : ""
     if (dependency != "" && dependency != "(null)") kv("state", "dependency", dependency)
     start = q ? R[q, "StartTime"] : ""             # a pending job's: Slurm's estimate
@@ -2655,7 +2657,7 @@ function qjob(p,   t) {
 function why_plan(   q, reason, dep, n, cl, i, m, id, pl, pd, inpd, host, path, which) {
   if (verdict != "one" || !qrow) return
   q = qrow
-  if (STATE == "PD") {
+  if (reads_pending(STATE, q)) {
     reason = R[q, "Reason"]
     if (reason ~ /^(Resources|Priority|BadConstraints)$/) put("nodes", 1)
     if (reason ~ /^(Resources|Priority)$/) put("queue", 1)
@@ -2771,8 +2773,14 @@ function node_pair_fail(q,   P, np, k, PP, npp, j, x) {
 }
 
 # ---- the section of one job, after its state and times
+# a job the why section reads as pending: PD, and an RH Slurm holds no longer.
+# Nothing clears RH but a start (job_mgr.c:6401, 12202), so a released job
+# prints it until then; what tells is the reason: held, the state_desc of the
+# requeue limit (:6404, kept by job_scheduler.c:319-333), which a restart may
+# append to with no space (reservation.c:4556-4561); released, none of it
+function reads_pending(c, q) { return c == "PD" || (c == "RH" && R[q, "Reason"] !~ /requeued held/) }
 function build_why(c, q, r) {
-  if (c == "PD") why_pending(q, r)
+  if (reads_pending(c, q)) why_pending(q, r)
   else if (c == "RH" || c == "SE") why_requeue_held(c)
   else if (c in DONE) why_ended(c, q, r)
 }
@@ -2903,7 +2911,7 @@ function parent_state(pid, asked, gone,   p, a, c, left) {
     if (RP[p, "JobID"] == pid || (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/ && RP[p, "ArrayJobID"] "_" RP[p, "ArrayTaskID"] == pid)) break
   if (p <= npq) {
     c = RP[p, "StateCompact"]
-    if (pending_form(c, RP[p, "NodeList"])) return paint(stcolour(c), stname(c)) " (" RP[p, "Reason"] ")" (c == "SE" ? held_exit(parent_exit(pid, c, RP[p, "exit_code"])) : "") (isepoch(RP[p, "StartTime"]) && RP[p, "StartTime"] > NOW ? " · Slurm's estimate: " when(RP[p, "StartTime"]) : " · no start estimate")
+    if (pending_form(c, RP[p, "NodeList"])) return paint(stcolour(c), stname(c)) reason_said(RP[p, "Reason"]) (c == "SE" ? held_exit(parent_exit(pid, c, RP[p, "exit_code"])) : "") (isepoch(RP[p, "StartTime"]) && RP[p, "StartTime"] > NOW ? " · Slurm's estimate: " when(RP[p, "StartTime"]) : " · no start estimate")
     if (c in DONE)
       return paint(stcolour(c), stname(c)) parent_exit(pid, c, RP[p, "exit_code"]) (isepoch(RP[p, "EndTime"]) ? " · ended " ago(NOW - RP[p, "EndTime"]) " ago" : "")
     left = RP[p, "TimeLeft"]

@@ -8670,7 +8670,7 @@ EOF
 @exit 1')
 	job_fx qdown sacct <<<'JobID=800; State=PENDING; ExitCode=0:0; ElapsedRaw=0; AllocCPUS=0; Start=Unknown; End=Unknown; NodeList=None assigned' > /dev/null
 	why_run "$d" -- --no-color job 800
-	need "squeue down, accounting says PENDING: stuck, the reason unknown" eval 'rc_is 0 && why_has "  stuck: squeue did not answer, so its reason is unknown"'
+	need "squeue down, accounting says PENDING: stuck, the reason unknown" eval 'rc_is 0 && why_has "  stuck: squeue did not answer, so its reason is unknown" && has "PENDING" && lacks "()"'
 }
 
 # ---- dependencies (J6, J7) ------------------------------------------------------
@@ -9434,7 +9434,7 @@ c_why_ahead() {
 # its own record nor a later job reads ahead of it.  The tasks of its array
 # that come before it stay unsaid
 c_why_own_record() {
-	T_TITLE="sq job TASK, reason Priority: its own row found: numbered from its record, folded back into it, by its unique id, the record answered whole; a later job not named, an earlier one and a tie by id named"
+	T_TITLE="sq job TASK, reason Priority: its own row found: numbered from its record, folded back into it, by its unique id, a released RH folded in, the record answered whole; a later job not named, an earlier one and a tie by id named"
 	why_run own-rec-11950 -- --no-color job 11950_7
 	need "a task numbered from its record: the record is not ahead, nor 11975 or 11955; 11960 and the tie 11940 are" eval '
 		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -q "11960  " && why_lines | grep -q "11940  " && ! why_lines | grep -qE "11950_|11955|11975"'
@@ -9447,6 +9447,42 @@ c_why_own_record() {
 	why_run own-fold-11950 -- --no-color job 11953
 	need "the same task by its unique id, no task asked for: the same" eval '
 		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -q "11960  " && why_lines | grep -qF "11945_[1-9]" && ! why_lines | grep -qE "11950_|11975"'
+	why_run own-rh-11950 -- --no-color job 11950_3
+	need "a released RH task, folded in by -t RH's bit: the same" eval '
+		rc_is 0 && has "  state       REQUEUE_HOLD (Priority)" && why_has "  waits its turn: 1 job submitted before it comes first" && why_lines | grep -q "11960  " && ! why_lines | grep -qE "11950_|11975"'
+}
+# AB3: nothing clears RH but a start, so a released job prints it until then
+# (job_mgr.c:6401, 12202); the reason tells, and what it says is a pending job's
+c_rh_released() {
+	T_TITLE="REQUEUE_HOLD: held, its reason the requeue limit's, the verdict stands; any other reason, as after a release, reads as a pending job's, with the calls that takes; a parent's row says no None, for PD neither"
+	why_run rh-held-11964 -- --no-color job 11964
+	need "held: the verdict, no call for the nodes or the queue" eval '
+		rc_is 0 && has "  state       REQUEUE_HOLD (launch failure limit exceeded requeued held)" && [ "$(why_lines)" = "  needs action: held after a requeue: scontrol release 11964" ] &&
+		[ "$(calls scontrol)" = 0 ] && ! argv_has squeue -h -t PD,R,CF,ST,SI,RD,RH,RF'
+	why_run rh-rel-res-11964 -- --no-color job 11964
+	need "released, Resources: the state as Slurm prints it, the why as any pending job's" eval '
+		rc_is 0 && has "  state       REQUEUE_HOLD (Resources)" && lacks "held after a requeue" && why_has "  waits its turn: too little is free now on the nodes it may use (LocalQ)" &&
+		why_has "  it needs this job to end first, on fb2-bioinf:" && [ "$(calls scontrol)" = 1 ] && argv_has squeue -h -t PD,R,CF,ST,SI,RD,RH,RF'
+	why_run rh-rel-prio-11964 -- --no-color job 11964
+	need "released, Priority: the job ahead, by its own priority in the answer" eval '
+		rc_is 0 && has "  state       REQUEUE_HOLD (Priority)" && lacks "held after a requeue" && why_has "  waits its turn: 1 job submitted before it comes first" && lacks "the jobs ahead are unknown" && ! why_lines | grep -qE "11961|11962|11967|11970"'
+	why_run rh-rel-begin-11964 -- --no-color job 11964
+	need "released, BeginTime: the why as any pending job's" eval 'rc_is 0 && why_lines | grep -qF "(--begin)" && lacks "held after a requeue"'
+	why_run rh-rel-dep-11964 -- --no-color job 11964
+	need "released, Dependency: the parents asked for, the parent's row" eval 'rc_is 0 && why_has "  waits its turn: it may start once 12000 has completed successfully" && why_has "    12000  PENDING · no start estimate"'
+	why_run rh-rel-badc-11964 -- --no-color job 11964
+	need "released, BadConstraints: the nodes asked for" eval 'rc_is 0 && why_lines | grep -qF "can never start: no node it may use (LocalQ) meets its constraints" && [ "$(calls scontrol)" = 1 ]'
+	why_run rh-held-glued-11964 -- --no-color job 11964
+	need "held, a restart's words stuck on the desc: the verdict stands" eval 'rc_is 0 && [ "$(why_lines)" = "  needs action: held after a requeue: scontrol release 11964" ]'
+	why_run rh-rel-none-11964 -- --no-color job 11964
+	need "just released: no None on the state line, the scheduler's line" eval '
+		rc_is 0 && has "  state       REQUEUE_HOLD" && lacks "(None)" && [ "$(why_lines)" = "$(printf "%s\n" "  waits its turn: the scheduler has not looked at it yet" "  ↳ requeued 5 times so far (a node failure, or scontrol requeue)")" ]'
+	why_run rh-hold-user-11964 -- --no-color job 11964
+	need "a user hold on top: a user hold" eval 'rc_is 0 && why_has "  needs action: on user hold; it can start once you release it: scontrol release 11964" && lacks "held after a requeue"'
+	why_run rh-hold-admin-11964 -- --no-color job 11964
+	need "an admin hold on top: an admin's" eval 'rc_is 0 && why_has "  waits for an admin: an admin held it; only an admin can release it" && lacks "held after a requeue"'
+	parent_rows_are dep-rh-none '    12000  REQUEUE_HOLD · no start estimate'
+	parent_rows_are dep-pd-none '    12000  PENDING · no start estimate'
 }
 # AB4: with no UTF-8 locale on the host gawk counts bytes, so nothing that
 # holds a " · " is cut by position
@@ -13409,7 +13445,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once special_exit held_form rd_two_forms why_queue_states why_ahead why_own_record no_utf8_cuts array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once special_exit held_form rd_two_forms why_queue_states why_ahead why_own_record rh_released no_utf8_cuts array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins

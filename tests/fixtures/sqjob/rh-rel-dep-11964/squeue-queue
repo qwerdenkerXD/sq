@@ -1,0 +1,6 @@
+# AB3: an RH released, its reason Dependency
+# squeue -h -t PD,R,CF,ST,SI,RD,RH,RF: 11875 and 11950 running on fb2-bioinf, 11964 itself pending;
+# every PriorityLong 1, as on bioserver (all PriorityWeight* 0)
+@defaults ArrayJobID=0; ArrayTaskID=N/A; PriorityLong=1
+JobID=11875; ArrayJobID=11875; StateCompact=R; UserName=schroder; Partition=LocalQ; NodeList=fb2-bioinf; NumCPUs=32; tres_alloc=cpu=32,mem=256G,node=1,billing=32; EndTime=\{epoch+31451400s}; TimeLeft=UNLIMITED; TimeLimit=UNLIMITED; SubmitTime=\{epoch-86400s}; Reason=None
+JobID=11964; ArrayJobID=11964; StateCompact=RH; UserName=fsill; Partition=LocalQ; NodeList=; NumCPUs=100; tres_alloc=cpu=100,mem=200G,node=1,billing=100; EndTime=N/A; TimeLeft=3-00:00:00; TimeLimit=3-00:00:00; SubmitTime=\{epoch-1290s}; Reason=Dependency
