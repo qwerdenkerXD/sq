@@ -3020,16 +3020,24 @@ function before(p, prio, submit, id) {
   if (RQ[p, "SubmitTime"] + 0 != submit) return RQ[p, "SubmitTime"] + 0 < submit
   return RQ[p, "JobID"] + 0 < id + 0
 }
-function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio, submit, later, lead, nbig, nbigdown, nunknown, fitnow, idw, uw) {
+function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, my_id, prio, submit, later, lead, nbig, nbigdown, nunknown, fitnow, idw, uw, st) {
   rq_c = R[q, "NumCPUs"] + 0; rq_m = tres_mem(R[q, "tres-alloc"])
   usable_nodes(q)
   if (reason == "Priority") {
-    # its own priority as the queue answer gives it; submit time from its record
-    for (me = 1; me <= nrq; me++) if (RQ[me, "JobID"] == raw) break
+    # its own row of the queue answer: a task with a record of its own folds
+    # back into its array's (print.c:205-235), so raw names no row there, and
+    # the task is its own row's, as sq job by its unique id asks for no task.
+    # Its priority from that row, its id raw (a record's where it has none), the
+    # submit time from its record.  The list ahead: who waits to start, by code and reason.
+    # A fold merges reasons, so every word counts (_merge_job_reason); RH and
+    # RD have them once released, a held one has neither word
+    for (me = 1; me <= nrq; me++)
+      if (RQ[me, "JobID"] == raw || (onetask(q) && RQ[me, "ArrayJobID"] == R[q, "ArrayJobID"] && task_in(RQ[me, "ArrayTaskID"], R[q, "ArrayTaskID"] + 0))) break
     prio = (me <= nrq) ? RQ[me, "PriorityLong"] + 0 : 0; submit = R[q, "SubmitTime"] + 0
+    my_id = (raw == "" && me <= nrq) ? RQ[me, "JobID"] : raw
     for (p = 1; p <= nrq; p++) {
-      if (p == me || RQ[p, "StateCompact"] != "PD" || RQ[p, "Reason"] !~ /^(Resources|Priority)$/) continue
-      if (!before(p, prio, submit, raw) || !share_nodes(RQ[p, "Partition"])) continue
+      if (p == me || RQ[p, "StateCompact"] !~ /^(PD|RH|RD)$/ || RQ[p, "Reason"] !~ /(^|,)(Resources|Priority)(,|$)/) continue
+      if (!before(p, prio, submit, my_id) || !share_nodes(RQ[p, "Partition"])) continue
       AH[++ahead] = p
     }
     for (a = 2; a <= ahead; a++)              # in that order
@@ -3047,9 +3055,9 @@ function why_res(q, reason,   rq_c, rq_m, k, i, ahead, AH, p, a, b, t, me, prio,
       if (colw(RQ[AH[k], "UserName"]) > uw) uw = colw(RQ[AH[k], "UserName"])
     }
     for (k = 1; k <= ahead && k <= 3; k++) {
-      p = AH[k]
+      p = AH[k]; st = RQ[p, "StateCompact"]
       wl2(sprintf("%-*s  %s %3s CPU%-1s  %6s  %s (%s), submitted %s ago", idw, qjob(p), colpad(RQ[p, "UserName"], -uw), RQ[p, "NumCPUs"], cpus_s(RQ[p, "NumCPUs"]),
-                  memsize(tres_mem(RQ[p, "tres-alloc"]), 0), paint(stcolour("PD"), "PENDING"), RQ[p, "Reason"], ago(NOW - RQ[p, "SubmitTime"])))
+                  memsize(tres_mem(RQ[p, "tres-alloc"]), 0), paint(stcolour(st), stname(st)), RQ[p, "Reason"], ago(NOW - RQ[p, "SubmitTime"])))
     }
     if (ahead > 3) wl2("… and " (ahead - 3) " more")
     if (ENVIRON["SQJ_WQUEUESTAT"] != "ok") wn("the jobs ahead are unknown: squeue did not answer")
@@ -3086,7 +3094,9 @@ function share_nodes(parts,   k, i, NP, nn, j) {
 # which running jobs have to end first: on each node that can ever hold it,
 # its jobs by end time (none: a year, as Slurm plans one without a limit)
 # until enough is free; the node where that comes first.  sq's own
-# reckoning, not Slurm's: it leaves out the jobs ahead and backfill
+# reckoning, not Slurm's: it leaves out the jobs ahead and backfill.  No CG:
+# the answer's RH, RD, RF and ST take a flag by its bit, so a job requeued held
+# comes while it completes, nodes and all, its CPUs already free
 function why_blockers(q, rq_c, rq_m,   k, i, p, nj, J, E, a, b, t, fc, fm, best, bestt, BL, nbl, fin, end, est, unl, unlend, w, idw) {
   if (ENVIRON["SQJ_WQUEUESTAT"] != "ok") { wn("which jobs must end first is unknown: squeue did not answer"); return }
   for (k = 1; k <= nuse; k++) {
@@ -3096,7 +3106,7 @@ function why_blockers(q, rq_c, rq_m,   k, i, p, nj, J, E, a, b, t, fc, fm, best,
     fc = node_cpufree(i); fm = node_memfree(i)
     nj = 0; delete J; delete E
     for (p = 1; p <= nrq; p++)
-      if (RQ[p, "StateCompact"] != "PD" && index("," RQ[p, "NodeList"] ",", "," NODE_NAME[i] ",")) {
+      if (RQ[p, "StateCompact"] !~ /^(PD|CG)$/ && index("," RQ[p, "NodeList"] ",", "," NODE_NAME[i] ",")) {
         J[++nj] = p; end = RQ[p, "EndTime"]; E[nj] = isepoch(end) ? end + 0 : NOW + 365 * 86400
       }
     for (a = 2; a <= nj; a++) for (b = a; b > 1 && E[b] < E[b - 1]; b--) { t = E[b]; E[b] = E[b - 1]; E[b - 1] = t; t = J[b]; J[b] = J[b - 1]; J[b - 1] = t }
@@ -3367,11 +3377,21 @@ JOBAWK
 # a dependency (squeue, accounting for those acct_asked names), the nodes and
 # the queue for a job waiting on resources (scontrol --json show node, or
 # where that fails sinfo for the figures and scontrol -o about its nodes for
-# CPUEfctv and MemSpecLimit, node_hook_job; squeue -t PD,R), and a failed job's
+# CPUEfctv and MemSpecLimit, node_hook_job; squeue -t "$job_why_states"), and a failed job's
 # output file.  They run while sacct is asked, and
 # every call of sq job ends by one deadline, sacct's budget and 5 s more from
 # its first call (job_limit); the names of who cancelled come after sacct
 # answered (uid_names), within the same deadline.
+# Who holds what the nodes say is allocated, and who waits.  squeue -t compares a
+# base state with the whole state and a flag by its bit (print.c:2960-2968), so
+# R alone drops a running job with a flag: its CPUs are in CPUAlloc until it
+# ends, CONFIGURING, STOPPED, SIGNALING, RD after a restart, RF on a sibling.
+# Left out for that reason: COMPLETING and STAGE_OUT, whose CPUs left CPUAlloc
+# as they ended (deallocate_nodes, node_scheduler.c:333), and a job suspended,
+# whose did as it stopped (select_cons_tres.c:837).  RH: a released job is in
+# this queue.  A bit brings a CG row too (why_blockers), and the filter runs
+# before the fold, so SE stays out of the arrays' records and RH and RD join
+job_why_states=PD,R,CF,ST,SI,RD,RH,RF
 job_why_qfields="JobID ArrayJobID ArrayTaskID StateCompact UserName Partition NodeList NumCPUs tres-alloc EndTime
 	TimeLeft TimeLimit SubmitTime Reason PriorityLong"
 # /proc/uptime's seconds (TEXT, as 1234.56) in microseconds, into VAR; returns
@@ -3527,7 +3547,7 @@ job_why_start() {
 	if [ "$w_queue" = 1 ]; then
 		for f in $job_why_qfields; do w_qfmt="$w_qfmt${w_qfmt:+,}$f:$nonce"; done
 		job_limit lim "$tmo"
-		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$w_qfmt collect -t "$lim" -b wqueue squeue -h -t PD,R
+		SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2=$w_qfmt collect -t "$lim" -b wqueue squeue -h -t "$job_why_states"
 	fi
 	if [ -n "$w_parents" ]; then
 		job_limit w_parents_bound "$tmo"

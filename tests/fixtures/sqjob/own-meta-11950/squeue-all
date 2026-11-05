@@ -1,0 +1,3 @@
+# AB2: the same with the record answered whole, pick()'s inmeta branch, raw empty: no shape of 23.11's squeue, whose answer is numbered
+@include ../../_common/job-defaults
+JobID=11950; ArrayJobID=11950; ArrayTaskID=5-9; StateCompact=PD; Reason=Priority; UserName=fsill; UserID=1041; Name=assembly; NodeList=; BatchHost=; NumCPUs=100; tres_alloc=cpu=100,mem=200G,node=1,billing=100; TimeUsed=0:00; TimeLeft=3-00:00:00; TimeLimit=3-00:00:00; SubmitTime=1792000000; StartTime=\{epoch+31451400s}; WorkDir=/media/BioNAS2/fsill/asm; STDOUT=/media/BioNAS2/fsill/asm/slurm-11964.out; STDERR=/media/BioNAS2/fsill/asm/slurm-11964.out; EndTime=N/A

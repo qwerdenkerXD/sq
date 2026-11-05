@@ -7778,7 +7778,7 @@ c_why_clock_step() {
 # the calls the why section makes: framed and pinned as sq job's own, every
 # caller setting unset, each only when the job's state calls for it
 c_why_calls() {   # W2, V13, V14
-	T_TITLE="the why section's calls: scontrol --json show node and squeue -t PD,R for Resources/Priority, scontrol alone for BadConstraints, the parents' squeue and the failed ones' sacct; none for other jobs; SQUEUE_*/SACCT_*/SCONTROL_* unset, %s and 0 pinned"
+	T_TITLE="the why section's calls: scontrol --json show node and squeue -t PD,R,CF,ST,SI,RD,RH,RF for Resources/Priority, scontrol alone for BadConstraints, the parents' squeue and the failed ones' sacct; none for other jobs; SQUEUE_*/SACCT_*/SCONTROL_* unset, %s and 0 pinned"
 	local n2 f
 	why_run pending-est SQUEUE_SORT=bogus SQUEUE_STATES=PD SACCT_FORMAT=JobID SCONTROL_FEDERATION=1 SCONTROL_ALL=1 \
 		SLURM_TIME_FORMAT=relative SLURM_BITSTR_LEN=5 SLURM_JSON=compact -- --no-color job 11962
@@ -7786,8 +7786,8 @@ c_why_calls() {   # W2, V13, V14
 		rc_is 0 && err_empty && job_is "$jfx/screens/job__pending-est.txt"'
 	need "... no call saw an SQUEUE_* but the SQUEUE_FORMAT2 sq set, an SACCT_* or an SCONTROL_*" eval '
 		only_format2 && ! grep "^CALL" "$LOG" | grep -qE "SACCT_|SCONTROL_"'
-	need "... scontrol --json show node once, without SLURM_JSON, and the whole queue once: squeue -h -t PD,R, 15 fields framed by the queue nonce" eval '
-		[ "$(calls scontrol)" = 1 ] && argv_has scontrol --json show node && scontrol_clean && [ "$(calls squeue)" = 2 ] && argv_has squeue -h -t PD,R &&
+	need "... scontrol --json show node once, without SLURM_JSON, and the whole queue once: squeue -h -t PD,R,CF,ST,SI,RD,RH,RF, 15 fields framed by the queue nonce" eval '
+		[ "$(calls scontrol)" = 1 ] && argv_has scontrol --json show node && scontrol_clean && [ "$(calls squeue)" = 2 ] && argv_has squeue -h -t PD,R,CF,ST,SI,RD,RH,RF &&
 		[ "$(env_of squeue 2 SQUEUE_FORMAT2)" = \
 		  "$(for f in JobID ArrayJobID ArrayTaskID StateCompact UserName Partition NodeList NumCPUs tres-alloc EndTime TimeLeft TimeLimit SubmitTime Reason PriorityLong; do printf "%s:%s," "$f" "$(env_of squeue 1 SQ_NONCE)"; done | sed "s/,\$//")" ]'
 	need "... every squeue and sacct call: SLURM_TIME_FORMAT=%s, SLURM_BITSTR_LEN=0" eval '
@@ -7805,7 +7805,7 @@ c_why_calls() {   # W2, V13, V14
 	for f in finished-11912:11912 running-own:11950 timeout-11325:11325 held-own-11966:11966; do
 		why_run "${f%:*}" -- --no-color job "${f#*:}"
 		need "${f%:*}: no call beyond sq job's own (and JOBMEM's)" eval '
-			rc_is 0 && [ "$(calls scontrol)" = 0 ] && ! argv_has squeue -h -t PD,R && [ "$(calls sacct)" = 1 ] && [ "$(calls getent)" = 0 ]'
+			rc_is 0 && [ "$(calls scontrol)" = 0 ] && ! argv_has squeue -h -t PD,R,CF,ST,SI,RD,RH,RF && [ "$(calls sacct)" = 1 ] && [ "$(calls getent)" = 0 ]'
 	done
 }
 
@@ -9384,6 +9384,70 @@ c_rd_two_forms() {
 	need "a pending RF under the cluster lock: no reason to say, the pending form" eval '
 		rc_is 0 && has "  state       REQUEUE_FED" && has "  start       no estimate yet" && has "  CPUs        16 requested" && lacks " on " && lacks "allocated"'
 }
+# AB2: squeue -t compares a base with the whole state and a flag by its bit
+# (print.c:2960-2968).  The stub answers squeue-queue to this list alone, so
+# every call of it pins the list; the fixtures hold what Slurm then answers
+c_why_queue_states() {
+	T_TITLE="sq job: the queue answer asks for what holds CPUs by name, a running job with a flag among them; such a job is the one to end first; a COMPLETING job, whose CPUs left CPUAlloc as it ended, is not asked for and leaves the nodes free, and one a flag's bit brings is not taken"
+	local c
+	for c in st cf si rd rf; do
+		why_run resources-$c-11964 -- --no-color job 11964
+		need "11950 in state ${c^^}: named, as a plain R is" eval '
+			rc_is 0 && why_has "  it needs this job to end first, on fb2-bioinf:" && why_has "    11950  fsill  16 CPUs     64G  21h46m left" && ! why_lines | grep -q 11875'
+	done
+	why_run resources-cg-11964 -- --no-color job 11964
+	need "11950 COMPLETING: not in the answer, its CPUs free: nothing to wait for" eval '
+		rc_is 0 && why_has "  waits its turn: enough is free now on fb2-bioinf; Slurm should start it on a next pass" && ! why_lines | grep -q "end first"'
+	need "... and the call asks the list, no CG" eval 'argv_has squeue -h -t PD,R,CF,ST,SI,RD,RH,RF'
+	why_run resources-cg-rh-11964 -- --no-color job 11964
+	need "a job requeued held while it completes, by RH's bit: CG with nodes, its CPUs free: not named; the running job is" eval '
+		rc_is 0 && why_has "    11875  schroder  32 CPUs    256G  no time limit" && ! why_lines | grep -q 11950'
+}
+# AB2: who waits ahead of a job: code PD, or RH and RD once released, by every
+# word of a reason squeue may have merged in a fold (print.c:173-188).  The
+# stub folds nothing: each squeue-queue is what print.c answers
+c_why_ahead() {
+	T_TITLE="sq job, reason Priority: the jobs ahead: a fold's merged reason read word by word, its words printed as Slurm's, a released RH or RD with its own state word, a held one and a later one not"
+	why_run prio-fold-rd-11964 -- --no-color job 11964
+	need "an RD task folded into an array: the array and the plain job" eval '
+		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -qF "12000_[1,3-6]  schroder   64 CPUs    128G  PENDING (Priority,ReservationDeleted), submitted" && why_lines | grep -q "11990  "'
+	why_run prio-fold-rh-11964 -- --no-color job 11964
+	need "a held RH task folded in: the same" eval '
+		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -qF "PENDING (Priority,JobHoldMaxRequeue), submitted" && why_lines | grep -q "11990  "'
+	why_run prio-fold-hold-11964 -- --no-color job 11964
+	need "a plain user hold folded in: the array, named" eval '
+		rc_is 0 && why_has "  waits its turn: 1 job submitted before it comes first" && why_lines | grep -qF "PENDING (Priority,JobHeldUser), submitted"'
+	why_run prio-fold-limit-11964 -- --no-color job 11964
+	need "the word second, the master's priority set: the array comes first" eval '
+		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -qF "PENDING (JobArrayTaskLimit,Priority), submitted"'
+	why_run prio-fold-heldfirst-11964 -- --no-color job 11964
+	need "a held master's row, its priority 0: not ahead by the order, though a task of it is released (a Limit)" eval '
+		rc_is 0 && why_has "  waits its turn: 1 job submitted before it comes first" && ! why_lines | grep -q 12000'
+	why_run prio-rel-ahead-11964 -- --no-color job 11964
+	need "a released RH and RD come first, each by its own word; held at priority 0, a PD on a dependency and later jobs do not" eval '
+		rc_is 0 && why_has "  waits its turn: 3 jobs submitted before it come first" && why_lines | grep -qF "11965  schroder   64 CPUs    128G  REQUEUE_HOLD (Priority), submitted" &&
+		why_lines | grep -qF "11966  schroder   64 CPUs    128G  RESV_DEL_HOLD (Resources), submitted" && why_lines | grep -qF "11960  schroder   64 CPUs    128G  PENDING (Resources), submitted" && ! why_lines | grep -qE "1196[127]|11970"'
+	why_run prio-rel-ahead-11964 -- job 11964
+	need "... RH's word in cyan, as on its own screen" eval 'rc_is 0 && grep -qF "$(printf "\033[36mREQUEUE_HOLD\033[0m (Priority)")" "$OUT"'
+}
+# AB2: a task's own row of the queue answer, whatever row holds it, so neither
+# its own record nor a later job reads ahead of it.  The tasks of its array
+# that come before it stay unsaid
+c_why_own_record() {
+	T_TITLE="sq job TASK, reason Priority: its own row found: numbered from its record, folded back into it, by its unique id, the record answered whole; a later job not named, an earlier one and a tie by id named"
+	why_run own-rec-11950 -- --no-color job 11950_7
+	need "a task numbered from its record: the record is not ahead, nor 11975 or 11955; 11960 and the tie 11940 are" eval '
+		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -q "11960  " && why_lines | grep -q "11940  " && ! why_lines | grep -qE "11950_|11955|11975"'
+	why_run own-meta-11950 -- --no-color job 11950_7
+	need "the record answered whole, no id of its own: the same, %N read, the tie by the record's id" eval '
+		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -q "11940  " && ! why_lines | grep -qE "11950_|11955|11975"'
+	why_run own-fold-11950 -- --no-color job 11950_3
+	need "a task with a record of its own, folded back: the same, by a comma list; another array holding a task of that number is ahead" eval '
+		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -q "11960  " && why_lines | grep -qF "11945_[1-9]" && ! why_lines | grep -qE "11950_|11975"'
+	why_run own-fold-11950 -- --no-color job 11953
+	need "the same task by its unique id, no task asked for: the same" eval '
+		rc_is 0 && why_has "  waits its turn: 2 jobs submitted before it come first" && why_lines | grep -q "11960  " && why_lines | grep -qF "11945_[1-9]" && ! why_lines | grep -qE "11950_|11975"'
+}
 # AB4: with no UTF-8 locale on the host gawk counts bytes, so nothing that
 # holds a " · " is cut by position
 c_no_utf8_cuts() {
@@ -9886,7 +9950,7 @@ c_why_signals() {   # V2, V13: nothing outlives sq
 	for sig in INT:130 TERM:143 KILL:; do
 		sq_start "$d" SQSTUB_UID=1041 SQ_TIMEOUT=25 -- --no-color job 11962
 		need "SIG${sig%:*}: sacct, scontrol and the queue call all in flight at once" \
-			waits_for 10 eval '[ "$(calls scontrol)" = 1 ] && [ "$(calls sacct)" = 1 ] && argv_has squeue -h -t PD,R'
+			waits_for 10 eval '[ "$(calls scontrol)" = 1 ] && [ "$(calls sacct)" = 1 ] && argv_has squeue -h -t PD,R,CF,ST,SI,RD,RH,RF'
 		sleep 0.3; kill -"${sig%:*}" "$SQ_PID" 2>/dev/null
 		if [ -n "${sig#*:}" ]; then
 			sq_finish "$RUN" 20
@@ -13345,7 +13409,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once special_exit held_form rd_two_forms no_utf8_cuts array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once special_exit held_form rd_two_forms why_queue_states why_ahead why_own_record no_utf8_cuts array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins

@@ -10,8 +10,8 @@
 #   SQSTUB_FIXTURE  fixture directory; the stub reads <dir>/sinfo, <dir>/sacct,
 #                   <dir>/sstat, <dir>/scontrol-node, <dir>/squeue, or
 #                   <dir>/squeue-all when squeue gets "-t all" (whatever its
-#                   format), or <dir>/squeue-queue when it gets "-t PD,R" (sq
-#                   job's whole queue), or <dir>/squeue-alloc when its format asks for
+#                   format), or <dir>/squeue-queue when it gets sq job's list,
+#                   "-t PD,R,CF,ST,SI,RD,RH,RF" (its whole queue), or <dir>/squeue-alloc when its format asks for
 #                   StateCompact and tres-alloc (sq's allocation call, so it can
 #                   fail on its own), or <dir>/squeue-tres when it asks for
 #                   tres-alloc alone (sq's mirror call, ditto).  A fixture
@@ -323,12 +323,13 @@ case $tool in
 		else refuse "squeue's default format is not emulated: set a format"
 		fi
 		# "-t all" is the one filter that picks the fixture: it is a different
-		# question (finished jobs too), not a narrower one; "-t PD,R" is sq
-		# job's whole queue, a question of its own as well
-		case $states in [Aa][Ll][Ll]) file=squeue-all ;; PD,R) file=squeue-queue ;; *) file=squeue ;; esac
+		# question (finished jobs too), not a narrower one; sq job's list is
+		# its whole queue, a question of its own as well, and any other list
+		# fails the case: this pins it
+		case $states in [Aa][Ll][Ll]) file=squeue-all ;; PD,R,CF,ST,SI,RD,RH,RF) file=squeue-queue ;; *) file=squeue ;; esac
 		# sq's allocation call and its mirror call are questions of their own
 		# too, answered apart, so a case can fail either alone; but "-t all"
-		# and "-t PD,R" first, whatever the format holds (sq job asks for
+		# and sq job's list first, whatever the format holds (sq job asks for
 		# tres-alloc with both)
 		[ "$file" != squeue ] ||
 		case $mode:$fmt in

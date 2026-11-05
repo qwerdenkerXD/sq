@@ -163,6 +163,15 @@ compare squeue-all long JobID,StateCompact,State,exit_code,TimeUsed,EndTime,Arra
 	SQUEUE_FORMAT2="JobID:$N,StateCompact:$N,State:$N,exit_code:$N,TimeUsed:$N,EndTime:$N,ArrayJobID:$N,ArrayTaskID:$N,UserName:$N,Name:$N" \
 	squeue -t all -h
 
+# ---- sq job's queue call for a job waiting on resources (job_why_start): its
+# state list and fields, read out of sq, each field framed by the nonce, the
+# times as epochs.  "tres-alloc" is the fixture's tres_alloc
+eval "$(sed -n '/^job_why_states=/p; /^job_why_qfields="/,/"$/p' "$here/../sq")"
+wfmt= wnames=
+for f in $job_why_qfields; do wfmt="$wfmt${wfmt:+,}$f:$N" wnames="$wnames${wnames:+,}${f//-/_}"; done
+compare squeue-queue long "$wnames" "$N" squeue-queue \
+	SLURM_TIME_FORMAT=%s SLURM_BITSTR_LEN=0 SQUEUE_FORMAT2="$wfmt" squeue -h -t "$job_why_states"
+
 # ---- sq log's one squeue call: 17 fields of one job (sq's log_ask) -------------
 # The fields as sq lists them (log_fields, read out of sq), each framed by the
 # nonce, the times as epochs; the job is the first that squeue -t all printed
