@@ -9326,9 +9326,9 @@ c_special_exit() {
 	job_run star-se-desc-11963 COLUMNS=200 -- --no-color job 11950_1
 	need "an exit of 0:0: no exit, Slurm's own words" eval 'rc_is 0 && has "  state       SPECIAL_EXIT (job requeued in special exit state)" && lacks "exit 0"'
 	job_run star-se-sig-11963 COLUMNS=200 -- --no-color job 11950_1
-	need "a signal reads as a finished job's" eval 'rc_is 0 && has "  state       SPECIAL_EXIT (JobHeldUser) · exit 0/sig9: signal 9 (SIGKILL)"'
+	need "a signal reads as a finished job's" eval 'rc_is 0 && has "  state       SPECIAL_EXIT (job requeued in special exit state) · exit 0/sig9: signal 9 (SIGKILL)"'
 	parent_rows_are dep-se '    12000  SPECIAL_EXIT (JobHeldUser) · exit 3 · no start estimate'
-	parent_rows_are dep-se-sig '    12000  SPECIAL_EXIT (JobHeldUser) · exit 0/sig9 · no start estimate'
+	parent_rows_are dep-se-sig '    12000  SPECIAL_EXIT (RaisedSignal:9(Killed)) · exit 0/sig9 · no start estimate'
 	parent_rows_are dep-se-zero '    12000  SPECIAL_EXIT (JobHeldUser) · no start estimate'
 	job_run dep-se-pd-11963 COLUMNS=200 -- --no-color job 12000
 	need "accounting's row already PENDING 0:0, the case the exit is kept for: squeue's exit on the state line" eval 'rc_is 0 && has "  state       SPECIAL_EXIT (JobHeldUser) · exit 3"'
