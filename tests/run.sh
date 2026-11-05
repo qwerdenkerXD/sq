@@ -9341,8 +9341,9 @@ c_special_exit() {
 		rc_is 0 && rows queue | grep -q held-se && ! rows recent | grep -q held-se && rows recent | grep -q finished-one && footer_is 2 1 0 1'
 }
 # AA2 v2: REQUEUE_HOLD takes the pending form as SE does, with no exit, as main
-# shows it none; RD, RF and RQ keep the layout of a job with nodes, as each has
-# a path where it is one (the fixtures hold those paths)
+# shows it none; RD, RF and RQ keep the layout of a job with nodes on the path
+# where they are one (the fixtures hold those paths; AB1: RD and RF without
+# nodes, rd_two_forms)
 c_held_form() {
 	T_TITLE="sq job TASK and a parent's row: REQUEUE_HOLD is held pending: the pending form, no exit; RD on a running job, RF on a running sibling and accounting's REQUEUED row keep what they were given"
 	array_title_is star-rh-own '2: 1 running · 1 other'
@@ -9356,6 +9357,32 @@ c_held_form() {
 		job_run star-${c%:*}-11963 COLUMNS=200 -- --no-color job 11950_1
 		need "${c#*:}: the layout of a job with nodes" eval 'rc_is 0 && has "  state     ${c#*:} on fb2-bioinf (LocalQ)" && has "  CPUs      16 allocated" && lacks "no estimate yet"'
 	done
+}
+# AB1: RD and RF sit on either base, so what the job has tells: no nodes, the
+# pending form (a deleted reservation's hold, reservation.c:833-845; a sibling
+# under the cluster lock, job_mgr.c:17566); nodes, the layout of a running job,
+# held_form's fixtures and dep-rd-run
+c_rd_two_forms() {
+	T_TITLE="RESV_DEL_HOLD and REQUEUE_FED on a job with no nodes read as pending in sq job and a parent's row, a task, a record's task, a plain parent; with nodes as a running job, by the job's own NodeList; no new words"
+	array_title_is star-rd-pd '2: 1 running · 1 other'
+	job_run star-rd-pd-11963 COLUMNS=200 -- --no-color job 11950_1
+	need "a pending RD: its reason, the start, what it asks for, nothing of a run" eval '
+		rc_is 0 && has "  state       RESV_DEL_HOLD (Reservation maint was deleted)" && has "  start       no estimate yet" && has "  submitted   " &&
+		has "  CPUs        16 requested" && has "  memory      64G requested" && has "  time limit  1d00h" &&
+		lacks " on " && lacks " elapsed" && lacks "allocated" && lacks "  started " && why_lacks_section'
+	job_run star-rd-pd-11963 COLUMNS=200 -- job 11950_1
+	need "its colour stays cyan" eval 'rc_is 0 && grep -qF "$(printf "\033[36mRESV_DEL_HOLD\033[0m")" "$OUT"'
+	array_title_is star-rd-rec '6: 1 running · 5 other'
+	job_run star-rd-rec-11963 COLUMNS=200 -- --no-color job 11950_4
+	need "a task of a record of several held RD, numbered from it: the same form" eval '
+		rc_is 0 && has "  state       RESV_DEL_HOLD (Reservation maint was deleted)" && has "  CPUs        16 requested" && lacks "allocated" && lacks " elapsed"'
+	parent_rows_are dep-rd '    12000  RESV_DEL_HOLD (Reservation maint was deleted) · no start estimate'
+	parent_rows_are dep-rd-run '    12000  RESV_DEL_HOLD on fb2-bioinf · 10h00m left of 12h00m'
+	parent_rows_are dep-rf-run '    12000  REQUEUE_FED on fb2-bioinf · 10h00m left of 12h00m'
+	array_title_is star-rf-pd '2: 1 running · 1 other'
+	job_run star-rf-pd-11963 COLUMNS=200 -- --no-color job 11950_1
+	need "a pending RF under the cluster lock: no reason to say, the pending form" eval '
+		rc_is 0 && has "  state       REQUEUE_FED" && has "  start       no estimate yet" && has "  CPUs        16 requested" && lacks " on " && lacks "allocated"'
 }
 # AA3: every id ntasks reads is whole, as on the dashboard: a term past 7 digits
 # counts none, a throttle of up to 10 digits (max_run_tasks, %u) is read
@@ -13305,7 +13332,7 @@ cases=(
 	sub_dispatch sub_stray log_follow log_now log_not_regular log_syntax log_paths log_not_utf8 log_stream
 	job_screens job_contract job_select job_branches job_own job_notes job_pss job_sources
 	why_screens why_clock_step why_calls why_tail why_tail_file why_not_utf8 why_ctl_o job_passes why_tail_hung clock_frozen clock_fail_read clock_inventory clock_at why_forged why_nodes_json why_nodes_figures why_pending why_dep
-	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once special_exit held_form array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
+	client_env nodes_none array_one_count array_over_counts array_why_norows array_other_states array_unread_record array_task_once special_exit held_form rd_two_forms array_id_whole failed_oom_mark forgot_rc_one stderr_bounded_reads no_unset_args est_wait_rules why_parent why_parent_hang why_parent_bound why_parent_garbled why_parent_array why_parent_own job_width_docs dash_sinfo_env
 	why_resources wide_job wide_job_ahead why_ended why_array why_budget why_parallel why_signals
 	opts_env_values opts_env_flags opts_flag_beats_env opts_env_refused opts_env_inert opts_sort opts_rd7_flags
 	opts_clusters opts_short_words opts_equals opts_empty_blank opts_canonical opts_dash_values opts_kept_pins

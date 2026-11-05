@@ -1,0 +1,2 @@
+# AB1: a plain parent RD after a restart, running with its nodes (reservation.c:4536-4563)
+@include ../../_common/job-sacct-defaults

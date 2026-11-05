@@ -2407,25 +2407,27 @@ function exit_text(c,   t, sg, rc) {
 }
 # a job sq job and a parent's row show as pending (its reason, the start
 # estimate, what it asks for): PD, and SE and RH, which Slurm holds pending
-# after a requeue (final_states; job_mgr.c:6401).  Not RD: it can sit on a
-# running job (reservation.c:4559).  Not RF: on a running sibling
-# (fed_mgr.c:5078).  Not RQ: squeue never shows it, so it is a REQUEUED row of
-# accounting, a run with its nodes
-function pending_form(c) { return c == "PD" || c == "SE" || c == "RH" }
+# after a requeue (final_states; job_mgr.c:6401).  RD and RF sit on either
+# base, so NODES, squeue's NodeList, tells: a deleted reservation's hold on a
+# pending job (reservation.c:838), or after a restart on a running one, with its
+# nodes (:4559); RF on a running sibling, with them, or a pending one under the
+# cluster lock, without (fed_mgr.c:5078, job_mgr.c:17566).  Not RQ: squeue never
+# shows it, so it is a REQUEUED row of accounting, a run with its nodes
+function pending_form(c, nodes) { return c == "PD" || c == "SE" || c == "RH" || (c ~ /^R[DF]$/ && nodes == "") }
 # SE's exit, SAID as a finished job's reads (" · exit 3"): the one fact that
 # decides a release, which zeroes it (job_mgr.c:12204), and accounting's row
 # soon says PENDING; nothing for 0:0
 function held_exit(said) { return (said == " · exit 0") ? "" : said }
-function build_job(   q, r, c, final, never, name, user, unique, state, reason, held, dependency, start, submit,
+function build_job(   q, r, c, final, pending, never, name, user, unique, state, reason, held, dependency, start, submit,
                       left, ended, req_cpus, req_mb, req_text, alloc_cpus, limit, out, err) {
   q = qrow; r = arow; c = STATE
-  final = (c in DONE); never = final && never_started(q, r)
+  final = (c in DONE); never = final && never_started(q, r); pending = pending_form(c, q ? R[q, "NodeList"] : "")
   name = q ? R[q, "Name"] : A[r, "JobName"]; user = q ? R[q, "UserName"] : A[r, "User"]
   unique = (raw != "" && raw != jid) ? " " paint("2", "(unique id " raw ")") : ""
   TITLE = paint("1;36", "▌ ") paint("1", jid) unique "  " name " · " user
   source_notes(final)
   state = paint(stcolour(c), stname(c))
-  if (pending_form(c)) {
+  if (pending) {
     reason = q ? R[q, "Reason"] : ""
     if (c == "SE" && q) { exit_of(jid, A, 0, nsteps, step_row, R[q, "exit_code"]); held = held_exit(" · " exit_text(c)) }
     kv("state", "state", state (reason != "" && reason != "None" ? " (" reason ")" : "") held)
@@ -2467,13 +2469,13 @@ function build_job(   q, r, c, final, never, name, user, unique, state, reason, 
   # resources: a pending job's request (or one that never ran), else what it
   # was given and asked for.  The memory a running job uses is the
   # efficiency section's, not repeated here
-  if (pending_form(c) || never) {
+  if (pending || never) {
     req_cpus = (r && (never || !q)) ? A[r, "ReqCPUS"] : R[q, "NumCPUs"]   # squeue's NumCPUs: the request, while pending
     kv("res", "CPUs", req_cpus " requested")
     req_mb = (r && (never || !q)) ? tres_mem(A[r, "ReqTRES"]) : tres_mem(R[q, "tres-alloc"])
     if (req_mb > 0) kv("res", "memory", memsize(req_mb, 0) " requested")
     limit = q ? R[q, "TimeLimit"] : ""
-    if (pending_form(c) && limit != "") kv("res", "time limit", (limit == "UNLIMITED") ? "none" : elap(dur(limit)))
+    if (pending && limit != "") kv("res", "time limit", (limit == "UNLIMITED") ? "none" : elap(dur(limit)))
   } else {
     alloc_cpus = r ? A[r, "AllocCPUS"] + 0 : R[q, "NumCPUs"] + 0; req_cpus = r ? A[r, "ReqCPUS"] + 0 : 0
     kv("res", "CPUs", alloc_cpus " allocated" ((req_cpus && req_cpus != alloc_cpus) ? " (" req_cpus " requested)" : ""))
@@ -2901,7 +2903,7 @@ function parent_state(pid, asked, gone,   p, a, c, left) {
     if (RP[p, "JobID"] == pid || (RP[p, "ArrayTaskID"] ~ /^[0-9]+$/ && RP[p, "ArrayJobID"] "_" RP[p, "ArrayTaskID"] == pid)) break
   if (p <= npq) {
     c = RP[p, "StateCompact"]
-    if (pending_form(c)) return paint(stcolour(c), stname(c)) " (" RP[p, "Reason"] ")" (c == "SE" ? held_exit(parent_exit(pid, c, RP[p, "exit_code"])) : "") (isepoch(RP[p, "StartTime"]) && RP[p, "StartTime"] > NOW ? " · Slurm's estimate: " when(RP[p, "StartTime"]) : " · no start estimate")
+    if (pending_form(c, RP[p, "NodeList"])) return paint(stcolour(c), stname(c)) " (" RP[p, "Reason"] ")" (c == "SE" ? held_exit(parent_exit(pid, c, RP[p, "exit_code"])) : "") (isepoch(RP[p, "StartTime"]) && RP[p, "StartTime"] > NOW ? " · Slurm's estimate: " when(RP[p, "StartTime"]) : " · no start estimate")
     if (c in DONE)
       return paint(stcolour(c), stname(c)) parent_exit(pid, c, RP[p, "exit_code"]) (isepoch(RP[p, "EndTime"]) ? " · ended " ago(NOW - RP[p, "EndTime"]) " ago" : "")
     left = RP[p, "TimeLeft"]

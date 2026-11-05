@@ -1,0 +1,2 @@
+# AB1: a plain parent held by a deleted reservation, pending
+@include ../../_common/job-sacct-defaults

@@ -1,0 +1,2 @@
+# AB1: task 1 RD on its own row, pending (reservation.c:833-845), no nodes; task 2 R
+@include ../../_common/job-sacct-defaults

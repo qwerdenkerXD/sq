@@ -1,0 +1,2 @@
+# AB1: a pending RF, the sibling under the cluster lock (job_mgr.c:17566, fed_mgr.c:5078), no nodes; task 2 R
+@include ../../_common/job-sacct-defaults

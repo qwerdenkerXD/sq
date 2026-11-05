@@ -1,0 +1,2 @@
+# AB1: a plain parent RF on a running sibling, with its nodes
+@include ../../_common/job-sacct-defaults
